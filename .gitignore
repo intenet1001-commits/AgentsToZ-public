@@ -1,0 +1,104 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+src-tauri/resources/agentstoz-api-sidecar*
+src-tauri/resources/templates/
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# Playwright CLI runtime artifacts (screenshots/traces used for local verification)
+.playwright-cli/
+.playwright-mcp/
+output/playwright/
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# macOS
+.DS_Store
+
+# Local data files
+.ports.json
+.ports.json.backup
+
+# Project long-term memory — 디렉토리 전체 제외.
+# CORE.md에 원작자의 미해결 보안 지적·내부 커밋 해시가 담기고, config/activity/backups는
+# 개발자별 휘발성 상태다. 어느 파일도 저장소·공개 스냅샷에 들어가면 안 된다.
+.agent-memory/
+
+# OMC (oh-my-claudecode) local state
+.omc/sessions/
+.omc/state/
+# 기기별 스캔 캐시 — projectRoot에 개인 절대경로가 박힘
+.omc/project-memory.json
+.gstack/
+dist-portal
+.vercel
+.env*.local
+.bkit/
+
+# Claude local settings (per-machine, not for repo)
+# 예외: 배포용 스킬(.claude/skills/onboarding)은 저장소에 포함
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/onboarding/
+
+# Ad-hoc test/diagnosis scripts (one-off, superseded by tests/smoke.mjs)
+analyze-*.mjs
+test-mobile-*.mjs
+test-load.mjs
+test-full.mjs
+test-tmux-api.ts
+tests/screenshots/
+worktrees
+# 실행 산출물 전체 — 개인 절대경로·실제 프로젝트명·미해결 보안 지적이 그대로 박힘
+tests/results/
+
+# Playwright 실행 산출물 — 실제 프로젝트명·개인 절대경로가 스크린샷/스냅샷/트레이스에 통째로 박힘
+output/
+test-results/
+**/traces/
+*.trace
+*.network
+*.zip
+
+# 릴리스 검증 산출물 — 특정 시점 1회성 판정이라 포크 사용자에겐 무가치하고 미해결 이슈만 노출
+.cs-artifacts/
+
+# 시크릿 / 로컬 데이터 — Supabase 키·기기 UUID·실제 포트 목록이 담김 (템플릿인 .env.example만 예외)
+.env.*
+!.env.example
+portal.json
+ports.json
+# service_role 키 — 유출 시 RLS 전체 우회 가능. 저장소에 절대 들어오면 안 된다.
+supabase-service.json
+supabase/.temp/
+
+# 주의: .gitignore 규칙은 "아직 추적되지 않은" 파일에만 적용된다.
+# 이미 git이 추적 중인 파일은 규칙을 추가해도 계속 추적된다.
+# 추적 여부 확인:  git ls-files | grep <경로>
+# 추적 해제:      git rm -r --cached <경로>
