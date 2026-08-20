@@ -1,0 +1,9 @@
+src-tauri/target
+src-tauri/.cargo
+node_modules
+dist
+dist-portal
+.git
+iTerm2
+test-results
+tests/results/screenshots

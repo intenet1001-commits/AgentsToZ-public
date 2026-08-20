@@ -1,0 +1,106 @@
+name: Verify
+
+# 이 저장소에는 오랫동안 자동 검증 지점이 하나도 없었다 (git hook 0개,
+# 워크플로는 수동 실행 build-windows.yml 뿐). 무엇이 깨져도 아무도 모르는 상태였다.
+# 여기서 typecheck / bun test / cargo test 를 push·PR 마다 강제한다.
+on: [push, pull_request]
+
+jobs:
+  # Vercel은 커밋 작성자를 GitHub 사용자와 연결하지 못하면 배포를 **조용히** 차단한다
+  # (COMMIT_AUTHOR_REQUIRED). 빌드가 시작조차 하지 않아 로그가 비고, 프로덕션은 옛 번들을
+  # 계속 200으로 서빙하므로 아무도 모른다 — 실측으로 11커밋이 그렇게 쌓여 웹이 14시간
+  # 넘게 멎었다. 그 침묵을 여기서 소리로 바꾼다.
+  commit-author:
+    name: commit author email
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 범위를 보려면 얕은 클론으로는 부족하다.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Check commit author emails
+        env:
+          RANGE: ${{ github.event_name == 'push' && format('{0}..{1}', github.event.before, github.sha) || '' }}
+        run: bun scripts/check-commit-authors.ts "$RANGE"
+
+  # TypeScript 쪽은 시스템 의존성이 없어 그냥 돈다.
+  js:
+    name: typecheck + bun test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun test
+
+  # Rust 는 별도 job 이다. src-tauri 가 tauri 2 에 의존하므로 리눅스에서
+  # 컴파일하려면 webkit2gtk 계열 시스템 라이브러리가 필요하다 (macOS 로컬에서는
+  # 시스템에 이미 있어서 드러나지 않는다). 아래 apt 목록은 Tauri 2 리눅스
+  # 필수 의존성이며, 빠지면 링크 단계에서 실패한다.
+  #
+  # continue-on-error 를 쓰지 않는다 — 이 job 이 환경 문제로 실패하면
+  # 그건 "빨강"으로 보여야 한다. 거짓 초록보다 정직한 빨강이 낫다.
+  rust:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            build-essential \
+            file \
+            patchelf
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # tauri-build 이 tauri.conf.json 의 frontendDist(../dist) 존재를 검사하므로,
+      # cargo test 전에 프론트엔드 산출물이 있어야 한다. 없으면 build.rs 에서 죽는다.
+      - name: Build frontend (tauri-build 의 frontendDist 검사 통과용)
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      # sidecar도 bundle.resources에 필수다. Git에는 생성물을 넣지 않으므로
+      # cargo test 전에 현 플랫폼용 바이너리를 만들어 clean checkout을 보장한다.
+      - name: Build API sidecar (Tauri resource 검사 통과용)
+        run: bun run build:sidecar
+
+      - name: Rust tests
+        run: cd src-tauri && cargo test

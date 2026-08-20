@@ -1,0 +1,249 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design Tokens ─────────────────────────────────────── */
+:root {
+  /* Background */
+  --bg-base:     #0a0a0b;
+  --bg-card:     #111113;
+  --bg-elevated: #18181b;
+  --bg-deep:     #09090b;
+
+  /* Text */
+  --text-primary:   #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted:     #52525b;
+  --text-faint:     #3f3f46;
+
+  /* Accent */
+  --accent-amber:  #5eead4;
+  --accent-green:  #4ade80;
+  --accent-red:    #f87171;
+  --accent-purple: #c8a8f0;
+  --accent-teal:   #2dd4bf;
+  --accent-cyan:   #22d3ee;
+
+  /* Border */
+  --border-subtle: rgba(255,255,255,0.07);
+  --border-mild:   rgba(255,255,255,0.12);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter Tight', 'Segoe UI',
+    'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Focus Visible ─────────────────────────────────────── */
+input, textarea, select {
+  outline: none;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(94,234,212,0.65);
+  outline-offset: 1px;
+}
+button:focus-visible {
+  outline: 2px solid rgba(94,234,212,0.65);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+.focus\:outline-none:focus-visible {
+  outline: 2px solid rgba(94,234,212,0.65) !important;
+  outline-offset: 1px !important;
+}
+
+/* ── dvh fallback ──────────────────────────────────────── */
+.h-screen {
+  height: var(--ui-viewport-height, 100dvh);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* 고배율/좁은 폭 도구줄은 자식이 글자 단위로 찌그러져 여러 줄 높이가 되지 않게 하고,
+   필요한 경우 부모의 가로 스크롤로 접근한다. */
+.ui-toolbar-scroll > *,
+.ui-toolbar-scroll button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-right {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* --- Guide Mode --- */
+/*
+ * Design principle: Calm baseline + strong hover.
+ *  • All marked elements get a quiet inset hint (1px inner ring, no bg, no pulse).
+ *  • The hover halo (rendered in GuideMode.tsx) is the single strong amber accent.
+ *  • Discoverability comes from the corner notch — a subtle triangle, not a pulsing dot.
+ * This keeps 60+ simultaneously-marked elements from screaming at the user.
+ */
+
+@keyframes guide-tip-in {
+  from {
+    transform: translateY(-3px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes guide-banner-pulse {
+  0%, 100% { opacity: 0.92; }
+  50%      { opacity: 1;    }
+}
+
+/* Room for the top banner.
+ * The app root is `h-screen` (100vh), so body padding alone made the document
+ * 100vh + 36px tall: the page gained a scrollbar and the bottom 36px fell off
+ * screen. Constrain body to the viewport and shrink the root to match instead. */
+/* VOC(개선 요청) 모드도 같은 배너를 쓰므로 같은 자리를 비워야 한다. 이 규칙이 없으면
+ * 앱 상단 36px이 배너 아래에 깔려, 헤더 툴바의 버튼에는 코멘트를 남길 수 없다. */
+body.guide-mode-active,
+body.voc-mode-active {
+  padding-top: 36px;
+  box-sizing: border-box;
+  height: 100vh;
+  overflow: hidden;
+}
+body.guide-mode-active #root,
+body.voc-mode-active #root {
+  /* 브라우저 배율 폴백은 #root 자체를 scale한다. 상단 36px은 바깥(body)에 있는
+   * portal 배너가 차지하므로, scale 전 논리 높이에서 36px/배율을 빼야 실제 하단이
+   * viewport에 정확히 맞는다. 네이티브 Tauri zoom에서는 변수가 없어 기존 100%다. */
+  height: calc(var(--ui-viewport-height, 100%) - var(--ui-banner-logical-height, 0px)) !important;
+  overflow: hidden;
+}
+body.guide-mode-active #root > *,
+body.voc-mode-active #root > * {
+  height: 100% !important;
+  max-height: 100% !important;
+}
+
+/* Calm baseline marker — subtle inner ring, no bg fill, no pulse */
+body.guide-mode-active [data-help-key] {
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(94,234,212, 0.22);
+  border-radius: 6px;
+  cursor: help !important;
+  transition: box-shadow 0.15s ease;
+}
+
+/* Subtle corner notch in lieu of a pulsing dot — directional, never collides.
+ * `inherit` background means it never paints on top of an opacity:0 wrapper. */
+body.guide-mode-active [data-help-key]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 5px 5px 0;
+  border-color: transparent rgba(94,234,212, 0.55) transparent transparent;
+  border-top-right-radius: 6px;
+  z-index: 9100;
+  pointer-events: none;
+}
+
+/* Text-only tags (titles, counters): notch is overkill — drop it, keep only a faint underline. */
+body.guide-mode-active h1[data-help-key],
+body.guide-mode-active h2[data-help-key],
+body.guide-mode-active h3[data-help-key],
+body.guide-mode-active span[data-help-key],
+body.guide-mode-active p[data-help-key] {
+  box-shadow: none;
+  border-bottom: 1px dashed rgba(94,234,212, 0.35);
+  border-radius: 0;
+  padding-bottom: 1px;
+}
+body.guide-mode-active h1[data-help-key]::after,
+body.guide-mode-active h2[data-help-key]::after,
+body.guide-mode-active h3[data-help-key]::after,
+body.guide-mode-active span[data-help-key]::after,
+body.guide-mode-active p[data-help-key]::after {
+  content: none;
+}
+
+/* Inputs/textareas: same calm inset, no harsh outline conflict */
+body.guide-mode-active input[data-help-key],
+body.guide-mode-active textarea[data-help-key] {
+  box-shadow: inset 0 0 0 1px rgba(94,234,212, 0.3);
+}
+
+/* Force-show hover-only action strips so users can SEE the buttons they're learning about.
+ * Targets wrappers like `<div class="opacity-0 group-hover:opacity-100">` that contain
+ * any [data-help-key] children. Without this, card action buttons stay invisible until
+ * the user hovers the parent card, defeating the purpose of guide mode. */
+body.guide-mode-active .opacity-0:has([data-help-key]),
+body.guide-mode-active .group-hover\:opacity-100:has([data-help-key]) {
+  opacity: 1 !important;
+  transition: none !important;
+}
+
+/* Banner gets a gentle breathing animation instead of every button pulsing */
+body.guide-mode-active .guide-mode-banner {
+  animation: guide-banner-pulse 2.4s ease-in-out infinite;
+}
+
+
+/* 메타 영역의 편집 가능한 행 — VOC 지적("어디는 클릭하여 수정이 되고 어디는 안되는데")
+ * 이후, 클릭하면 고칠 수 있다는 사실을 hover로 드러낸다. 규칙이 통일돼도 그 사실이
+ * 보이지 않으면 사용자는 여전히 눌러 보고 나서야 안다. */
+.meta-editable-row {
+  transition: background 120ms ease;
+  margin: 0 -6px;
+  padding: 2px 6px;
+}
+.meta-editable-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* iOS Safari는 16px 미만인 입력에 포커스하면 페이지를 자동 확대하고, blur 후에도
+ * 원래 배율로 되돌리지 않는다. viewport에 maximum-scale을 박는 방식은 확대를 아예
+ * 막아 접근성을 해치므로 쓰지 않는다. 대신 모바일 폭에서만 입력 글꼴에 16px 하한을
+ * 둔다 — 데스크톱의 조밀한 레이아웃은 그대로다.
+ * 전역 규칙인 이유: 입력마다 하나씩 고치면 새 입력이 추가될 때 같은 실수가 반복된다. */
+@media (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
