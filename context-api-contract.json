@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 10,
+  "requiredCapabilities": [
+    "project-memory.resolve-project",
+    "project-memory.recall",
+    "project-memory.thread-binding",
+    "project-memory.thread-create",
+    "project-memory.thread-create-project",
+    "project-memory.thread-sync",
+    "supabase.native-pkce"
+  ],
+  "optionalCapabilities": [
+    "project-memory.feedback",
+    "process.windows-job-supervisor"
+  ]
+}

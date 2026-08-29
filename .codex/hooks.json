@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENTSTOZ_PROJECT_MEMORY_ACTIVITY=codex; root=\"$(git rev-parse --show-toplevel 2>/dev/null || pwd)\"; main=\"$(git -C \"$root\" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -n 1)\"; if [ -n \"$main\" ] && [ -f \"$main/.agent-memory/config.json\" ]; then root=\"$main\"; fi; hook=\"$root/.agent-memory/activity-hook.sh\"; if [ -f \"$hook\" ]; then /bin/sh \"$hook\" codex; else cat >/dev/null 2>&1 || :; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
