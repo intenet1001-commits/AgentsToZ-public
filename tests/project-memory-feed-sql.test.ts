@@ -1,0 +1,54 @@
+import { PGlite } from '@electric-sql/pglite';
+import { PROJECT_MEMORY_FEED_SQL } from '../src/projectMemoryFeedSql';
+import { test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+test('scoped memory API keys enforce authorization, pagination, rotation, expiry and revocation in PostgreSQL', async () => {
+if (readFileSync(new URL('../supabase/migrations/20260906010000_project_memory_feed.sql', import.meta.url), 'utf8') !== PROJECT_MEMORY_FEED_SQL) throw Error('migration drift');
+const db = new PGlite();
+try {
+await db.exec(`create role anon; create role authenticated; create role service_role;
+create schema auth; create function auth.role() returns text language sql as $$ select current_setting('test.role',true) $$;
+create function public.portmgr_is_member() returns boolean language sql as $$ select current_setting('test.member',true)='yes' $$;
+create table portmgr_project_memory_heads(memory_id text primary key,head_revision_id text);
+create table portmgr_project_memory_revisions(id text primary key,memory_id text,project_name text,content text,content_hash text,created_at timestamptz default now());
+create table portmgr_project_memory_trash(memory_id text primary key);
+create table portmgr_project_memory_aliases(alias_memory_id text primary key);
+insert into portmgr_project_memory_heads values ('a','ra'),('b','rb'),('c','rc');
+insert into portmgr_project_memory_revisions(id,memory_id,project_name,content,content_hash) values ('ra','a','A','memory a','ha'),('rb','b','B','memory b','hb'),('rc','c','C','private c','hc');`);
+await db.exec(PROJECT_MEMORY_FEED_SQL);
+await db.exec(PROJECT_MEMORY_FEED_SQL); // repair is idempotent
+const permissions = await db.query<any>(`select has_table_privilege('authenticated','public.portmgr_project_memory_feed_keys','SELECT') as direct_read, has_function_privilege('anon','public.portmgr_project_memory_feed(text,text,integer)','EXECUTE') as anonymous_feed`);
+if (permissions.rows[0].direct_read || permissions.rows[0].anonymous_feed) throw Error('direct key access');
+const q = async (sql: string, params: any[] = []) => (await db.query<any>(sql, params)).rows[0]?.result;
+const manage = (action: string, id: string | null, token: string | null, ids: string[] | null) => q('select portmgr_project_memory_feed_keys_manage($1,$2,$3,$4,$5) result',[action,id,'Test',token,ids]);
+const feed = (token: string, after = '', limit = 1) => q('select portmgr_project_memory_feed($1,$2,$3) result',[token,after,limit]);
+const assert = (condition: any, name: string) => { if (!condition) throw Error(name); };
+const denied = async (fn: () => Promise<any>, name: string) => { let failed=false; try { await fn(); } catch { failed=true; } assert(failed,name); };
+await db.exec(`set test.role='anon'; set test.member='no';`);
+await denied(() => manage('list',null,null,null),'anonymous management denied');
+await db.exec(`set test.role='authenticated'; set test.member='yes';`);
+const token = 'a'.repeat(64), next = 'b'.repeat(64);
+await denied(() => manage('issue',null,token,[]),'empty scope rejected');
+const keys = await manage('issue',null,token,['a','b']); const id=keys[0].id;
+await denied(() => feed(token),'authenticated direct feed denied');
+await db.exec(`set test.role='service_role';`);
+const first = await feed(token); assert(first.items.length===1&&first.items[0].memoryId==='a'&&first.nextCursor==='a','bounded first page');
+const second = await feed(token,first.nextCursor); assert(second.items[0].memoryId==='b'&&!second.hasMore,'next page excludes unselected memory');
+await db.exec("insert into portmgr_project_memory_trash values ('a')");
+assert((await feed(token,'',25)).items.length===1,'trashed memory excluded');
+await db.exec("insert into portmgr_project_memory_aliases values ('b')");
+assert((await feed(token,'',25)).items.length===0,'merged identity does not widen scope');
+await manage('rotate',id,next,null); await denied(() => feed(token),'rotation invalidates previous key');
+await db.exec('delete from portmgr_project_memory_trash; delete from portmgr_project_memory_aliases;');
+await db.exec("update portmgr_project_memory_revisions set content=repeat('x',262145) where memory_id='a'");
+assert((await feed(next)).items[0].truncated===true,'oversized body explicitly marked');
+await db.exec('update portmgr_project_memory_feed_keys set usage_count=10000');
+await denied(()=>feed(next),'daily limit enforced');
+await db.exec("update portmgr_project_memory_feed_keys set usage_date=current_date-1");
+assert((await feed(next)).items.length===1,'usage resets without accumulating history');
+await db.exec("update portmgr_project_memory_feed_keys set expires_at=now()-interval '1 second'");
+await denied(()=>feed(next),'expiry enforced');
+await manage('rotate',id,token,null); await manage('revoke',id,null,null);
+await denied(()=>feed(token),'revocation enforced');
+} finally { await db.close(); }
+}, 30000);
