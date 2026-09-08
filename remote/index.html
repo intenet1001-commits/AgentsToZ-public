@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="description" content="일회용 QR로 이 Mac의 AgentsToZ 프로젝트를 안전하게 제어합니다.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-2Ikg1YRUrB38OfTDHWhzdUsw+Hqf9ulExv02Q73jsz8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>AgentsToZ 원격제어</title>
+</head>
+<body>
+  <script>(()=>{const value=location.hash.slice(1);Object.defineProperty(window,"__agentstozRemotePairingFragment",{configurable:true,writable:true,value});history.replaceState(null,"",location.pathname+location.search);})();</script>
+  <div id="root"></div>
+  <script type="module" src="/src/remote-control-portal-main.tsx"></script>
+</body>
+</html>
