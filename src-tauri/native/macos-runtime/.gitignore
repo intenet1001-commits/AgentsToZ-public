@@ -1,0 +1,6 @@
+.artifacts/
+.artifacts-stage-*/
+.artifacts-backup-*/
+.artifacts-publish.lock/
+.build/
+.swiftpm/

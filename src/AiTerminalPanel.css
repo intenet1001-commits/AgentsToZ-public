@@ -1,0 +1,156 @@
+/* AI 터미널 — app chrome only (header · tab strip · surface frame · key row · states).
+   xterm internals (.xterm, its spans/canvas/textarea, ANSI colours) are deliberately NOT styled here.
+   Tokens come from src/index.css; the fallbacks are the dark-theme values so the remote portal
+   (which does not load index.css) renders the same design. */
+.ai-terminal-panel {
+  --at-bg: var(--bg, #121110);
+  --at-surface: var(--surface, #1a1917);
+  --at-line: var(--line, rgba(255, 255, 255, .07));
+  --at-line-2: var(--line-2, rgba(255, 255, 255, .13));
+  --at-ink: var(--ink, #f5f2ee);
+  --at-ink-2: var(--ink-2, #aaa39b);
+  --at-ink-3: var(--ink-3, #9b9289);
+  --at-accent: var(--accent, #f5935f);
+  --at-accent-soft: var(--accent-soft, rgba(245, 147, 95, .12));
+  --at-accent-line: var(--accent-line, rgba(245, 147, 95, .32));
+  --at-ok: var(--ok, #4ade80);
+  --at-danger: var(--danger, #f87171);
+  --at-danger-soft: var(--danger-soft, rgba(248, 113, 113, .12));
+  --at-term: var(--term, #0c0b0a);
+  --at-mono: var(--font-mono, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace);
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  border: 1px solid var(--at-line); border-radius: 12px; background: var(--at-bg);
+  color: var(--at-ink); font-size: 13px;
+}
+.remote-panel > .ai-terminal-panel { border: 0; border-radius: 0; background: transparent; }
+
+/* Header */
+.ai-terminal-panel .ai-terminal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 56px; flex: 0 0 auto; padding: 16px 20px; border-bottom: 1px solid var(--at-line); }
+.ai-terminal-panel .ai-terminal-title { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--at-ink); font-size: 15px; font-weight: 700; letter-spacing: -.01em; line-height: 1.3; }
+.ai-terminal-panel .ai-terminal-caption { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; max-width: none; margin: 0; color: var(--at-ink-3); font-size: 12px; line-height: 1.5; }
+.ai-terminal-panel .ai-terminal-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px) auto 32px; align-items: end; gap: 8px; width: 100%; min-width: 0; margin-top: 8px; }
+.ai-terminal-panel .ai-terminal-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ai-terminal-panel .ai-terminal-field .ai-terminal-select { width: 100%; }
+
+/* Controls */
+.ai-terminal-panel .ai-terminal-select {
+  height: 32px; min-width: 0; max-width: 100%; padding: 0 28px 0 10px;
+  border: 1px solid var(--at-line); border-radius: 8px;
+  background: var(--at-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%2385807a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;
+  color: var(--at-ink); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+}
+.ai-terminal-panel .ai-terminal-select:hover { border-color: var(--at-line-2); }
+.ai-terminal-panel .ai-terminal-select:focus-visible { outline: 0; border-color: var(--at-accent-line); box-shadow: 0 0 0 3px var(--at-accent-soft); }
+.ai-terminal-panel .ai-terminal-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; padding: 0 12px; border: 1px solid var(--at-line); border-radius: 8px; background: transparent; color: var(--at-ink-2); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ai-terminal-panel .ai-terminal-btn:hover:not(:disabled) { border-color: var(--at-line-2); color: var(--at-ink); }
+.ai-terminal-panel .ai-terminal-btn:disabled { opacity: .4; cursor: default; }
+.ai-terminal-panel .ai-terminal-btn--icon { width: 32px; padding: 0; }
+.ai-terminal-panel .ai-terminal-start { padding: 0 14px; border: 0; background: var(--at-ink); color: var(--at-bg); font-weight: 700; }
+.ai-terminal-panel .ai-terminal-start:hover:not(:disabled) { color: var(--at-bg); opacity: .9; }
+.ai-terminal-panel .ai-terminal-btn--danger { color: var(--at-danger); }
+.ai-terminal-panel .ai-terminal-btn--danger:hover:not(:disabled) { border-color: var(--at-line); background: var(--at-danger-soft); color: var(--at-danger); }
+.ai-terminal-panel :is(.ai-terminal-btn, .ai-terminal-key, .ai-terminal-tab):focus-visible { outline: 2px solid var(--at-accent); outline-offset: 2px; }
+
+/* New task composer and request hand-off */
+.ai-terminal-panel .ai-terminal-prompt { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; min-width: 0; padding: 20px; }
+.ai-terminal-panel .ai-terminal-prompt > .ai-terminal-btn { align-self: flex-start; }
+.ai-terminal-panel .ai-terminal-label { color: var(--at-ink-2); font-size: 11.5px; font-weight: 600; }
+.ai-terminal-panel .ai-terminal-textarea { width: 100%; box-sizing: border-box; min-height: 112px; max-height: 240px; padding: 10px 12px; border: 1px solid var(--at-line); border-radius: 8px; background: var(--at-surface); color: var(--at-ink); font: inherit; font-size: 13px; line-height: 1.55; resize: vertical; }
+.ai-terminal-panel .ai-terminal-textarea:focus-visible { outline: 0; border-color: var(--at-accent-line); box-shadow: 0 0 0 3px var(--at-accent-soft); }
+.ai-terminal-panel .ai-terminal-hint { margin: 0; color: var(--at-ink-3); font-size: 11.5px; line-height: 1.5; }
+
+/* Session tab strip */
+.ai-terminal-panel .ai-terminal-tabs { display: flex; gap: 6px; padding: 10px 20px; border-bottom: 1px solid var(--at-line); background: var(--at-bg); overflow-x: auto; scrollbar-width: thin; }
+.ai-terminal-panel .ai-terminal-tabs:empty { display: none; }
+.ai-terminal-panel .ai-terminal-tab { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; max-width: 100%; height: 30px; padding: 0 12px; border: 1px solid var(--at-line); border-radius: 7px; background: transparent; color: var(--at-ink-2); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ai-terminal-panel .ai-terminal-tab:hover { border-color: var(--at-line-2); color: var(--at-ink); }
+.ai-terminal-panel .ai-terminal-tab[aria-selected="true"] { border-color: var(--at-accent-line); background: var(--at-surface); color: var(--at-ink); }
+.ai-terminal-panel .ai-terminal-tab--ended { color: var(--at-ink-3); }
+.ai-terminal-panel .ai-terminal-tab-state { color: var(--at-ink-3); font-weight: 500; }
+.ai-terminal-panel .ai-terminal-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--at-ink-3); }
+.ai-terminal-panel .ai-terminal-dot--running { background: var(--at-ok); animation: ai-terminal-pulse 1.6s ease-in-out infinite; }
+@keyframes ai-terminal-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Body: error banner · terminal surface · key row */
+.ai-terminal-panel .ai-terminal-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: auto; padding: 16px 20px; }
+.ai-terminal-panel .ai-terminal-error { margin: 0; padding: 10px 12px; border-radius: 9px; background: var(--at-danger-soft); color: var(--at-danger); font-size: 12.5px; line-height: 1.5; }
+.ai-terminal-panel .ai-terminal-surface { position: relative; display: flex; flex: 1 1 0%; flex-direction: column; min-height: 300px; padding: 16px 18px; border: 1px solid var(--at-line-2); border-radius: 12px; background: var(--at-term); overflow: hidden; }
+.ai-terminal-panel .ai-terminal-screen { flex: 1 1 0%; min-width: 0; min-height: 0; overflow: hidden; }
+.ai-terminal-panel .ai-terminal-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ai-terminal-panel .ai-terminal-key { height: 30px; min-width: 44px; padding: 0 10px; border: 1px solid var(--at-line); border-radius: 7px; background: var(--at-bg); color: var(--at-ink-2); font-family: var(--at-mono); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.ai-terminal-panel .ai-terminal-key:hover:not(:disabled) { border-color: var(--at-line-2); color: var(--at-ink); }
+.ai-terminal-panel .ai-terminal-key:disabled { opacity: .4; cursor: default; }
+.ai-terminal-panel .ai-terminal-close { height: 30px; margin-left: auto; padding: 0 12px; border-radius: 7px; font-size: 11.5px; }
+
+/* Remote-connection access card */
+.ai-terminal-panel .ai-terminal-access { margin: 0 20px 16px; padding: 12px 16px; border: 1px solid var(--at-line); border-radius: 12px; background: var(--at-surface); font-size: 12.5px; }
+.ai-terminal-panel .ai-terminal-access summary { color: var(--at-ink); font-weight: 600; cursor: pointer; }
+.ai-terminal-panel .ai-terminal-access p { max-width: none; margin: 8px 0 4px; color: var(--at-ink-3); font-size: 11.5px; line-height: 1.55; }
+.ai-terminal-panel .ai-terminal-access label { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--at-ink-2); }
+.ai-terminal-panel .ai-terminal-access input { accent-color: var(--at-accent); }
+
+@media (max-width: 640px) {
+  .ai-terminal-panel .ai-terminal-head { padding: 12px 14px; }
+  .ai-terminal-panel .ai-terminal-toolbar { width: 100%; margin-left: 0; }
+  .ai-terminal-panel .ai-terminal-select { min-height: 44px; font-size: 16px; }
+  .ai-terminal-panel .ai-terminal-textarea { font-size: 16px; }
+  .ai-terminal-panel :is(.ai-terminal-btn, .ai-terminal-key, .ai-terminal-tab) { min-height: 44px; }
+  .ai-terminal-panel .ai-terminal-prompt, .ai-terminal-panel .ai-terminal-tabs { padding-left: 14px; padding-right: 14px; }
+  .ai-terminal-panel .ai-terminal-body { padding: 14px; }
+  .ai-terminal-panel .ai-terminal-surface { padding: 12px; }
+  .ai-terminal-panel .ai-terminal-access { margin: 0 14px 14px; }
+  .ai-terminal-panel .ai-terminal-keys { gap: 5px; }
+}
+@media (prefers-reduced-motion: reduce) { .ai-terminal-panel .ai-terminal-dot--running { animation: none; } }
+
+.ai-terminal-panel { container:workroom / inline-size; }
+/* The grid must contain its keys as well as the terminal before memory follows. */
+.ai-terminal-workspace { display:grid; grid-template-columns:minmax(150px, 190px) minmax(0, 1fr); flex:1; min-height:auto; }
+.ai-terminal-session-list { padding:16px 12px; border-right:1px solid var(--at-line); min-width:0; overflow:auto; }
+.ai-terminal-session-list h3 { display:flex; justify-content:space-between; margin:0 0 12px; font-size:12px; color:var(--at-ink-2); }
+.ai-terminal-session-list .ai-terminal-tabs { display:flex; flex-direction:column; padding:0; gap:6px; overflow:visible; }
+.ai-terminal-session-list .ai-terminal-tab { height:auto; min-height:36px; flex-wrap:wrap; white-space:normal; text-align:left; overflow-wrap:anywhere; }
+.ai-terminal-context-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
+.ai-terminal-current { font-size:12px; font-weight:600; overflow-wrap:anywhere; }
+@media (max-width: 900px) {
+  .ai-terminal-workspace { grid-template-columns:minmax(0,1fr); }
+  .ai-terminal-session-list { max-height:180px; border-right:0; border-bottom:1px solid var(--at-line); }
+  .ai-terminal-session-list .ai-terminal-tabs { flex-direction:row; flex-wrap:wrap; }
+}
+@container workroom (max-width: 760px) {
+  .ai-terminal-workspace { grid-template-columns:minmax(0,1fr); }
+  .ai-terminal-session-list { max-height:160px; border-right:0; border-bottom:1px solid var(--at-line); }
+  .ai-terminal-session-list .ai-terminal-tabs { flex-direction:row; flex-wrap:wrap; }
+}
+
+/* Saved queue entries are a compact history, separate from running sessions. */
+.ai-terminal-panel .ai-terminal-launch-error { margin: 12px 20px 0; }
+.ai-terminal-panel .ai-terminal-memory { flex: 0 0 auto; min-width: 0; margin: 16px 20px; padding-top: 14px; border-top: 1px solid var(--at-line); }
+.ai-terminal-panel .ai-terminal-memory-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.ai-terminal-panel .ai-terminal-memory h3 { margin: 0; color: var(--at-ink-2); font-size: 12px; font-weight: 600; }
+.ai-terminal-panel .ai-terminal-memory :is(summary, p, strong) { overflow-wrap: anywhere; }
+.ai-terminal-panel .ai-terminal-memory summary { color: var(--at-ink-3); cursor: pointer; font-size: 11.5px; line-height: 1.6; }
+.ai-terminal-panel .ai-terminal-memory-help { flex: 1; min-width: 0; }
+.ai-terminal-panel .ai-terminal-memory-help p { margin-top: 6px; }
+.ai-terminal-panel .ai-terminal-memory-list { list-style: none; padding: 0; margin: 6px 0; }
+.ai-terminal-panel .ai-terminal-memory-history { margin-top: 8px; }
+.ai-terminal-panel .ai-terminal-memory-history[open] { max-height: 280px; overflow: auto; }
+.ai-terminal-panel .ai-terminal-memory-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-bottom: 1px solid var(--at-line); }
+.ai-terminal-panel .ai-terminal-memory-row > span { display: flex; flex-direction: column; gap: 3px; flex: 1 1 200px; min-width: 0; }
+.ai-terminal-panel .ai-terminal-memory-row strong { color: var(--at-ink-2); font-size: 12px; font-weight: 600; }
+.ai-terminal-panel .ai-terminal-memory-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.ai-terminal-workspace--idle { flex: 0 0 auto; }
+@container workroom (max-width: 760px) {
+  .ai-terminal-panel .ai-terminal-toolbar { grid-template-columns: minmax(0, 1fr) auto 32px; }
+  .ai-terminal-panel .ai-terminal-field--project { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .ai-terminal-panel .ai-terminal-toolbar { grid-template-columns: minmax(0, 1fr) auto 44px; }
+  .ai-terminal-panel .ai-terminal-field--project { grid-column: 1 / -1; }
+  .ai-terminal-panel .ai-terminal-btn--icon { width: 44px; }
+  .ai-terminal-panel .ai-terminal-launch-error { margin-left: 14px; margin-right: 14px; }
+  .ai-terminal-panel .ai-terminal-memory { margin-left: 14px; margin-right: 14px; }
+}
+
+.ai-terminal-panel .ai-terminal-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
