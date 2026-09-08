@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.intenet.agentstozbycs.runtime-dedicated-worker-fixture</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/AgentsToZ_byCS.app/Contents/Library/LaunchServices/com.intenet.agentstozbycs.runtime-dedicated-worker-fixture</string>
+    <string>--harmless-dedicated-worker-fixture-v1</string>
+  </array>
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Library/Application Support/com.intenet.agentstozbycs/agent-runtime/fixtures/dedicated-worker.stdout</string>
+  <key>StandardErrorPath</key>
+  <string>/Library/Application Support/com.intenet.agentstozbycs/agent-runtime/fixtures/dedicated-worker.stderr</string>
+</dict>
+</plist>
