@@ -1,0 +1,9 @@
+.internet-workroom-consent{display:flex;align-items:flex-start;gap:10px;min-height:44px;margin-top:12px;padding:12px;border:1px solid var(--border-mild,#b9b4ab);border-radius:12px;background:var(--bg-elevated,var(--bg-base,#f3f1ed));color:var(--text-primary,#292524);font-size:13px;line-height:1.6;cursor:pointer}
+.internet-workroom-consent input{flex:none;width:22px;height:22px;margin:0;accent-color:var(--accent,#c2410c)}
+.internet-workroom-consent span span{display:block;margin-top:4px;color:var(--text-secondary,#57534e)}
+.internet-workroom-scope{display:block;margin-top:10px;color:var(--text-primary,#292524);font-size:13px}
+.internet-workroom-scope select,.internet-workroom-retry button{display:block;width:100%;min-height:44px;margin-top:6px;padding:10px 12px;border:1px solid var(--border-mild,#b9b4ab);border-radius:10px;background:var(--bg-elevated,var(--bg-base,#f3f1ed));color:var(--text-primary,#292524);font:inherit}
+.internet-workroom-scope select:focus-visible,.internet-workroom-consent input:focus-visible,.internet-workroom-retry button:focus-visible{outline:2px solid var(--accent,#c2410c);outline-offset:3px}
+.internet-workroom-retry{padding:12px;border:1px solid var(--border-mild,#b9b4ab);border-radius:12px;color:var(--text-primary,#292524);background:var(--bg-elevated,var(--bg-base,#f3f1ed))}
+
+[data-testid="internet-qr-remote-control-dialog"] [data-testid="approve-internet-remote-session"]{background:var(--accent,#c2410c);color:var(--on-accent,#fff);border-color:var(--accent,#c2410c);min-height:44px}

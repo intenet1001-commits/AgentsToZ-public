@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 14,
+  "requiredCapabilities": [
+    "project-memory.resolve-project",
+    "project-memory.mentions",
+    "project-memory.recall",
+    "project-memory.thread-binding",
+    "project-memory.thread-create",
+    "project-memory.thread-create-project",
+    "project-memory.thread-sync",
+    "project-memory.auto-checkpoint-v1",
+    "agent-runtime.management-v1",
+    "remote-control.management-v1",
+    "supabase.native-pkce",
+    "what-i-said.management-v1",
+    "what-i-said.feed-v1",
+    "onboarding.management-v1"
+  ],
+  "optionalCapabilities": [
+    "project-memory.feedback",
+    "process.windows-job-supervisor"
+  ],
+  "sidecarHealthProof": {
+    "algorithm": "hmac-sha256",
+    "encoding": "lowercase-hex",
+    "nonceBytes": 32,
+    "queryParameter": "nonce",
+    "responseField": "sidecarProof",
+    "domain": "agentstoz-sidecar-health-proof-v1\u0000"
+  },
+  "remoteControlHealthProof": {
+    "algorithm": "hmac-sha256",
+    "encoding": "lowercase-hex",
+    "nonceBytes": 32,
+    "queryParameter": "nonce",
+    "responseField": "remoteControlSidecarProof",
+    "domain": "agentstoz-sidecar-health-proof-v1\u0000"
+  },
+  "agentRuntimeHealthProof": {
+    "algorithm": "hmac-sha256",
+    "encoding": "lowercase-hex",
+    "nonceBytes": 32,
+    "queryParameter": "nonce",
+    "responseField": "agentRuntimeSidecarProof",
+    "domain": "agentstoz-agent-runtime-health-proof-v1\u0000"
+  },
+  "whatISaidFeedAuth": {
+    "scheme": "AgentsToZ-HMAC",
+    "version": 1,
+    "algorithm": "hmac-sha256",
+    "encoding": "lowercase-hex",
+    "keyDerivation": "sha256-utf8-access-key",
+    "accessKey": {
+      "format": "64 lowercase hexadecimal characters",
+      "keyBytes": "SHA-256 of the access key's exact UTF-8 bytes"
+    },
+    "challengeBytes": 32,
+    "challengeTtlSeconds": 30,
+    "requestProofDomain": "agentstoz-what-i-said-feed-request-v1\u0000",
+    "responseProofDomain": "agentstoz-what-i-said-feed-response-v1\u0000",
+    "requestTarget": "Use the exact path and query string returned by the challenge, preserving percent-encoding, parameter order, and case.",
+    "requestProof": {
+      "header": "Authorization",
+      "value": "AgentsToZ-HMAC v1:<challenge>:<request-signature>",
+      "signature": "lowercase-hex HMAC-SHA256 using the derived key over the concatenated message segments",
+      "messageSegments": [
+        {
+          "source": "requestProofDomain",
+          "encoding": "UTF-8"
+        },
+        {
+          "source": "challenge",
+          "encoding": "UTF-8 lowercase-hex text; do not hex-decode"
+        },
+        {
+          "literalHex": "0047455400",
+          "meaning": "NUL, uppercase GET, NUL"
+        },
+        {
+          "source": "requestTarget",
+          "encoding": "exact UTF-8 path-and-query bytes"
+        }
+      ]
+    },
+    "responseProofHeader": "X-AgentsToZ-What-I-Said-Feed-Proof",
+    "responseProof": {
+      "value": "v1:<challenge>:<response-signature>",
+      "bodyHash": "lowercase-hex SHA-256 of the exact response body bytes before JSON parsing or reserialization",
+      "signature": "lowercase-hex HMAC-SHA256 using the derived key over the concatenated message segments",
+      "messageSegments": [
+        {
+          "source": "responseProofDomain",
+          "encoding": "UTF-8"
+        },
+        {
+          "source": "challenge",
+          "encoding": "UTF-8 lowercase-hex text; do not hex-decode"
+        },
+        {
+          "literalHex": "0047455400",
+          "meaning": "NUL, uppercase GET, NUL"
+        },
+        {
+          "source": "requestTarget",
+          "encoding": "exact UTF-8 path-and-query bytes"
+        },
+        {
+          "literalHex": "00",
+          "meaning": "NUL"
+        },
+        {
+          "source": "bodyHash",
+          "encoding": "UTF-8 lowercase-hex text; do not hex-decode"
+        }
+      ]
+    },
+    "testVector": {
+      "accessKey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "derivedKeySha256": "a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e",
+      "challenge": "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687",
+      "requestTarget": "/api/what-i-said/feed?after=opaque.cursor%2Fv1&limit=2",
+      "requestMessageHex": "6167656e7473746f7a2d776861742d692d736169642d666565642d726571756573742d7631006630653164326333623461353936383766306531643263336234613539363837663065316432633362346135393638376630653164326333623461353936383700474554002f6170692f776861742d692d736169642f666565643f61667465723d6f70617175652e637572736f722532467631266c696d69743d32",
+      "requestSignature": "e1231e0e8997d9ef9cddf91902c7a6bbbc9642c947860268956d4ab2eaaf8f97",
+      "authorization": "AgentsToZ-HMAC v1:f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687:e1231e0e8997d9ef9cddf91902c7a6bbbc9642c947860268956d4ab2eaaf8f97",
+      "responseBodyUtf8": "{\"schemaVersion\":1,\"items\":[{\"text\":\"안녕\"}],\"nextCursor\":null,\"hasMore\":false}",
+      "responseBodySha256": "6085d18b3b28db6fdaa0cef47bfde9f7e6fc55f794986848b46e6e73e34505f3",
+      "responseMessageHex": "6167656e7473746f7a2d776861742d692d736169642d666565642d726573706f6e73652d7631006630653164326333623461353936383766306531643263336234613539363837663065316432633362346135393638376630653164326333623461353936383700474554002f6170692f776861742d692d736169642f666565643f61667465723d6f70617175652e637572736f722532467631266c696d69743d320036303835643138623362323864623666646161306365663437626664653966376536666335356637393439383638343862343665366537336533343530356633",
+      "responseSignature": "24aed09bd948f05d71b29854498bcf4f20d0e88a5a91465bd5928927f42f0c40",
+      "responseProof": "v1:f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687:24aed09bd948f05d71b29854498bcf4f20d0e88a5a91465bd5928927f42f0c40"
+    }
+  },
+  "onboardingHealthProof": {
+    "algorithm": "hmac-sha256",
+    "encoding": "lowercase-hex",
+    "nonceBytes": 32,
+    "queryParameter": "nonce",
+    "responseField": "onboardingSidecarProof",
+    "domain": "agentstoz-onboarding-health-proof-v1\u0000"
+  }
+}

@@ -1,0 +1,761 @@
+<!-- AgentsToZ shared-output-style:start -->
+<!-- AgentsToZ memory-agent-version:21 -->
+# Shared output style
+
+- For every user request, first provide a single faithful and concise English translation of the user's request under the label `English translation:`.
+- Then proceed with the requested work.
+- Write the actual response in the user's language unless the user asks for another language.
+- Do not translate code, file paths, URLs, proper nouns, or quoted text unless needed for clarity.
+
+## Task-aware model and reasoning advice
+
+At the start of substantial planning or work, give one brief model/effort recommendation
+using context already available. For a multi-phase plan, identify the demanding phase and
+the condition for lowering effort. Reassess at planning, implementation, verification and
+handoff transitions, or when task difficulty materially changes; do not announce an
+unchanged recommendation at every transition or on every reply.
+- Identify the active agent, model/provider and execution surface where known. Claude,
+  Codex, Antigravity (agy) and Hermes do not necessarily expose the same controls; a
+  provider's effort labels are not portable to another agent or model. If effort is not
+  configurable, say so briefly and recommend a supported alternative only when known.
+- Treat model and reasoning effort as separate settings. Use runtime-provided metadata or
+  the user's latest explicit statement, and distinguish these sources. If unknown, do not
+  guess, claim to have inspected settings, or interrupt routine work just to ask.
+- Recommend a higher reasoning level for unresolved concurrency, privilege isolation,
+  destructive data migration design, or repeated failures whose cause remains unclear.
+  An authentication prompt, missing dependency, network failure, or large token counter
+  alone is not a reason to upgrade the model.
+- Consider a lower level for routine edits or repetitive work after representative checks
+  establish a reliable approach. Do not infer a fixed model ranking from its name, or
+  promise cost savings without measured evidence.
+- Recommend a specific setting only when the active surface is known to support it.
+  Otherwise describe the direction without inventing a model or level. When a change is
+  useful, give one short recommendation with its reason, applicable phase, and the condition
+  for reassessment. After the initial assessment, staying at the current setting normally
+  needs no announcement. Simple questions and trivial edits do not need an effort preamble.
+- Advice does not change settings. Never switch automatically, and honor the user's choice
+  to keep the current setting. Do not repeat the same recommendation in the same phase
+  unless new evidence materially changes it. Continue independent work while waiting.
+- Use no extra AI calls, polling loop, transcript copy, or growing advice history. At normal
+  session saving, retain only verified, reusable task/check/result lessons in the existing
+  project memory. Keep model source and uncertainty explicit; do not attribute success to
+  a model without evidence or store current settings as a permanent project preference.
+<!-- AgentsToZ shared-output-style:end -->
+
+# AGENTS.md — AgentsToZ_byCS 기술 참조
+
+> AI 에이전트, 기여자, 자동화 스크립트를 위한 상세 기술 문서.  
+> 일반 사용자는 [README.md](README.md)를 보세요.
+
+---
+
+## 프로젝트 구조
+
+```
+AgentsToZ_byCS/
+├── src/                    # React 프론트엔드
+│   ├── App.tsx             # 메인 컴포넌트 (~6000줄, 모든 UI 로직)
+│   ├── i18n.ts             # 번역 (ko/en)
+│   ├── main.tsx            # React 진입점
+│   └── lib/
+│       └── supabaseClient.ts  # Supabase 싱글턴 클라이언트
+├── src-tauri/              # Tauri 백엔드 (Rust)
+│   ├── src/lib.rs          # Tauri 커맨드 전체
+│   └── tauri.conf.json     # Tauri 설정 (productName, identifier, 창 크기)
+├── api-server.ts           # Bun 기반 API 서버 (포트 3001)
+├── update-version.ts       # 빌드 번호 자동 증가
+├── build-macos.ts          # macOS 빌드 래퍼 (CARGO_TARGET_DIR 동적 설정)
+├── build-win.ts            # Windows 빌드 래퍼
+├── fix-dmg.ts              # DMG 빌드 후처리 (임시 DMG 복구)
+├── stamp-icon.py           # 앱 아이콘에 버전 번호 스탬프 (Pillow 필요)
+├── index.html              # 앱 진입 HTML
+├── setup.html              # 설정 마법사 HTML
+└── portal.html             # 포털 전용 HTML
+```
+
+**데이터 저장 위치 (앱·웹 공유)**
+```
+macOS: ~/Library/Application Support/com.portmanager.portmanager/ports.json
+       ~/Library/Application Support/com.portmanager.portmanager/logs/{portId}.log
+Windows: %APPDATA%\com.portmanager.portmanager\ports.json
+         %APPDATA%\com.portmanager.portmanager\logs\{portId}.log
+```
+
+---
+
+## 기술 스택
+
+| 영역 | 기술 | 비고 |
+|---|---|---|
+| 런타임 | Bun | Node.js 대신 사용. `bun <file>` 직접 실행 |
+| 프론트엔드 | React 19 + TypeScript | Vite 번들러 |
+| 데스크탑 | Tauri 2 (Rust) | Bundle ID: `com.portmanager.portmanager` |
+| API 서버 | Bun.serve() | 포트 3001, 정확한 로컬/Tauri origin만 허용. 공식 포털은 장기기억 폴더 찾기 2개 경로만 허용 |
+| 스타일링 | Tailwind CSS | 다크 테마 (#0a0a0b 배경, #18181b 카드) |
+| DB 동기화 | Supabase | device_id 기반 기기별 격리 |
+| 인증 | Google OAuth 2.0 + 로컬 sidecar | 웹 포털은 Google, 데스크톱 앱은 로그인 없는 서버 중계 |
+| 웹 배포 | Vercel | 포털 탭 외부 배포 |
+
+### 에이전트 공통 응답 규칙
+
+로컬 API 시작 시 `src/agentOutputStyleInstaller.ts`가 Claude의 `~/.claude/CLAUDE.md`,
+Codex의 `~/.codex/AGENTS.md`, Antigravity의 `~/.gemini/GEMINI.md`를 멱등 갱신한다.
+Hermes는 실제 CLI가 있을 때만 `~/.hermes/SOUL.md`를 갱신한다. 기존 사용자 내용은
+보존하고 `AgentsToZ shared-output-style` 마커 블록만 교체한다. 프로젝트 장기기억을
+초기화하거나 업그레이드할 때도 프로젝트 지침 파일과 Antigravity workspace rule에
+같은 원문을 생성한다.
+
+v21부터 이 공통 블록은 `src/modelEffortAdvicePolicy.ts`의 작업 단계별 모델·에포트
+추천도 포함한다. 계획 시작과 단계 전환에 기존 문맥으로 판단하며 추가 AI 호출·자동
+설정 변경은 없다. 도구별 지원 설정을 추정하지 않는다. [동작과 전달 경로](docs/model-effort-advice.md)를 따른다.
+
+---
+
+## 개발 명령어
+
+```bash
+# 개발 서버 (API 3001 + Vite 9000 동시 실행)
+bun run dev            # vite만
+bun run start          # api-server.ts + vite 동시
+./실행.command         # 포트 충돌 정리 + 종료 핸들러 포함 (권장)
+
+# API 서버만
+bun api-server.ts      # --watch 금지 (헬스체크 실패)
+
+# 커밋 전 필수 — 셋 다 통과해야 한다
+bun run verify         # typecheck + bun test + cargo test 를 이 순서로
+bun run typecheck      # 기준선 0 에러
+bun run test           # tests/ 한정 실행 — 판정은 0 fail, 개수 일치가 아니다
+cd src-tauri && cargo test   # 2026-08-15 실측 33 pass
+bun run test:smoke     # 별개 러너 (node tests/smoke.mjs) — bun test 에 포함되지 않는다
+
+# Tauri 개발
+bun run tauri:dev
+
+# 빌드
+bun run update-version          # build-number.json 증가 + productName 고정
+bun run tauri:build             # macOS .app
+bun run tauri:build:dmg         # macOS DMG
+bun run build:macos-app:developer-id-base # 공개 clean snapshot의 기본 Developer ID 앱 (공증·설치 별도)
+bun run tauri:build:win         # Windows NSIS .exe
+```
+
+> **출하 소스 가드**: macOS·Windows 공식 빌드 래퍼는 버전 증가 전에 clean worktree와 원격의 실제 기본 브랜치 HEAD 일치를 확인한다. 미병합·미Push HEAD 또는 원격 조회 실패에서는 빌드하지 않는다. `--allow-unpublished-source`는 명시적인 로컬 테스트 패키지에만 사용하며 설치·배포하지 않는다.
+
+> **앱 자원 관리**: 장수 캐시·조회 타이머·터미널/원격 대기열의 예산과 수명은 [docs/resource-management.md](docs/resource-management.md)를 따른다. `bun run test:resources`로 규모·수명 회귀를 집중 실행할 수 있으며 해당 Bun 회귀는 `verify`에도 포함된다. 원본 기억·미완료 작업을 삭제해 메모리 예산을 맞추지 말고, UI가 숨겨져도 실제 작업·자동 세션 저장은 유지한다.
+
+> **주의**: `vite` 직접 호출 금지 — `./node_modules/.bin/vite` 사용 (PATH 문제 방지)
+
+> **테스트 탐색 범위**: `bunfig.toml`의 `test.root`는 `./tests`다. 필터형 `bun test 이름`도 릴리즈 DMG의 `Applications` 링크를 탐색하지 않도록 유지한다. 개별 파일은 `bun test ./tests/파일.test.ts` 또는 `bun test --cwd tests 파일.test.ts`로 실행한다.
+
+**빌드 결과물 경로**
+```
+macOS .app:  ~/cargo-targets/portmanager/release/bundle/macos/AgentsToZ_byCS.app
+macOS DMG:   ~/cargo-targets/portmanager/release/bundle/dmg/AgentsToZ_byCS_YYYY.M.D_aarch64.dmg
+Windows .exe: %USERPROFILE%\cargo-targets\portmanager\release\bundle\nsis\*.exe
+```
+
+---
+
+## API 엔드포인트 (포트 3001)
+
+### 포트 관리
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/ports` | 포트 목록 조회 |
+| POST | `/api/ports` | 포트 목록 저장 |
+| POST | `/api/detect-port` | `.command` 파일 분석 (포트·폴더 경로 추출) |
+| GET | `/api/detect-start-command?path=<folderPath>` | 폴더 내 매니페스트 탐색 → 실행 명령 자동 감지 |
+| POST | `/api/execute-command` | `.command` 파일 실행 (로그 파일 리다이렉트) |
+| POST | `/api/stop-command` | 실행 중인 명령 중지 (모든 PID 검색·종료) |
+| POST | `/api/force-restart-command` | 강제 재실행 (SIGKILL → 500ms → 재실행) |
+| POST | `/api/check-port-status` | 포트 실행 상태 확인 (`lsof` 사용) |
+
+### QR 원격제어 관리
+
+아래 경로는 LAN이나 relay에 직접 공개되는 원격 API가 아니라 `127.0.0.1:3001`의 앱 관리 API다. 모두 `POST`만 허용하며, 설치 sidecar에서는 Tauri가 별도 `remote-control-management.capability`와 `X-AgentsToZ-Remote-Control-Capability` 헤더로 프록시한다. What I Said의 capability·헤더·health proof와 공유하지 않는다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/remote-control/status` | 로컬 LAN listener·QR·세션 상태 조회 |
+| POST | `/api/remote-control/interfaces` | 사용자가 선택할 수 있는 이 Mac의 RFC1918 IPv4 목록 |
+| POST | `/api/remote-control/enable` | 선택한 사설 IPv4 하나에 별도 LAN listener 시작 |
+| POST | `/api/remote-control/pairing/rotate` | 30일 유효 일회용 QR을 새로 만들고 이전 미사용 QR 무효화 |
+| POST | `/api/remote-control/sessions/revoke` | 활성 세션 하나 또는 전체 연결 해제 |
+| POST | `/api/remote-control/disable` | 세션과 별도 LAN listener 전체 종료 |
+| POST | `/api/remote-control/internet/status` | 외부 relay host·승인 대기·활성 controller 상태 조회 |
+| POST | `/api/remote-control/internet/enable` | 개인 포털 origin을 검증하고 외부 host·일회용 QR 생성 |
+| POST | `/api/remote-control/internet/sessions/approve` | Mac에 표시된 SAS가 일치하는 controller 하나 승인 |
+| POST | `/api/remote-control/internet/sessions/scopes` | 승인된 controller의 Codex 작업·지속형 대화 권한 변경 |
+| POST | `/api/remote-control/internet/sessions/revoke` | 외부 controller 하나의 로컬 권한을 먼저 폐기 |
+| POST | `/api/remote-control/internet/disable` | 외부 host·QR·승인·세션 전체 폐기 |
+
+원격 단말은 포트 3001에 접근하지 않는다. 활성화할 때만 사용자가 선택한 RFC1918 IPv4와 임시 포트에 두 번째 Bun 서버가 열리며, 허용 표면은 정적 모바일 자산·health·WebSocket인 정확한 `/remote/*` 경로(`/remote/`, `index.html`, `app.js`, `styles.css`, `manifest.webmanifest`, `icon.svg`, `health`, `ws`)뿐이다. V1은 IPv6·loopback·link-local·public·wildcard bind를 거부하고 Host·Origin·query·method를 제한한다.
+
+QR token은 URL fragment에만 들어가 HTTP 요청으로 전송되지 않으며 LAN·외부 모두 30일·일회용이다. LAN 연결은 현재 socket 증명과 복원 가능한 pairing 세션을 구분한다. 검증된 private host 기록으로 재시작 뒤 detached 세션을 복원하고, 같은 기기가 재접속할 때 새 socket epoch에 결속한다(`remoteControlLanServer.ts`). 명시 disable/revoke와 만료는 복원을 막으며, 주소 변경의 자동 탐색·pinned-host challenge는 아직 지원하지 않는다. TTL 상한은 idle·absolute 모두 30일이다(`REMOTE_CONTROL_IDLE_TTL_MS`/`_ABSOLUTE_TTL_MS`). 외부 QR 스캔 뒤 승인 대기 세션은 24시간, 승인된 세션은 승인 시점부터 최대 30일이다. 외부 host identity·pairing secret·세션 cursor는 계정 전용 앱 데이터의 0600 vault에 저장되어 재시작 뒤 복원을 시도하며, 사용자가 외부 원격제어를 끄거나 연결을 해제하면 해당 권한과 비밀을 폐기한다. 외부 연결은 개인 포털의 Google 인증, P-256 ECDH/AES-256-GCM 종단간 암호화, Mac SAS 승인 뒤에만 활성화한다. relay가 중계하는 제어 메시지 본문에는 고정 envelope 메타데이터와 ciphertext만 보이며, relay의 host/controller 등록·승인 행에는 계정 ID·표시 이름·공개키·승인 상태가 저장된다.
+
+모바일 DTO는 임시 `controlId`, 표시 이름, 포트, `main | worktree`, `running | stopped | unknown`, 서버가 계산한 고정 동작과 프로젝트 생성용 임시 작업-root ID만 포함한다. 작업 직전에 등록 행과 Git worktree를 다시 해석한다. 허용 동작은 process start/stop/restart, 등록 프로젝트·localhost·Orca·desktop app 열기, bounded commit/branch 입력, GitHub push, clean+fast-forward pull, 원격 기본 브랜치를 조회한 conflict-preflight merge, Orca 관리 worktree 생성이다. Merge는 로컬 기본 브랜치만 갱신하고 원격 반영은 기본 프로젝트 카드의 별도 Push로 제한한다. 실제 port/root ID·로컬 경로·명령·환경값·PID·로컬 저장 credential·service_role·Git/API 로그인 토큰·장기기억·What I Said 데이터와 임의 shell/path/delete/install/memory-write 기능은 내보내지 않는다.
+
+LAN HTTP 주소는 신뢰 가능한 개인 Wi‑Fi에서만 쓰고 공용·게스트 Wi‑Fi나 포트 포워딩에 노출하지 않는다. 외부 인터넷은 사용자가 등록한 HTTPS 개인 포털 origin만 허용한다. What I Said 외부 앱 feed(`/api/what-i-said/feed`)는 별도 challenge/HMAC 읽기 전용 프로토콜이므로 QR 원격제어 route·token·session과 결합하지 않는다.
+
+### AI 작업·AI 터미널
+
+모바일 작업 홈은 `portal.html`과 `remote/index.html`에서 같은 React shell을 사용한다.
+`workspace-v1` 호스트의 암호화 terminal envelope 안에서 별도 strict workspace 요청을 처리하며,
+`records.read`, `memory.save`, `duty.manage`, `worktree.manage`는 프로젝트별 기기 grant의 별도 권한이다.
+기존 터미널 권한만으로 기록/관리를 허용하지 않는다. 본인 모바일 기록 조회는 외부 What I Said
+feed 발급과 독립이며 호스트의 기존 등록 프로젝트 조회를 재사용한다. 승인된 모바일 기억 저장은
+연결 종료 후에도 같은 dispatcher에서 계속되고 미확정 영수증은 자동 재실행하지 않는다.
+구현 범위와 실기기 후속 검증은 [모바일 실행 기록](docs/plans/mobile-workspace-2026-09-11/EXECUTION.md)을 따른다.
+
+SDK v0.2.0의 짧은 이름 추천과 별도 CLI PTY 실행 경로·원격 opt-in·수명·플랫폼 제한은 [runtime-execution.md](docs/runtime-execution.md)에 정리되어 있다. QR의 기본 DTO 제한은 유지하고, 터미널 원문 입출력만 별도 연결별 동의 후 허용한다.
+
+설치 Mac의 워크룸 암호화 키 준비는 기존 Agent Runtime capability로 보호되는 `POST /api/agent-runtime/terminals/memory`의 `keyOperation: status | prepare | recover-initial`과 등록된 `observationTargetId`만 받는다. 키·계정·경로·자동 저장 동의를 요청 body로 받지 않는다. `status`는 Keychain에 접근하거나 파일/DB를 생성하지 않는다. 실제 준비는 app-data directory lease 아래 `memorySaveKeyLifecycle.ts`의 fingerprint/이력 검증을 거치며, ready 키 유실을 새 키 생성으로 해결하지 않는다. 키 준비는 V2 자동 저장을 활성화하지 않는다.
+
+같은 capability 경로의 `automaticOperation: status | prepare-provider | enable | disable | exclude`가
+설치 Mac의 V2 설정을 관리한다. 정확한 Claude 모델 ID·low/medium 연결 검사1회와 별도 동의가
+필요하며 기존 체크포인트 opt-in을 재사용하지 않는다. 활성화는 기존 체크포인트를 끈다.
+동의 후 완료된 Claude/Codex 대화는 파일 변경 없이도 대상이며 기존15초 tick·공통 dispatcher로
+실행한다. 최대8턴·원문20,000 bytes·프롬프트48,000 bytes, idle120초와 rolling24시간8회·기억별30분
+상한을 적용한다. V2가 켜진 프로젝트의 수동 update/session-end도 같은 coverage·상한을 따른다.
+선택 구간의 receipt는 전체 프로젝트의 legacy 기억 완료 기준을 전진시키지 않는다.
+60초 유지보수는 암호화 입력의7일 만료와 고정 백업 guard의 재시도를 수행하며 AI를 재호출하지 않는다.
+V2 host 계획은 기존 session-recovery 경로에서 exact binding을 검증해 복구한다. 제안이 없는
+미확정 시도를 자동 재실행하지 않으며 상세 한계·설치 pilot은 [자원 관리](docs/resource-management.md)를 따른다.
+
+CLI 변경으로 미확정 저장의 provider 결속이 달라졌을 때는 같은 capability의
+`review-recovery-provider`(AI 없는 검토), `verify-recovery-provider`(특정 검토에 동의한 연결 검사1회),
+`review-recovery`(원본·키·기억 기준 검토), `execute-recovery`(별도 동의한 정리1회)를 순서대로 사용한다.
+schema10은 원래 intent·source 소유·동의 경계를 보존하고 새 provider/policy revision과 단일 successor를
+동일 트랜잭션에서 반영한다. 연결 검사는 별도8회/24시간, 각 승인은5분 유효하며 같은 승인 재전송은
+AI를 재호출하지 않는다. 일반 `revalidate-provider`의 미확정 작업 guard는 유지한다.
+
+
+### 빌드 시스템
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/build` | Tauri 빌드 (`type: 'app' \| 'dmg'`) |
+| GET | `/api/build-status` | 빌드 상태·로그 (1초 폴링용) |
+| POST | `/api/open-build-folder` | 빌드 폴더 열기 |
+| POST | `/api/export-dmg` | DMG를 Desktop으로 복사 |
+| POST | `/api/install-app` | `.app`을 `/Applications/AgentsToZ_byCS.app`으로 설치 |
+
+### 파일·폴더
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/open-folder` | 지정 폴더 열기 |
+| GET | `/api/pick-folder` | macOS 폴더 선택 다이얼로그 (웹 모드 전용) |
+| POST | `/api/create-folder` | 폴더 생성 (절대경로 필수) |
+| POST | `/api/open-orca-localhost` | 선택 프로젝트/워크트리에 Orca 브라우저 탭으로 localhost 열기 (macOS) |
+
+### 포털 설정
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/portal` | `portal.json` 로드 |
+| POST | `/api/portal` | `portal.json` 저장 |
+
+### AI 이름 생성
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/suggest-batch` | N개 포트 이름+카테고리 단일 Claude 호출 일괄 생성 |
+| POST | `/api/suggest-name-and-category` | 단일 포트 이름+카테고리 |
+| POST | `/api/suggest-name` | legacy shim → suggest-name-and-category 위임 |
+| POST | `/api/suggest-category` | legacy shim → suggest-name-and-category 위임 |
+
+### 공개 VOC 수집
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/voc` | 로컬 JSON 저장 후 사용자가 선택한 경우 공개 Edge Function 전송 |
+| GET | `/api/voc` | 이 기기의 로컬 VOC 목록 |
+| GET | `/api/voc/access` | 설치 UUID의 원격 차단 상태 확인(장애 시 fail-open) |
+| GET/PUT | `/api/voc-admin/settings` | service-role 운영자의 접수 여부·일일 한도 관리 |
+| POST/DELETE | `/api/voc-admin/block` | 단말 해시의 VOC/앱 차단 적용·해제 |
+
+### 프로젝트 장기기억
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/project-memory/detect` | 프로젝트 내부 기존 기억·관리 스킬 감지 |
+| POST | `/api/project-memory/document-recovery` | 등록 프로젝트의 중단된 문서 쓰기를 정확한 transaction ID·workspace lease로 재개(세션 전체 완료와 별도) |
+| POST | `/api/project-memory/session-recovery` | 호스트 준비 계획의 문서·일지·저장 기준과 원래 작업 결과 복구(백업 결과 별도) |
+| POST | `/api/project-memory/init` | `.agent-memory/CORE.md`와 Claude/Codex 로컬 스킬 생성·연결 |
+| POST | `/api/project-memory/update` | 선택한 Claude/Codex 비대화형 실행으로 로컬 기억 갱신 |
+| POST | `/api/project-memory/upgrade-agent` | 기존 기억은 보존하고 Claude/Codex용 장기기억 에이전트만 최신화 |
+| POST | `/api/project-memory/mark-remembered` | AI 호출 없이 현재 프로젝트·워크트리 활동 지문을 기억 완료 기준으로 저장 |
+| POST | `/api/project-memory/push` | 현재 로컬 기억을 Supabase 새 리비전으로 백업 |
+| POST | `/api/project-memory/pull` | 원격 최신 리비전을 로컬로 복원(충돌 시 덮어쓰기 금지) |
+| POST | `/api/project-memory/remote-status` | 로컬·원격 해시와 백업 상태 비교 |
+| POST | `/api/project-memory/refresh-resolved-status` | 공식 포털에서 등록 프로젝트를 ID로 안전하게 해석해 이 단말의 기억·Git 상태 갱신 |
+| POST | `/api/project-memory/history` | 프로젝트별 최근 장기기억 리비전 조회 |
+| POST | `/api/project-memory/restore-revision` | 선택 리비전 복원(현재 로컬 파일은 먼저 백업) |
+| POST | `/api/project-memory/session-end` | 로컬 기억 갱신 후 Supabase 백업을 한 번에 실행 |
+| GET | `/api/project-memory/auto-checkpoint/status` | 이 Mac의 Codex 자동 세션 기억 설정·최근 체크포인트 상태 조회 |
+| POST | `/api/project-memory/auto-checkpoint/settings` | 명시적 opt-in으로 50·75·90% 자동 체크포인트 켜기·끄기 |
+| POST | `/api/project-memory/recall` | curated 기억과 검증된 journal FTS 근거를 제한된 결과로 회상 |
+| POST | `/api/project-memory/private-github-archive/status` | 이 단말의 선택형 Private GitHub cold archive 상태 조회 |
+| POST | `/api/project-memory/private-github-archive/enable` | 실제 PRIVATE·WRITE 이상을 확인하고 첫 보관 성공 후 자동 보관 활성화 |
+| POST | `/api/project-memory/private-github-archive/run` | 활성화된 전용 branch에 재해복구 사본 즉시 보관 |
+| POST | `/api/project-memory/private-github-archive/disable` | 이 단말의 자동 보관만 중지(원격 branch 삭제 안 함) |
+| GET | `/api/project-memory/mentions` | 로컬 mention alias 레지스트리 목록 |
+| POST | `/api/project-memory/mentions/suggest` | 표시명과 안전한 `mentionAlias` AI 추천 |
+| POST | `/api/project-memory/mentions/save` | stable memoryId의 primary alias 저장·이름 변경 |
+| POST | `/api/project-memory/mentions/resolve` | `#alias`를 memoryId와 검증된 로컬 canonicalPath로 해석 |
+
+> 장기기억의 원본은 프로젝트 로컬 파일이다. Supabase 백업 실패 시에도 로컬 갱신은 유지하고 재Push할 수 있어야 한다.
+> journal·feedback 원격 Pull은 `portmgr_project_memory_ledger_changes.sync_seq` 단일 cursor를 사용한다. trigger는 memory별 advisory transaction lock으로 sequence 할당·commit 순서를 맞추며, 합병 전 ID로 늦게 올라온 행은 대표 ID로 계속 전달한다. 단말의 cursor/ack는 앱 데이터 폴더의 재생성 가능한 SQLite에 저장한다. 로컬 파일 퇴행, cursor anchor 소실, Supabase restore가 감지되면 cursor를 신뢰하지 않고 0부터 멱등 재생한다. 미지원 future payload는 그 행을 건너뛰지 않고 cursor를 멈춰 업그레이드 후 재시도한다.
+> Private GitHub 보관은 명시적 opt-in이며 Supabase와 별도다. 실제 PRIVATE·쓰기 권한, owner/name, 최초 연결 때 기록한 불변 GitHub repository node ID를 push 직전에 확인하고 고정 `agentstoz-memory-v1` refspec만 사용한다. app-data staging의 allowlist 외 파일, credential/raw transcript, 검증되지 않은 journal은 거부한다. 실패가 로컬/Supabase 결과를 롤백해서는 안 된다. 여러 기억이 같은 저장소를 써도 repository 단위로 직렬화한다. 현재 archive snapshot/tree 대조는 O(total)이므로 백그라운드에서 실행하고 수십만 journal 구간은 실측 후 증분 manifest로 전환한다.
+> Hermes mention alias의 공유 정본은 전용 Supabase `portmgr_project_memory_mentions` 테이블이며, 로컬 `project-memory-mention-aliases.json`은 offline cache/fallback(schemaVersion 1)이다. `portmgr_project_memory_aliases`는 memoryId 계보 전달표이므로 재사용하지 않는다. primary alias를 바꾸면 DB RPC와 로컬 cache 모두 이전 값을 영구 redirect로 남기고 다른 memoryId에 재할당하지 않는다. alias는 소문자 ASCII·숫자·한글·하이픈만 허용하며, 해석할 때 등록 프로젝트와 실제 `.agent-memory/config.json`의 memoryId를 다시 검증한다. 프론트엔드는 service-role을 받지 않고 localhost sidecar만 호출한다.
+> 초기화 시 Claude/Codex용 `project-memory`와 `remember-session` 로컬 스킬 및 토큰을 사용하지 않는 `UserPromptSubmit` 활동 훅을 함께 생성한다. 훅은 프롬프트 본문을 버리고 마지막 활동 시각과 AI 종류만 로컬에 기록한다. 앱은 메인 프로젝트와 연결 워크트리의 Git 활동 지문을 30초마다 확인해 `세션 기억하기 필요`를 표시한다. Claude에서는 `/remember-session`, Codex에서는 `$remember-session` 또는 “세션 기억하기” 자연어로 실행한다. 생성 스킬 버전이 오래되면 프로젝트 영역에 `장기기억 에이전트 업데이트`를 표시한다.
+> Codex 자동 세션 기억은 기본 꺼짐이며 이 Mac에서 명시적으로 켠 뒤 완료되는 턴부터 적용한다. 표준 `~/.codex/sessions` 기록을 쓰는 AgentsToZ·ChatGPT Desktop·Codex CLI·Orca/cmux/터미널 표면을 함께 관찰하되 subagent와 미등록/미초기화 프로젝트는 제외한다. 사용률 50·75·90%를 넘고 실제 `task_complete`가 확인되며 `activity.needsRemember`일 때만 canonical root를 workspace lease로 잠근 뒤 Codex `session-end`를 실행한다. 같은 완료 턴의 일반 실패와 이미 충족한 임계값은 반복 호출하지 않는다.
+
+> CORS: 와일드카드를 쓰지 않는다. 로컬/Tauri origin만 반사하며, 공식 배포 포털은
+> `/api/project-memory/resolve-project`, `/api/project-memory/open-resolved-project`,
+> `/api/project-memory/refresh-resolved-status`, `/api/project-memory/suggest-display-name`만 허용한다.
+> 상태 갱신 경로도 임의 경로를 받지 않고 로컬에 등록된 memoryId를 다시 해석한다. 마지막 경로의 Claude 호출은
+> `--safe-mode --tools ''`로 실행되어 파일·셸 도구에 접근하지 않는다.
+> 후자는 요청 경로가 아니라 로컬에 등록된 memoryId를 다시 해석해 폴더를 연다.
+
+---
+
+## 데이터 구조
+
+### TypeScript (Frontend)
+
+```typescript
+interface PortInfo {
+  id: string;
+  name: string;
+  port?: number;             // 폴더 전용 항목(포트 없는 프로젝트)은 비어 있다
+  commandPath?: string;      // .command 파일 경로
+  terminalCommand?: string;  // 터미널 실행 명령어
+  folderPath?: string;       // 프로젝트 폴더 경로
+  isRunning?: boolean;
+  favorite?: boolean;
+  category?: string;
+  aiName?: string;
+  memo?: string;
+  memo_updated_at?: string;
+  deployUrl?: string;
+  githubUrl?: string;       // 대표 저장소 URL (레거시 호환)
+  githubUrls?: string[];    // 모든 GitHub 저장소 URL, 대표 URL을 첫 항목으로 포함
+  worktreePath?: string;
+  worktreeParentId?: string; // 앱이 생성한 워크트리 행의 부모 프로젝트 ID
+  syncGeneration?: string;  // 삭제 fence용 PostgreSQL bigint의 10진 문자열
+  sourcePortId?: string;    // 다른 기기 Pull로 만든 로컬 복제본의 원본 행 ID
+  sourcePortDeviceId?: string;
+  sourcePortSyncGeneration?: string;
+  manualPath?: string;      // 프로젝트 매뉴얼 파일 경로 (HTML/MD/PDF 등)
+  logFilePath?: string;     // 로그 관리 문서 파일 경로
+  sourceDeviceId?: string;   // 타 기기 포트 격리용
+}
+```
+
+### Rust (Tauri Backend — `src-tauri/src/lib.rs`)
+
+```rust
+struct PortInfo {
+    id: String,
+    name: String,
+    #[serde(default)]
+    port: Option<u16>,   // 폴더 전용 항목은 포트가 없다 — 필수 아님
+    command_path: Option<String>,
+    folder_path: Option<String>,
+    is_running: bool,
+    // …deploy_url / github_url / github_urls / worktree_path / manual_path 등 생략.
+    // 실제 필드 전체는 src-tauri/src/lib.rs 의 struct PortInfo 가 정본이다.
+    // 필드 추가 시 반드시 여기도 추가 — serde가 누락 필드를 silently drop
+}
+```
+
+> **주의**: Rust 구조체에 없는 필드는 `save_ports` 호출 시 JSON 역직렬화 과정에서 사라짐.  
+> TypeScript ↔ Rust 필드 불일치 = 필드 사라짐 버그 1순위 원인.
+
+---
+
+## Supabase 테이블 스키마
+
+### portmgr_ports
+```sql
+CREATE TABLE portmgr_ports (
+  id text PRIMARY KEY,
+  sync_generation bigint NOT NULL DEFAULT 0,
+  device_id text,          -- 기기별 격리 키 (필수)
+  name text,
+  port integer,
+  command_path text,
+  folder_path text,
+  terminal_command text,
+  deploy_url text,
+  github_url text,
+  github_urls text[],
+  manual_path text,
+  log_file_path text,
+  favorite boolean DEFAULT false,
+  memo text,
+  memo_updated_at timestamptz,
+  memory_id text,
+  device_name text,
+  category text,            -- 웹 포털(portal-main.tsx)의 프로젝트 추가/수정이 씀
+  description text          -- 〃
+);
+CREATE INDEX idx_portmgr_ports_device_id ON portmgr_ports(device_id);
+```
+
+### portmgr_port_fences
+
+- 프로젝트 ID별 `generation`과 `active | deleted` 상태를 영구 보존한다.
+- `portmgr_ports`가 물리 삭제돼도 fence 행은 삭제하지 않는다. 구버전 단말의 generation 0 Push가 삭제된 ID를 되살리지 못하게 하는 정본이다.
+- authenticated/service-role도 `portmgr_ports`를 직접 INSERT/UPDATE/DELETE하지 않고 `portmgr_upsert_ports_if_generation_matches`, `portmgr_delete_ports_if_identity_matches`, `portmgr_tombstone_absent_ports`, `portmgr_restore_port_if_generation_matches` RPC만 사용한다.
+- bigint generation은 프런트에서 JS number로 바꾸지 않고 10진 문자열로 운반한다.
+
+### portmgr_workspace_roots
+```sql
+CREATE TABLE portmgr_workspace_roots (id text, device_id text, name text, path text);
+```
+
+### portmgr_portal_items
+```sql
+CREATE TABLE portmgr_portal_items (
+  id text PRIMARY KEY,
+  device_id text,          -- 공유: '__shared__', 기기별: <UUID>
+  name text, type text, url text, path text,
+  category text, description text,
+  pinned boolean, visit_count integer, last_visited timestamptz, created_at timestamptz
+);
+```
+
+### portmgr_portal_categories
+```sql
+CREATE TABLE portmgr_portal_categories (
+  id text PRIMARY KEY,
+  device_id text,          -- 항상 '__shared__'
+  name text, color text, "order" integer
+);
+```
+
+### portmgr_devices
+```sql
+CREATE TABLE portmgr_devices (
+  id text PRIMARY KEY, name text, last_push_at timestamptz,
+  handoff_note text, handoff_updated_at timestamptz   -- 기기 간 인수인계 메모
+);
+```
+
+### portmgr_push_snapshots
+```sql
+CREATE TABLE portmgr_push_snapshots (
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,  -- DEFAULT 없으면 id 누락 시 조용히 실패
+  created_at timestamptz, table_name text,
+  device_id text, device_name text, row_count integer, snapshot jsonb
+);
+```
+
+### portmgr_project_memory_revisions
+```sql
+CREATE TABLE portmgr_project_memory_revisions (
+  id text PRIMARY KEY,
+  memory_id text NOT NULL,
+  parent_revision_id text,
+  project_name text,
+  github_url text,
+  device_id text,
+  device_name text,
+  source_path text,
+  content text NOT NULL,
+  content_hash text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX idx_portmgr_project_memory_latest
+  ON portmgr_project_memory_revisions(memory_id, created_at DESC);
+```
+
+### 장기기억 단말·별칭·계보 합병 메타데이터
+
+- `portmgr_project_memory_devices`: 기억별/단말별 마지막 확인 해시·플랫폼·동기화 시각과 Git HEAD·브랜치·upstream·ahead/behind·dirty·커밋/확인 시각. Pull도 기록하므로 리비전 이력만으로 추정하지 않는다. Git upstream은 네트워크 fetch를 강제하지 않고 각 단말이 마지막으로 가져온 로컬 추적 ref 기준이다.
+- `portmgr_remote_devices` / `portmgr_remote_device_credentials`: AWS/Linux/headless 단말 표시 메타데이터와 서버 전용 credential hash. 원문 credential은 일회용 claim 응답으로만 단말에 전달한다.
+- `portmgr_remote_device_enrollments` / `portmgr_remote_device_memory_access`: 회원이 만든 10분 유효 일회용 등록 토큰 hash와 단말별 접근 가능한 기억. 등록 명령에는 anon key만 포함하고 service-role은 절대 포함하지 않는다.
+- `portmgr_device_identity_aliases`: 앱 재설치 등으로 생긴 이전 물리 단말 ID → 현재 ID 연결. 리비전이나 상태 이력을 재작성하지 않으며 연결 해제 가능하다.
+- `portmgr_project_memory_device_retirements`: 사용 종료 단말을 되돌릴 수 있게 별도 기록한다. 리비전 이력은 삭제하지 않고 최신/확인 필요 집계와 합병 대기에서만 제외한다.
+- `portmgr_project_memory_labels`: UUID와 분리된 사용자용 표시 별칭(1~60자). 사용자가 수정하며 로컬 AI 추천을 받을 수 있다.
+- `portmgr_project_memory_aliases`: 합병 전 ID → 현재 대표 ID의 영구 전달표. 알려진 단말 전환 완료 후에도 삭제하지 않는다.
+- `portmgr_project_memory_merges`: A/B 존속 또는 새 C 생성, 대표 GitHub 저장소 선택과 합병 리비전의 감사 이력.
+- `portmgr_project_memory_merge_devices`: 합병 시 알려진 단말 스냅샷과 각 단말의 새 ID/내용 적용 확인.
+- `portmgr_github_repository_roles`: 저장소 URL별 소유자·협업자 표시 메타데이터. GitHub 토큰은 저장하지 않는다.
+
+합병은 원본 A/B 리비전을 삭제하지 않고 새 합병 리비전을 추가한다. 각 단말의 다음 `/api/project-memory/sync`는 구 ID를 대표 ID로 해석하고 합병본을 Pull한 뒤 전환 완료를 기록한다. 저장소 선택은 기억 계보 선택과 별도이며 코드 저장소의 Git 이력을 자동 덮어쓰지 않는다.
+
+화면 없는 단말은 배포 포털 `기기 관리 → 클라우드·서버` 또는 앱 `장기기억 → 클라우드 단말`에서 생성한 복붙 명령으로 등록한다. `public/agentstoz-remote-device.sh`가 첫 상태를 보고하고 `~/.local/bin/agentstoz-status`를 설치한다. 등록 해제는 credential을 폐기하는 soft-delete이며 과거 관측 행은 보존한다.
+
+### 공개 VOC 서버 테이블
+
+- `portmgr_voc_inbox`: 수신 VOC. 댓글·앱 버전·앵커와 설치 UUID의 SHA-256 해시만 저장한다.
+- `portmgr_voc_daily_usage`: 날짜+단말 해시별 원자적 일일 카운터.
+- `portmgr_voc_settings`: 기본 10회인 일일 한도(1~100)와 접수 여부.
+- `portmgr_voc_blocklist`: `voc` 또는 `app` 범위의 단말 차단, 운영자 메모, 만료 시각.
+- 네 테이블과 `portmgr_submit_voc`/`portmgr_check_voc_device` RPC는 service-role 전용이다.
+- 공개 설치본에는 `VITE_VOC_ENDPOINT`만 들어가며 secret/service-role 키를 포함하지 않는다.
+
+### RLS: 켜져 있다 — 끄지 말 것 (anon 전면 차단, authenticated 전용)
+
+정본은 `src/schemaSql.ts`의 `rlsPolicySql()`과 마이그레이션
+`supabase/migrations/20260804010000_enable_rls_authenticated_only.sql` 두 곳이며,
+모든 `portmgr_*` 테이블에서 RLS를 활성화하고 anon 권한을 회수(`revoke all ... from anon`)한 뒤
+`authenticated` 역할에만 `select/insert/update/delete`를 grant한다.
+anon key가 유출돼도 로그인(JWT) 없이는 접근할 수 없어야 한다는 것이 이 설계의 목적이다.
+
+401/403/PGRST301 이 뜨면 **RLS를 끄는 것이 해결책이 아니다** — 웹 포털은 Google OAuth
+세션을, Tauri 앱은 localhost Supabase 프록시와 `supabase-service.json`의 service_role 상태를 확인하라.
+
+---
+
+## 기기별 격리 정책 (Per-device isolation)
+
+| 테이블 / 조건 | 격리 단위 | device_id 값 |
+|---|---|---|
+| `portmgr_ports` | 기기별 | 해당 기기 UUID |
+| `portmgr_portal_items` where `type = 'web'` | 공유 (전 기기) | `'__shared__'` |
+| `portmgr_portal_items` where `type = 'folder'` | **Deprecated** — 앱 부팅 시 `portmgr_ports`로 자동 이전 | — |
+| `portmgr_portal_categories` | 공유 (전 기기) | `'__shared__'` |
+
+- Pull: `device_id = <내 UUID>` AND `device_id = '__shared__'` 두 결과 합산
+- Push: `sourceDeviceId`가 내 UUID인 포트만 upsert (타 기기 포트 제외)
+- `portal.json`에 `deviceId` (UUID) + `deviceName` (사람이 읽을 수 있는 기기명) 저장
+
+---
+
+## 설치 마법사 플로우
+
+### OneClickWizard (완전 자동화 모드)
+
+`src/SetupWizard.tsx` 내 `OneClickWizard` 컴포넌트. 이미 만든 Supabase 프로젝트를
+CLI로 이 기기에 연결하는 빠른 흐름이며, GitHub/Vercel 로그인은 선택 단계다.
+
+```
+1. Choose: "처음 사용" | "추가 기기 연결"
+   └─ 처음 사용:
+      a. CLI 설치 안내 (macOS: brew, Windows: Scoop/직접)
+      b. supabase login (브라우저 OAuth)
+      c. 프로젝트 선택 또는 신규 생성
+      d. SQL 마이그레이션 자동 실행 (portmgr_* 테이블 생성)
+      e. CLI에서 URL + Anon Key 자동 추출 → portal.json 저장
+      f. 기기 이름 입력 → deviceId 생성
+      g. 연결 테스트 → 완료
+   └─ 추가 기기 연결:
+      a. URL + Anon Key 직접 입력 또는 "CLI 자동 가져오기"
+      b. 기기 이름 입력
+      c. Pull (다른 기기 데이터 불러오기)
+      d. 경로 재설정 모달 자동 표시
+```
+
+### SetupGuide 컴포넌트
+
+`src/PortalManager.tsx` 내 `SetupGuide`. 설정 모달 내 아코디언.  
+3개 테이블 DDL을 Claude Code 프롬프트 형태로 제공. "Claude 프롬프트 복사" 버튼으로 클립보드 복사.
+
+---
+
+## 프로세스 관리 시스템
+
+### 실행 상태 추적
+- **HashMap**: 앱에서 직접 실행한 프로세스 `HashMap<String, u32>` (portId → PID)
+- **lsof 기반**: 앱 재시작 후 기존 프로세스 `lsof -ti:포트번호`로 PID 검색
+- **10초 자동 폴링**: `portsRef` + `setInterval(10000)` — dependency array는 반드시 `[]`
+
+### 중지 로직
+```
+1. lsof -ti :포트 → 모든 PID 수집
+2. 각 PID: SIGTERM → 200ms 대기 → kill -0 확인 → 생존 시 SIGKILL
+3. HashMap에서 제거
+```
+
+### 강제 재실행
+```
+1. SIGKILL로 모든 PID 즉시 종료
+2. 500ms 대기
+3. 새 프로세스 실행 → 새 PID HashMap 등록
+```
+
+### 실행 우선순위
+`commandPath` → `terminalCommand` → 자동 감지(`folderPath`)  
+`detect_start_command`: `package.json` → `pyproject.toml` → `Cargo.toml` 순으로 탐색
+
+---
+
+## Tauri ACL 권한 (`src-tauri/capabilities/default.json`)
+
+```json
+{
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-read-file",
+    "fs:allow-exists",
+    "fs:allow-write-text-file"
+  ]
+}
+```
+
+**변환 공식**: 오류 `{plugin}|{operation} not allowed` → 권한 `{plugin}:allow-{operation}`  
+권한 변경 후 반드시 재빌드 필요.
+
+---
+
+## Tauri 커맨드 (lib.rs)
+
+| 커맨드 | 설명 |
+|---|---|
+| `load_ports()` | 포트 데이터 로드 |
+| `save_ports(ports)` | 포트 데이터 저장 |
+| `execute_command(port_id, command_path, folder_path, app_handle)` | 서버 실행 |
+| `detect_start_command(folder_path)` | 실행 명령 자동 감지 |
+| `stop_command(port_id, port, state)` | 프로세스 중지 |
+| `force_restart_command(...)` | 강제 재실행 |
+| `detect_port(file_path)` | 포트 번호 자동 감지 |
+| `check_port_status(port)` | 실행 상태 확인 |
+| `open_log(port_id, app_handle)` | Terminal에서 로그 열기 |
+| `open_in_chrome(url)` | Chrome에서 URL 열기 |
+| `build_app(build_type, app_handle)` | Tauri 빌드 (백그라운드) |
+| `export_dmg()` | DMG를 Desktop으로 복사 |
+| `create_folder(folder_path)` | 폴더 생성 후 Finder 열기 |
+
+> **GUI PATH 이슈**: Tauri invoke()는 최소 PATH(`/usr/bin:/bin`). `claude` 등 사용자 설치 바이너리는 `zsh -l -c` 로 실행 필수.
+
+---
+
+## 로그 시스템
+
+- 위치: `{앱 데이터}/logs/{portId}.log`
+- 실행 시 stdout/stderr 자동 리다이렉트
+- 앱 내 모달: 1초 폴링, 최근 500줄 슬라이딩 윈도우
+- `newData.size < offset` 시 offset 0 리셋 (서버 재시작 자동 감지)
+
+---
+
+## 빌드 시스템 상세
+
+```
+bun run tauri:build:dmg
+  └─ build-macos.ts
+      ├─ CARGO_TARGET_DIR = $HOME/cargo-targets/portmanager
+      ├─ update-version.ts (build-number.json 증가 + productName 고정)
+      ├─ stamp-icon.py (아이콘 우하단에 vN 스탬프, Pillow 필요)
+      ├─ vite build
+      └─ tauri build --bundles dmg
+          └─ fix-dmg.ts (macOS 버전 호환성 후처리, 임시 DMG 복사)
+```
+
+**버전 날짜 = 마지막 git 커밋 날짜** (오늘 날짜 아님). 올바른 날짜 DMG 생성하려면 빌드 전 커밋 완료 필수.
+
+**Windows CARGO_TARGET_DIR 고정 이유**: 프로젝트가 `C:\Windows\System32\` 경로에 있으면 makensis.exe가 파일 읽기 차단(os error 2/5). `build-win.ts`가 target dir을 홈으로 자동 리다이렉트.
+
+---
+
+## Fork 후 체크리스트
+
+포크 후 아래 파일만 업데이트하면 그대로 사용 가능:
+
+1. `src-tauri/tauri.conf.json` — `identifier`를 본인 도메인으로 변경 (예: `com.yourname.agentstoZ`). 그대로 두면 macOS 서명 충돌.
+2. `.env.example` → `.env` 복사 후 값 채우기:
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+   - `VITE_VOC_ENDPOINT` — 선택형 별도 공개 VOC 수신 프로젝트의 `submit-voc` URL. 비우거나 `off`면 로컬 전용
+   - `VITE_REPO_URL` — 포크한 저장소 URL
+   - `PORTMGR_GITHUB_OWNER` / `PORTMGR_GITHUB_REPO`
+   - 포털 회원 이메일은 Vercel 환경변수가 아니라 Supabase `portmgr_allowed_members`에서만 관리. 포털은 로그인 뒤 `portmgr_is_member()`로 확인하며 RLS를 끄지 말 것.
+3. `package.json` — `homepage`, `repository.url` 업데이트
+4. `.github/workflows/build-windows.yml` — Secrets 재설정
+
+---
+
+## 트러블슈팅
+
+### claude 명령을 찾을 수 없음 (DMG 빌드 후)
+Tauri 앱은 사용자 PATH를 상속하지 않음. 앱은 `which claude` → `/usr/local/bin/claude` → `~/.npm-global/bin/claude` 순으로 탐색.
+```bash
+ln -sf $(which claude) /usr/local/bin/claude
+```
+
+### cmux 버튼 클릭 시 반응 없음
+```bash
+defaults write com.cmuxterm.app socketControlMode -string "allowAll"
+pkill -f "cmux.app/Contents/MacOS/cmux" && sleep 2 && open -a cmux
+cmux ping   # PONG이 오면 성공
+```
+
+### Windows: "running scripts is disabled"
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Windows: API 서버 PATH 문제
+`api-server.ts`는 `/usr/sbin/lsof` 절대경로 사용. 문제 지속 시 `./실행.command` 또는 `start.bat`으로 재시작.
+
+### Supabase 인증/RLS 충돌
+웹 포털의 `createClient()`는 Google JWT를 위해 `persistSession: true`를 유지한다. Tauri 앱의
+같은 호출은 `src/lib/supabaseClient.ts`에서 localhost sidecar 프록시로 바뀌며 사용자 로그인이나
+프런트의 service_role 키를 사용하지 않는다. 프록시 503이면 설정의 service_role 상태를 확인한다.
+
+### Tauri DMG bundle_dmg.sh 반복 실패
+`fix-dmg.ts`로 임시 DMG 복구: `bun run fix-dmg`
+
+---
+
+## UI 아키텍처 핵심
+
+- `App.tsx` 단일 파일 (~6000줄) — 모든 상태, 모달, 탭 관리
+- 최상위 탭: 프로젝트·폴더, AI 작업, AI 터미널, 북마크, 장기기억, 내가 한 말. 장기기억 현황판/합병 기능을 북마크 안의 중첩 탭으로 되돌리지 말 것.
+- 디자인은 2026-09 웜 스톤·코퍼 리디자인을 따른다. 기본 밝은 테마(`gray`)와 다크(`dark`)의 공통 토큰 정본은 `src/index.css`, 셸 레이아웃은 `src/workspaceDesign.css`다. 이전 민트/니어블랙 팔레트를 새 화면에 다시 하드코딩하지 않는다. 상세 기준은 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
+- 10초 자동 폴링: `portsRef` (`useRef<PortInfo[]>`) + `setInterval(10000)`  
+  — `useEffect` dependency array는 반드시 `[]` (무한 루프 방지)
+- Toast 알림: 우측 하단, 성공 3초·경고 9초·오류 12초 기본 표시 및 직접 닫기. 오류 복사 동작 유지.
+- Claude 버튼 레이블: 이모지 없이 텍스트만 (`Claude 열기` / `새창`)
+
+## 네이티브 iOS 클라이언트
+
+- `mobile/ios/`는 같은 프로젝트와 장기기억에서 개발한다. 별도 앱 프로젝트로 등록하지 않는다.
+- `bun run test:ios`는 Swift 계약 검사와 실제 격리 Bun LAN 서버 통합 검사다. `bun run preflight:ios`는 Xcode·iPhone SDK 유무를 검사한다. Swift 변경 시 기존 `verify`와 별도로 실행한다.
+- 현재 네이티브 소스는 LAN QR·프로젝트 조회·프로세스 제어를 구현한다. 인터넷 Supabase gateway·iOS 실기기·TestFlight 완료로 표현하지 않는다. 범위는 `docs/design/native-mobile-testflight.md`를 따른다.
+
+## 공개 배포 저장소의 로컬 배치
+
+- `release/AgentsToZ-public/`은 앱 공개 검증 clone, `release/AgentsToZ-memory/`는 독립 장기기억 SDK 저장소다. 둘 다 상위 Git에서 제외하며 별도 앱 프로젝트로 등록하지 않는다.
+- 두 저장소 관련 AI 작업과 세션 기억은 이 개발 프로젝트 루트에서 시작한다. 독립 Git 저장소는 중첩 위치만으로 기억을 상속하지 않으므로 하위에 `.agent-memory`를 생성·복사·연결하지 않는다.
+- 상위 커밋에 하위 저장소 변경은 포함되지 않는다. 공개 배포 및 SDK 검증·커밋 기준은 `release/README.md`를 따른다.
+
+---
+
+© 2025 CS & Company. All rights reserved.
+
+<!-- AgentsToZ project-memory:start -->
+## Project memory integration
+
+<!-- AgentsToZ memory-agent-version:21 -->
+- Resolve the current Git top-level, take the first porcelain worktree as the repository authority,
+  then append this registered project's fixed relative subpath (repository root).
+  If that canonical `$MEMORY_ROOT/.agent-memory/config.json` is unavailable, stop memory reads and
+  writes instead of creating or promoting a linked-worktree fallback.
+- Read `$MEMORY_ROOT/.agent-memory/config.json` and its project-relative `sourcePath` before substantial work when historical decisions may matter.
+- At substantial work or a material phase change, apply the generated `project-memory`
+  skill's model/effort advice using already-known settings and task evidence. Recommend only;
+  never auto-switch or repeat a declined recommendation without new evidence.
+- Once the memory outgrows a single file, `sourcePath` holds an **index** of entry titles and
+  `.agent-memory/notes/` holds the bodies. Read the index, then only the notes whose titles
+  match the task. The index is generated — edit the notes, never the index.
+- Every durable `###` entry carries an immediately following `<!-- memory-entry-id:<24 lowercase hex> -->` marker.
+  Never remove or regenerate that ID when renaming, moving, or editing the entry; only a genuinely new entry gets a new ID.
+- “세션 기억하기” is the project-local memory workflow. When the user asks to remember the
+  session, update the configured local memory first, mark current activity as remembered,
+  and then back it up:
+  `WORKING_ROOT="$(pwd -P)"; PROJECT_TOP="$(git -C "$WORKING_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"; MEMORY_SUBPATH=''; MEMORY_ROOT="$WORKING_ROOT"; if [ -n "$PROJECT_TOP" ]; then MAIN_TOP="$(git -C "$PROJECT_TOP" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -n 1)"; [ -n "$MAIN_TOP" ] || { echo "Canonical project worktree is unavailable" >&2; exit 1; }; MEMORY_ROOT="$MAIN_TOP"; [ -z "$MEMORY_SUBPATH" ] || MEMORY_ROOT="$MAIN_TOP/$MEMORY_SUBPATH"; fi; [ -f "$MEMORY_ROOT/.agent-memory/config.json" ] || { echo "Canonical project memory is unavailable: $MEMORY_ROOT/.agent-memory/config.json" >&2; exit 1; }; curl --fail-with-body -sS -X POST --get --data-urlencode "folderPath=$MEMORY_ROOT" http://127.0.0.1:3001/api/project-memory/mark-remembered && curl --fail-with-body -sS -X POST --get --data-urlencode "folderPath=$MEMORY_ROOT" http://127.0.0.1:3001/api/project-memory/push`
+- Generated Claude/Codex `UserPromptSubmit` hooks are token-free: they discard prompt
+  content and record only the last activity time and agent so AgentsToZ can highlight
+  “세션 기억하기 필요”.
+- If a compatible external closing workflow such as `/cs-end` runs, apply the same
+  “세션 기억하기” procedure before it finishes.
+- Keep each note at or under 12000 bytes; a save is asked to compact one
+  over-budget note at a time. Merge or compress older entries within that note instead of
+  growing it; never drop a durable decision outright.
+- A failed remote backup must never roll back the local memory update. Report the failure so Push can be retried in AgentsToZ_byCS.
+<!-- AgentsToZ project-memory:end -->

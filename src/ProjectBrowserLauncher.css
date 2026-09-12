@@ -1,0 +1,9 @@
+.project-browser-launcher { position:relative; display:inline-flex; align-items:stretch; gap:2px; min-width:0; }
+.project-browser-launcher > button { display:inline-flex; align-items:center; gap:4px; }
+.project-browser-launcher > .workspace-tools { position:static; }
+.project-browser-launcher > .workspace-tools > summary { height:100%; min-height:0; padding:2px 5px; }
+.project-browser-launcher > .workspace-tools > summary svg:first-child { display:none; }
+.project-browser-launcher > .workspace-tools > summary svg:last-child { margin:0; }
+.project-browser-launcher > .workspace-tools > summary span { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.project-browser-launcher > .workspace-tools > .workspace-tools-panel { right:auto; left:0; }
+.project-browser-launcher .project-browser-settings-hint { margin:0 0 4px; padding:4px 8px; color:var(--ink-3); font-size:11px; line-height:1.5; }

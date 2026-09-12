@@ -1,0 +1,58 @@
+import { chromium, webkit } from 'playwright';
+import assert from 'node:assert/strict';
+const base = process.env.TARGET ?? 'http://127.0.0.1:9421';
+if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw Error('Isolated local fixture required');
+const browser = await (process.env.DUTY_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true });
+try {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 1050 } }), errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
+    await page.goto(base + '/tests/fixtures/cs-duty.html?strict');
+    await page.getByRole('button', { name: 'CS 대직 · 질문 응답 설정', exact: true }).click();
+    await page.getByLabel('대직용 카카오톡 프로필 이름').fill('자료 테스트 봇');
+    await page.getByRole('button', { name: '카카오톡 채팅방 목록 확인', exact: true }).click();
+    await page.getByLabel('응대할 채팅방').selectOption('chat_fixture');
+    await page.getByRole('button', { name: '설정 저장', exact: true }).click();
+    const panel = page.getByTestId('cs-duty-knowledge');
+    assert.equal(await panel.getByRole('button',{name:'선택한 자료로 검색 자료 만들기',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByLabel('프로젝트 호출 별칭').inputValue(),'테스트-프로젝트');
+    assert.equal(await panel.getByLabel('장기기억 항목도 선택', { exact: true }).isChecked(), false);
+    await panel.getByLabel('장기기억 항목도 선택', { exact: true }).check();
+    await panel.getByRole('button', { name: '자료 선택하기', exact: true }).click();
+    await panel.getByLabel(/문서 · 운영 안내/).check();
+    await panel.getByLabel(/기억 · 운영 \/ 지원 연락처/).check();
+    await panel.getByLabel(/문서 · 제품 매뉴얼.pdf/).check();
+    assert.equal(await panel.getByLabel(/문서 · 큰 파일.pdf/).isDisabled(),true);
+    await panel.getByText('PDF 파일은 50MiB 이하여야 합니다.',{exact:true}).waitFor();
+    await panel.getByRole('button', { name: '운영 안내.md 본문 확인', exact: true }).click();
+    await page.getByTestId('knowledge-source-body').filter({ hasText: '오전 9시' }).waitFor();
+    await panel.getByRole('button', { name: '선택한 자료로 검색 자료 만들기', exact: true }).click();
+    const apply = panel.getByRole('button', { name: '이 자료를 답변에 사용', exact: true });
+    assert.equal(await apply.isDisabled(), true);
+    await panel.getByRole('checkbox', { name: /선택한 본문이 이 채팅방에/ }).check();
+    await apply.click();
+    await page.getByTestId('knowledge-state').filter({ hasText: '사용 가능 · 3개' }).waitFor();
+    await panel.getByLabel('자료 시험 질문').fill('문의 시간은?');
+    await panel.getByRole('button', { name: '검색만 시험 · AI 사용 없음', exact: true }).click();
+    await page.getByTestId('knowledge-preview').filter({ hasText: 'AI 호출 없음' }).waitFor();
+    const ops = await page.evaluate(() => window.fixtureRequests);
+    assert(!ops.includes('enable'), 'source and preview workflow must not enable transport');
+    await panel.getByRole('button', { name: '원본 변경 확인', exact: true }).click();
+    await panel.getByText('현재 선택된 원본은 승인 자료와 같습니다.').waitFor();
+    for (const width of [800, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        assert.equal(await page.locator('dialog').evaluate(d => d.scrollWidth <= d.clientWidth + 1), true);
+    }
+    await page.locator('dialog').evaluate(d => { d.scrollTop = d.scrollHeight; });
+    assert.equal(await page.getByRole('button',{name:'대직 OFF',exact:true}).evaluate(b => {const r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;}),true,'OFF stays visible at the bottom of the long dialog');
+    await page.screenshot({ path: '/tmp/cs-duty-knowledge-ui.png', fullPage: true });
+    await panel.getByText('검색 자료 관리', { exact: true }).click();
+    await panel.getByRole('button', { name: '검색 자료 공유 해제', exact: true }).click();
+    assert.equal((await page.evaluate(() => window.fixtureRequests)).includes('revokeKnowledge'), false);
+    await panel.getByRole('button', { name: '유지하기', exact: true }).click();
+    await panel.getByRole('button', { name: '검색 자료 공유 해제', exact: true }).click();
+    await panel.getByRole('button', { name: '공유 해제하기', exact: true }).click();
+    await page.getByTestId('knowledge-state').filter({ hasText: '공유 해제됨' }).waitFor();
+    assert.deepEqual(errors, []);
+    console.log('Knowledge UI passed: memory opt-in, exact selection, body review, apply, search-only preview, updates, revoke, narrow layout; no transport');
+} finally { await browser.close(); }

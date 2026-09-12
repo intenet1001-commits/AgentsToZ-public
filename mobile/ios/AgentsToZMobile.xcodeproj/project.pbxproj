@@ -1,0 +1,51 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+B10000000000000000000001 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceUITests.swift; sourceTree = "<group>"; };
+B10000000000000000000002 = { isa = PBXBuildFile; fileRef = B10000000000000000000001; };
+B10000000000000000000003 = { isa = PBXGroup; path = UITests; sourceTree = "<group>"; children = (B10000000000000000000001); };
+B10000000000000000000004 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentsToZMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+B10000000000000000000005 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
+B10000000000000000000006 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+B10000000000000000000007 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+B10000000000000000000008 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.intenet.agentstoz.mobile.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TEST_TARGET_NAME = AgentsToZMobile; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
+B10000000000000000000009 = { isa = XCBuildConfiguration; name = Release; buildSettings = { CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.intenet.agentstoz.mobile.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TEST_TARGET_NAME = AgentsToZMobile; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; }; };
+B1000000000000000000000A = { isa = XCConfigurationList; buildConfigurations = (B10000000000000000000008,B10000000000000000000009); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+B1000000000000000000000B = { isa = PBXContainerItemProxy; containerPortal = 244210E48437B6556980A702; proxyType = 1; remoteGlobalIDString = 34A04005BCAF206EEC990BD9; remoteInfo = AgentsToZMobile; };
+B1000000000000000000000C = { isa = PBXTargetDependency; target = 34A04005BCAF206EEC990BD9; targetProxy = B1000000000000000000000B; };
+B1000000000000000000000D = { isa = PBXNativeTarget; buildConfigurationList = B1000000000000000000000A; buildPhases = (B10000000000000000000005,B10000000000000000000006,B10000000000000000000007); buildRules = (); dependencies = (B1000000000000000000000C); name = AgentsToZMobileUITests; productName = AgentsToZMobileUITests; productReference = B10000000000000000000004; productType = "com.apple.product-type.bundle.ui-testing"; };
+
+8EB6F609CAB6811672529303 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentsToZMobileApp.swift"; sourceTree = "<group>"; };
+99237A11FC2F763562DF6163 = { isa = PBXBuildFile; fileRef = 8EB6F609CAB6811672529303; };
+4BE647943B30740FE88AFFAC = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QRScannerSheet.swift"; sourceTree = "<group>"; };
+E57DD3FEE79987E2386D396E = { isa = PBXBuildFile; fileRef = 4BE647943B30740FE88AFFAC; };
+26A98CB2998B1ED9AA27FF32 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteHomeView.swift"; sourceTree = "<group>"; };
+5B51F2125EC0D1D4D31EC69E = { isa = PBXBuildFile; fileRef = 26A98CB2998B1ED9AA27FF32; };
+001049624B6AD129ABB317B8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteModel.swift"; sourceTree = "<group>"; };
+5B2C63B8A78F038705F45A8C = { isa = PBXBuildFile; fileRef = 001049624B6AD129ABB317B8; };
+07F57A788B264587ABAEBE01 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LANWorkroomView.swift"; sourceTree = "<group>"; };
+07F57A788B264587ABAEBE02 = { isa = PBXBuildFile; fileRef = 07F57A788B264587ABAEBE01; };
+A11C3E9D0F5B47228C6D0001 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KeychainSessionStore.swift"; sourceTree = "<group>"; };
+A11C3E9D0F5B47228C6D0002 = { isa = PBXBuildFile; fileRef = A11C3E9D0F5B47228C6D0001; };
+C20000000000000000000001 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+C20000000000000000000002 = { isa = PBXBuildFile; fileRef = C20000000000000000000001; };
+C20000000000000000000003 = { isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+C20000000000000000000004 = { isa = PBXBuildFile; fileRef = C20000000000000000000003; };
+E17E80AD8E2103CF3FC3FD96 = { isa = PBXGroup; path = App; sourceTree = "<group>"; children = (8EB6F609CAB6811672529303,4BE647943B30740FE88AFFAC,26A98CB2998B1ED9AA27FF32,001049624B6AD129ABB317B8,07F57A788B264587ABAEBE01,A11C3E9D0F5B47228C6D0001,C20000000000000000000001,C20000000000000000000003); };
+A8792157CB4F27FB949C035F = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentsToZMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+0A3E27B8CA818264D75C8D81 = { isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A8792157CB4F27FB949C035F,B10000000000000000000004); };
+C8D2DC745BFC63C0D67231CE = { isa = PBXGroup; sourceTree = "<group>"; children = (B10000000000000000000003,E17E80AD8E2103CF3FC3FD96,0A3E27B8CA818264D75C8D81); };
+BC4A71180870F7945155FBB0 = { isa = XCLocalSwiftPackageReference; relativePath = AgentsToZCore; };
+8473FB7C391915EE75DAD5DA = { isa = XCSwiftPackageProductDependency; package = BC4A71180870F7945155FBB0; productName = AgentsToZCore; };
+91596F6079D535D734C1642A = { isa = PBXBuildFile; productRef = 8473FB7C391915EE75DAD5DA; };
+878A52FC5FF6A57D50B7B870 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (99237A11FC2F763562DF6163,E57DD3FEE79987E2386D396E,5B51F2125EC0D1D4D31EC69E,5B2C63B8A78F038705F45A8C,07F57A788B264587ABAEBE02,A11C3E9D0F5B47228C6D0002); runOnlyForDeploymentPostprocessing = 0; };
+E2AA269EB967A8853A258BFA = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (91596F6079D535D734C1642A); runOnlyForDeploymentPostprocessing = 0; };
+41D311A605520FC7B8B9A980 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C20000000000000000000002,C20000000000000000000004); runOnlyForDeploymentPostprocessing = 0; };
+488864B3D19480A82F7F1786 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 6.0; }; };
+952548237D7F645F11D1E7B6 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { AGENTSTOZ_DISPLAY_NAME = AgentsToZ; AGENTSTOZ_RELEASE_CHANNEL = development; AGENTSTOZ_REMOTE_PROTOCOL_VERSION = "agentstoz-local-v7"; AGENTSTOZ_SOURCE_COMMIT = local; AGENTSTOZ_TASK_PROTOCOL_VERSION = "agentstoz-local-v8"; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 455; MARKETING_VERSION = 455.0.0; PRODUCT_BUNDLE_IDENTIFIER = com.intenet.agentstoz.mobile; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = App/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
+35B1014F135DE9B45529B733 = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 6.0; }; };
+E2D3A31BEAA1368FC62DA77A = { isa = XCBuildConfiguration; name = Release; buildSettings = { AGENTSTOZ_DISPLAY_NAME = AgentsToZ; AGENTSTOZ_RELEASE_CHANNEL = release; AGENTSTOZ_REMOTE_PROTOCOL_VERSION = "agentstoz-local-v7"; AGENTSTOZ_SOURCE_COMMIT = local; AGENTSTOZ_TASK_PROTOCOL_VERSION = "agentstoz-local-v8"; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 455; MARKETING_VERSION = 455.0.0; PRODUCT_BUNDLE_IDENTIFIER = com.intenet.agentstoz.mobile; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = App/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
+76F8DEC3DFE0BDB465198890 = { isa = XCConfigurationList; buildConfigurations = (488864B3D19480A82F7F1786,35B1014F135DE9B45529B733); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+1B672BF3DA427763BF644BE3 = { isa = XCConfigurationList; buildConfigurations = (952548237D7F645F11D1E7B6,E2D3A31BEAA1368FC62DA77A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+34A04005BCAF206EEC990BD9 = { isa = PBXNativeTarget; buildConfigurationList = 1B672BF3DA427763BF644BE3; buildPhases = (878A52FC5FF6A57D50B7B870,E2AA269EB967A8853A258BFA,41D311A605520FC7B8B9A980); buildRules = (); dependencies = (); name = AgentsToZMobile; productName = AgentsToZMobile; productReference = A8792157CB4F27FB949C035F; productType = "com.apple.product-type.application"; packageProductDependencies = (8473FB7C391915EE75DAD5DA); };
+244210E48437B6556980A702 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2600; }; buildConfigurationList = 76F8DEC3DFE0BDB465198890; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko,en,Base); mainGroup = C8D2DC745BFC63C0D67231CE; productRefGroup = 0A3E27B8CA818264D75C8D81; projectDirPath = ""; projectRoot = ""; packageReferences = (BC4A71180870F7945155FBB0); targets = (34A04005BCAF206EEC990BD9,B1000000000000000000000D); };
+}; rootObject = 244210E48437B6556980A702; }

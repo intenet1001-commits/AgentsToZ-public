@@ -1,0 +1,8 @@
+# Cross-device build configuration
+# NOTE: target-dir is set via CARGO_TARGET_DIR env var in build scripts
+# (package.json tauri:build commands set this dynamically to $HOME/cargo-targets/portmanager)
+# This avoids iCloud sync issues when project is in Documents/
+
+# Uncomment below ONLY if you want a project-local target (slower, larger repo):
+# [build]
+# target-dir = "target"
