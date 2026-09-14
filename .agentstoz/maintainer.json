@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "quick": ["maintainer-self", "essential-contracts"],
+    "verify": ["repository-verify"],
+    "tester": ["maintainer-self", "tester-integration"],
+    "web": ["maintainer-self", "tester-integration", "web-workroom", "web-orchestration", "web-mobile", "web-performance"],
+    "native": ["ios-preflight", "ios-core", "ios-ui"],
+    "device": ["ios-preflight", "iphone-workroom"],
+    "full": ["essential-contracts", "repository-verify", "tester-integration", "web-workroom", "web-orchestration", "web-mobile", "web-performance", "ios-preflight", "ios-core", "ios-ui", "iphone-workroom"]
+  },
+  "checks": [
+    {
+      "id": "tester-integration",
+      "argv": ["bun", "run", "test:tester"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 300,
+      "evidence": "real-python-isolated-api-chromium-webkit",
+      "covers": ["tester setup and preservation", "idempotency and cancellation", "restart receipts", "AI handoff", "project and worktree selection", "mobile tester permissions and reconnect", "Control test overview"],
+      "memoryQueries": ["tester runner regression", "테스터 프로젝트"]
+    },
+    {
+      "id": "maintainer-self",
+      "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/maintainer", "-v"],
+      "timeoutSeconds": 90,
+      "evidence": "python-behavioral-tests",
+      "covers": ["maintainer execution", "failure reporting", "memory recall", "project scaffolding"]
+    },
+    {
+      "id": "essential-contracts",
+      "argv": ["bun", "test", "--cwd", "tests", "--max-concurrency=1", "remote-control-lan-reconnect.integration.test.ts", "remote-control-relay-controller.test.ts", "remote-control-relay-session-vault.test.ts", "remote-project-create-client.test.ts", "remote-project-create-result.test.ts", "agentstoz-use-code-app-mode.test.ts", "agentstoz-use-control.test.ts", "control-profile-store.test.ts", "control-profile-restore.test.ts", "control-profile-connections.test.ts", "workroom-close-evidence.test.ts", "codex-auto-remember-coordinator.test.ts", "claude-auto-remember.test.ts"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 240,
+      "evidence": "source-contracts-and-local-fixtures",
+      "covers": ["remote reconnect", "input ordering", "create project", "MCP open", "control profile", "automatic save", "save before close"],
+      "memoryQueries": ["workroom remote session regression", "워크룸 저장"]
+    },
+    {
+      "id": "repository-verify",
+      "argv": ["bun", "run", "verify"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 1800,
+      "evidence": "typescript-bun-rust-source-verification",
+      "covers": ["all repository unit and integration contracts", "Rust host", "sidecar build"],
+      "memoryQueries": ["verify test regression"]
+    },
+    {
+      "id": "web-workroom",
+      "argv": ["bun", "scripts/check-maintainer-web.ts", "workroom"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 900,
+      "evidence": "real-browser-synthetic-api",
+      "covers": ["terminal touch and keyboard", "save before close", "runtime selector", "remote grant", "context and save status"],
+      "memoryQueries": ["workroom terminal touch regression", "워크룸 저장"]
+    },
+    {
+      "id": "web-orchestration",
+      "argv": ["bun", "scripts/check-maintainer-web.ts", "orchestration"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 420,
+      "evidence": "real-browser-synthetic-api",
+      "covers": ["desktop onboarding", "control preparation", "AI work request"],
+      "memoryQueries": ["control onboarding fixture"]
+    },
+    {
+      "id": "web-mobile",
+      "argv": ["bun", "scripts/check-maintainer-web.ts", "mobile"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 420,
+      "evidence": "chromium-webkit-mobile-fixture",
+      "covers": ["project inventory", "login recovery", "tabs", "memory panel", "project creation idempotency"],
+      "memoryQueries": ["mobile login project fixture", "모바일 프로젝트"]
+    },
+    {
+      "id": "web-performance",
+      "argv": ["bun", "scripts/check-maintainer-web.ts", "performance"],
+      "requires": ["node_modules"],
+      "timeoutSeconds": 240,
+      "evidence": "isolated-production-initial-render-five-cold-five-warm",
+      "covers": ["mobile initial render FCP LCP CLS TBT"],
+      "memoryQueries": ["performance resource rendering"]
+    },
+    {
+      "id": "ios-preflight",
+      "argv": ["bun", "mobile/ios/scripts/preflight.ts"],
+      "platforms": ["darwin"],
+      "timeoutSeconds": 45,
+      "evidence": "local-build-prerequisites-only",
+      "covers": ["Xcode SDK", "app icon", "privacy resources"]
+    },
+    {
+      "id": "ios-core",
+      "argv": ["bun", "run", "test:ios"],
+      "platforms": ["darwin"],
+      "needs": ["ios-preflight"],
+      "timeoutSeconds": 420,
+      "evidence": "native-swift-to-bun-fixture",
+      "covers": ["pairing", "native transport", "restore session", "cancel request"],
+      "memoryQueries": ["native transport resume session"]
+    },
+    {
+      "id": "ios-ui",
+      "argv": ["{python}", "mobile/ios/scripts/check-ui.py"],
+      "platforms": ["darwin"],
+      "needs": ["ios-preflight"],
+      "timeoutSeconds": 1800,
+      "evidence": "production-swiftui-owned-simulator-xcuitest",
+      "covers": ["native onboarding controls", "Korean input", "LAN warning and cancel"],
+      "memoryQueries": ["native onboarding simulator XCUITest"]
+    },
+    {
+      "id": "iphone-workroom",
+      "argv": ["bun", "mobile/ios/scripts/check-workroom.ts", "--device", "{env:AGENTSTOZ_TEST_DEVICE}", "{env:AGENTSTOZ_TEST_IOS_TEMPLATE}", "{env:AGENTSTOZ_TEST_SIGNING_IDENTITY}"],
+      "platforms": ["darwin"],
+      "needs": ["ios-preflight"],
+      "timeoutSeconds": 600,
+      "evidence": "physical-iphone-wkwebview-lan-fake-cli",
+      "covers": ["native dialog", "workroom consent", "PTY input output", "background", "reconnect", "explicit disconnect"],
+      "memoryQueries": ["iPhone WKWebView fixture", "네이티브 대화창"]
+    }
+  ],
+  "limits": [
+    "A source or fixture pass does not prove the installed Mac app or a TestFlight download works.",
+    "Real provider authentication and actual Codex/Claude/Hermes/agy responses need separate account-level checks.",
+    "Personal internet relay, cellular handover, camera QR scan and 30-day expiry are not end-to-end verified by these fixture checks.",
+    "Performance measures the isolated mobile initial page, not signed-in project workload or AI latency.",
+    "The simulator's optional personal HTTPS test can be skipped when no personal origin is supplied; inspect native UI evidence."
+  ]
+}
