@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "1.1.1",
+  "instructionVersion": 1,
+  "minimumRunnerVersion": "1.1.1",
+  "managedRunnerHash": "f0ef493dd084c9ccb2c685270812c5de7681dcda1c8252d1bb6076dac8e25adc",
+  "defaultProfile": "quick"
+}

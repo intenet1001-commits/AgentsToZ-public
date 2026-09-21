@@ -1,0 +1,139 @@
+/* Self-hosted variable fonts (CSP `font-src 'self'` — no CDN). Pretendard stays in the
+   stack as an optional system font for Korean; Apple SD Gothic Neo / Malgun Gothic fall in. */
+@import '@fontsource-variable/manrope/index.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+
+/* ── Design Tokens ─────────────────────────────────────────
+ * Redesign (2026-09): warm-stone neutrals + one copper accent. State colours keep a fixed
+ * meaning — green=running, red=danger/stop, blue=sync/info, violet=AI/alias, amber=stale.
+ * `:root` is the dark theme; `[data-app-theme="gray"]` is the light default. The legacy
+ * names (--bg-base, --text-primary, --accent-*, --zinc-*) are bridged so every existing
+ * surface — Tailwind zinc classes included — moves with the palette without code changes. */
+:root {
+  /* Semantic surface / ink */
+  --bg:#121110; --surface:#1a1917; --raised:#211f1c; --sunken:#0e0d0c;
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.13);
+  --ink:#f5f2ee; --ink-2:#aaa39b; --ink-3:#9b9289;
+  --accent:#f5935f; --accent-strong:#ffb08a; --accent-soft:rgba(245,147,95,.12);
+  --accent-line:rgba(245,147,95,.32); --on-accent:#1c1917; --accent-rgb:245 147 95;
+  --ok:#4ade80; --ok-soft:rgb(var(--ok-rgb) / .12); --ok-rgb:74 222 128;
+  --danger:#f87171; --danger-soft:rgb(var(--danger-rgb) / .12); --danger-rgb:248 113 113;
+  --info:#7cb2ff; --info-soft:rgba(124,178,255,.12); --info-rgb:124 178 255;
+  --violet:#c4b5fd; --violet-soft:rgb(var(--violet-rgb) / .12); --violet-rgb:196 181 253;
+  --warn:#fbbf24; --warn-soft:rgb(var(--warn-rgb) / .12); --warn-rgb:251 191 36;
+  --term:#0c0b0a; --scrim:rgba(0,0,0,.6);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+  --shadow-lg:0 30px 90px rgba(0,0,0,.7);
+  --font-sans:"Manrope Variable",Manrope,"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI","Malgun Gothic",sans-serif;
+  --font-mono:"JetBrains Mono Variable","JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  /* Legacy bridge */
+  --text-on-solid: var(--on-accent);
+  --text-on-accent: var(--on-accent);
+  --surface-shade-rgb: 0 0 0;
+  --surface-highlight-rgb: 255 255 255;
+  --zinc-50: 245 242 238;
+  --zinc-100: 236 232 226;
+  --zinc-200: 214 209 202;
+  --zinc-300: 186 180 172;
+  --zinc-400: 148 141 133;
+  --zinc-500: 111 104 98;
+  --zinc-600: 78 73 68;
+  --zinc-700: 54 50 46;
+  --zinc-800: 33 31 28;
+  --zinc-900: 26 25 23;
+  --zinc-950: 14 13 12;
+  --text-dim: var(--ink-3);
+  --text-dim-rgb: 155 146 137;
+  --bg-hover: var(--raised);
+  --bg-hover-rgb: 33 31 28;
+  --bg-input: var(--sunken);
+  --bg-input-rgb: 14 13 12;
+  --bg-base:     #121110; /* = --bg; literal so the root-background contract test can see it */
+  --bg-base-rgb: 18 17 16;
+  --bg-card:     var(--surface);
+  --bg-card-rgb: 26 25 23;
+  --bg-elevated: var(--raised);
+  --bg-elevated-rgb: 33 31 28;
+  --bg-deep:     var(--sunken);
+  --bg-deep-rgb: 14 13 12;
+  --text-primary:   var(--ink);
+  --text-primary-rgb: 245 242 238;
+  --text-secondary: var(--ink-2);
+  --text-secondary-rgb: 170 163 155;
+  --text-muted:     var(--ink-3);
+  --text-muted-rgb: 155 146 137;
+  --text-faint:     #55504a;
+  --text-faint-rgb: 85 80 74;
+  --accent-amber:  var(--accent);
+  --accent-green:  var(--ok);
+  --accent-red:    var(--danger);
+  --accent-purple: var(--violet);
+  --accent-teal:   var(--accent);
+  --accent-cyan:   var(--info);
+  --border-subtle: var(--line);
+  --border-mild:   var(--line-2);
+}
+
+/* Light neutral gray (default): warm stone surfaces, near-black ink, copper accent. */
+:root[data-app-theme="gray"] {
+  color-scheme: light;
+  --bg:#f3f1ed; --surface:#ffffff; --raised:#faf9f7; --sunken:#ecebe7;
+  --line:rgba(28,25,23,.08); --line-2:rgba(28,25,23,.14);
+  --ink:#1c1917; --ink-2:#5c5651; --ink-3:#6f675f;
+  --accent:#c2410c; --accent-strong:#9a3412; --accent-soft:rgba(194,65,12,.09);
+  --accent-line:rgba(194,65,12,.28); --on-accent:#ffffff; --accent-rgb:194 65 12;
+  --ok:#15803d; --ok-soft:rgb(var(--ok-rgb) / .1); --ok-rgb:21 128 61;
+  --danger:#b91c1c; --danger-soft:rgb(var(--danger-rgb) / .08); --danger-rgb:185 28 28;
+  --info:#1d4ed8; --info-soft:rgba(37,99,235,.08); --info-rgb:29 78 216;
+  --violet:#6d28d9; --violet-soft:rgba(109,40,217,.08); --violet-rgb:109 40 217;
+  --warn:#a16207; --warn-soft:rgba(202,138,4,.12); --warn-rgb:161 98 7;
+  --term:#141210; --scrim:rgba(28,25,23,.42);
+  --shadow:0 1px 2px rgba(28,25,23,.05),0 8px 28px rgba(28,25,23,.08);
+  --shadow-lg:0 24px 80px rgba(28,25,23,.22);
+
+  --text-dim: var(--ink-3);
+  --text-dim-rgb: 111 103 95;
+  --bg-hover: var(--sunken);
+  --bg-hover-rgb: 236 235 231;
+  --bg-input: var(--raised);
+  --bg-input-rgb: 250 249 247;
+  --bg-base: #f3f1ed; /* = --bg */
+  --bg-base-rgb: 243 241 237;
+  --bg-card: var(--surface);
+  --bg-card-rgb: 255 255 255;
+  --bg-elevated: var(--surface);
+  --bg-elevated-rgb: 255 255 255;
+  --bg-deep: var(--sunken);
+  --bg-deep-rgb: 236 235 231;
+  --text-primary: var(--ink);
+  --text-primary-rgb: 28 25 23;
+  --text-secondary: var(--ink-2);
+  --text-secondary-rgb: 92 86 81;
+  --text-muted: var(--ink-3);
+  --text-muted-rgb: 111 103 95;
+  --text-faint: #a39c94;
+  --text-faint-rgb: 163 156 148;
+  /* Tailwind zinc scale, inverted for light so text-zinc-* stays readable on white. */
+  --zinc-50: 28 25 23;
+  --zinc-100: 41 37 34;
+  --zinc-200: 68 63 58;
+  --zinc-300: 92 86 81;
+  --zinc-400: 110 103 96;
+  --zinc-500: 142 135 127;
+  --zinc-600: 168 161 153;
+  --zinc-700: 214 209 202;
+  --zinc-800: 228 224 218;
+  --zinc-900: 243 241 237;
+  --zinc-950: 236 235 231;
+  --surface-shade-rgb: 140 132 124;
+  --surface-highlight-rgb: 28 25 23;
+  --border-subtle: var(--line);
+  --border-mild: var(--line-2);
+  --accent-amber: var(--accent);
+  --accent-green: var(--ok);
+  --accent-red: var(--danger);
+  --accent-purple: var(--violet);
+  --accent-teal: var(--accent);
+  --accent-cyan: var(--info);
+}

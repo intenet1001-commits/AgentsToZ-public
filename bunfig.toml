@@ -1,0 +1,4 @@
+[test]
+# Keep even filtered `bun test name` invocations inside the repository test suite.
+# Release DMG staging contains an Applications symlink that must not be traversed.
+root = "./tests"

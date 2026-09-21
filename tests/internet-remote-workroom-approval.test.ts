@@ -1,0 +1,5 @@
+import {test,expect} from 'bun:test';
+import {approveInternetSessionWithWorkroom} from '../src/internetRemoteWorkroomApproval';
+test('SAS approval plus successful explicit workroom consent returns approved status',async()=>{const calls:string[]=[];const result=await approveInternetSessionWithWorkroom(async()=>{calls.push('approve');return{approved:true}},async()=>{calls.push('grant')});expect(calls).toEqual(['approve','grant']);expect(result).toEqual({status:{approved:true},workroomError:null});});
+test('successful approval plus failed grant preserves approved status for grant-only retry',async()=>{let approvals=0;const result=await approveInternetSessionWithWorkroom(async()=>{approvals++;return{approved:true}},async()=>{throw new Error('disk full')});expect(result.status.approved).toBe(true);expect(result.workroomError).toBe('disk full');expect(approvals).toBe(1);});
+test('failed approval never attempts optional terminal consent',async()=>{let grants=0;await expect(approveInternetSessionWithWorkroom(async()=>{throw new Error('SAS mismatch')},async()=>{grants++})).rejects.toThrow('SAS mismatch');expect(grants).toBe(0);});

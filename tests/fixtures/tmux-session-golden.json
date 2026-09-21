@@ -1,0 +1,30 @@
+{
+  "_comment": "tmux 세션명 계약. TypeScript 정본(src/tmuxSessionName.ts)과 Rust 백엔드(tmux_session_name, src-tauri/src/lib.rs)가 이 표 하나를 함께 읽는다. 세션명은 에이전트에 의존하지 않아야 하므로 세 에이전트를 모두 넣었다 — 한 에이전트만 특별 취급하는 백엔드는 여기서 터진다.",
+  "cases": [
+    { "agent": "claude", "baseName": "demo", "worktreePath": null, "bypass": false, "expected": "demo" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": null, "bypass": true, "expected": "demo-bypass" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": false, "expected": "demo-feature" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": true, "expected": "demo-feature-bypass" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": false, "expected": "demo-a" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": true, "expected": "demo-a-bypass" },
+
+    { "agent": "codex", "baseName": "demo", "worktreePath": null, "bypass": false, "expected": "demo" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": null, "bypass": true, "expected": "demo-bypass" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": false, "expected": "demo-feature" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": true, "expected": "demo-feature-bypass" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": false, "expected": "demo-a" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": true, "expected": "demo-a-bypass" },
+
+    { "agent": "agy", "baseName": "demo", "worktreePath": null, "bypass": false, "expected": "demo" },
+    { "agent": "agy", "baseName": "demo", "worktreePath": null, "bypass": true, "expected": "demo-bypass" },
+    { "agent": "agy", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": false, "expected": "demo-feature" },
+    { "agent": "agy", "baseName": "demo", "worktreePath": "/repo/worktrees/feature", "bypass": true, "expected": "demo-feature-bypass" },
+    { "agent": "agy", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": false, "expected": "demo-a" },
+    { "agent": "agy", "baseName": "demo", "worktreePath": "/repo/wt/a,/repo/wt/b", "bypass": true, "expected": "demo-a-bypass" },
+
+    { "agent": "claude", "baseName": "demo", "worktreePath": "/repo/worktrees/feature/", "bypass": false, "expected": "demo-feature" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "   ", "bypass": false, "expected": "demo" },
+    { "agent": "claude", "baseName": "demo", "worktreePath": "C:\\repo\\worktrees\\feature", "bypass": true, "expected": "demo-feature-bypass" },
+    { "agent": "codex", "baseName": "demo", "worktreePath": "/", "bypass": false, "expected": "demo" }
+  ]
+}

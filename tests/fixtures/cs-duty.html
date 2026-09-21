@@ -1,0 +1,50 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CS duty fixture</title>
+<style>:root{--surface:#faf9f6;--ink:#312d29;--line:#d9d1c8;--accent:#9d6545;--on-accent:#fff;--danger:#a12424}*{box-sizing:border-box}body{font:15px system-ui;background:var(--surface);color:var(--ink)}</style><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import {CsDutyPanel} from '/src/CsDutyPanel.tsx';
+const projects=new Map(),knowledgeProjects=new Map();window.fixtureRequests=[];
+const sourceRows=[{id:'a'.repeat(64),hash:'1'.repeat(64),kind:'document',title:'운영 안내.md',bytes:120},{id:'b'.repeat(64),hash:'2'.repeat(64),kind:'memory',title:'운영 / 지원 연락처',bytes:150},{id:'c'.repeat(64),hash:'4'.repeat(64),kind:'document',title:'제품 매뉴얼.pdf',bytes:220},{id:'d'.repeat(64),hash:'5'.repeat(64),kind:'document',title:'큰 파일.pdf',bytes:60000000,unavailable:true,warning:'PDF 파일은 50MiB 이하여야 합니다.'}];
+const emptyKnowledge=()=>({revision:0,snapshotId:null,createdAt:null,expiresAt:null,sourceCount:0,sources:[],state:'empty'});
+let nextHold=null,nextFailure=null;
+window.fixtureHoldNext=operation=>{nextHold=operation;};
+window.fixtureFailNext=operation=>{nextFailure=operation;};
+window.fixtureRelease=null;
+window.fixtureUpdateConfig=(targetId,patch)=>{
+ const current=projects.get(targetId);
+ current.config={...current.config,...patch,revision:current.config.revision+1};
+};
+window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+ if(command!=='agent_runtime_request'||args.path!=='/api/agent-runtime/cs-duty')throw Error('Fixture refuses unexpected action');
+ const b=args.body;window.fixtureRequests.push(b.operation);
+ const held=nextHold===b.operation; if(held)nextHold=null;
+ if(nextFailure===b.operation){nextFailure=null;return {status:409,body:{error:'테스트 저장소 연결 실패'}};}
+ let {config,state}=projects.get(b.targetId)??{config:null,state:'off'};
+ const knowledge=knowledgeProjects.get(b.targetId)??{status:emptyKnowledge(),job:null};knowledgeProjects.set(b.targetId,knowledge);
+ const okay=body=>({status:200,body:{supported:true,...body}});
+ if(b.operation==='sources')return okay({sources:sourceRows.filter(s=>b.includeMemory||s.kind==='document'),warnings:[]});
+ if(b.operation==='sourcePreview'||b.operation==='candidatePreview'){const id=b.selection?.id??b.sourceId;return okay({source:{...sourceRows.find(s=>s.id===id),body:'고객센터는 평일 오전 9시부터 오후 5시까지 운영합니다.'}});}
+ if(b.operation==='prepareKnowledge'){const selected=sourceRows.filter(s=>b.selections.some(x=>x.id===s.id));knowledge.job={id:'candidate-1',state:'ready',candidate:{id:'candidate-1',manifestHash:'3'.repeat(64),sources:selected,bytes:270,changed:selected.length,reused:0,removed:0}};return okay({job:knowledge.job});}
+ if(b.operation==='applyKnowledge'){knowledge.status={revision:knowledge.status.revision+1,snapshotId:'candidate-1',createdAt:Date.now(),expiresAt:Date.now()+90*86400000,sourceCount:knowledge.job.candidate.sources.length,sources:knowledge.job.candidate.sources,state:'ready'};knowledge.job=null;state='off';}
+ if(b.operation==='revokeKnowledge'){knowledge.status={...emptyKnowledge(),revision:knowledge.status.revision+1,state:'revoked'};knowledge.job=null;state='off';}
+ if(b.operation==='checkKnowledgeUpdates')return okay({changed:[],removed:[],checkedAt:Date.now()});
+ if(b.operation==='previewAnswer')return okay({preview:{answer:b.generate?'오전 9시부터 운영합니다.':null,evidence:[{id:'chunk-1',title:'운영 안내.md',body:'고객센터는 평일 오전 9시부터 오후 5시까지 운영합니다.',score:1}],aiUsed:b.generate,snapshotId:knowledge.status.snapshotId}});
+ if(b.operation==='cancelKnowledgeJob'){knowledge.job={id:'candidate-1',state:'cancelled'};return okay({job:knowledge.job});}
+ if(b.operation==='discover')return {status:200,body:{chats:[{id:'chat_fixture',title:'테스트 지원방'},{id:'chat_second',title:'두 번째 지원방'}],supported:true}};
+ if(b.operation==='documents')return {status:200,body:{supported:true,documents:[{path:'README.md',bytes:820},{path:'docs/faq.md',bytes:1400},{path:'제품 매뉴얼.pdf',bytes:2000}]}};
+ if(b.operation==='documentText')return {status:200,body:{supported:true,text:b.paths.map(p=>'# '+p+'\n픽스처 문서 본문').join('\n\n')}};
+ if(b.operation==='diagnose')return {status:200,body:{supported:true,checks:[
+  {id:'kmsg',label:'kmsg CLI 설치',ok:true,detail:'설치됨'},
+  {id:'kakaotalk',label:'카카오톡 실행 중',ok:true,detail:'PID 1234'},
+  {id:'window',label:'채팅방 창이 열려 있어 읽기 가능',ok:false,detail:'채팅방 창을 읽지 못했습니다. 카카오톡에서 이 채팅방을 별도 창으로 열어 화면에 보이도록 두세요. 대직은 창을 대신 열지 않습니다.'}]}};
+ if(b.operation==='createConnection'){const id='duty_11111111-1111-4111-8111-111111111111';const next={...config,targetId:id,projectTargetId:b.targetId,revision:1,chatId:b.chatId,chatTitle:b.chatTitle,knowledge:'',faqs:[],aiEnabled:false};projects.set(id,{config:next,state:'off'});return okay({config:next,state:'off'});}
+ if(b.operation==='save'){if((config?.revision??0)!==b.config.revision)return {status:409,body:{error:'다른 화면에서 설정이 바뀌었습니다. 다시 불러오세요.'}};config={...b.config,revision:b.config.revision+1};state='off';}
+ if(b.operation==='enable'){if(b.consent!==true)throw Error('Missing consent');state='on';}
+ if(b.operation==='disable'||b.operation==='revealChat')state='off';
+ projects.set(b.targetId,{config,state});
+ const response=structuredClone({status:200,body:{config,state,projectConnections:[...projects.entries()].filter(([id,v])=>(v.config?.projectTargetId??id)===(config?.projectTargetId??b.targetId)).map(([id,v])=>({targetId:id,chatId:v.config?.chatId,chatTitle:v.config?.chatTitle??'첫 채팅방 설정',state:v.state})),roomProjects:[...projects.entries()].filter(([,v])=>v.config?.chatId===config?.chatId).map(([id,v])=>({targetId:id,alias:v.config?.projectAlias??'',state:v.state})),knowledge:knowledge.status,knowledgeJob:knowledge.job,supported:true,aiUsed:0,replied:0,error:null,baseline:state==='on'?3:0,checkedAt:state==='on'?1788960000000:null,since:state==='on'?1788960000000:null}});
+ if(held)await new Promise(resolve=>{window.fixtureRelease=()=>{window.fixtureRelease=null;resolve();};});
+ return response;
+}};
+function Fixture(){const [target,setTarget]=React.useState('fixture-project');window.fixtureSelectProject=setTarget;return React.createElement(CsDutyPanel,{key:target,targetId:target,projectName:target==='fixture-project'?'테스트 프로젝트':'두 번째 프로젝트'});}
+createRoot(document.getElementById('root')).render(new URLSearchParams(location.search).has('strict')?React.createElement(React.StrictMode,null,React.createElement(Fixture)):React.createElement(Fixture));
+</script></html>
