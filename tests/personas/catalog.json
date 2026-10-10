@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "personas": [
+    {
+      "id": "korean-searcher",
+      "goal": "초성·한영 키보드 실수로도 프로젝트를 찾는다",
+      "tests": [
+        "project-search.test.ts"
+      ]
+    },
+    {
+      "id": "remote-controller",
+      "goal": "휴대폰에서 허용 범위와 원격 동작을 이해하고 조작한다",
+      "tests": [
+        "internet-remote-workroom-approval.test.ts",
+        "remote-control-mobile-accessibility.test.ts",
+        {
+          "file": "control-accessibility-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "hands-free-operator",
+      "goal": "음성 대화 중 자막과 작업 상태를 잃지 않는다",
+      "tests": [
+        "voice-dock.test.ts",
+        "voice-workroom-read-bound.test.ts",
+        {
+          "argv": ["bun", "scripts/check-voice-dock.ts"],
+          "kind": "screen",
+          "name": "voice-dock-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    },
+    {
+      "id": "multi-session-maker",
+      "goal": "여러 작업을 별도 창으로 열고 다시 찾는다",
+      "tests": [
+        "workroom-popout.test.ts",
+        "workroom-session-status.test.ts",
+        {
+          "argv": ["bun", "tests/personas/workroom-popout-screen.mjs"],
+          "kind": "screen",
+          "name": "workroom-popout-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    },
+    {
+      "id": "first-time-user",
+      "goal": "처음 연결할 때 선택과 실패 원인을 이해한다",
+      "tests": [
+        "onboarding-first-run-clarity.regression.test.ts",
+        "onboarding-progress.test.ts",
+        {
+          "file": "onboarding-first-project-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "cautious-sync-user",
+      "goal": "업로드 충돌이나 잠금 중 데이터가 조용히 덮이지 않는다",
+      "tests": [
+        "port-auto-upload-status.test.ts"
+      ]
+    },
+    {
+      "id": "low-vision-user",
+      "goal": "모바일 조작 대상과 상태가 접근 가능하다",
+      "tests": [
+        "remote-control-mobile-accessibility.test.ts",
+        {
+          "file": "control-accessibility-ui.mjs"
+        },
+        {
+          "file": "mobile-workspace-panel-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "project-memory-user",
+      "goal": "기억 검색과 현재 프로젝트 맥락을 구분한다",
+      "tests": [
+        "project-memory-directory.test.ts",
+        "project-search.test.ts"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>시작한 OPS 또는 워크룸 음성 대화를 위해 마이크를 사용합니다. 음성은 선택한 음성 제공자로 전송됩니다.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>사용자가 명시적으로 요청할 때 ChatGPT Voice 시작을 위해 ChatGPT를 제어합니다.</string>
+</dict>
+</plist>

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "project.onboarding-unit",
+  "title": "온보딩 단위 검사 묶음",
+  "intent": "첫 실행 온보딩의 진단, 진행 상태, GitHub·Codex·Supabase 준비 계약을 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "onboarding",
+    "unit"
+  ],
+  "paths": [
+    "src/onboarding*",
+    "src/*Onboarding*",
+    "tests/onboarding-*"
+  ],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 90
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "--cwd",
+        "tests",
+        "--max-concurrency=1",
+        "onboarding-"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "onboarding regression"
+  ]
+}

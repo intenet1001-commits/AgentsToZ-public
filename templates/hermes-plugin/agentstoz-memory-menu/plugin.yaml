@@ -1,0 +1,4 @@
+name: agentstoz-memory-menu
+version: 1.0.0
+description: "Keeps AgentsToZ project-memory commands visible in capped gateway menus while preserving skill dispatch."
+author: "AgentsToZ_byCS"

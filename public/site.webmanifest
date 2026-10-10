@@ -1,0 +1,12 @@
+{
+  "name": "AgentsToZ 워크스페이스",
+  "short_name": "AgentsToZ",
+  "description": "프로젝트·북마크·장기기억·단말 동기화 워크스페이스",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "measuredAt": "2026-09-23T13:27:46.158Z",
+  "bun": "1.4.2",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "method": "30 samples per mode after one warmup, rotated order, identical shell echo fixture, 1ms polling in both routes. Service target resolver is a trivial temporary root. No production registry/API/Tauri/xterm/Orca/Codex app/model is measured.",
+  "latency": {
+    "directPty": {
+      "n": 30,
+      "p50Ms": 1.147,
+      "p95Ms": 1.416,
+      "maxMs": 9.521
+    },
+    "serviceSeparateEnter": {
+      "n": 30,
+      "p50Ms": 1.387,
+      "p95Ms": 1.905,
+      "maxMs": 2.229
+    },
+    "serviceCombinedEnter": {
+      "n": 30,
+      "p50Ms": 152.354,
+      "p95Ms": 154.252,
+      "maxMs": 155.657
+    }
+  },
+  "registrationEvidence": [
+    {
+      "registeredLocalDirectories": 1,
+      "n": 20,
+      "p50Ms": 0.012,
+      "p95Ms": 0.018,
+      "maxMs": 0.02
+    },
+    {
+      "registeredLocalDirectories": 100,
+      "n": 20,
+      "p50Ms": 1.063,
+      "p95Ms": 1.377,
+      "maxMs": 1.381
+    },
+    {
+      "registeredLocalDirectories": 1000,
+      "n": 20,
+      "p50Ms": 11.405,
+      "p95Ms": 12.068,
+      "maxMs": 12.64
+    }
+  ],
+  "tailReadScan": [
+    {
+      "retainedOneCharacterChunks": 1000,
+      "n": 20,
+      "p50Ms": 0.011,
+      "p95Ms": 0.015,
+      "maxMs": 0.017
+    },
+    {
+      "retainedOneCharacterChunks": 10000,
+      "n": 20,
+      "p50Ms": 0.037,
+      "p95Ms": 0.109,
+      "maxMs": 0.113
+    },
+    {
+      "retainedOneCharacterChunks": 100000,
+      "n": 20,
+      "p50Ms": 0.244,
+      "p95Ms": 0.249,
+      "maxMs": 0.272
+    }
+  ],
+  "replay": {
+    "asciiCharacters": 1000000,
+    "pages": 245,
+    "idealRemoteSchedulingFloorMs": 34160,
+    "note": "Calculated from current 140ms minimum request-start spacing; excludes RTT, contention, encryption, paint and all real relay polling. Not a measured transfer."
+  },
+  "idleEmptyReadDelaysMs": {
+    "local": [
+      240,
+      480,
+      960,
+      1920,
+      2000,
+      2000,
+      2000
+    ],
+    "remote": [
+      1400,
+      2800,
+      5000,
+      5000,
+      5000,
+      5000,
+      5000
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+# Explicit trusted config for the source-mode Agent Runtime guard.
+# Supplying this file prevents a target workspace bunfig from injecting preload code.
+[run]
+shell = "bun"

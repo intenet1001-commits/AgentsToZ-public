@@ -1,0 +1,127 @@
+/* 아젠투지 voice dock — always on screen (VOC 2026-09-29). Tokens only (src/index.css). */
+.az-voice-dock {
+  position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 1000;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none; font-size: 13px; color: var(--ink);
+}
+.az-voice-dock > * { pointer-events: auto; }
+.az-voice-dock__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.az-voice-dock--compact { max-width: 52px; }
+.az-voice-dock__compact-button { position: relative; display: grid; place-items: center; width: 52px; height: 52px; padding: 0; border: 1px solid var(--accent, #38bdf8); border-radius: 16px; background: var(--surface, #18181b); color: var(--ink, #fafafa); box-shadow: var(--shadow, 0 8px 24px #0004); cursor: pointer; }
+.az-voice-dock__live-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #38bdf8); }
+.az-voice-dock.az-voice-dock--fullscreen { inset: 0; z-index: 1200; display: block; width: 100vw; max-width: none; height: 100dvh; max-height: none; overflow: hidden; pointer-events: auto; }
+.az-voice-dock__fullscreen-panel { box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; width: 100%; height: 100%; padding: calc(16px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: var(--bg, #0a0a0b); color: var(--ink, #fafafa); font-family: system-ui, sans-serif; }
+.az-voice-dock__fullscreen-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.az-voice-dock__fullscreen-header > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+.az-voice-dock__fullscreen-header strong { font-size: 20px; }
+.az-voice-dock__fullscreen-header small { color: var(--ink-2, #a1a1aa); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-voice-dock__fullscreen-actions, .az-voice-dock__fullscreen-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.az-voice-dock__fullscreen-panel button, .az-voice-dock__fullscreen-panel select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line, #3f3f46); border-radius: 10px; background: var(--surface, #18181b); color: var(--ink, #fafafa); font: inherit; cursor: pointer; }
+.az-voice-dock__fullscreen-panel button:disabled { opacity: .45; cursor: default; }
+.az-voice-dock__fullscreen-captions { box-sizing: border-box; flex: 1; min-height: 0; width: 100%; margin: 0; padding: 4px 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 12px; }
+.az-voice-dock__fullscreen-captions li { display: flex; flex-direction: column; gap: 6px; padding: 16px; border: 1px solid var(--line-2, #3f3f46); border-radius: 16px; background: var(--surface, #18181b); overflow-wrap: anywhere; }
+.az-voice-dock__fullscreen-captions li b { font-size: 13px; color: var(--accent, #38bdf8); }
+.az-voice-dock__fullscreen-captions li[data-role="assistant"] b { color: var(--violet, #c4b5fd); }
+.az-voice-dock__fullscreen-captions li span { font-size: clamp(20px, 4vw, 30px); line-height: 1.4; }
+.az-voice-dock__fullscreen-captions li small { font-size: clamp(16px, 3vw, 23px); line-height: 1.45; color: var(--ink-2, #a1a1aa); }
+.az-voice-dock__fullscreen-captions li small[data-state="translating"], .az-voice-dock__fullscreen-empty { color: var(--ink-3, #71717a); }
+.az-voice-dock__fullscreen-footer { border-top: 1px solid var(--line-2, #3f3f46); padding-top: 12px; }
+.az-voice-dock__fullscreen-footer label { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+@media (max-width: 640px) { .az-voice-dock__fullscreen-header { align-items: flex-start; flex-direction: column; } .az-voice-dock__fullscreen-footer label { width: 100%; } }
+.az-voice-dock__main, .az-voice-dock__partners, .az-voice-dock__menu, .az-voice-dock__captions, .az-voice-dock__error {
+  border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow);
+}
+.az-voice-dock__main { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 4px; }
+.az-voice-dock__call {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 10px 4px 4px;
+  border: 0; border-radius: 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.az-voice-dock__call:hover:not(:disabled) { background: var(--sunken); }
+.az-voice-dock__call > span { display: flex; flex-direction: column; min-width: 0; }
+.az-voice-dock__call strong { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.az-voice-dock__call small { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.az-voice-dock[data-active="true"] .az-voice-dock__call small { color: var(--ink); font-weight: 600; }
+.az-voice-dock__controls { display: flex; gap: 4px; }
+.az-voice-dock__controls button, .az-voice-dock__settings {
+  display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--raised); color: var(--ink-2); cursor: pointer;
+}
+.az-voice-dock__controls button:hover:not(:disabled), .az-voice-dock__settings:hover { color: var(--ink); border-color: var(--line-2); }
+.az-voice-dock__controls button:disabled { opacity: .45; cursor: default; }
+.az-voice-dock__settings[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.az-voice-dock__partners { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding: 8px; }
+.az-voice-dock__partners button {
+  min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.az-voice-dock__partners button[aria-pressed="true"] { border-color: var(--accent); background: rgb(var(--accent-rgb) / .12); color: var(--ink); font-weight: 700; cursor: default; opacity: 1; }
+.az-voice-dock__partners button:hover:not(:disabled) { border-color: var(--line-2); color: var(--ink); }
+.az-voice-dock__picker { display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(320px, calc(100vw - 32px)); border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+.az-voice-dock__picker input { min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+.az-voice-dock__picker label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.az-voice-dock__picker select { min-height: 34px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+.az-voice-dock__picker ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.az-voice-dock__picker li button { width: 100%; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.az-voice-dock__picker li button:hover:not(:disabled) { border-color: var(--accent); background: rgb(var(--accent-rgb) / .08); }
+.az-voice-dock__text-button { align-self: flex-end; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
+.az-voice-dock__type { display: flex; gap: 6px; width: min(360px, calc(100vw - 32px)); padding: 6px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.az-voice-dock__type input { flex: 1; min-width: 0; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+.az-voice-dock__type button { display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 34px; border: 0; border-radius: 9px; background: var(--accent); color: var(--bg); cursor: pointer; }
+.az-voice-dock__type button:disabled { opacity: .45; cursor: default; }
+.az-voice-dock__draft { display: flex; flex-direction: column; gap: 6px; width: min(360px, calc(100vw - 32px)); padding: 10px 12px; border: 1px solid var(--accent); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.az-voice-dock__draft p { margin: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }
+.az-voice-dock__draft b { display: block; margin-bottom: 2px; font-size: 12px; color: var(--accent); }
+.az-voice-dock__draft div { display: flex; flex-wrap: wrap; gap: 6px; }
+.az-voice-dock__draft button { min-height: 34px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.az-voice-dock__draft .az-voice-dock__send { border-color: var(--accent); background: var(--accent); color: var(--bg); font-weight: 700; }
+.az-voice-dock__menu { display: flex; flex-direction: column; gap: 8px; padding: 12px; min-width: 240px; }
+.az-voice-dock__menu label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.az-voice-dock__menu select { min-height: 34px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+.az-voice-dock__menu button { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.az-voice-dock__relay { max-width: min(360px, calc(100vw - 32px)); padding: 4px 10px; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink-2) !important; }
+.az-voice-dock__hint { margin: 0; font-size: 11px; color: var(--ink-3); }
+.az-voice-dock__captions { list-style: none; margin: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; max-height: 28vh; overflow: auto; width: min(420px, calc(100vw - 32px)); box-sizing: border-box; }
+.az-voice-dock__captions li { display: flex; flex-direction: column; gap: 2px; }
+.az-voice-dock__said { font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.az-voice-dock__said b { margin-right: 6px; font-size: 11px; font-weight: 700; color: var(--ink-3); }
+.az-voice-dock__captions li[data-role="assistant"] .az-voice-dock__said b { color: var(--violet); }
+.az-voice-dock__translation { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.az-voice-dock__translation[data-state="translating"] { color: var(--ink-3); font-style: italic; }
+.az-voice-dock__notice { margin: 0; padding: 8px 12px; max-width: min(360px, calc(100vw - 32px)); border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.az-voice-dock__error { margin: 0; padding: 8px 12px; color: var(--danger); font-size: 12px; max-width: 360px; }
+/* The OPS panel opens above the dock rather than on top of it. */
+.voice-panel { bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--voice-dock-offset, 0px)); max-height: calc(100dvh - 40px - var(--voice-dock-offset, 0px)); }
+@media (max-width: 640px) {
+  .az-voice-dock { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px); }
+  .az-voice-dock__controls button, .az-voice-dock__settings, .az-voice-dock__partners button { min-width: 44px; min-height: 44px; }
+  .az-voice-dock__call small { max-width: 150px; }
+  /* Idle on a phone the dock floats over content; the plain 「눌러서 말하기」 line only widened it. */
+  .az-voice-dock__call small[data-plain="true"] { display: none; }
+  .az-voice-dock__menu select, .az-voice-dock__picker input, .az-voice-dock__picker select { font-size: 16px; }
+  .az-voice-dock__picker li button { min-height: 44px; }
+  .az-voice-dock__type input { min-height: 44px; font-size: 16px; }
+  .az-voice-dock__type button { min-width: 44px; min-height: 44px; }
+  .az-voice-dock__draft button { min-height: 44px; }
+  .voice-panel { bottom: calc(8px + env(safe-area-inset-bottom) + var(--voice-dock-offset, 0px)); max-height: calc(100dvh - 24px - env(safe-area-inset-bottom) - var(--voice-dock-offset, 0px)); }
+}
+/* Touch screens wider than a phone (iPhone landscape, iPad) keep 44px targets. */
+@media (pointer: coarse) {
+  .az-voice-dock__controls button, .az-voice-dock__settings, .az-voice-dock__partners button, .az-voice-dock__menu button, .az-voice-dock__menu select, .az-voice-dock__draft button, .az-voice-dock__picker li button { min-height: 44px; }
+  .az-voice-dock__controls button, .az-voice-dock__settings { min-width: 44px; }
+  .az-voice-dock__type input, .az-voice-dock__picker input, .az-voice-dock__picker select { min-height: 44px; font-size: 16px; }
+  .az-voice-dock__menu select { font-size: 16px; }
+  .az-voice-dock__type button { min-width: 44px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .az-voice-dock * { transition: none !important; } }
+
+/* # 언급 suggestions, right above the input they complete. */
+.az-voice-dock__mentions { display: flex; flex-direction: column; gap: 2px; padding: 6px; max-height: 32vh; overflow: auto; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.az-voice-dock__mentions button { min-height: 34px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.az-voice-dock__mentions button:hover, .az-voice-dock__mentions button[aria-selected="true"] { background: rgb(var(--accent-rgb) / .12); }
+@media (pointer: coarse) { .az-voice-dock__mentions button { min-height: 44px; } }
+.az-voice-dock__route { flex: none; max-width: 40%; min-height: 32px; padding: 4px 10px; border: 1px solid rgb(var(--accent-rgb) / .4); border-radius: 999px; background: rgb(var(--accent-rgb) / .1); color: var(--accent); font: inherit; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.az-voice-dock__draft button:disabled { opacity: .45; cursor: default; }
+.az-voice-dock__draft label { display: flex; flex-direction: column; gap: 4px; }
+.az-voice-dock__draft textarea { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; resize: vertical; }
+@media (pointer: coarse) { .az-voice-dock__draft textarea { font-size: 16px; } }

@@ -1,0 +1,189 @@
+{
+  "description": "portal.json device identity guard. Read by tests/portal-device-identity.test.ts and src-tauri (include_str!). `incoming` is what is being loaded or saved, `current` the portal.json on disk (null when loading), `record` the portal-device-identity.json record. Only deviceId/deviceName and the record are compared.",
+  "cases": [
+    {
+      "name": "fixture write without an id keeps the id on disk",
+      "incoming": {
+        "items": [
+          {
+            "id": "stale-bookmark"
+          }
+        ]
+      },
+      "current": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "record": null,
+      "expect": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A",
+        "restored": true,
+        "record": {
+          "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+          "deviceName": "Mac A"
+        }
+      }
+    },
+    {
+      "name": "clobbered portal.json is healed from the record on load",
+      "incoming": {
+        "items": [],
+        "categories": []
+      },
+      "current": null,
+      "record": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "expect": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A",
+        "restored": true,
+        "record": {
+          "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+          "deviceName": "Mac A"
+        }
+      }
+    },
+    {
+      "name": "healthy portal.json writes the record the first time",
+      "incoming": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "current": null,
+      "record": null,
+      "expect": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A",
+        "restored": false,
+        "record": {
+          "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+          "deviceName": "Mac A"
+        }
+      }
+    },
+    {
+      "name": "an explicit new valid id is a deliberate change and updates the record",
+      "incoming": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f",
+        "deviceName": "Mac B"
+      },
+      "current": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "record": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "expect": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f",
+        "deviceName": "Mac B",
+        "restored": false,
+        "record": {
+          "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f",
+          "deviceName": "Mac B"
+        }
+      }
+    },
+    {
+      "name": "the disk id wins over an older record when the write drops the id",
+      "incoming": {
+        "items": []
+      },
+      "current": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f"
+      },
+      "record": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "expect": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f",
+        "deviceName": null,
+        "restored": true,
+        "record": {
+          "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f"
+        }
+      }
+    },
+    {
+      "name": "a name from another identity is never attached",
+      "incoming": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f"
+      },
+      "current": null,
+      "record": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "expect": {
+        "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f",
+        "deviceName": null,
+        "restored": false,
+        "record": {
+          "deviceId": "70839979-6d7c-408f-878c-4774ce0da58f"
+        }
+      }
+    },
+    {
+      "name": "invalid ids are never adopted and are passed through untouched",
+      "incoming": {
+        "deviceId": "device-a"
+      },
+      "current": {
+        "deviceId": ""
+      },
+      "record": {
+        "deviceId": "not-a-uuid",
+        "deviceName": "x"
+      },
+      "expect": {
+        "deviceId": "device-a",
+        "deviceName": null,
+        "restored": false,
+        "record": null
+      }
+    },
+    {
+      "name": "first install with nothing stays empty so the app mints once",
+      "incoming": {
+        "items": [],
+        "categories": []
+      },
+      "current": null,
+      "record": null,
+      "expect": {
+        "deviceId": null,
+        "deviceName": null,
+        "restored": false,
+        "record": null
+      }
+    },
+    {
+      "name": "an incoming name is kept and recorded for the same id",
+      "incoming": {
+        "deviceName": "Renamed Mac"
+      },
+      "current": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "record": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Mac A"
+      },
+      "expect": {
+        "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+        "deviceName": "Renamed Mac",
+        "restored": true,
+        "record": {
+          "deviceId": "fe3088df-1a7a-4223-b886-75b99765fe74",
+          "deviceName": "Renamed Mac"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# Tauri invokes `xattr -cr <bundle>` before signing. Some macOS installations ship
+# an xattr variant without the recursive `-r` option, so perform the same operation
+# explicitly and delegate every other invocation to the system tool.
+case "${1:-}" in
+  -cr|-rc)
+    shift
+    for target in "$@"; do
+      /usr/bin/find "$target" -exec /usr/bin/xattr -c {} \; || exit $?
+    done
+    ;;
+  *)
+    exec /usr/bin/xattr "$@"
+    ;;
+esac

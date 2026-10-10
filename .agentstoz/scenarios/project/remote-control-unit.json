@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "project.remote-control-unit",
+  "title": "원격 제어 단위 검사 묶음",
+  "intent": "LAN·인터넷 원격 제어의 페어링, 재접속, 세션 보존, 모바일 페이지, Git 안전 계약을 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "remote",
+    "unit"
+  ],
+  "paths": [
+    "src/remoteControl*",
+    "src/*RemoteControl*",
+    "src/mobileRemote*",
+    "api-server.ts",
+    "tests/remote-control-*"
+  ],
+  "safety": "read-only",
+  "risk": 3,
+  "cost": {
+    "estimateSeconds": 180
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "--cwd",
+        "tests",
+        "--max-concurrency=1",
+        "remote-control-"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "remote control reconnect regression"
+  ]
+}

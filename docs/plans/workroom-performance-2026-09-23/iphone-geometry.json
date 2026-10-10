@@ -1,0 +1,67 @@
+{
+  "workroom": {
+    "width": 402,
+    "height": 724,
+    "viewportHeight": 724,
+    "scale": 1,
+    "scrollWidth": 402,
+    "terminalHeight": 400,
+    "controls": [
+      {
+        "id": "terminal-start",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-send",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-line",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-launch-summary",
+        "height": 44,
+        "fontSize": "16px"
+      }
+    ]
+  },
+  "draft": {
+    "width": 402,
+    "height": 382,
+    "viewportHeight": 382,
+    "scale": 1,
+    "scrollWidth": 402,
+    "terminalHeight": 202,
+    "controls": [
+      {
+        "id": "terminal-start",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-send",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-line",
+        "height": 44,
+        "fontSize": "16px"
+      },
+      {
+        "id": "terminal-launch-summary",
+        "height": 44,
+        "fontSize": "16px"
+      }
+    ]
+  },
+  "device": "iPhone 17 Pro",
+  "runId": "20260923T144441Z-50924e87",
+  "sawSystemKeyboard": true,
+  "actualIPhone": true,
+  "realAI": false
+}

@@ -1,0 +1,527 @@
+@import './appearanceTokens.css';
+/* The phone is a focused controller, so give it a quieter slate-and-teal
+   palette without changing the desktop theme or the meaning of status colors. */
+html:root {
+  --bg:#0d1720; --surface:#172630; --raised:#1d303a; --sunken:#0a141c;
+  --line:rgba(215,236,239,.08); --line-2:rgba(215,236,239,.16);
+  --ink:#f2f8f8; --ink-2:#bfd0d3; --ink-3:#a0b6bb;
+  --accent:#63d4c0; --accent-strong:#8ee4d4; --accent-soft:rgba(99,212,192,.12);
+  --accent-line:rgba(99,212,192,.34); --accent-rgb:99 212 192; --on-accent:#092924;
+  --info:#9ac4fa; --info-rgb:154 196 250; --violet:#b9baf7; --violet-rgb:185 186 247;
+  --shadow:0 1px 2px rgba(0,0,0,.18),0 12px 34px rgba(0,0,0,.2);
+  --bg-base:var(--bg); --bg-base-rgb:13 23 32; --bg-card:var(--surface); --bg-card-rgb:23 38 48;
+  --bg-elevated:var(--raised); --bg-deep:var(--sunken); --text-primary:var(--ink); --text-secondary:var(--ink-2); --text-muted:var(--ink-3);
+}
+html:root[data-app-theme="gray"] {
+  --bg:#f4f7f8; --surface:#fff; --raised:#fbfcfc; --sunken:#eaf0f2;
+  --line:rgba(29,54,65,.07); --line-2:rgba(29,54,65,.14);
+  --ink:#1d303b; --ink-2:#4c626d; --ink-3:#637985;
+  --accent:#0d766d; --accent-strong:#095d56; --accent-soft:rgba(13,118,109,.085);
+  --accent-line:rgba(13,118,109,.28); --accent-rgb:13 118 109; --on-accent:#fff;
+  --info:#315f9b; --info-rgb:49 95 155; --violet:#625f9f; --violet-rgb:98 95 159;
+  --shadow:0 1px 2px rgba(20,45,58,.04),0 10px 28px rgba(20,45,58,.065);
+  --bg-base:var(--bg); --bg-base-rgb:244 247 248; --bg-card:var(--surface); --bg-card-rgb:255 255 255;
+  --bg-elevated:var(--raised); --bg-deep:var(--sunken); --text-primary:var(--ink); --text-secondary:var(--ink-2); --text-muted:var(--ink-3);
+}
+:root { color-scheme: dark; font-family: var(--font-sans); background: var(--bg); color: var(--ink); --mint: var(--accent); --panel: var(--surface); --border: var(--line-2); }
+:root[data-app-theme="gray"] { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100dvh; background: var(--bg); }
+button { font: inherit; }
+:root { --workspace-safe-top: env(safe-area-inset-top, 0px); }
+/* 가로 모드에서는 노치 쪽 좌/우 inset이 ~47px다 — 18px 고정이면 첫 글자와 버튼 한 줄이 노치와
+   둥근 모서리 아래로 들어간다(`viewport-fit=cover`를 쓰면서 상·하만 보던 결함). */
+.remote-shell { width: min(760px, 100%); min-height: 100dvh; margin: 0 auto;
+  padding: calc(24px + var(--workspace-safe-top)) max(18px, env(safe-area-inset-right, 0px))
+    calc(44px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left, 0px)); }
+/* Keep a minimum inset for standalone portrait windows when no environment
+   inset is supplied, and cover content scrolling underneath the status bar. */
+@media (display-mode: standalone) and (orientation: portrait) {
+  :root { --workspace-safe-top: max(44px, env(safe-area-inset-top, 0px)); }
+}
+.workspace-statusbar { position:fixed; z-index:45; top:0; left:0; right:0; height:var(--workspace-safe-top); background:var(--bg); pointer-events:none; }
+.remote-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; margin-bottom: 20px; }
+.remote-brand { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--mint); color: var(--sunken); font-weight: 900; }
+.remote-heading { min-width: 0; }
+.remote-heading p, .remote-eyebrow { margin: 0 0 3px; color: var(--ink-3); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.remote-heading h1 { margin: 0; overflow: hidden; color: var(--ink); font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.remote-state { padding: 7px 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 800; }
+.remote-state--online { background: var(--ok-soft); color: var(--accent); }
+.remote-state--closed, .remote-state--error { background: var(--danger-soft); color: var(--danger); }
+/* The phone itself has no network: a warning about this side, not a verdict on the Mac. */
+.remote-state--phone-offline { background: rgb(var(--warn-rgb) / 0.14); color: var(--warn); }
+.remote-host-tabs { display: flex; gap: 7px; margin: -6px 0 12px; padding-bottom: 4px; overflow-x: auto; scrollbar-width: none; }
+.remote-host-tabs::-webkit-scrollbar { display: none; }
+.remote-host-tab { display: flex; flex: 0 0 auto; align-items: center; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); }
+.remote-host-tab--active { border-color: rgb(var(--accent-rgb) / 0.55); background: rgb(var(--accent-rgb) / 0.1); }
+.remote-host-tab-select { display: flex; min-height: 44px; max-width: 62vw; align-items: center; gap: 7px; padding: 0 4px 0 12px; border: 0; border-radius: 999px 0 0 999px; background: none; color: var(--ink-2); font-size: 12px; font-weight: 750; cursor: pointer; }
+.remote-host-tab--active .remote-host-tab-select { color: var(--ink-2); }
+.remote-host-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-host-tab-state { flex: 0 0 auto; color: var(--warn); font-size: 10px; font-weight: 800; }
+.remote-host-tab-state--busy { color: var(--accent); }
+.remote-host-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--warn); }
+.remote-host-dot--online { background: var(--accent); }
+.remote-host-dot--closed, .remote-host-dot--error { background: var(--danger); }
+.remote-host-dot--phone-offline { background: var(--warn); }
+.remote-host-tab-remove { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 0 999px 999px 0; background: none; color: var(--ink-3); cursor: pointer; }
+.remote-host-tab-remove svg { width: 13px; height: 13px; }
+.remote-portal-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: -4px 0 12px; }
+.remote-portal-nav a { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 7px 5px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); color: var(--ink-2); font-size: 11px; font-weight: 750; text-align: center; text-decoration: none; }
+.remote-portal-nav a:focus-visible { outline: 3px solid rgb(var(--accent-rgb) / 0.24); outline-offset: 2px; }
+.remote-portal-nav svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--mint); }
+.remote-portal-scan { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; margin: 0 0 12px; padding: 9px 12px; border: 1px dashed rgb(var(--accent-rgb) / 0.34); border-radius: 12px; background: rgb(var(--accent-rgb) / 0.06); color: var(--ink-2); font-size: 12px; font-weight: 750; text-decoration: none; }
+.remote-portal-scan svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--mint); }
+.remote-portal-scan:focus-visible { outline: 3px solid rgb(var(--accent-rgb) / 0.24); outline-offset: 2px; }
+.remote-resume-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 13px; background: var(--line); color: var(--ink-2); font-size: 11px; line-height: 1.55; }
+.remote-security-note { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 13px 14px; border: 1px solid rgb(var(--accent-rgb) / 0.18); border-radius: 16px; background: rgb(var(--accent-rgb) / 0.055); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.remote-security-note svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--mint); }
+.remote-security-note p { margin: 0; }
+.remote-panel, .remote-project { border: 1px solid var(--border); background: var(--panel); box-shadow: var(--shadow); }
+.remote-panel { padding: 26px 22px; border-radius: 22px; }
+.remote-centered { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.remote-centered > svg { width: 32px; height: 32px; margin-bottom: 14px; color: var(--mint); }
+.remote-view-only-steps { max-width: 520px; margin: 12px 0 14px; padding-left: 20px; list-style: decimal; color: var(--ink-2); font-size: 13px; line-height: 1.65; text-align: left; }
+.remote-panel h2 { margin: 0; color: var(--ink); font-size: 20px; line-height: 1.35; }
+.remote-panel p { max-width: 520px; margin: 10px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.remote-alert { margin-bottom: 14px; padding: 12px 14px; border: 1px solid rgb(var(--danger-rgb) / 0.28); border-radius: 14px; background: rgb(var(--danger-rgb) / 0.08); color: var(--danger); font-size: 13px; line-height: 1.5; }
+.remote-alert p { margin: 0; }
+.remote-alert-paths { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.remote-alert-hint { margin: 6px 0 0; color: var(--ink-2); font-size: 13px; }
+.remote-alert-detail { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 9px; padding-top: 9px; border-top: 1px solid rgb(var(--danger-rgb) / 0.22); }
+.remote-alert-detail code { flex: 1 1 auto; min-width: 0; color: var(--danger); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+.remote-alert-detail button { flex: 0 0 auto; min-height: 36px; padding: 0 12px; border: 1px solid rgb(var(--danger-rgb) / 0.34); border-radius: 10px; background: rgb(var(--danger-rgb) / 0.12); color: var(--danger); font-size: 12px; font-weight: 750; cursor: pointer; }
+.remote-alert-detail button:focus-visible { outline: 3px solid rgb(var(--danger-rgb) / 0.3); outline-offset: 2px; }
+.remote-phone-offline { margin-bottom: 14px; padding: 12px 14px; border: 1px solid rgb(var(--warn-rgb) / 0.32); border-radius: 14px; background: rgb(var(--warn-rgb) / 0.1); color: var(--ink); font-size: 13px; line-height: 1.5; }
+.remote-notice { margin-bottom: 14px; padding: 12px 14px; border: 1px solid rgb(var(--accent-rgb) / 0.25); border-radius: 14px; background: rgb(var(--accent-rgb) / 0.08); color: var(--accent); font-size: 13px; line-height: 1.5; }
+.remote-primary { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; margin-top: 22px; padding: 0 20px; border: 0; border-radius: 14px; background: var(--mint); color: var(--on-accent); font-size: 14px; font-weight: 850; cursor: pointer; }
+.remote-primary svg { width: 17px; height: 17px; }
+.remote-primary:disabled { cursor: wait; opacity: .45; }
+.remote-secondary { min-height: 44px; margin-top: 10px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--sunken); color: var(--ink-2); font-size: 12px; font-weight: 750; cursor: pointer; }
+.remote-approval { text-align: center; }
+.remote-icon-circle { display: grid; width: 52px; height: 52px; place-items: center; margin: 0 auto 14px; border: 1px solid rgb(var(--accent-rgb) / 0.24); border-radius: 18px; background: rgb(var(--accent-rgb) / 0.08); color: var(--mint); }
+.remote-icon-circle svg { width: 24px; height: 24px; }
+.remote-sas { margin: 22px auto 14px; color: var(--accent); font: 800 clamp(36px, 12vw, 58px)/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
+.remote-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 14px; }
+.remote-toolbar div, .remote-toolbar button { display: flex; min-height: 44px; align-items: center; gap: 8px; }
+.remote-toolbar div { color: var(--accent); font-size: 12px; font-weight: 750; }
+/* The Mac's state is unknown from here (no network, or no relay): a warning about this side, never the green "checked". */
+.remote-toolbar div[data-reach="phone-offline"], .remote-toolbar div[data-reach="relay-unreachable"] { color: var(--warn); }
+.remote-toolbar svg { width: 16px; height: 16px; }
+.remote-toolbar button { padding: 0 13px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--sunken); color: var(--ink-2); cursor: pointer; }
+.remote-task-console { margin: 0 0 14px; border: 1px solid rgb(var(--info-rgb) / 0.23); border-radius: 18px; background: var(--surface); overflow: hidden; }
+.remote-task-console-heading { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; }
+.remote-task-console-heading > div { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.remote-task-console-heading svg { width: 20px; height: 20px; flex: 0 0 auto; color: var(--accent); }
+.remote-task-console-heading span { display: flex; min-width: 0; flex-direction: column; }
+.remote-task-console-heading strong { color: var(--ink); font-size: 14px; }
+.remote-task-console-heading small { margin-top: 2px; overflow: hidden; color: var(--ink-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.remote-task-console-heading > button { min-width: 58px; min-height: 40px; border: 1px solid rgb(var(--info-rgb) / 0.28); border-radius: 11px; background: rgb(var(--info-rgb) / 0.1); color: var(--ink-2); font-size: 12px; font-weight: 800; }
+.remote-task-console button:disabled, .remote-task-console select:disabled, .remote-task-console textarea:disabled { cursor: wait; opacity: .45; }
+.remote-task-console-body { padding: 0 13px 14px; border-top: 1px solid rgb(var(--info-rgb) / 0.12); }
+.remote-task-safety { margin: 12px 0; padding: 10px; border-radius: 11px; background: rgb(var(--info-rgb) / 0.07); color: var(--ink-2); font-size: 11px; line-height: 1.55; }
+.remote-task-loading { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--ink-2); font-size: 12px; }
+.remote-task-loading svg { width: 15px; height: 15px; }
+.remote-task-error { margin: 10px 0; padding: 10px; border: 1px solid rgb(var(--danger-rgb) / 0.25); border-radius: 11px; background: rgb(var(--danger-rgb) / 0.07); color: var(--danger); font-size: 12px; line-height: 1.5; }
+.remote-task-form-grid { display: grid; gap: 7px; }
+.remote-task-form-grid label { color: var(--ink-3); font-size: 11px; font-weight: 800; }
+.remote-task-form-grid select, .remote-task-form-grid textarea { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 11px; outline: none; background: var(--sunken); color: var(--ink); font: inherit; }
+.remote-task-form-grid textarea { min-height: 110px; resize: vertical; line-height: 1.5; }
+.remote-task-form-grid select:focus, .remote-task-form-grid textarea:focus { border-color: rgb(var(--info-rgb) / 0.55); box-shadow: 0 0 0 3px rgb(var(--info-rgb) / 0.09); }
+.remote-task-start { display: flex; width: 100%; min-height: 48px; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; border: 0; border-radius: 12px; background: var(--accent); color: var(--sunken); font-weight: 900; }
+.remote-task-start svg, .remote-task-list-heading svg, .remote-task-cancel svg { width: 15px; height: 15px; }
+.remote-task-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 16px 0 8px; }
+.remote-task-list-heading span, .remote-task-list-heading button { display: flex; min-height: 40px; align-items: center; gap: 7px; }
+.remote-task-list-heading span { color: var(--ink-2); font-size: 12px; font-weight: 850; }
+.remote-task-list-heading button { padding: 0 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--sunken); color: var(--ink-2); font-size: 11px; }
+.remote-task-list { display: grid; gap: 7px; }
+.remote-task-item { display: flex; align-items: stretch; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.remote-task-item--running, .remote-task-item--accepted { border-color: rgb(var(--accent-rgb) / 0.3); }
+.remote-task-item--failed { border-color: rgb(var(--danger-rgb) / 0.3); }
+.remote-task-item-main { display: flex; min-width: 0; min-height: 52px; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; padding: 8px 11px; border: 0; background: none; color: var(--ink); text-align: left; }
+.remote-task-item-main strong { max-width: 100%; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.remote-task-item-main span { margin-top: 3px; color: var(--ink-3); font-size: 10px; }
+.remote-task-cancel { display: flex; min-width: 66px; align-items: center; justify-content: center; gap: 5px; border: 0; border-left: 1px solid rgb(var(--danger-rgb) / 0.18); background: rgb(var(--danger-rgb) / 0.06); color: var(--danger); font-size: 11px; font-weight: 800; }
+.remote-task-timeline { margin-top: 12px; padding: 11px; border: 1px solid rgb(var(--info-rgb) / 0.14); border-radius: 12px; background: var(--surface); }
+.remote-task-timeline h3 { margin: 0 0 9px; color: var(--ink-2); font-size: 12px; }
+.remote-task-timeline > div { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 7px; padding: 6px 0; border-top: 1px solid var(--line); }
+.remote-task-timeline > div > span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: rgb(var(--info-rgb) / 0.1); color: var(--accent); font-size: 9px; }
+.remote-task-timeline p { margin: 2px 0 0; color: var(--ink-2); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.remote-task-empty { margin: 7px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.55; }
+.remote-conversation-console { border-color: rgb(var(--violet-rgb) / 0.25); background: var(--surface); }
+.remote-conversation-console .remote-task-console-heading svg { color: var(--violet); }
+.remote-conversation-layout { display: grid; grid-template-columns: minmax(150px, .34fr) minmax(0, 1fr); gap: 10px; }
+.remote-conversation-sidebar, .remote-conversation-main { min-width: 0; }
+.remote-conversation-list-jump { display: none; }
+.remote-conversation-list-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 7px; }
+.remote-conversation-list-tabs button { min-height: 34px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); color: var(--ink-3); font-size: 10px; font-weight: 850; }
+.remote-conversation-list-tabs button.is-selected { border-color: rgb(var(--violet-rgb) / 0.55); background: rgb(var(--violet-rgb) / 0.16); color: var(--ink-2); }
+.remote-conversation-new { width: 100%; min-height: 42px; border: 1px solid rgb(var(--violet-rgb) / 0.3); border-radius: 11px; background: rgb(var(--violet-rgb) / 0.12); color: var(--ink-2); font-size: 12px; font-weight: 850; }
+.remote-conversation-search { display: block; margin-top: 7px; }
+.remote-conversation-search input { width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 11px; outline: none; background: var(--sunken); color: var(--ink); font: inherit; font-size: 11px; }
+.remote-conversation-search input:focus { border-color: rgb(var(--accent-rgb) / 0.5); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08); }
+.remote-conversation-list { display: grid; gap: 6px; margin-top: 7px; }
+.remote-conversation-list > button { display: flex; min-height: 50px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 8px 9px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; }
+.remote-conversation-list > button.is-selected { border-color: rgb(var(--violet-rgb) / 0.55); background: rgb(var(--violet-rgb) / 0.13); }
+.remote-conversation-list strong { max-width: 100%; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.remote-conversation-list span { margin-top: 3px; color: var(--ink-3); font-size: 9px; }
+.remote-conversation-settings { margin-bottom: 9px; }
+.remote-conversation-history { display: flex; min-height: 90px; max-height: 360px; flex-direction: column; gap: 7px; overflow-y: auto; }
+.remote-conversation-history-boundary { align-self: stretch; padding: 7px 9px; border: 1px solid rgb(var(--warn-rgb) / 0.18); border-radius: 10px; background: rgb(var(--warn-rgb) / 0.06); color: var(--warn); font-size: 9px; line-height: 1.5; }
+.remote-conversation-unknown-boundary { align-self: stretch; display: grid; gap: 4px; padding: 10px 11px; border: 1px solid rgb(var(--warn-rgb) / 0.28); border-radius: 11px; background: rgb(var(--warn-rgb) / 0.08); color: var(--warn); font-size: 11px; line-height: 1.5; }
+.remote-conversation-unknown-boundary span { color: rgb(var(--warn-rgb) / 0.76); }
+.remote-conversation-message { max-width: 92%; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); }
+.remote-conversation-message--user { align-self: flex-end; border-color: rgb(var(--accent-rgb) / 0.23); background: rgb(var(--accent-rgb) / 0.07); }
+.remote-conversation-message--pending { border-style: dashed; opacity: .88; }
+.remote-conversation-message > span { display: block; margin-bottom: 4px; color: var(--ink-3); font-size: 9px; font-weight: 850; }
+.remote-conversation-message--user > span { color: var(--accent); }
+.remote-conversation-message p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.remote-conversation-event { align-self: center; max-width: 92%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-3); font-size: 10px; line-height: 1.45; text-align: center; }
+.remote-conversation-event--progress { border-color: rgb(var(--accent-rgb) / 0.18); background: rgb(var(--accent-rgb) / 0.06); color: var(--accent); }
+.remote-conversation-event--artifact { align-self: stretch; max-width: 100%; border-color: rgb(var(--violet-rgb) / 0.2); border-radius: 11px; background: rgb(var(--violet-rgb) / 0.07); color: var(--ink-2); text-align: left; }
+.remote-conversation-event--artifact strong { display: block; margin-bottom: 3px; color: var(--violet); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.remote-conversation-event--artifact-diff { border-color: rgb(var(--info-rgb) / 0.25); background: rgb(var(--info-rgb) / 0.08); }
+.remote-conversation-event--artifact-diff strong { color: var(--info); }
+.remote-conversation-event--artifact-test { border-color: rgb(var(--ok-rgb) / 0.25); background: rgb(var(--ok-rgb) / 0.08); }
+.remote-conversation-event--artifact-test strong { color: var(--ok); }
+.remote-conversation-event--artifact-commit { border-color: rgb(var(--warn-rgb) / 0.25); background: rgb(var(--warn-rgb) / 0.08); }
+.remote-conversation-event--artifact-commit strong { color: var(--warn); }
+.remote-conversation-event--artifact-memory { border-color: rgb(var(--violet-rgb) / 0.25); background: rgb(var(--violet-rgb) / 0.08); }
+.remote-conversation-event--artifact-memory strong { color: var(--violet); }
+.remote-conversation-prompt { display: grid; gap: 6px; margin-top: 10px; color: var(--ink-3); font-size: 11px; font-weight: 800; }
+.remote-conversation-prompt textarea { width: 100%; min-height: 92px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 11px; outline: none; resize: vertical; background: var(--sunken); color: var(--ink); font: inherit; line-height: 1.5; }
+.remote-conversation-prompt textarea:focus { border-color: rgb(var(--violet-rgb) / 0.62); box-shadow: 0 0 0 3px rgb(var(--violet-rgb) / 0.1); }
+.remote-conversation-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.remote-conversation-actions .remote-task-start { width: auto; min-width: 150px; flex: 1; }
+.remote-conversation-actions > button:not(.remote-task-start):not(.remote-task-cancel) { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; padding: 0 11px; border: 1px solid var(--line-2); border-radius: 11px; background: var(--sunken); color: var(--violet); font-size: 11px; font-weight: 800; }
+.remote-conversation-actions .remote-task-cancel { min-height: 48px; margin-top: 10px; border: 1px solid rgb(var(--danger-rgb) / 0.2); border-radius: 11px; }
+.remote-conversation-actions svg { width: 14px; height: 14px; }
+.remote-project-create { margin: 0 0 14px; }
+.remote-create-toggle { min-height: 46px; width: 100%; border: 1px solid rgb(var(--accent-rgb) / 0.3); border-radius: 13px; background: rgb(var(--accent-rgb) / 0.08); color: var(--accent); font-weight: 850; cursor: pointer; }
+.remote-create-toggle:disabled { cursor: wait; opacity: .45; }
+.remote-create-form { display: grid; gap: 8px; margin-top: 9px; padding: 14px; border: 1px solid var(--line-2); border-radius: 15px; background: var(--surface); }
+.remote-create-form p { margin: 0 0 4px; color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.remote-create-form label { color: var(--ink-2); font-size: 11px; font-weight: 800; }
+.remote-create-form input, .remote-create-form select { min-height: 44px; width: 100%; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 11px; outline: none; background: var(--sunken); color: var(--ink); font: inherit; }
+.remote-create-form input:focus, .remote-create-form select:focus { border-color: rgb(var(--accent-rgb) / 0.62); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.09); }
+.remote-create-form button { min-height: 46px; margin-top: 3px; border: 0; border-radius: 11px; background: var(--mint); color: var(--sunken); font-weight: 850; cursor: pointer; }
+.remote-create-form button:disabled { cursor: not-allowed; opacity: .35; }
+.remote-create-form .remote-create-empty { color: var(--warn); }
+.remote-project-filter { margin: 0 0 14px; }
+.remote-project-filter label { display: block; margin: 0 0 7px; color: var(--ink-2); font-size: 12px; font-weight: 750; }
+.remote-project-filter input, .remote-project-filter select { width: 100%; min-height: 46px; margin-bottom: 10px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 13px; outline: none; background: var(--sunken); color: var(--ink); font: inherit; }
+.remote-project-filter input:focus, .remote-project-filter select:focus { border-color: rgb(var(--accent-rgb) / 0.62); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.09); }
+.remote-projects { display: grid; gap: 13px; }
+.remote-project { padding: 18px; border-radius: 20px; }
+.remote-project-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.remote-project-title span { flex: 0 0 auto; padding: 4px 7px; border: 1px solid rgb(var(--accent-rgb) / 0.2); border-radius: 999px; color: var(--ink-3); font-size: 8px; font-weight: 900; letter-spacing: .08em; }
+.remote-project h2 { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 17px; }
+.remote-reload-hint { margin: 10px 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.6; }
+.remote-reload { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; margin-top: 12px; padding: 0 14px; border: 1px solid rgb(var(--accent-rgb) / 0.22); border-radius: 14px; background: rgb(var(--accent-rgb) / 0.07); color: var(--accent); font-size: 13px; font-weight: 800; }
+.remote-filter-partial { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--warn); font-size: 11px; font-weight: 700; }
+.remote-filter-partial button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; padding: 5px 12px; border: 1px solid rgb(var(--warn-rgb) / 0.35); border-radius: 999px; background: rgb(var(--warn-rgb) / 0.08); color: var(--warn); font-size: 11px; font-weight: 800; }
+/* 워크트리 묶음 — 어느 프로젝트의 워크트리인지 화면에서 읽히게 한다.
+   규칙 정본은 src/remoteControlWorktreeGrouping.ts 이고 같은 Wi-Fi QR 페이지도 같은 모양을 쓴다. */
+.remote-worktree-group { display: grid; gap: 12px; padding: 12px; border: 1px dashed rgb(var(--accent-rgb) / 0.22); border-radius: 22px; background: rgb(var(--accent-rgb) / 0.035); }
+.remote-worktree-group-title { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--accent); font-size: 11px; font-weight: 800; overflow-wrap: anywhere; }
+.remote-worktree-group-title svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.remote-project-branch { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--accent); font-size: 11px; font-weight: 700; }
+.remote-project-alias { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--violet); font-size: 11px; font-weight: 700; }
+.remote-project-root { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--accent); font-size: 11px; font-weight: 700; }
+.remote-project-status { margin: 7px 0 16px; color: var(--ink-2); font-size: 13px; font-weight: 750; }
+.remote-project-status--running { color: var(--accent); }
+.remote-action-heading { margin: 14px 0 7px; color: var(--ink-3); font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.remote-action-help { margin: -1px 0 8px; color: var(--ink-3); font-size: 11px; line-height: 1.55; }
+.remote-actions { display: grid; gap: 8px; }
+.remote-actions--process { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.remote-actions--project { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.remote-actions--first-conversation { grid-template-columns: minmax(0, 1fr); }
+.remote-actions--reopen { grid-template-columns: minmax(0, 1fr); }
+.remote-actions--orca { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.remote-actions--git { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.remote-actions button { min-height: 46px; border: 0; border-radius: 12px; background: var(--mint); color: var(--sunken); font-size: 13px; font-weight: 850; cursor: pointer; }
+.remote-actions--project button { border: 1px solid var(--line-2); background: var(--sunken); color: var(--ink); }
+.remote-actions--first-conversation button { border: 1px solid rgb(var(--ok-rgb) / 0.34); background: rgb(var(--ok-rgb) / 0.13); color: var(--accent); }
+.remote-actions--reopen button { border: 1px solid rgb(var(--violet-rgb) / 0.3); background: rgb(var(--violet-rgb) / 0.1); color: var(--violet); }
+.remote-actions--orca button { border: 1px solid var(--line-2); background: var(--sunken); color: var(--ink); }
+.remote-actions--git button { border: 1px solid rgb(var(--accent-rgb) / 0.24); background: rgb(var(--accent-rgb) / 0.08); color: var(--accent); }
+.remote-actions button:disabled { cursor: not-allowed; opacity: .3; }
+.remote-empty { padding: 28px 20px; border: 1px dashed var(--line-2); border-radius: 18px; color: var(--ink-2); text-align: center; }
+.remote-load-more { display: block; min-height: 48px; width: 100%; margin-top: 13px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--sunken); color: var(--ink-2); font-weight: 800; cursor: pointer; }
+.remote-load-more:disabled { cursor: wait; opacity: .45; }
+.remote-disconnect { display: flex; min-height: 48px; width: 100%; align-items: center; justify-content: center; gap: 9px; margin-top: 16px; border: 1px solid rgb(var(--danger-rgb) / 0.24); border-radius: 14px; background: rgb(var(--danger-rgb) / 0.06); color: var(--danger); font-weight: 750; cursor: pointer; }
+.remote-disconnect svg { width: 17px; height: 17px; }
+.remote-spin { animation: remote-spin 1s linear infinite; }
+@keyframes remote-spin { to { transform: rotate(360deg); } }
+@media (max-width: 360px) {
+  .remote-shell { padding-inline: 12px; }
+  .remote-header { gap: 8px; }
+  .remote-heading p { font-size: 8px; letter-spacing: .08em; }
+  .remote-heading h1 { overflow: visible; font-size: 15px; line-height: 1.15; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; word-break: keep-all; }
+  .remote-state { padding: 6px 7px; font-size: 10px; }
+}
+@media (max-width: 430px) { .remote-portal-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 619px) { .remote-conversation-layout { grid-template-columns: minmax(0, 1fr); } .remote-conversation-main { order: -1; } .remote-conversation-list-jump { display: flex; min-height: 44px; align-items: center; justify-content: center; margin-bottom: 8px; border: 1px solid rgb(var(--violet-rgb) / 0.28); border-radius: 10px; background: rgb(var(--violet-rgb) / 0.08); color: var(--ink-2); font-size: 11px; font-weight: 850; } .remote-conversation-history { max-height: 46dvh; } }
+@media (min-width: 620px) { .remote-shell { padding-inline: 24px; } .remote-projects { grid-template-columns: repeat(2, minmax(0, 1fr)); } .remote-worktree-group { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); } .remote-worktree-group-title { grid-column: 1 / -1; } }
+@media (prefers-reduced-motion: reduce) { .remote-spin { animation: none; } }
+/* 어느 번들인지 한눈에 — 포털은 Mac 앱과 별개로 Vercel에 배포되므로
+   "배포가 안 됐다"와 "휴대폰이 옛 번들을 캐시했다"가 구분되지 않았다.
+   짧은 커밋 해시가 저장소와 대조할 수 있게 해 주는 값이다. */
+.remote-build-stamp { margin: 10px 0 0; color: var(--ink-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; text-align: center; letter-spacing: .02em; }
+
+/* Shared navigation stays mounted: changing tabs never ends a CLI session. */
+.remote-workspace-tabs { display:flex; gap:6px; padding:5px; margin:12px 0 18px; background:var(--sunken); border:1px solid var(--line); border-radius:14px; }
+.remote-workspace-tabs button { flex:1; min-height:44px; border:0; border-radius:10px; color:var(--ink-2); background:transparent; cursor:pointer; font-weight:750; }
+.remote-workspace-tabs button[aria-pressed="true"] { background:var(--surface); color:var(--accent); box-shadow:var(--shadow); }
+.remote-appearance-toggle { min-height:44px; padding:8px 12px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink); cursor:pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.remote-shell[data-remote-pane="workroom"] .remote-project-create,
+.remote-shell[data-remote-pane="workroom"] .remote-project-filter,
+.remote-shell[data-remote-pane="workroom"] .remote-projects { display:none; }
+.remote-shell[data-remote-pane="duty"] .remote-project-create,
+.remote-shell[data-remote-pane="duty"] .remote-project-filter,
+.remote-shell[data-remote-pane="duty"] .remote-projects,
+.remote-shell[data-remote-pane="duty"] .remote-workroom-content,
+/* ⚠️ 커뮤니티 화면에는 숨김 규칙이 **한 줄도 없었다**(2026-10-05 감사) — 그래서 커뮤니티를 열면
+   프로젝트 목록·생성·필터와 빈 터미널 상자(≤640px에서 최소 160px를 차지한다)가 그 아래 함께 깔렸다.
+   pane이 늘 때마다 이 묶음에 같이 적어야 한다. */
+.remote-shell[data-remote-pane="community"] .remote-project-create,
+.remote-shell[data-remote-pane="community"] .remote-project-filter,
+.remote-shell[data-remote-pane="community"] .remote-projects,
+.remote-shell[data-remote-pane="community"] .remote-workroom-content,
+/* The OPS status/review card belongs to 프로젝트 관리. Once 「OPS 워크룸 열기」 switches to the
+   workroom, the OPS terminal is on screen and the card below it only repeated it. */
+.remote-shell[data-remote-pane="workroom"] .remote-ops-control,
+.remote-shell[data-remote-pane="community"] .remote-ops-control,
+.remote-shell[data-remote-pane="duty"] .remote-ops-control { display:none; }
+.remote-shell[data-workspace-tab="projects"] .remote-workroom-content { display:none; }
+.remote-shell button { touch-action:manipulation; }
+.remote-shell input, .remote-shell select, .remote-shell textarea { font-size:16px; }
+@media (max-width:430px) { .remote-shell { padding-inline:12px; } .remote-header { gap:8px; } .remote-heading h1 { font-size:16px; } }
+
+/* The connection owner stays mounted while the workspace changes views. */
+.remote-shell { padding-bottom: calc(100px + env(safe-area-inset-bottom) + var(--voice-dock-offset, 0px)); }
+.remote-header { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.workspace-navigation { position: fixed; z-index: 40; bottom: 0; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); width: min(760px,100%); padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--line-2); background: var(--surface); }
+.workspace-navigation button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; min-height:52px; border:0; border-radius:12px; background:transparent; color:var(--ink-3); font-size:12px; cursor:pointer; }
+.workspace-navigation button[aria-current="page"] { color:var(--accent); background:var(--accent-soft); font-weight:750; }
+.workspace-navigation svg { width:21px; height:21px; }
+.workspace-theme { position:relative; }
+.workspace-theme summary { display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--line-2); border-radius:12px; cursor:pointer; list-style:none; }
+.workspace-theme summary::-webkit-details-marker { display:none; }
+.workspace-theme summary svg { width:20px; }
+.workspace-theme > div { position:absolute; right:0; top:50px; width:180px; padding:6px; z-index:60; border:1px solid var(--line-2); border-radius:14px; background:var(--surface); box-shadow:0 8px 24px #0002; }
+.workspace-theme button { display:block; width:100%; min-height:44px; text-align:left; padding:8px 12px; border:0; background:none; color:var(--ink); border-radius:8px; }
+.workspace-theme button[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); font-weight:bold; }
+.workspace-connection-details { margin:12px 0; font-size:12px; color:var(--ink-3); }
+.workspace-connection-details summary { min-height:44px; display:flex; align-items:center; cursor:pointer; }
+.workspace-quick-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.workspace-recent-project { display:flex; align-items:center; gap:10px; width:100%; min-height:52px; margin-top:10px; padding:12px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink); text-align:left; }
+.workspace-recent-project svg { width:18px; flex-shrink:0; }
+.workspace-recent-project span { margin-left:auto; white-space:nowrap; color:var(--accent); font-size:12px; }
+.workspace-project-source { display:flex; gap:8px; margin:12px 0; }
+.workspace-project-source button { min-height:44px; padding:8px 12px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink-2); }
+.workspace-project-source button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+.workspace-project-source .workspace-pane-extra { margin-left:auto; min-height:44px; padding:4px 12px; border-style:dashed; border-radius:999px; font-size:12px; color:var(--ink-3); align-self:center; }
+.remote-shell:not([data-workspace-tab="workroom"]) .remote-workroom-content,
+.remote-shell:not([data-workspace-tab="workroom"]) .remote-project-create,
+.remote-shell:not([data-workspace-tab="workroom"]) .remote-project-filter,
+.remote-shell:not([data-workspace-tab="workroom"]) .remote-projects { display:none; }
+.workspace-catalog .portal-shell { min-height:0; background:transparent; }
+.workspace-catalog .portal-workspace { display:block; }
+.workspace-catalog .portal-main { padding:12px 0; width:100%; }
+.workspace-catalog .portal-login-shell { min-height:0; padding:0; display:block; overflow:visible; background:transparent; }
+.workspace-catalog .portal-login-build { position:static; display:flex; justify-content:flex-end; margin-bottom:10px; }
+.workspace-catalog .portal-login-card { max-width:none; padding:24px 20px; box-shadow:0 12px 36px rgb(0 0 0 / .08); }
+.workspace-catalog .portal-login-card__intro { margin:20px 0; }
+.workspace-catalog .portal-login-card__intro h1 { font-size:26px; }
+.workspace-catalog .portal-login-card__features { display:none; }
+.remote-shell .portal-login-recovery button { min-height:44px; flex-basis:200px; font-size:12px; }
+.portal-catalog-toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:12px 0; }
+.portal-catalog-toolbar > button { min-height:44px; padding:8px; color:var(--ink-2); }
+.remote-shell [hidden] { display:none !important; }
+@media (max-width:1099px) and (max-height:500px) { .remote-shell .az-voice-dock__captions { max-height:18vh; } }
+/* The 아젠투지 voice dock sits above the bottom tab bar, not on it (review 2026-09-30); its panel stacks above it. */
+@media (max-width:1099px) {
+ .remote-shell .az-voice-dock { bottom:calc(76px + env(safe-area-inset-bottom)); }
+ .remote-shell .az-voice-dock { max-height:calc(100dvh - 84px - env(safe-area-inset-bottom) - env(safe-area-inset-top)); overflow-y:auto; }
+ .remote-shell .az-voice-dock.az-voice-dock--fullscreen { inset:0; max-height:none; overflow:hidden; }
+ /* Short screens (iPhone landscape): the panel keeps at least 240px and overlaps the dock rather than shrinking to nothing. */
+ .remote-shell .voice-panel { bottom:min(calc(76px + env(safe-area-inset-bottom) + var(--voice-dock-offset, 0px)), calc(100dvh - 240px)); max-height:max(240px, calc(100dvh - 92px - env(safe-area-inset-bottom) - var(--voice-dock-offset, 0px))); }
+}
+@media (min-width:1100px) {
+ .remote-shell { width:min(1100px,100%); padding-left:160px; }
+ .workspace-navigation { top:100px; left:max(20px,calc((100vw - 1100px)/2)); bottom:auto; transform:none; width:130px; grid-template-columns:1fr; border:1px solid var(--line-2); border-radius:16px; }
+ .workspace-navigation button { flex-direction:row; justify-content:flex-start; padding:12px; }
+}
+@media (max-width:380px) { .remote-header { gap:8px; } .remote-state { font-size:10px; padding:6px; } }
+.mobile-workspace-panel { margin:14px 0; }
+.mobile-workspace-panel label { display:block; color:var(--ink-2); font-size:13px; margin:12px 0; }
+.mobile-workspace-panel select,.mobile-workspace-panel input { display:block; width:100%; min-height:44px; border:1px solid var(--line-2); border-radius:10px; padding:8px 12px; background:var(--surface); color:var(--ink); }
+.mobile-workspace-panel button { min-height:44px; border:1px solid var(--line-2); border-radius:10px; padding:8px 12px; margin-top:8px; background:var(--surface); color:var(--accent); cursor:pointer; }
+.mobile-workspace-panel button:disabled { opacity:.45; cursor:default; }
+.workspace-record { margin:16px 0; padding:16px; border:1px solid var(--line-2); border-radius:14px; }
+.workspace-record p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.workspace-record small { color:var(--ink-3); }
+.workspace-duty-review { padding:16px; border:1px solid var(--accent); border-radius:14px; }
+
+.remote-shell[data-remote-pane="projects"] .remote-workroom-content { display:none; }
+
+.workspace-inventory-note { padding:12px 14px; margin-bottom:16px; border:1px solid var(--line-2); border-radius:12px; color:var(--ink-3); font-size:13px; line-height:1.6; }
+.workspace-inventory-note p { margin:0 0 8px; }
+.workspace-inventory-note button { min-height:44px; padding:8px 12px; border:1px solid var(--line-2); border-radius:10px; background:var(--surface); color:var(--ink); }
+.portal-catalog-toolbar { flex-wrap:wrap; }
+.portal-catalog-toolbar>div { display:flex; gap:8px; align-items:center; min-width:0; }
+/* The embedded catalog uses the shell's padding, not the old page's bleed. */
+.workspace-catalog .portal-category-tabs { margin-inline:0; padding-inline:0; max-width:100%; }
+
+.workspace-prompt-guides {margin: 0 0 16px; padding: 8px 0;}
+.workspace-prompt-guides button {min-height:44px;}
+@media(max-width:600px) { [data-testid="prompt-guide-dialog"] button {min-height:44px;} [data-testid="prompt-guide-dialog"] input,[data-testid="prompt-guide-dialog"] textarea {font-size:16px;} }
+
+.workspace-tester { margin-top:18px; padding-top:14px; border-top:1px solid var(--line-2); }
+.workspace-tester button { touch-action:manipulation; margin-right:8px; }
+.workspace-tester p { overflow-wrap:anywhere; }
+
+
+.mobile-workspace-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.mobile-workspace-heading h2 { margin:0; }
+.mobile-workspace-panel .mobile-workspace-close { margin-top:0; color:var(--ink-2); }
+.remote-ops-status { color:var(--ink-2); font-size:14px; }
+.remote-ops-hint { margin:12px 0 8px; color:var(--ink-3); font-size:13px; }
+.remote-ops-candidate { margin:8px 0; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); }
+.remote-ops-candidate summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; padding:10px 14px; cursor:pointer; list-style:none; font-weight:600; }
+.remote-ops-candidate summary::-webkit-details-marker { display:none; }
+.remote-ops-candidate summary small { flex:none; color:var(--ink-3); font-weight:400; }
+.remote-ops-candidate[open] summary { border-bottom:1px solid var(--line-2); }
+.remote-ops-candidate > p, .remote-ops-candidate > .workspace-quick-actions { margin:12px 14px; }
+.remote-ops-candidate > p { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.6; }
+.remote-ops-candidate .remote-ops-evidence { color:var(--ink-3); font-size:12px; }
+
+/* VOC — one composer for every entry point (share sheet, header button, error buttons). */
+.remote-header { grid-template-columns: auto minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; }
+.remote-voc-open { display:inline-flex; align-items:center; gap:5px; min-height:44px; padding:0 12px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink-2); font-size:13px; font-weight:700; cursor:pointer; }
+.remote-voc-open svg { width:17px; height:17px; }
+@media (max-width:430px) { .remote-voc-open span { display:none; } .remote-voc-open { padding:0 10px; } }
+.remote-error-voc-actions { display:inline-flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+.remote-task-error .remote-error-voc-actions, [role="alert"] > .remote-error-voc-actions { display:flex; margin-top:8px; }
+.remote-error-voc-actions button { display:inline-flex; align-items:center; gap:5px; min-height:40px; padding:0 12px; border:1px solid rgb(var(--danger-rgb) / 0.34); border-radius:10px; background:rgb(var(--danger-rgb) / 0.12); color:var(--danger); font-size:12px; font-weight:750; cursor:pointer; }
+.remote-error-voc-actions button svg { width:15px; height:15px; }
+.remote-voc-dialog { width:min(560px, calc(100vw - 24px)); max-height:calc(100dvh - 32px); padding:16px; border:1px solid var(--line-2); border-radius:18px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow); overflow:auto; }
+.remote-voc-dialog::backdrop { background:rgb(0 0 0 / 0.45); }
+.remote-voc-dialog header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.remote-voc-dialog h2 { margin:0; font-size:16px; font-weight:800; }
+.remote-voc-dialog header button { display:grid; place-items:center; width:44px; height:44px; border:0; border-radius:12px; background:transparent; color:var(--ink-2); cursor:pointer; }
+.remote-voc-context { margin:0 0 10px; padding:9px 11px; border-radius:10px; background:rgb(var(--danger-rgb) / 0.08); color:var(--danger); font-size:12.5px; word-break:break-word; }
+.remote-voc-comment { display:grid; gap:6px; font-size:13px; font-weight:700; }
+.remote-voc-comment small { color:var(--ink-3); font-size:12px; font-weight:500; }
+.remote-voc-comment textarea { width:100%; box-sizing:border-box; min-height:96px; padding:10px 12px; border:1px solid var(--line-2); border-radius:12px; background:var(--sunken); color:var(--ink); font:inherit; font-weight:400; resize:vertical; }
+/* `font:inherit` took the 13px label size, under iOS's 16px focus-zoom threshold (see AiTerminalPanel.css). */
+@media (max-width:640px), (pointer:coarse) { .remote-voc-comment textarea { font-size:16px; } }
+.remote-voc-photos { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.remote-voc-photos figure { position:relative; margin:0; width:76px; height:76px; border-radius:12px; overflow:hidden; border:1px solid var(--line-2); background:var(--sunken); }
+.remote-voc-photos img { width:100%; height:100%; object-fit:cover; }
+.remote-voc-photos figure button { position:absolute; top:3px; right:3px; display:grid; place-items:center; width:28px; height:28px; border:1px solid var(--line-2); border-radius:999px; background:var(--surface); color:var(--ink); cursor:pointer; }
+.remote-voc-photos figure button svg { width:15px; height:15px; }
+.remote-voc-add { display:grid; place-items:center; align-content:center; gap:4px; width:76px; height:76px; border:1px dashed var(--line-2); border-radius:12px; background:transparent; color:var(--ink-2); font-size:11.5px; cursor:pointer; }
+.remote-voc-add:disabled { opacity:.5; cursor:not-allowed; }
+.remote-voc-hint { margin:8px 0 0; color:var(--ink-3); font-size:11.5px; line-height:1.5; }
+.remote-voc-progress { display:flex; align-items:center; gap:6px; margin:10px 0 0; color:var(--ink-2); font-size:12.5px; }
+.remote-voc-progress svg { width:15px; height:15px; }
+.remote-voc-error { margin:10px 0 0; color:var(--danger); font-size:12.5px; }
+.remote-voc-dialog footer { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:14px; }
+.remote-voc-dialog footer button { display:inline-flex; align-items:center; gap:6px; min-height:44px; padding:0 14px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink); font-size:13.5px; font-weight:750; cursor:pointer; }
+.remote-voc-dialog footer button.primary { border-color:var(--accent); background:var(--accent); color:var(--on-accent); }
+.remote-voc-dialog footer button:disabled { opacity:.55; cursor:not-allowed; }
+.remote-voc-dialog footer svg { width:16px; height:16px; }
+.remote-voc-open { position:relative; }
+.remote-voc-open-badge { position:absolute; top:-6px; right:-6px; min-width:20px; height:20px; padding:0 5px; box-sizing:border-box; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:11px; font-weight:800; line-height:20px; text-align:center; }
+.workspace-project-source .workspace-pane-voc { margin-left:auto; }
+/* Only the first extra chip pushes right; the rest follow it (a wrapped 「대직」 used to sit alone at the far right). */
+.workspace-project-source .workspace-pane-voc ~ .workspace-pane-extra { margin-left:0; }
+/* The same host can be viewed from a Mac, an iPad and a phone at once. Keep the
+   controller's labels and touch controls readable without scaling the host UI. */
+@media (max-width:1099px) {
+  .workspace-navigation button { font-size:13px; }
+  .workspace-project-source { flex-wrap:wrap; }
+  /* Once the row wraps, right-pushed chips scatter; let them flow left after the two main buttons. */
+  .workspace-project-source .workspace-pane-voc { margin-left:0; }
+  .workspace-project-source button { font-size:14px; }
+  .remote-workroom-content .ai-terminal-panel { font-size:14px; }
+  .remote-workroom-content .ai-terminal-panel :is(.ai-terminal-label,.ai-terminal-caption,.ai-terminal-hint,.ai-terminal-session-owner,.ai-terminal-command-head) { font-size:13px; }
+  .remote-workroom-content .ai-terminal-panel :is(.ai-terminal-btn,.ai-terminal-tab,.ai-terminal-key) { font-size:13px; }
+}
+/* 「VOC」 — new · unsent share captures · what piled up on the Mac. */
+.remote-voc-hub-new { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; min-height:48px; border:1px solid var(--accent); border-radius:12px; background:var(--accent); color:var(--on-accent); font-size:14px; font-weight:800; cursor:pointer; }
+.remote-voc-hub-new svg { width:17px; height:17px; }
+.remote-voc-hub-section { margin-top:16px; padding-top:14px; border-top:1px solid var(--line-2); }
+.remote-voc-hub-section h3 { display:flex; align-items:center; gap:6px; margin:0; font-size:13.5px; font-weight:800; }
+.remote-voc-hub-section h3 > svg { width:16px; height:16px; color:var(--ink-2); }
+.remote-voc-hub-section h3 span { color:var(--ink-3); font-family:var(--font-mono); font-size:12px; font-weight:700; }
+.remote-voc-hub-refresh { display:grid; place-items:center; width:44px; height:44px; margin-left:auto; border:0; border-radius:12px; background:transparent; color:var(--ink-2); cursor:pointer; }
+.remote-voc-hub-refresh svg { width:16px; height:16px; }
+.remote-voc-hub-section ul { display:grid; gap:8px; margin:10px 0 0; padding:0; list-style:none; }
+.remote-voc-hub-section li { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px; border:1px solid var(--line-2); border-radius:12px; background:var(--sunken); }
+.remote-voc-hub-thumb { display:grid; place-items:center; flex:none; width:52px; height:52px; overflow:hidden; border-radius:10px; background:var(--surface); color:var(--ink-3); }
+.remote-voc-hub-thumb img { width:100%; height:100%; object-fit:cover; }
+.remote-voc-hub-body { display:grid; flex:1 1 160px; min-width:0; gap:3px; }
+.remote-voc-hub-body small { color:var(--ink-3); font-size:11.5px; }
+.remote-voc-hub-body span { overflow-wrap:anywhere; font-size:13px; line-height:1.45; }
+.remote-voc-hub-actions { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
+.remote-voc-hub-actions button, .remote-voc-hub-process { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:44px; padding:0 12px; border:1px solid var(--line-2); border-radius:12px; background:var(--surface); color:var(--ink); font-size:12.5px; font-weight:750; cursor:pointer; }
+.remote-voc-hub-actions button svg, .remote-voc-hub-process svg { width:15px; height:15px; }
+.remote-voc-hub-actions button.primary, .remote-voc-hub-process.primary { border-color:var(--accent); background:var(--accent); color:var(--on-accent); }
+.remote-voc-hub-actions button.danger { border-color:rgb(var(--danger-rgb) / 0.4); background:rgb(var(--danger-rgb) / 0.12); color:var(--danger); }
+.remote-voc-hub-actions button:disabled, .remote-voc-hub-process:disabled { opacity:.55; cursor:not-allowed; }
+.remote-voc-hub-process { width:100%; margin-top:12px; }
+
+/* A Mac silent for minutes: asleep, or this phone holds a host identity the Mac no longer uses (2026-10-02). */
+.remote-stale-pairing { display: flex; margin-inline: 0; flex-direction: column; gap: 8px; margin: 8px 0 0; padding: 10px 12px; border: 1px solid rgb(var(--warn-rgb) / .45); border-radius: 12px; background: var(--warn-soft); font-size: 13px; line-height: 1.5; color: var(--ink); }
+.remote-stale-pairing p { margin: 0; }
+.remote-stale-pairing button { align-self: flex-start; min-height: 44px; padding: 6px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--raised); color: var(--ink); font: inherit; font-weight: 700; }
+
+/* Folded card sections: a full-width 44px row to tap, so a 20-card page stays short (2026-10-02). */
+.remote-project-more, .remote-mac-actions { margin-top: 8px; border-top: 1px solid var(--line); }
+.remote-project-more > summary, .remote-mac-actions > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13.5px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.remote-project-more[open] > summary, .remote-mac-actions[open] > summary { color: var(--ink); }
+.remote-project-more > summary, .remote-mac-actions > summary { list-style: none; }
+.remote-project-more > summary::-webkit-details-marker, .remote-mac-actions > summary::-webkit-details-marker { display: none; }
+.remote-project-more > summary::before, .remote-mac-actions > summary::before { content: '▸'; color: var(--ink-3); transition: transform .15s; }
+.remote-project-more[open] > summary::before, .remote-mac-actions[open] > summary::before { transform: rotate(90deg); }
+/* Small-screen pass (2026-10-02, iPhone 17 실기 점검): the shell repeated the app's title and spent ~200px
+   before any content on every tab. On a phone the tab name alone carries the header. */
+@media (max-width: 640px) {
+  /* Without the brand mark the title is the first column; the rest stay content-sized (VOC once stretched). */
+  .remote-header { margin-bottom: 10px; grid-template-columns: minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; }
+  .remote-brand, .remote-heading p { display: none; }
+  .workspace-prompt-guides { margin-bottom: 8px; padding: 0; }
+  /* The OPS card's two explanations repeat what the dock already says; keep its buttons and status. */
+  .remote-ops-voice p { display: none; }
+  .remote-ops-control h2 { font-size: 16px; }
+  .remote-toolbar > button { flex: 0 0 auto; white-space: nowrap; }
+}
+.remote-portal-scan-more { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 4px 0 8px; }
+.remote-portal-scan-more svg { width: 16px; height: 16px; color: var(--mint); }
+
+/* 커뮤니티 — 휴대폰에서 다른 아젠투지들과 주고받고, 그 기기의 워크룸으로 건너간다.
+   입장·나가기는 Mac 화면에만 있으므로 여기에는 그 버튼이 없다. */
+.remote-community h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 16px; font-weight: 800; }
+.remote-community h2 svg { width: 17px; height: 17px; color: var(--mint); }
+.remote-community-unread { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--mint); color: var(--on-accent); font-size: 11.5px; font-weight: 800; }
+.remote-community-state { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.remote-community-error { margin: 0 0 10px; font-size: 13px; font-weight: 700; color: var(--danger, #e5484d); }
+.remote-community-notice { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.remote-community-empty { margin: 6px 0; font-size: 12.5px; color: var(--ink-3); }
+.remote-community-messages { display: flex; flex-direction: column; gap: 8px; max-height: 46dvh; overflow: auto; }
+.remote-community-message { padding: 9px 11px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); }
+.remote-community-message--self { background: var(--sunken, var(--surface)); }
+.remote-community-message header { display: flex; gap: 8px; font-size: 11.5px; font-weight: 800; color: var(--ink-2); }
+.remote-community-message header span { margin-left: auto; font-weight: 600; color: var(--ink-3); }
+.remote-community-message p { margin: 4px 0 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.remote-community-compose { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+.remote-community-compose textarea { flex: 1; min-height: 44px; padding: 10px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; font-size: 16px; resize: vertical; }
+.remote-community-compose .remote-primary { margin-top: 0; }
+.remote-community-devices { margin-top: 14px; }
+.remote-community-devices h3 { margin: 0 0 6px; font-size: 13px; font-weight: 800; }
+.remote-community-devices button { display: flex; align-items: center; gap: 7px; width: 100%; margin-bottom: 6px; min-height: 44px; }
+.remote-community-refresh { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
+.remote-community-refresh svg, .remote-community-devices button svg { width: 16px; height: 16px; }

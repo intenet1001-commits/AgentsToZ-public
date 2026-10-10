@@ -1,0 +1,14 @@
+[
+  {"case": "legacy folder and name", "name": "AgentsToZ-Control", "leaf": "AgentsToZ-Control", "aiName": null, "expectedRole": "ops"},
+  {"case": "new folder and name", "name": "AgentsToZ-OPS", "leaf": "AgentsToZ-OPS", "aiName": null, "expectedRole": "ops"},
+  {"case": "renamed display name, new folder leaf", "name": "운영본부", "leaf": "AgentsToZ-OPS", "aiName": null, "expectedRole": "ops"},
+  {"case": "renamed display name, legacy folder leaf", "name": "운영본부", "leaf": "AgentsToZ-Control", "aiName": null, "expectedRole": "ops"},
+  {"case": "case and spacing are ignored", "name": " agentstoz-ops ", "leaf": "somewhere", "aiName": null, "expectedRole": "ops"},
+  {"case": "legacy name, lower case", "name": "agentstoz-control", "leaf": "somewhere", "aiName": null, "expectedRole": "ops"},
+  {"case": "only the alias names OPS", "name": "renamed", "leaf": "renamed", "aiName": "AgentsToZ-OPS", "expectedRole": "ops"},
+  {"case": "only the alias names legacy OPS", "name": "renamed", "leaf": "renamed", "aiName": "AgentsToZ-Control", "expectedRole": "ops"},
+  {"case": "display label is not the folder name", "name": "AgentsToZ OPS", "leaf": "ops-notes", "aiName": null, "expectedRole": "managed"},
+  {"case": "a suffix is a different folder", "name": "AgentsToZ-OPS-backup", "leaf": "AgentsToZ-OPS-backup", "aiName": null, "expectedRole": "managed"},
+  {"case": "an unrelated control project", "name": "Control experiment", "leaf": "control-notes", "aiName": null, "expectedRole": "managed"},
+  {"case": "the app source is DEV", "name": "AgentsToZ_byCS", "leaf": "AgentsToZ_byCS", "aiName": null, "expectedRole": "dev"}
+]

@@ -1,0 +1,11 @@
+import {describe,expect,test} from 'bun:test';
+import {AgentRuntimeQuickLabels} from '../src/agentRuntimeQuickLabels';
+import type {RunCodexConversationTurnInput} from '../src/codexAgentRuntime';
+const items=[{id:'project-fixture',name:'billing',description:'Monthly invoice dashboard'}];
+function fixture(output:string, wait?:Promise<void>){let input:RunCodexConversationTurnInput|undefined;const sdk=new AgentRuntimeQuickLabels({cwd:'/tmp',resolveRuntime:async()=>({executable:'/codex',executableIdentity:{} as any,models:[{modelId:'fixture-model',label:'test',isDefault:true,providerModel:'fixture',reasoningEffort:'low'}]}),run:async i=>{input=i;await wait;return{threadId:'thread',turnId:'turn',finalSummary:output} as any}});return{sdk,input:()=>input};}
+async function settled(sdk:AgentRuntimeQuickLabels,id:string){for(let i=0;i<100;i++){const r=sdk.read(id);if(r.state!=='running')return r;await Bun.sleep(5)}throw new Error('timeout')}
+describe('SDK short task suggestions',()=>{
+ test('uses tool-free runtime and returns validated suggestions without file or port writes',async()=>{const f=fixture(JSON.stringify([{id:items[0]!.id,name:'월별 청구',category:'업무'}]));const job=await settled(f.sdk,f.sdk.start(items).id);expect(job.state).toBe('completed');expect(job.results[0]?.name).toBe('월별 청구');expect(f.input()?.executionMode).toBe('read-only');expect(f.input()?.prompt).toContain('Monthly invoice dashboard');await f.sdk.shutdown()});
+ test('rejects hallucinated ids, malformed labels and duplicate target results',async()=>{for(const output of ['[{"id":"other-id","name":"X","category":"Y"}]','plain text','[]']){const f=fixture(output);expect((await settled(f.sdk,f.sdk.start(items).id)).state).toBe('failed');await f.sdk.shutdown()}});
+ test('cancellation wins over a late model result and overlapping requests are rejected',async()=>{let release!:()=>void;const wait=new Promise<void>(r=>{release=r});const f=fixture(JSON.stringify([{id:items[0]!.id,name:'월별 청구',category:'업무'}]),wait);const id=f.sdk.start(items).id;await Bun.sleep(5);expect(()=>f.sdk.start(items)).toThrow('진행');f.sdk.cancel(id);release();expect((await settled(f.sdk,id)).state).toBe('cancelled');await f.sdk.shutdown()});
+});

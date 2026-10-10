@@ -1,0 +1,28 @@
+{
+  "comment": "Shared by tests/workroom-popout.test.ts and the Rust open_workroom_window tests. A pop-out URL carries only opaque ids — never a path, token or prompt.",
+  "queries": [
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=1", "valid": true},
+    {"query": "workroom-popout=1&session=0f6c2c1e-1b2a-4c55-9a3e-2b9d6f1a7c10&target=AbCdEf12_-&agent=claude&bypass=0", "valid": true},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=hermes&bypass=0", "valid": true},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=agy&bypass=1", "valid": true},
+    {"query": "workroom-popout=1&session=short&target=fixture-project-alpha&agent=codex&bypass=1", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=../../etc/passwd&agent=codex&bypass=1", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=bash&bypass=1", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=yes", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=1&token=secret123", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&session=fixture-session-bravo&target=fixture-project-alpha&agent=codex&bypass=1", "valid": false},
+    {"query": "workroom-popout=0&session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=1", "valid": false},
+    {"query": "session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=1", "valid": false},
+    {"query": "workroom-popout=1&session=fixture-session-alpha&target=fixture-project-alpha&agent=codex&bypass=1#frag", "valid": false},
+    {"query": "", "valid": false}
+  ],
+  "labels": [
+    {"label": "workroom-1", "valid": true},
+    {"label": "workroom-42", "valid": true},
+    {"label": "workroom-0", "valid": false},
+    {"label": "workroom-", "valid": false},
+    {"label": "main", "valid": false},
+    {"label": "workroom-1a", "valid": false},
+    {"label": "workroom-1234567", "valid": false}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "hermesPresent": true,
+  "hermesHome": "/Users/cs-work/.hermes",
+  "skillsDir": "/Users/cs-work/.hermes/agentstoz-skills",
+  "configPath": "/Users/cs-work/.hermes/config.yaml",
+  "available": [
+    "memory-link",
+    "memory-start",
+    "memory-status",
+    "memory-stop",
+    "memory-sync",
+    "memory-unlink",
+    "remember-session"
+  ],
+  "installed": [
+    "memory-link",
+    "memory-start",
+    "memory-status",
+    "memory-stop",
+    "memory-sync",
+    "memory-unlink",
+    "remember-session"
+  ],
+  "externalDirRegistered": true,
+  "installedVersion": 10,
+  "currentVersion": 10,
+  "updateAvailable": false
+}

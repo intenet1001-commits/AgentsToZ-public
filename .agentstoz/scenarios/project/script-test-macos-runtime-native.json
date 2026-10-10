@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "project.script-test-macos-runtime-native",
+  "title": "test:macos-runtime-native 스크립트",
+  "intent": "package.json의 `test:macos-runtime-native` 스크립트를 그대로 실행한다.",
+  "origin": "discovered:package-script",
+  "tags": [
+    "package-script"
+  ],
+  "paths": [
+    "**"
+  ],
+  "safety": "writes-build-output",
+  "risk": 0,
+  "cost": {
+    "estimateSeconds": 600
+  },
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "run",
+        "test:macos-runtime-native"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "requires": [
+    "node_modules"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "project.memory-save-unit",
+  "title": "자동 기억 저장 단위 검사 묶음",
+  "intent": "자동 세션 저장의 선택, 디스크 허용량, 키 관리, 복구, 공급자 전환 계약을 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "memory",
+    "unit"
+  ],
+  "paths": [
+    "src/memorySave*",
+    "src/*MemorySave*",
+    "tests/memory-save-*"
+  ],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 150
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "--cwd",
+        "tests",
+        "--max-concurrency=1",
+        "memory-save-"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "memory save regression",
+    "자동 저장"
+  ]
+}

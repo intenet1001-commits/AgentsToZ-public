@@ -1,0 +1,14 @@
+/* Workroom pop-out window shell (「새 창으로 분리」). Tokens only — see src/index.css. */
+html:has(.workroom-popout), body:has(.workroom-popout) { background: var(--bg); }
+.workroom-popout { box-sizing: border-box; display: flex; flex-direction: column; min-height: 100dvh; padding: 12px; background: var(--bg); color: var(--ink); }
+.workroom-popout > .ai-terminal-panel { flex: 1 1 auto; }
+/* The window is the terminal: give it the height the main window spends on its sidebar and header. */
+.workroom-popout .ai-terminal-panel .ai-terminal-surface { height: max(300px, calc(100dvh - 420px)); }
+.workroom-popout-state { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 24px; color: var(--ink-2); font-size: 13px; }
+.workroom-popout-state button { min-height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+@media (max-width: 640px) { .workroom-popout { padding: 0; } .workroom-popout-state button { min-height: 44px; } }
+/* Result notice for VOC saves in the pop-out (the main window uses its toast). Above the VOC overlay. */
+.workroom-popout-notice { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; display: flex; align-items: center; gap: 10px; max-width: min(480px, calc(100vw - 32px)); padding: 10px 12px; border-radius: 999px; background: var(--ink); color: var(--bg); font-size: 13px; box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / .25)); }
+.workroom-popout-notice::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.workroom-popout-notice--error::before { background: var(--danger); }
+.workroom-popout-notice button { flex: none; border: 0; background: transparent; color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }

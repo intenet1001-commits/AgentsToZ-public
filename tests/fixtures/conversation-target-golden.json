@@ -1,0 +1,31 @@
+{
+  "note": "Rows shaped like the registered projects that failed by voice on 2026-09-28. The runtime targets are what the Git inventory reports: its labels are aiName-first. Text (MCP resolve-target) and voice (resolve_target_alias) must give the same outcome for every case.",
+  "opsProjectId": "359150c5-7ed4-4b99-9b81-d864190342d3",
+  "ports": [
+    {"id": "359150c5-7ed4-4b99-9b81-d864190342d3", "name": "AgentsToZ-Control", "folderPath": "/Users/fixture/product_2026/AgentsToZ-Control"},
+    {"id": "6f1d0a52-8d7e-4c5b-9a3f-1b2c3d4e5f60", "name": "AgentsToZ_byCS", "aiName": "AgentsToZ Port Manager", "folderPath": "/Users/fixture/product_2026/AgentsToZ_byCS"},
+    {"id": "0b7a2c1e-1111-4a4a-8b8b-000000000001", "name": "vibe", "aiName": "vibe claude guide", "folderPath": "/Users/fixture/projects/vibe"},
+    {"id": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "name": "vibe2", "aiName": "Vibe Coding Guide v2", "folderPath": "/Users/fixture/projects/vibe2"},
+    {"id": "0b7a2c1e-2222-4a4a-8b8b-000000000002_wt_feature", "name": "vibe2 (feature)", "aiName": "Vibe Coding Guide v2", "folderPath": "/Users/fixture/projects/vibe2/worktrees/feature", "worktreePath": "/Users/fixture/projects/vibe2/worktrees/feature", "worktreeParentId": "0b7a2c1e-2222-4a4a-8b8b-000000000002"},
+    {"id": "4e1f7c2a-3333-4b4b-9c9c-000000000003", "name": "헤르메스", "aiName": "Claude Agent Config", "folderPath": "/Users/fixture/.hermes"}
+  ],
+  "runtimeTargets": [
+    {"targetId": "359150c5-7ed4-4b99-9b81-d864190342d3", "projectTargetId": "359150c5-7ed4-4b99-9b81-d864190342d3", "label": "AgentsToZ-Control", "scope": "main", "branch": "main"},
+    {"targetId": "6f1d0a52-8d7e-4c5b-9a3f-1b2c3d4e5f60", "projectTargetId": "6f1d0a52-8d7e-4c5b-9a3f-1b2c3d4e5f60", "label": "AgentsToZ Port Manager", "scope": "main", "branch": "main"},
+    {"targetId": "0b7a2c1e-1111-4a4a-8b8b-000000000001", "projectTargetId": "0b7a2c1e-1111-4a4a-8b8b-000000000001", "label": "vibe claude guide", "scope": "main", "branch": null},
+    {"targetId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "projectTargetId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "label": "Vibe Coding Guide v2", "scope": "main", "branch": "main"},
+    {"targetId": "0b7a2c1e-2222-4a4a-8b8b-000000000002_wt_feature", "projectTargetId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "label": "Vibe Coding Guide v2", "scope": "worktree", "branch": "feature"},
+    {"targetId": "rwt_9a1b2c3d4e5f60718293a4b5c6d7e8f901234567890abcde", "projectTargetId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "label": "Vibe Coding Guide v2 · hotfix", "scope": "worktree", "branch": "hotfix"},
+    {"targetId": "4e1f7c2a-3333-4b4b-9c9c-000000000003", "projectTargetId": "4e1f7c2a-3333-4b4b-9c9c-000000000003", "label": "Claude Agent Config", "scope": "main", "branch": null}
+  ],
+  "cases": [
+    {"alias": "바이브2 담당자", "expected": {"resolved": false, "code": "TARGET_ALIAS_NOT_FOUND", "candidateNames": ["AgentsToZ-Control", "AgentsToZ_byCS", "vibe", "vibe2", "헤르메스"]}},
+    {"alias": "vibe2", "expected": {"resolved": true, "kind": "project", "projectId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "projectName": "vibe2", "role": "managed"}},
+    {"alias": "vibe2 담당자", "expected": {"resolved": true, "kind": "project", "projectId": "0b7a2c1e-2222-4a4a-8b8b-000000000002", "projectName": "vibe2", "role": "managed"}},
+    {"alias": "헤르메스 담당자", "expected": {"resolved": true, "kind": "project", "projectId": "4e1f7c2a-3333-4b4b-9c9c-000000000003", "projectName": "헤르메스", "role": "managed"}},
+    {"alias": "아젠투지개발", "expected": {"resolved": true, "kind": "project", "projectId": "6f1d0a52-8d7e-4c5b-9a3f-1b2c3d4e5f60", "projectName": "AgentsToZ_byCS", "role": "dev"}},
+    {"alias": "Claude Agent Config 담당자", "expected": {"resolved": true, "kind": "project", "projectId": "4e1f7c2a-3333-4b4b-9c9c-000000000003", "projectName": "헤르메스", "role": "managed"}},
+    {"alias": "vibe claude guide", "expected": {"resolved": true, "kind": "project", "projectId": "0b7a2c1e-1111-4a4a-8b8b-000000000001", "projectName": "vibe", "role": "managed"}},
+    {"alias": "아젠투지", "expected": {"resolved": true, "kind": "ops", "label": "AgentsToZ OPS"}}
+  ]
+}

@@ -1,0 +1,8 @@
+.portal-email-login { width:100%; max-width:360px; margin:20px auto 0; padding-top:16px; border-top:1px solid var(--line-2); text-align:left; }
+.portal-email-login label { display:block; margin-bottom:8px; color:var(--ink-2); font-size:13px; font-weight:600; }
+.portal-email-login input { display:block; box-sizing:border-box; width:100%; min-height:44px; padding:8px 12px; border:1px solid var(--line-2); border-radius:10px; background:var(--surface); color:var(--ink); font-size:16px; }
+.portal-email-login button { display:block; box-sizing:border-box; width:100%; min-height:44px; margin-top:8px; padding:8px 12px; border:1px solid var(--line-2); border-radius:10px; background:var(--surface); color:var(--ink); font-size:15px; font-weight:600; cursor:pointer; }
+.portal-email-login button[data-primary] { border-color:var(--accent); background:var(--accent); color:var(--on-accent, #fff); }
+.portal-email-login button:disabled { opacity:.5; cursor:default; }
+.portal-email-login-note { margin:8px 0 0; color:var(--ink-3); font-size:12px; line-height:1.5; }
+.portal-email-login-error { margin:8px 0 0; color:var(--danger); font-size:13px; line-height:1.5; }

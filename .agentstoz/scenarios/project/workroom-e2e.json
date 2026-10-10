@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "project.workroom-e2e",
+  "title": "워크룸 브라우저 흐름",
+  "intent": "자체 Vite와 합성 API로 워크룸의 터치·키보드 입력, 닫기 전 저장, 실행기 선택, 원격 권한을 실제 브라우저에서 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "workroom",
+    "ui",
+    "browser"
+  ],
+  "paths": [
+    "src/workroom*",
+    "src/Workroom*",
+    "src/*Workroom*",
+    "src/terminal*",
+    "scripts/check-maintainer-web.ts"
+  ],
+  "safety": "writes-temp",
+  "risk": 3,
+  "cost": {
+    "estimateSeconds": 420
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "workroom"
+      ],
+      "timeoutSeconds": 900
+    }
+  ],
+  "memoryQueries": [
+    "workroom terminal touch regression",
+    "워크룸 저장"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "project.voice-media",
+  "title": "음성 패널 마이크·전사 흐름",
+  "intent": "가짜 마이크와 가짜 공급자로 음성 패널의 시작·발화 감지·전사·종료·동의 철회·네이티브 백그라운드 동작을 Chromium과 WebKit에서 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "voice",
+    "ui",
+    "browser"
+  ],
+  "paths": [
+    "src/voice*",
+    "src/Voice*",
+    "src/*Voice*",
+    "tests/fixtures/voice/**",
+    "scripts/check-voice-media.ts"
+  ],
+  "safety": "writes-temp",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 120
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "scripts/check-voice-media.ts"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "voice session regression",
+    "OPS 음성"
+  ]
+}
