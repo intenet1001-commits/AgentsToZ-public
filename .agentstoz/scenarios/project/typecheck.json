@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "project.typecheck",
+  "title": "TypeScript 타입 검사가 통과한다",
+  "intent": "앱·서버·스크립트 전체의 TypeScript 타입 오류가 0개인지 확인한다. 가장 싸고 넓은 회귀 그물이다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "smoke",
+    "typescript"
+  ],
+  "paths": [
+    "**/*.ts",
+    "**/*.tsx",
+    "tsconfig*.json",
+    "package.json"
+  ],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 90
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "run",
+        "typecheck"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "typecheck regression"
+  ]
+}

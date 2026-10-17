@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';import {chromium,webkit} from 'playwright';import {commonMemoryUiFixture} from './fixtures/common-memory/server.ts';
+const report=[];
+for(const [engineName,engine] of [['chromium',chromium],['webkit',webkit]]){
+ const fixture=await commonMemoryUiFixture(),browser=await engine.launch();
+ try{
+  const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',r=>new URL(r.request().url()).origin===fixture.url?r.continue():r.abort());await page.goto(fixture.url);
+  const panel=page.getByTestId('common-memory-panel');await panel.getByRole('button',{name:'공통기억 관리',exact:true}).click();await panel.getByRole('button',{name:'공통기억 만들기',exact:true}).waitFor();
+  assert.equal(await panel.getByLabel('공통기억 작업 워크룸',{exact:true}).count(),0,'A common topic must not ask the user to choose one project to own the AI work');
+  await panel.getByRole('button',{name:'공통기억 만들기',exact:true}).click();await panel.getByLabel('공통기억 이름',{exact:true}).fill('셀프트레이닝');
+  assert.equal(await panel.getByLabel('설명',{exact:true}).isVisible(),false);assert.equal(await panel.getByLabel(/카테고리로 자동 적용/).count(),0,'a newcomer links long-term memories directly, with no category rule');assert.match(await panel.getByTestId('meta-memory-link-targets').innerText(),/이 Mac: 등록 A/);await panel.getByRole('checkbox',{name:/등록 A/}).check();await panel.getByRole('checkbox',{name:/등록 B/}).check();await panel.getByRole('button',{name:'공통기억 만들기',exact:true}).click();
+  await panel.getByTestId('common-memory-use-context').getByRole('heading',{name:'연결된 장기기억 · 직접 선택 2개',exact:true}).waitFor();assert.equal(await panel.getByRole('button',{name:'검토한 항목 게시',exact:true}).isVisible(),false);
+  const initial=JSON.stringify((await (await fetch(fixture.url+'/fixture/stats')).json()).groups);await panel.getByRole('button',{name:'AI로 정리·업데이트',exact:true}).click();
+  const draft=page.getByTestId('common-memory-workroom-draft');await draft.getByRole('heading',{name:'셀프트레이닝 · 기억 정리',exact:true}).waitFor();assert.match(await draft.innerText(),/propose-source-entry/);assert.match(await draft.innerText(),/11111111/);assert.match(await draft.innerText(),/22222222/);assert.equal(JSON.stringify((await (await fetch(fixture.url+'/fixture/stats')).json()).groups),initial);
+  await draft.getByRole('button',{name:'공통기억으로 돌아가기',exact:true}).click();await panel.getByRole('button',{name:'공통기억 관리',exact:true}).click();await panel.getByRole('heading',{name:'셀프트레이닝 관리·수정',exact:true}).waitFor();
+  await fetch(fixture.url+'/fixture/propose',{method:'POST'});await panel.getByRole('button',{name:'진행 내용 확인',exact:true}).click();await panel.getByText('공유 검증 규칙 · 검토 후보',{exact:true}).waitFor();
+  assert.equal(await panel.getByRole('button',{name:'검토 후 확정',exact:true}).count(),1);await panel.getByRole('button',{name:'검토 후 확정',exact:true}).click();await panel.getByText('공유 검증 규칙 · 확정',{exact:true}).waitFor();
+  const noOps=await browser.newPage({viewport:{width:390,height:844}});await noOps.route('**/*',r=>new URL(r.request().url()).origin===fixture.url?r.continue():r.abort());await noOps.goto(fixture.url+'/?no-ops=1');const disconnected=noOps.getByTestId('common-memory-panel');await disconnected.getByRole('button',{name:'공통기억 관리',exact:true}).click();await disconnected.getByText(/AI 정리에는 OPS 대화 연결이 필요/).waitFor();assert.equal(await disconnected.getByRole('button',{name:'AI로 공통기억 추천받기',exact:true}).isDisabled(),true);assert.equal(await disconnected.getByLabel('공통기억 작업 워크룸',{exact:true}).count(),0);await noOps.close();
+  const final=(await (await fetch(fixture.url+'/fixture/stats')).json()).groups;assert.equal(final.length,1);assert.equal(final[0].state.portableKnowledge.current.entries[0].state,'active');assert.equal(final[0].state.sourceMemoryIds.length,0);assert.equal(final[0].state.portableKnowledge.current.members.length,2);
+  assert.equal(await panel.getByText(/아직 게시한 기억이 없습니다/).isVisible(),false,'Accepted shared items must not look unpublished');assert.equal(await panel.getByText(/독립 ID/).isVisible(),false,'Technical identity and backup controls are advanced');
+  await page.screenshot({path:`/tmp/common-memory-personas-${engineName}.png`,fullPage:true});assert.deepEqual(errors,[]);report.push({engine:engineName,personas:['newcomer-name-and-shared-projects-only','curator-independent-scope-and-human-review','returning-user-same-topic-OPS-draft-and-latest-candidates','MCP-candidate-visible-without-automatic-acceptance'],errors:0});
+ }finally{await browser.close();fixture.stop();}
+}
+console.log(JSON.stringify({fixture:true,physicalDevice:false,report},null,2));

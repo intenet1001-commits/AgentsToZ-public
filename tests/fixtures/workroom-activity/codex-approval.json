@@ -1,0 +1,2063 @@
+{
+ "schema": "workroom-activity-calibration/v1",
+ "cli": "codex",
+ "version": "codex-cli 0.162.1",
+ "scenario": "approval",
+ "recordedOn": "2026-10-16",
+ "host": "AiTerminalService in-process (real PTY + host headless screen), macOS arm64",
+ "terminal": {
+  "cols": 100,
+  "rows": 30
+ },
+ "isolation": "isolated HOME + config dir, dummy API key, local fake model server, HTTPS_PROXY to a dead port; no account",
+ "argv": [
+  "<CODEX_BIN>",
+  "-c",
+  "tui.status_line=[\"context-remaining\"]"
+ ],
+ "timeUnit": "ms since the start request",
+ "phases": [
+  {
+   "name": "idle-before-submit",
+   "kind": "idle",
+   "start": 3092,
+   "end": 6093,
+   "durationMs": 3001,
+   "output": {
+    "events": 0,
+    "maxGapMs": 3001,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 3001,
+    "trailingGapMs": 3001
+   },
+   "screenContent": {
+    "events": 0,
+    "maxGapMs": 3001,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 3001,
+    "trailingGapMs": 3001
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 3001,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 3001,
+    "trailingGapMs": 3001,
+    "stateAtStart": "plain",
+    "statesSeen": {},
+    "stateAtEnd": "plain"
+   },
+   "samples": 0,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "turn-before-prompt",
+   "kind": "working",
+   "start": 6093,
+   "end": 8303,
+   "durationMs": 2210,
+   "output": {
+    "events": 100,
+    "maxGapMs": 119,
+    "medianGapMs": 1,
+    "p90GapMs": 58,
+    "p99GapMs": 119,
+    "leadingGapMs": 1,
+    "trailingGapMs": 78
+   },
+   "screenContent": {
+    "events": 7,
+    "maxGapMs": 924,
+    "medianGapMs": 205,
+    "p90GapMs": 924,
+    "p99GapMs": 924,
+    "leadingGapMs": 60,
+    "trailingGapMs": 305
+   },
+   "title": {
+    "updates": 21,
+    "events": 21,
+    "maxGapMs": 239,
+    "medianGapMs": 101,
+    "p90GapMs": 150,
+    "p99GapMs": 183,
+    "leadingGapMs": 239,
+    "trailingGapMs": 79,
+    "stateAtStart": "plain",
+    "statesSeen": {
+     "spinner": 20,
+     "action-required": 1
+    },
+    "stateAtEnd": "action-required"
+   },
+   "samples": 7,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 1
+  },
+  {
+   "name": "approval-prompt-waiting",
+   "kind": "prompt",
+   "start": 8303,
+   "end": 28369,
+   "durationMs": 20066,
+   "output": {
+    "events": 34,
+    "maxGapMs": 1003,
+    "medianGapMs": 1001,
+    "p90GapMs": 1003,
+    "p99GapMs": 1003,
+    "leadingGapMs": 24,
+    "trailingGapMs": 708
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 20066,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 0,
+    "trailingGapMs": 20066
+   },
+   "title": {
+    "updates": 33,
+    "events": 33,
+    "maxGapMs": 1004,
+    "medianGapMs": 1001,
+    "p90GapMs": 1003,
+    "p99GapMs": 1004,
+    "leadingGapMs": 24,
+    "trailingGapMs": 708,
+    "stateAtStart": "action-required",
+    "statesSeen": {
+     "action-required": 33
+    },
+    "stateAtEnd": "action-required"
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 1,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "after-approval",
+   "kind": "working",
+   "start": 28369,
+   "end": 29838,
+   "durationMs": 1469,
+   "output": {
+    "events": 54,
+    "maxGapMs": 103,
+    "medianGapMs": 34,
+    "p90GapMs": 95,
+    "p99GapMs": 103,
+    "leadingGapMs": 2,
+    "trailingGapMs": 5
+   },
+   "screenContent": {
+    "events": 6,
+    "maxGapMs": 715,
+    "medianGapMs": 204,
+    "p90GapMs": 715,
+    "p99GapMs": 715,
+    "leadingGapMs": 11,
+    "trailingGapMs": 130
+   },
+   "title": {
+    "updates": 17,
+    "events": 17,
+    "maxGapMs": 124,
+    "medianGapMs": 102,
+    "p90GapMs": 114,
+    "p99GapMs": 124,
+    "leadingGapMs": 2,
+    "trailingGapMs": 5,
+    "stateAtStart": "action-required",
+    "statesSeen": {
+     "spinner": 16,
+     "plain": 1
+    },
+    "stateAtEnd": "plain"
+   },
+   "samples": 6,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 3
+  },
+  {
+   "name": "whole-turn",
+   "kind": "working",
+   "start": 6093,
+   "end": 29838,
+   "durationMs": 23745,
+   "output": {
+    "events": 188,
+    "maxGapMs": 1003,
+    "medianGapMs": 33,
+    "p90GapMs": 710,
+    "p99GapMs": 1003,
+    "leadingGapMs": 1,
+    "trailingGapMs": 5
+   },
+   "screenContent": {
+    "events": 14,
+    "maxGapMs": 20077,
+    "medianGapMs": 205,
+    "p90GapMs": 924,
+    "p99GapMs": 20077,
+    "leadingGapMs": 60,
+    "trailingGapMs": 130
+   },
+   "title": {
+    "updates": 71,
+    "events": 71,
+    "maxGapMs": 1004,
+    "medianGapMs": 102,
+    "p90GapMs": 1002,
+    "p99GapMs": 1004,
+    "leadingGapMs": 239,
+    "trailingGapMs": 5,
+    "stateAtStart": "plain",
+    "statesSeen": {
+     "spinner": 36,
+     "action-required": 34,
+     "plain": 1
+    },
+    "stateAtEnd": "plain"
+   },
+   "samples": 14,
+   "awaitsAnswerSamples": 1,
+   "escToInterruptSamples": 4
+  },
+  {
+   "name": "idle-after-turn",
+   "kind": "idle",
+   "start": 29838,
+   "end": 49986,
+   "durationMs": 20148,
+   "output": {
+    "events": 1,
+    "maxGapMs": 20148,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 0,
+    "trailingGapMs": 20148
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 20073,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 75,
+    "trailingGapMs": 20073
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 20148,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20148,
+    "trailingGapMs": 20148,
+    "stateAtStart": "plain",
+    "statesSeen": {},
+    "stateAtEnd": "plain"
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  }
+ ],
+ "actions": [
+  {
+   "t": 2,
+   "action": "start"
+  },
+  {
+   "t": 6092,
+   "action": "condition",
+   "note": "ready (composer + 3 s quiet, >= 6 s after start)"
+  },
+  {
+   "t": 6092,
+   "action": "condition",
+   "note": "ready after prompt"
+  },
+  {
+   "t": 6093,
+   "action": "input",
+   "data": "CALIB_APPROVE create a file\r",
+   "note": "submit"
+  },
+  {
+   "t": 8267,
+   "action": "condition",
+   "note": "model step 0 done"
+  },
+  {
+   "t": 8369,
+   "action": "condition",
+   "note": "approval prompt on screen"
+  },
+  {
+   "t": 8369,
+   "action": "observe",
+   "note": "holding the approval prompt 20 s"
+  },
+  {
+   "t": 28369,
+   "action": "input",
+   "data": "\r",
+   "note": "approve (Enter = highlighted Yes)"
+  },
+  {
+   "t": 28370,
+   "action": "condition",
+   "note": "model step 1 done"
+  },
+  {
+   "t": 29986,
+   "action": "condition",
+   "note": "turn ended in transcript"
+  },
+  {
+   "t": 29986,
+   "action": "observe",
+   "note": "idle after turn 20 s"
+  },
+  {
+   "t": 49986,
+   "action": "close"
+  }
+ ],
+ "model": [
+  {
+   "t": 6377,
+   "kind": "request",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 6406,
+   "kind": "request",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 7178,
+   "kind": "first-byte",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 7207,
+   "kind": "first-byte",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 8186,
+   "kind": "done",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 8209,
+   "kind": "done",
+   "scenario": "APPROVE",
+   "step": 0
+  },
+  {
+   "t": 8213,
+   "kind": "request",
+   "scenario": "APPROVE",
+   "step": 1
+  },
+  {
+   "t": 9015,
+   "kind": "first-byte",
+   "scenario": "APPROVE",
+   "step": 1
+  },
+  {
+   "t": 9618,
+   "kind": "done",
+   "scenario": "APPROVE",
+   "step": 1
+  },
+  {
+   "t": 28421,
+   "kind": "request",
+   "scenario": "APPROVE",
+   "step": 1
+  },
+  {
+   "t": 29222,
+   "kind": "first-byte",
+   "scenario": "APPROVE",
+   "step": 1
+  },
+  {
+   "t": 29825,
+   "kind": "done",
+   "scenario": "APPROVE",
+   "step": 1
+  }
+ ],
+ "output": [
+  [
+   33,
+   8
+  ],
+  [
+   33,
+   47
+  ],
+  [
+   284,
+   80
+  ],
+  [
+   284,
+   9
+  ],
+  [
+   286,
+   14
+  ],
+  [
+   286,
+   1024
+  ],
+  [
+   287,
+   734
+  ],
+  [
+   289,
+   43
+  ],
+  [
+   290,
+   43
+  ],
+  [
+   294,
+   43
+  ],
+  [
+   295,
+   43
+  ],
+  [
+   299,
+   68
+  ],
+  [
+   301,
+   43
+  ],
+  [
+   303,
+   43
+  ],
+  [
+   305,
+   43
+  ],
+  [
+   339,
+   43
+  ],
+  [
+   341,
+   43
+  ],
+  [
+   378,
+   43
+  ],
+  [
+   381,
+   43
+  ],
+  [
+   383,
+   43
+  ],
+  [
+   385,
+   43
+  ],
+  [
+   386,
+   43
+  ],
+  [
+   390,
+   43
+  ],
+  [
+   391,
+   43
+  ],
+  [
+   396,
+   43
+  ],
+  [
+   399,
+   43
+  ],
+  [
+   401,
+   12
+  ],
+  [
+   402,
+   532
+  ],
+  [
+   411,
+   43
+  ],
+  [
+   435,
+   16
+  ],
+  [
+   435,
+   12
+  ],
+  [
+   439,
+   43
+  ],
+  [
+   445,
+   43
+  ],
+  [
+   6094,
+   43
+  ],
+  [
+   6095,
+   75
+  ],
+  [
+   6095,
+   8
+  ],
+  [
+   6095,
+   35
+  ],
+  [
+   6095,
+   8
+  ],
+  [
+   6095,
+   43
+  ],
+  [
+   6095,
+   43
+  ],
+  [
+   6095,
+   43
+  ],
+  [
+   6096,
+   43
+  ],
+  [
+   6096,
+   43
+  ],
+  [
+   6096,
+   43
+  ],
+  [
+   6096,
+   43
+  ],
+  [
+   6096,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6097,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6098,
+   43
+  ],
+  [
+   6099,
+   43
+  ],
+  [
+   6099,
+   43
+  ],
+  [
+   6099,
+   43
+  ],
+  [
+   6127,
+   84
+  ],
+  [
+   6246,
+   44
+  ],
+  [
+   6250,
+   144
+  ],
+  [
+   6250,
+   8
+  ],
+  [
+   6251,
+   108
+  ],
+  [
+   6251,
+   14
+  ],
+  [
+   6272,
+   43
+  ],
+  [
+   6272,
+   43
+  ],
+  [
+   6282,
+   79
+  ],
+  [
+   6282,
+   14
+  ],
+  [
+   6332,
+   16
+  ],
+  [
+   6334,
+   14
+  ],
+  [
+   6334,
+   161
+  ],
+  [
+   6362,
+   22
+  ],
+  [
+   6363,
+   43
+  ],
+  [
+   6397,
+   43
+  ],
+  [
+   6430,
+   22
+  ],
+  [
+   6430,
+   35
+  ],
+  [
+   6430,
+   8
+  ],
+  [
+   6464,
+   43
+  ],
+  [
+   6497,
+   43
+  ],
+  [
+   6532,
+   22
+  ],
+  [
+   6532,
+   43
+  ],
+  [
+   6568,
+   43
+  ],
+  [
+   6603,
+   22
+  ],
+  [
+   6603,
+   43
+  ],
+  [
+   6636,
+   43
+  ],
+  [
+   6671,
+   43
+  ],
+  [
+   6706,
+   22
+  ],
+  [
+   6706,
+   35
+  ],
+  [
+   6706,
+   8
+  ],
+  [
+   6742,
+   43
+  ],
+  [
+   6776,
+   43
+  ],
+  [
+   6809,
+   22
+  ],
+  [
+   6809,
+   35
+  ],
+  [
+   6809,
+   8
+  ],
+  [
+   6843,
+   43
+  ],
+  [
+   6876,
+   43
+  ],
+  [
+   6911,
+   22
+  ],
+  [
+   6911,
+   85
+  ],
+  [
+   6945,
+   43
+  ],
+  [
+   6979,
+   43
+  ],
+  [
+   7012,
+   22
+  ],
+  [
+   7012,
+   77
+  ],
+  [
+   7012,
+   8
+  ],
+  [
+   7047,
+   43
+  ],
+  [
+   7082,
+   43
+  ],
+  [
+   7117,
+   22
+  ],
+  [
+   7117,
+   85
+  ],
+  [
+   7151,
+   43
+  ],
+  [
+   7188,
+   106
+  ],
+  [
+   7197,
+   43
+  ],
+  [
+   7300,
+   22
+  ],
+  [
+   7401,
+   22
+  ],
+  [
+   7432,
+   61
+  ],
+  [
+   7533,
+   22
+  ],
+  [
+   7637,
+   22
+  ],
+  [
+   7684,
+   74
+  ],
+  [
+   7787,
+   22
+  ],
+  [
+   7888,
+   22
+  ],
+  [
+   7935,
+   22
+  ],
+  [
+   7935,
+   59
+  ],
+  [
+   8036,
+   22
+  ],
+  [
+   8137,
+   22
+  ],
+  [
+   8195,
+   43
+  ],
+  [
+   8215,
+   22
+  ],
+  [
+   8224,
+   42
+  ],
+  [
+   8225,
+   14
+  ],
+  [
+   8225,
+   1025
+  ],
+  [
+   8225,
+   8
+  ],
+  [
+   8225,
+   30
+  ],
+  [
+   8327,
+   42
+  ],
+  [
+   8429,
+   42
+  ],
+  [
+   8531,
+   42
+  ],
+  [
+   8635,
+   42
+  ],
+  [
+   8736,
+   42
+  ],
+  [
+   8838,
+   42
+  ],
+  [
+   8939,
+   42
+  ],
+  [
+   9042,
+   42
+  ],
+  [
+   9145,
+   42
+  ],
+  [
+   9247,
+   42
+  ],
+  [
+   9349,
+   42
+  ],
+  [
+   9452,
+   42
+  ],
+  [
+   9554,
+   42
+  ],
+  [
+   9619,
+   42
+  ],
+  [
+   9623,
+   36
+  ],
+  [
+   9625,
+   30
+  ],
+  [
+   10627,
+   36
+  ],
+  [
+   11629,
+   36
+  ],
+  [
+   12630,
+   36
+  ],
+  [
+   13632,
+   36
+  ],
+  [
+   14634,
+   36
+  ],
+  [
+   15637,
+   36
+  ],
+  [
+   16640,
+   36
+  ],
+  [
+   17643,
+   36
+  ],
+  [
+   18645,
+   36
+  ],
+  [
+   19647,
+   36
+  ],
+  [
+   20648,
+   36
+  ],
+  [
+   21650,
+   36
+  ],
+  [
+   22652,
+   36
+  ],
+  [
+   23655,
+   36
+  ],
+  [
+   24656,
+   36
+  ],
+  [
+   25658,
+   36
+  ],
+  [
+   26659,
+   36
+  ],
+  [
+   27661,
+   36
+  ],
+  [
+   28371,
+   16
+  ],
+  [
+   28371,
+   849
+  ],
+  [
+   28371,
+   8
+  ],
+  [
+   28406,
+   16
+  ],
+  [
+   28406,
+   43
+  ],
+  [
+   28416,
+   220
+  ],
+  [
+   28416,
+   8
+  ],
+  [
+   28425,
+   43
+  ],
+  [
+   28459,
+   43
+  ],
+  [
+   28495,
+   62
+  ],
+  [
+   28530,
+   16
+  ],
+  [
+   28530,
+   43
+  ],
+  [
+   28564,
+   43
+  ],
+  [
+   28598,
+   43
+  ],
+  [
+   28632,
+   16
+  ],
+  [
+   28632,
+   43
+  ],
+  [
+   28667,
+   43
+  ],
+  [
+   28702,
+   16
+  ],
+  [
+   28702,
+   43
+  ],
+  [
+   28736,
+   43
+  ],
+  [
+   28770,
+   43
+  ],
+  [
+   28804,
+   16
+  ],
+  [
+   28804,
+   43
+  ],
+  [
+   28838,
+   43
+  ],
+  [
+   28872,
+   43
+  ],
+  [
+   28906,
+   16
+  ],
+  [
+   28906,
+   77
+  ],
+  [
+   28906,
+   8
+  ],
+  [
+   28941,
+   43
+  ],
+  [
+   28974,
+   43
+  ],
+  [
+   29008,
+   16
+  ],
+  [
+   29008,
+   77
+  ],
+  [
+   29008,
+   8
+  ],
+  [
+   29043,
+   43
+  ],
+  [
+   29078,
+   43
+  ],
+  [
+   29114,
+   16
+  ],
+  [
+   29114,
+   85
+  ],
+  [
+   29148,
+   43
+  ],
+  [
+   29181,
+   43
+  ],
+  [
+   29215,
+   16
+  ],
+  [
+   29215,
+   77
+  ],
+  [
+   29216,
+   8
+  ],
+  [
+   29226,
+   103
+  ],
+  [
+   29226,
+   8
+  ],
+  [
+   29329,
+   16
+  ],
+  [
+   29424,
+   16
+  ],
+  [
+   29424,
+   72
+  ],
+  [
+   29526,
+   16
+  ],
+  [
+   29625,
+   16
+  ],
+  [
+   29625,
+   65
+  ],
+  [
+   29726,
+   16
+  ],
+  [
+   29826,
+   16
+  ],
+  [
+   29829,
+   43
+  ],
+  [
+   29833,
+   12
+  ],
+  [
+   29838,
+   162
+  ]
+ ],
+ "titles": [
+  [
+   401,
+   "project"
+  ],
+  [
+   435,
+   "⠋ project"
+  ],
+  [
+   435,
+   "project"
+  ],
+  [
+   6332,
+   "⠏ project"
+  ],
+  [
+   6362,
+   "⠏ ⠏ | project"
+  ],
+  [
+   6430,
+   "⠋ ⠋ | project"
+  ],
+  [
+   6532,
+   "⠙ ⠙ | project"
+  ],
+  [
+   6603,
+   "⠹ ⠹ | project"
+  ],
+  [
+   6706,
+   "⠸ ⠸ | project"
+  ],
+  [
+   6809,
+   "⠼ ⠼ | project"
+  ],
+  [
+   6911,
+   "⠴ ⠴ | project"
+  ],
+  [
+   7012,
+   "⠦ ⠦ | project"
+  ],
+  [
+   7117,
+   "⠧ ⠧ | project"
+  ],
+  [
+   7300,
+   "⠇ ⠇ | project"
+  ],
+  [
+   7401,
+   "⠋ ⠋ | project"
+  ],
+  [
+   7533,
+   "⠙ ⠙ | project"
+  ],
+  [
+   7637,
+   "⠹ ⠹ | project"
+  ],
+  [
+   7787,
+   "⠸ ⠸ | project"
+  ],
+  [
+   7888,
+   "⠼ ⠼ | project"
+  ],
+  [
+   7935,
+   "⠴ ⠴ | project"
+  ],
+  [
+   8036,
+   "⠦ ⠦ | project"
+  ],
+  [
+   8137,
+   "⠧ ⠧ | project"
+  ],
+  [
+   8215,
+   "⠇ ⠇ | project"
+  ],
+  [
+   8224,
+   "[ . ] Action Required | ⠇ | project"
+  ],
+  [
+   8327,
+   "[ . ] Action Required | ⠏ | project"
+  ],
+  [
+   8429,
+   "[ ! ] Action Required | ⠋ | project"
+  ],
+  [
+   8531,
+   "[ ! ] Action Required | ⠙ | project"
+  ],
+  [
+   8635,
+   "[ ! ] Action Required | ⠹ | project"
+  ],
+  [
+   8736,
+   "[ ! ] Action Required | ⠸ | project"
+  ],
+  [
+   8838,
+   "[ ! ] Action Required | ⠼ | project"
+  ],
+  [
+   8939,
+   "[ ! ] Action Required | ⠴ | project"
+  ],
+  [
+   9042,
+   "[ ! ] Action Required | ⠦ | project"
+  ],
+  [
+   9145,
+   "[ ! ] Action Required | ⠧ | project"
+  ],
+  [
+   9247,
+   "[ ! ] Action Required | ⠇ | project"
+  ],
+  [
+   9349,
+   "[ ! ] Action Required | ⠏ | project"
+  ],
+  [
+   9452,
+   "[ . ] Action Required | ⠋ | project"
+  ],
+  [
+   9554,
+   "[ . ] Action Required | ⠙ | project"
+  ],
+  [
+   9619,
+   "[ . ] Action Required | ⠹ | project"
+  ],
+  [
+   9623,
+   "[ . ] Action Required | project"
+  ],
+  [
+   10627,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   11629,
+   "[ . ] Action Required | project"
+  ],
+  [
+   12630,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   13632,
+   "[ . ] Action Required | project"
+  ],
+  [
+   14634,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   15637,
+   "[ . ] Action Required | project"
+  ],
+  [
+   16640,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   17643,
+   "[ . ] Action Required | project"
+  ],
+  [
+   18645,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   19647,
+   "[ . ] Action Required | project"
+  ],
+  [
+   20648,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   21650,
+   "[ . ] Action Required | project"
+  ],
+  [
+   22652,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   23655,
+   "[ . ] Action Required | project"
+  ],
+  [
+   24656,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   25658,
+   "[ . ] Action Required | project"
+  ],
+  [
+   26659,
+   "[ ! ] Action Required | project"
+  ],
+  [
+   27661,
+   "[ . ] Action Required | project"
+  ],
+  [
+   28371,
+   "⠏ project"
+  ],
+  [
+   28406,
+   "⠋ project"
+  ],
+  [
+   28530,
+   "⠙ project"
+  ],
+  [
+   28632,
+   "⠹ project"
+  ],
+  [
+   28702,
+   "⠸ project"
+  ],
+  [
+   28804,
+   "⠼ project"
+  ],
+  [
+   28906,
+   "⠴ project"
+  ],
+  [
+   29008,
+   "⠦ project"
+  ],
+  [
+   29114,
+   "⠧ project"
+  ],
+  [
+   29215,
+   "⠇ project"
+  ],
+  [
+   29329,
+   "⠏ project"
+  ],
+  [
+   29424,
+   "⠋ project"
+  ],
+  [
+   29526,
+   "⠙ project"
+  ],
+  [
+   29625,
+   "⠹ project"
+  ],
+  [
+   29726,
+   "⠸ project"
+  ],
+  [
+   29826,
+   "⠼ project"
+  ],
+  [
+   29833,
+   "project"
+  ]
+ ],
+ "screens": [
+  {
+   "t": 23,
+   "hash": "a0bdb7e71846",
+   "cursor": [
+    0,
+    0
+   ],
+   "alternate": false,
+   "awaitsAnswer": false,
+   "rows": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "t": 329,
+   "hash": "89eb42d8afa3",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "0": " ",
+    "1": "  >_ OpenAI Codex (v0.162.1)",
+    "2": "     ~/project",
+    "6": "                                             ⣀⣤⣤⣤⣀⣀",
+    "7": "                                          ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀",
+    "8": "                                        ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄",
+    "9": "                                       ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧",
+    "10": "                                    ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇",
+    "11": "                                   ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷",
+    "12": "                                  ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀",
+    "13": "                                  ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄",
+    "14": "                                  ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿",
+    "15": "                                  ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇",
+    "16": "                                    ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿",
+    "17": "                                    ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃",
+    "18": "                                    ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁",
+    "19": "                                     ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁",
+    "20": "                                      ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟",
+    "21": "                                         ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏",
+    "22": "                                                ⠈⠙⠛⠿⠿⠿⠿⠛⠉",
+    "26": "› Ask Codex to do anything",
+    "29": "  ? for shortcuts"
+   }
+  },
+  {
+   "t": 431,
+   "hash": "c891efb26555",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "6": "",
+    "7": "",
+    "8": "",
+    "9": "",
+    "10": "",
+    "11": "",
+    "12": "",
+    "13": "",
+    "14": "",
+    "15": "",
+    "16": "",
+    "17": "",
+    "18": "",
+    "19": "",
+    "20": "",
+    "21": "",
+    "22": "",
+    "28": "  Context 100% left",
+    "29": "  ? for shortcuts                                                          ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 6153,
+   "hash": "8a871a841066",
+   "cursor": [
+    26,
+    29
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "26": "› CALIB_APPROVE create a file",
+    "29": "                                                                           ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 6255,
+   "hash": "803c95e78c97",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "5": "› CALIB_APPROVE create a file",
+    "26": "› Ask Codex to do anything",
+    "29": "  ? for shortcuts                                                          ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 6358,
+   "hash": "05ca00110ba6",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "23": "• Working (0s • esc to interrupt)",
+    "29": "  ? for shortcuts                                                         ⚠ 2 warnings · f2 to view"
+   }
+  },
+  {
+   "t": 7282,
+   "hash": "c23bacfb7051",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• I will",
+    "23": " "
+   }
+  },
+  {
+   "t": 7486,
+   "hash": "d166a7e32ab2",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• I will creat"
+   }
+  },
+  {
+   "t": 7691,
+   "hash": "8444045f9d00",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• I will create a fi"
+   }
+  },
+  {
+   "t": 7998,
+   "hash": "6add0da8092d",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• I will create a file."
+   }
+  },
+  {
+   "t": 8303,
+   "hash": "573e39d8d782",
+   "cursor": [
+    29,
+    100
+   ],
+   "alternate": true,
+   "awaitsAnswer": true,
+   "rows": {
+    "10": "• Running touch approved-calib.txt",
+    "16": "  Would you like to run the following command?",
+    "18": "  Environment: local",
+    "20": "  Reason: Create the calibration file outside the sandbox",
+    "22": "  $ touch approved-calib.txt",
+    "25": "› 1. Yes, proceed (y)                                                                               ",
+    "26": "  2. Yes, and don't ask again for commands that start with `touch approved-calib.txt` (p)",
+    "27": "  3. No, and tell Codex what to do differently (esc)",
+    "28": "",
+    "29": "  Press enter to confirm or esc to cancel                                                           "
+   }
+  },
+  {
+   "t": 28380,
+   "hash": "7d8c53306472",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "10": "✔ You approved codex to run touch approved-calib.txt this time",
+    "12": "• Running touch approved-calib.txt",
+    "16": "",
+    "18": "",
+    "20": "",
+    "22": "",
+    "23": "• Working (1s • esc to interrupt)",
+    "25": " ",
+    "26": "› Ask Codex to do anything",
+    "27": "",
+    "28": "  Context 100% left",
+    "29": "  ? for shortcuts                                                         ⚠ 2 warnings · f2 to view"
+   }
+  },
+  {
+   "t": 28483,
+   "hash": "af7775511a22",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "12": "• Ran touch approved-calib.txt",
+    "13": "  └ (no output)"
+   }
+  },
+  {
+   "t": 28584,
+   "hash": "38607686ae59",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "23": "• Working (2s • esc to interrupt)"
+   }
+  },
+  {
+   "t": 29299,
+   "hash": "569a4eda1d7c",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "15": "• Done: the",
+    "23": " "
+   }
+  },
+  {
+   "t": 29504,
+   "hash": "9b9d3983ce14",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "15": "• Done: the file was"
+   }
+  },
+  {
+   "t": 29708,
+   "hash": "05683d6fe817",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "15": "• Done: the file was created."
+   }
+  },
+  {
+   "t": 29913,
+   "hash": "f43d34a4ecfd",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "17": "  Worked for 23s • 8:58 AM                                                                          "
+   }
+  }
+ ],
+ "transcript": [
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6304,
+   "type": "session_meta",
+   "subtype": null
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6305,
+   "type": "event_msg",
+   "subtype": "task_started"
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6347,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6347,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6349,
+   "type": "world_state",
+   "subtype": null
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6350,
+   "type": "turn_context",
+   "subtype": null
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6358,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 6359,
+   "writtenAtApprox": 6359,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 8202,
+   "writtenAtApprox": 8192,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 8202,
+   "writtenAtApprox": 8194,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 8202,
+   "writtenAtApprox": 8195,
+   "type": "response_item",
+   "subtype": "function_call",
+   "name": "exec_command"
+  },
+  {
+   "seenAt": 8202,
+   "writtenAtApprox": 8196,
+   "type": "token_usage_record",
+   "subtype": null
+  },
+  {
+   "seenAt": 28483,
+   "writtenAtApprox": 28413,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 28483,
+   "writtenAtApprox": 28417,
+   "type": "response_item",
+   "subtype": "function_call_output"
+  },
+  {
+   "seenAt": 28483,
+   "writtenAtApprox": 28417,
+   "type": "event_msg",
+   "subtype": "token_count"
+  },
+  {
+   "seenAt": 29913,
+   "writtenAtApprox": 29828,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 29913,
+   "writtenAtApprox": 29829,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 29913,
+   "writtenAtApprox": 29829,
+   "type": "token_usage_record",
+   "subtype": null
+  },
+  {
+   "seenAt": 29913,
+   "writtenAtApprox": 29831,
+   "type": "event_msg",
+   "subtype": "token_count"
+  },
+  {
+   "seenAt": 29913,
+   "writtenAtApprox": 29833,
+   "type": "event_msg",
+   "subtype": "task_complete"
+  }
+ ],
+ "keychain": {
+  "shimRequests": [],
+  "securityChildProcesses": 0,
+  "psPolls": 787,
+  "securityFrameworkLogLines": 0
+ }
+}

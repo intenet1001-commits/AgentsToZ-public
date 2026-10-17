@@ -1,0 +1,41 @@
+* text=auto
+
+# Keep files launched directly by the native Windows shell in its conventional form.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+
+# Migrations are compared byte-for-byte against the TypeScript constants that
+# are their canon (src/schemaSql.ts and friends), and those constants use LF.
+# Under plain `text=auto` a Windows checkout rewrote these to CRLF, so every
+# such contract test failed there on line endings alone -- measured: the file
+# and the constant differed only by 173 CR bytes, and normalising made them
+# equal. 23 test files compare SQL this way.
+*.sql text eol=lf
+
+# The contract tests slice Rust source between `\n`-anchored markers to check
+# that a specific function still carries a specific guard. A CRLF checkout makes
+# every such marker miss, the slice comes back empty, and the test reports a
+# missing guard that is actually present -- which on Windows hit the very tests
+# that exist to protect the Windows launch path. Rust tooling is LF throughout
+# (rustfmt emits LF), so nothing else is affected.
+*.rs text eol=lf
+
+# Workflow files are read by GitHub's Linux runners and are matched here with
+# `\n`-anchored patterns (`/^on:\n.../m`). A CRLF checkout breaks the match, so
+# the Windows release-workflow contract could not be checked on Windows.
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# The same `\n`-anchored source slicing protects the TypeScript contracts, and
+# TS/TSX is where almost all of it lives: 88 test files slice `api-server.ts`,
+# `src/App.tsx` and friends between literal-newline markers to assert a guard is
+# still in place. Under plain `text=auto` a Windows checkout rewrote 1220 `.ts`
+# and 112 `.tsx` files to CRLF, every such marker missed, and the test reported a
+# missing guard that was present -- measured on api-server.ts, whose committed
+# blob is LF while the checkout was CRLF. Bun, tsc and Vite all emit and accept
+# LF, so nothing else is affected.
+*.ts text eol=lf
+*.tsx text eol=lf
+*.mjs text eol=lf

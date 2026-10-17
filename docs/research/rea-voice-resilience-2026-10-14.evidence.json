@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "projectBase": "d06c23934a450ebddb7b2636db8b97b2efe1b454",
+  "targetApp": {
+    "path": "/Applications/ChatGPT.app",
+    "version": "26.1007.30912",
+    "build": "20156",
+    "archiveSha256": "75e397e2280dde93b70a85aa926f4282c728eacc84dfeb15ba7fb6ddd84628af"
+  },
+  "rea": {
+    "cliVersion": "6.4.0",
+    "operation": "analyze_javascript_application",
+    "evidenceId": "ev_a0bd385fb5194e4fb24d2a3cc62e5cd3a92b4157acdb5d91aaee75076ac98c49",
+    "confidence": "derived",
+    "authority": "shipped-artifact",
+    "inputDigest": {
+      "sha256": "07748e91c4d122de4efb9bc7f26369bc4dfbb59bd0098f7d63e4ba95203b4fe6"
+    },
+    "rawEvidencePath": "/private/tmp/agentstoz-rea-voice-20261014-analysis.json",
+    "rawEvidenceSha256": "e89fbca1c09bb29a0d510dadd01c047f558668bb809c7ac6c78fdc89aaa98bab",
+    "statistics": {
+      "relevant_files": 7,
+      "nested_asar_containers": 0,
+      "text_bytes_read": 23155,
+      "invalid_utf8_files": 0,
+      "parsed_javascript_files": 5,
+      "visited_ast_nodes": 5970,
+      "findings": 169,
+      "modules": 0,
+      "parse_failures": 0
+    },
+    "graphCoverage": {
+      "status": "complete",
+      "truncated": false,
+      "omitted_count": 0,
+      "limits": []
+    },
+    "semanticCoverage": {
+      "status": "unknown",
+      "truncated": false,
+      "omitted_nodes": 0,
+      "omitted_relations": 0,
+      "limits": [],
+      "families": [
+        {
+          "family": "boundary",
+          "status": "partial",
+          "retained_relations": 1,
+          "omitted_relations": 0,
+          "unknownCount": 1
+        },
+        {
+          "family": "call-flow",
+          "status": "partial",
+          "retained_relations": 71,
+          "omitted_relations": 0,
+          "unknownCount": 367
+        },
+        {
+          "family": "child-process",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "closure",
+          "status": "partial",
+          "retained_relations": 354,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "configuration",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "data-flow",
+          "status": "partial",
+          "retained_relations": 3368,
+          "omitted_relations": 0,
+          "unknownCount": 411
+        },
+        {
+          "family": "event",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "object-flow",
+          "status": "partial",
+          "retained_relations": 289,
+          "omitted_relations": 0,
+          "unknownCount": 504
+        },
+        {
+          "family": "promise-ownership",
+          "status": "partial",
+          "retained_relations": 22,
+          "omitted_relations": 0,
+          "unknownCount": 17
+        },
+        {
+          "family": "request",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "resource-lifecycle",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        },
+        {
+          "family": "timer",
+          "status": "partial",
+          "retained_relations": 0,
+          "omitted_relations": 0,
+          "unknownCount": 0
+        }
+      ]
+    },
+    "limitations": [
+      "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+      "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+      "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+      "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+      "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code."
+    ],
+    "semanticUnknownCount": 1300
+  },
+  "sources": [
+    {
+      "path": "webview/assets/realtime-buffered-audio-worklet-550138dc2d39.js",
+      "size": 3395,
+      "sha256": "ee20261671ac82809a95785a5fc13aff726d42a95c987d2b9ad6c617efb39a61",
+      "declaredHashMatches": true
+    },
+    {
+      "path": "webview/assets/realtime-voice-codex-status-signal-23cf72836e83.js",
+      "size": 4337,
+      "sha256": "faa1a32b259d3b7eab3f674b45ce5226b0f2d6087b11bcf65ecd93db439a1a55",
+      "declaredHashMatches": true
+    },
+    {
+      "path": "webview/assets/realtime-voice-handoff-target-6266ca333a0d.js",
+      "size": 2640,
+      "sha256": "5af7a8afcae0fe4c5fe68d23ef9696b82e652ae99d3bef7179699157b0b4103b",
+      "declaredHashMatches": true
+    },
+    {
+      "path": "webview/assets/voice-prewarm-c23d561cad2a.js",
+      "size": 3962,
+      "sha256": "4dba39b9ce7f187edbb178f12856cdd0d924fcf2f545dc2d412c9e735beb9f95",
+      "declaredHashMatches": true
+    },
+    {
+      "path": "webview/assets/voice-configuration-manager-747ace2eaedc.js",
+      "size": 7548,
+      "sha256": "e69ede43e1f76c11d7ba2e8b73e372c4dfae7d2a3317e8f319dddb0468237465",
+      "declaredHashMatches": true
+    }
+  ],
+  "publicRemoteSource": {
+    "repository": "openai/codex",
+    "commit": "7a08c5f6271e818d832eb9061dac935936e2b539",
+    "path": "codex-rs/app-server-transport/src/transport/remote_control/websocket.rs",
+    "sha256": "43b6cec814b594337594e6f25e0bc7dd77bb5688a392bc03145dbb78986c072d"
+  },
+  "notEstablished": [
+    "Competitor voice recognition accuracy or speech latency",
+    "Competitor runtime availability or hidden server implementation",
+    "Production iPhone/Internet relay throughput",
+    "Overall superiority to Codex",
+    "Complete REA graph outside the five selected modules"
+  ],
+  "observations": [
+    {
+      "source": "webview/assets/realtime-buffered-audio-worklet-550138dc2d39.js",
+      "finding": "Bounded ring storage buffers input before release, trims leading/trailing silence, clears on mute and reports phase. This is static code presence, not measured startup quality."
+    },
+    {
+      "source": "webview/assets/voice-prewarm-c23d561cad2a.js",
+      "finding": "Prewarm checks microphone eligibility and cancels stale work with abort signals after awaits. No prewarm was run."
+    },
+    {
+      "source": "webview/assets/realtime-voice-handoff-target-6266ca333a0d.js",
+      "finding": "Handoff sequence belongs to presentation/animation code. It is not evidence of execution host handoff."
+    }
+  ]
+}

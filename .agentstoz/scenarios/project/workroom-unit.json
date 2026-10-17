@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "project.workroom-unit",
+  "title": "워크룸 단위 검사 묶음",
+  "intent": "워크룸 승인 범위, 실행 옵션, 세션 상태, 닫기 전 저장, 터미널 보기 계약을 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "workroom",
+    "unit"
+  ],
+  "paths": [
+    "src/workroom*",
+    "src/Workroom*",
+    "src/*Workroom*",
+    "tests/workroom-*"
+  ],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 60
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "--cwd",
+        "tests",
+        "--max-concurrency=1",
+        "workroom-"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "workroom remote session regression",
+    "워크룸 저장"
+  ]
+}

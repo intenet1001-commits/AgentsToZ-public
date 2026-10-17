@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "1.7.3",
+  "instructionVersion": 2,
+  "minimumRunnerVersion": "1.7.3",
+  "managedRunnerHash": "31b3dadcae7fa777db5541df8352fb2e5f19ff8c65b48c6a79f99b3c47fc7b02",
+  "defaultProfile": "quick",
+  "scenarioPack": {
+    "version": "1.7.3",
+    "hashes": {
+      ".agentstoz/scenarios/common/conflict-markers.json": "a2669d990b24fd35e71614fd371c9bc73939ebbcb9da39f9678a75caa28f3b36",
+      ".agentstoz/scenarios/common/json-valid.json": "02a6144e4f420b6ae00dbbc5cc92ef185653924ce8a35d00b04f261514e535ab",
+      ".agentstoz/scenarios/common/python-syntax.json": "82cc4d6057d1b466c5ad0873d6d1a3d86b3eefb99a8c1bf66dd7673deb3fd1d1"
+    }
+  },
+  "personaPack": {
+    "version": "1.0.0",
+    "hashes": {
+      ".agentstoz/personas/common/first-time-user.json": "cbf739dbe934e8c9ad6a19e4eb9742b394e9bb2b8db9fa52aac162207b59e842",
+      ".agentstoz/personas/common/regular-user.json": "ba00ded44f8b64b2dbe56941f0b06fa218387d6c0510cc87a7fdebfcba4dabb7",
+      ".agentstoz/personas/common/returning-user.json": "bfeb75fd3b19c25960789c259f759980165d04477c790fb18d246592e6a9673d"
+    }
+  }
+}

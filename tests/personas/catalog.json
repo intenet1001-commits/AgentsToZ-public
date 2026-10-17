@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "personas": [
+    {
+      "id": "korean-searcher",
+      "goal": "초성·한영 키보드 실수로도 프로젝트를 찾는다",
+      "tests": [
+        "project-search.test.ts"
+      ]
+    },
+    {
+      "id": "remote-controller",
+      "goal": "휴대폰에서 허용 범위와 원격 동작을 이해하고 조작한다",
+      "tests": [
+        "internet-remote-workroom-approval.test.ts",
+        "remote-control-mobile-accessibility.test.ts",
+        "remote-control-relay-controller.test.ts",
+        {
+          "file": "control-accessibility-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "hands-free-operator",
+      "goal": "음성 대화 중 자막과 작업 상태를 잃지 않는다",
+      "tests": [
+        "voice-dock.test.ts",
+        "voice-workroom-read-bound.test.ts",
+        "voice-media-client.test.ts",
+        "gemini-pcm-client.test.ts",
+        "gemini-live-provider.test.ts",
+        "control-profile-store.test.ts",
+        "control-profile-snapshot.test.ts",
+        {
+          "argv": [
+            "bun",
+            "scripts/check-voice-dock.ts"
+          ],
+          "kind": "screen",
+          "name": "voice-dock-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    },
+    {
+      "id": "multi-session-maker",
+      "goal": "여러 작업을 별도 창으로 열고 다시 찾는다",
+      "extends": "regular-user",
+      "situation": "여러 프로젝트에서 진행 중인 워크룸 작업을 반복해서 확인한다",
+      "journey": ["진행 중인 워크룸을 찾는다", "별도 창에서 작업을 이어간다", "다른 작업으로 전환하고 원래 세션을 다시 찾는다"],
+      "successCriteria": ["전환 뒤에도 원래 대화와 작업 상태를 유지한다", "서로 다른 프로젝트의 작업을 구분한다"],
+      "tests": [
+        "workroom-popout.test.ts",
+        "workroom-session-status.test.ts",
+        {
+          "argv": [
+            "bun",
+            "tests/personas/workroom-popout-screen.mjs"
+          ],
+          "kind": "screen",
+          "name": "workroom-popout-rendered-screen",
+          "timeoutSeconds": 300
+        },
+        "common-memory-projects.test.ts",
+        {
+          "file": "common-memory-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "first-time-user",
+      "goal": "처음 연결할 때 선택과 실패 원인을 이해한다",
+      "extends": "first-time-user",
+      "situation": "새 Mac에서 처음 연결하고 첫 프로젝트와 기억을 준비하려고 한다",
+      "journey": ["첫 연결 화면을 연다", "필요한 설정과 프로젝트를 선택한다", "준비 결과와 실패 시 다음 행동을 확인한다"],
+      "successCriteria": ["설정 선택의 의미와 준비 상태를 이해한다", "실패 원인과 재시도 방법을 확인할 수 있다"],
+      "tests": [
+        { "check": "tester-sets-screen", "kind": "screen" },
+        "onboarding-first-run-clarity.regression.test.ts",
+        "onboarding-progress.test.ts",
+        {
+          "file": "onboarding-first-project-ui.mjs"
+        },
+        "common-memory-remote.test.ts",
+        {
+          "file": "common-memory-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "cautious-sync-user",
+      "goal": "업로드 충돌이나 잠금 중 데이터가 조용히 덮이지 않는다",
+      "extends": "returning-user",
+      "situation": "프로젝트나 기억의 업로드가 충돌 또는 잠금으로 중단된 뒤 다시 돌아왔다",
+      "journey": ["충돌 또는 잠금 상태를 확인한다", "보존된 입력과 원본을 구분한다", "복구 또는 재시도한 결과를 확인한다"],
+      "successCriteria": ["충돌한 기존 데이터가 묵시적으로 덮이지 않는다", "잠금과 실제 저장 실패를 구분한다"],
+      "tests": [
+        "port-auto-upload-status.test.ts",
+        "common-memory-projects.test.ts",
+        "common-memory-remote.test.ts",
+        {
+          "file": "common-memory-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "low-vision-user",
+      "goal": "모바일 조작 대상과 상태가 접근 가능하다",
+      "tests": [
+        "remote-control-mobile-accessibility.test.ts",
+        {
+          "file": "control-accessibility-ui.mjs"
+        },
+        {
+          "file": "mobile-workspace-panel-ui.mjs"
+        },
+        {
+          "file": "common-memory-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "project-memory-user",
+      "goal": "기억 검색과 현재 프로젝트 맥락을 구분하고 교정한 실패를 다음 작업에 주의 근거로 반영한다",
+      "tests": [
+        "project-memory-corrections.test.ts",
+        "project-memory-recall-integration.test.ts",
+        "project-memory-api-integration.test.ts",
+        "control-profile-surface-api.test.ts",
+        {"file": "project-memory-corrections-ui.mjs"},
+        "project-memory-directory.test.ts",
+        "project-search.test.ts",
+        "common-memory-service.test.ts",
+        "common-memory-mcp-stdio.test.ts",
+        {
+          "file": "common-memory-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "shared-memory-newcomer",
+      "goal": "주제와 함께 쓸 장기기억으로 간단히 공통기억을 만들고 실행 프로젝트 선택 없이 시작한다",
+      "tests": [
+        "common-memory-personas.test.ts",
+        "common-memory-mcp-stdio.test.ts",
+        {
+          "file": "common-memory-personas-ui.mjs"
+        },
+        "common-memory-topics.test.ts",
+        {
+          "file": "common-memory-cloud-topics-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "shared-memory-curator",
+      "goal": "가져올 장기기억·연결할 장기기억을 구분하고 AI 후보를 사람이 검토해 확정한다",
+      "tests": [
+        "common-memory-personas.test.ts",
+        "common-memory-mcp-stdio.test.ts",
+        "meta-common-memory-connect.test.ts",
+        {
+          "file": "common-memory-personas-ui.mjs"
+        },
+        {
+          "file": "common-memory-link-picker-ui.mjs"
+        },
+        "common-memory-topics.test.ts",
+        {
+          "file": "common-memory-cloud-topics-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "shared-memory-returning-user",
+      "goal": "같은 공통 주제를 이어서 정리하고 최신 후보와 정확한 원본 이름을 확인한다",
+      "tests": [
+        "common-memory-personas.test.ts",
+        "common-memory-mcp-stdio.test.ts",
+        {
+          "file": "common-memory-personas-ui.mjs"
+        },
+        "common-memory-topics.test.ts",
+        {
+          "file": "common-memory-cloud-topics-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "shared-memory-mcp-operator",
+      "goal": "MCP와 앱에서 같은 주제·업데이트 제안·OPS 정리 요청·검토 후보를 사용한다",
+      "tests": [
+        "common-memory-personas.test.ts",
+        "common-memory-mcp-stdio.test.ts",
+        {
+          "file": "common-memory-personas-ui.mjs"
+        },
+        "common-memory-topics.test.ts",
+        {
+          "file": "common-memory-cloud-topics-ui.mjs"
+        },
+        {
+          "argv": [
+            "bun",
+            "tests/control-profile-startup-ui.mjs"
+          ],
+          "kind": "screen",
+          "name": "existing-OPS-cold-start-rendered-screen",
+          "timeoutSeconds": 120
+        }
+      ]
+    },
+    {
+      "id": "multi-account-maker",
+      "goal": "프로젝트별 Claude·Codex 계정을 선택하고 진행 중인 작업의 계정과 초안을 보존한다",
+      "tests": [
+        "cli-accounts.test.ts",
+        "cli-accounts-api.test.ts",
+        "cli-account-observers.test.ts",
+        {
+          "file": "cli-accounts-ui.mjs"
+        }
+      ]
+    },
+    {
+      "id": "community-session-explorer",
+      "goal": "1호·2호·3호의 대화를 프로젝트별로 찾고 큰 창에서 이어가며 연결 실패에도 입력과 기기 소유권을 지킨다",
+      "tests": [
+        "workroom-session-directory.test.ts",
+        "workroom-launch-options.test.ts",
+        {
+          "argv": [
+            "node",
+            "tests/workroom-session-directory.e2e.mjs"
+          ],
+          "kind": "screen",
+          "name": "community-session-directory-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    },
+    {
+      "id": "sdk-module-maker",
+      "goal": "공통 SDK 프로젝트에서 실제 하위 폴더·설치되지 않은 모듈을 구분하고 정확한 프로젝트와 폴더 멘션을 한 번에 복사한다",
+      "tests": [
+        "sdk-project-folders.test.ts",
+        {
+          "argv": [
+            "bun",
+            "tests/sdk-project-folders.e2e.mjs"
+          ],
+          "kind": "screen",
+          "name": "sdk-project-folders-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    },
+    {
+      "id": "runtime-terminal-operator",
+      "goal": "큰 대화 창에서 한글·IME 입력과 출력 크기를 유지하고 저장 상태를 확인한 뒤 명시적으로 세션을 종료한다",
+      "tests": [
+        "ai-terminal-screen.test.ts",
+        "ai-terminal-cursor-position.test.ts",
+        "terminal-resource-lifecycle.test.ts",
+        {
+          "argv": [
+            "bun",
+            "tests/personas/workroom-popout-screen.mjs",
+            "input"
+          ],
+          "kind": "screen",
+          "name": "runtime-input-rendered-screen",
+          "timeoutSeconds": 300
+        },
+        {
+          "argv": [
+            "bun",
+            "tests/personas/workroom-popout-screen.mjs",
+            "rendering"
+          ],
+          "kind": "screen",
+          "name": "runtime-rendering-rendered-screen",
+          "timeoutSeconds": 300
+        },
+        {
+          "argv": [
+            "bun",
+            "tests/personas/workroom-popout-screen.mjs",
+            "footer"
+          ],
+          "kind": "screen",
+          "name": "runtime-footer-rendered-screen",
+          "timeoutSeconds": 300
+        },
+        {
+          "argv": [
+            "bun",
+            "tests/personas/workroom-popout-screen.mjs",
+            "usability"
+          ],
+          "kind": "screen",
+          "name": "runtime-usability-rendered-screen",
+          "timeoutSeconds": 300
+        }
+      ]
+    }
+  ]
+}
