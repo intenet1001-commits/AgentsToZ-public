@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "project.meta-common-memory-unit",
+  "title": "메타 공통 기억 범위와 저장 검증",
+  "intent": "독립 기억, 프로젝트 다대다 연결, 후보 격리, 동시 저장과 복원, API/MCP 및 iPhone의 별도 권한·분할 전송·응답 유실 재확인을 확인한다.",
+  "origin": "manual:meta-memory-2026-10-11",
+  "tags": ["memory", "unit"],
+  "paths": ["src/metaCommonMemory*", "src/MetaCommonMemory*", "src/projectMetaMemoryContext.ts", "tests/meta-common-memory*"],
+  "safety": "writes-temp",
+  "risk": 2,
+  "cost": {"estimateSeconds": 15},
+  "requires": ["node_modules"],
+  "steps": [{"type": "command", "argv": ["bun", "test", "--cwd", "tests", "--max-concurrency=1", "meta-common-memory"], "timeoutSeconds": 120}],
+  "memoryQueries": ["메타 공통 기억", "common memory project scope"]
+}

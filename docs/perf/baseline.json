@@ -1,0 +1,870 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-07T16:10:37.297Z",
+  "environment": {
+    "machineModel": "Mac16,8",
+    "cpuModel": "Apple M4 Pro",
+    "cpuCount": 14,
+    "totalMemoryGiB": 24,
+    "os": "Darwin 25.6.0 (26.7)",
+    "bunVersion": "1.4.2",
+    "gitHead": "f8e5dc5987b91671ac5ac8a1a62dc9867888bafe",
+    "gitDirty": true,
+    "loadavgStart": [
+      4.68,
+      5.11,
+      5.2
+    ],
+    "loadavgEnd": [
+      6.04,
+      6.09,
+      5.64
+    ]
+  },
+  "measurements": {
+    "community.control.active-receiver": {
+      "unit": "ms",
+      "samples": [
+        612.376,
+        606.997,
+        455.07,
+        461.804,
+        458.742,
+        306.946,
+        304.906,
+        154.193,
+        152.879,
+        152.571
+      ],
+      "min": 152.571,
+      "median": 381.008,
+      "p90": 606.997,
+      "method": "받는 쪽이 90초 안에 제어받은 상태(communityControlPollDelay → 600ms). 보내는 위상을 주기 안에 고르게 10점. 보내는 쪽 되묻기 150ms 고정.",
+      "reproducible": true,
+      "notes": "이론값 ≈ 남은 주기(0~600ms, 평균 300) + 되묻기 양자화(≤150ms) + RPC. 네트워크 없음.",
+      "loadavg": {
+        "start": [
+          13.01,
+          6.91,
+          5.84
+        ],
+        "end": [
+          11.46,
+          6.78,
+          5.81
+        ]
+      },
+      "regressionFloor": 150
+    },
+    "community.control.idle-receiver": {
+      "unit": "ms",
+      "samples": [
+        2774.436,
+        2375.305,
+        1563.298,
+        1161.719,
+        409.406
+      ],
+      "min": 409.406,
+      "median": 1563.298,
+      "p90": 2774.436,
+      "method": "받는 쪽이 90초 넘게 조용한 상태(3000ms 주기). 보내는 위상을 주기 안에 고르게 5점. 보내는 쪽 시계를 표본마다 91초 앞당겨 되묻기 150→400ms 물러남·멤버십 캐시 만료까지 유휴 Mac처럼 만든다.",
+      "reproducible": true,
+      "notes": "휴대폰/1호가 2호·3호를 처음 고른 직후의 첫 요청이 이 경우다. 이론값 ≈ 남은 주기(0~3000, 평균 1500) + 되묻기(≤400ms).",
+      "loadavg": {
+        "start": [
+          11.46,
+          6.78,
+          5.81
+        ],
+        "end": [
+          8.7,
+          6.54,
+          5.75
+        ]
+      },
+      "regressionFloor": 300
+    },
+    "community.control.mailbox-floor": {
+      "unit": "ms",
+      "samples": [
+        152.767,
+        152.067,
+        151.778,
+        151.813,
+        152.554,
+        151.258,
+        151.654,
+        151.165,
+        151.469,
+        151.238
+      ],
+      "min": 151.165,
+      "median": 151.716,
+      "p90": 152.554,
+      "method": "실제 AgentDialogueHost 2대 + PGlite(같은 프로세스). 받는 쪽이 5ms마다 폴 — 폴링 양자화를 뺀 우편함 왕복(send→inbox→respond→result).",
+      "reproducible": true,
+      "notes": "보내는 쪽 RPC 호출당 3.0회(send + result 되묻기). 하한 ≈150ms는 controlCall이 첫 result 확인 뒤 150ms를 쉬기 때문이다(src/agentDialogueHost.ts controlCall). 실기에서는 RPC마다 Supabase 왕복이 더해진다.",
+      "loadavg": {
+        "start": [
+          13.79,
+          6.96,
+          5.85
+        ],
+        "end": [
+          13.01,
+          6.91,
+          5.84
+        ]
+      },
+      "regressionFloor": 50
+    },
+    "remote.list.full-walk": {
+      "unit": "ms",
+      "samples": [
+        1329.385,
+        1351.723,
+        1333.755,
+        1377.66,
+        1358.892
+      ],
+      "min": 1329.385,
+      "median": 1351.723,
+      "p90": 1377.66,
+      "method": "격리 사이드카(소스) + 합성 프로젝트 150개(워크트리 10) + 실제 LAN 리스너·WebSocket(agentstoz-local-v9). pair부터 마지막 페이지까지(휴대폰이 목록을 다 받는 시간의 호스트 몫, 릴레이·네트워크 제외).",
+      "reproducible": true,
+      "notes": "걸음당 페이지 8/8/8/8/8; 카드 160/160/160/160/160.",
+      "loadavg": {
+        "start": [
+          8.7,
+          6.54,
+          5.75
+        ],
+        "end": [
+          7.81,
+          6.44,
+          5.73
+        ]
+      },
+      "regressionFloor": 200
+    },
+    "remote.list.next-page": {
+      "unit": "ms",
+      "samples": [
+        164.443,
+        165.569,
+        164.262,
+        169.333,
+        164.965,
+        163.649,
+        165.748,
+        166.114,
+        166.592,
+        166.688,
+        168.736,
+        169.539,
+        163.965,
+        163.686,
+        165.671,
+        167.933,
+        166.978,
+        165.884,
+        164.737,
+        167.907,
+        166.669,
+        168.144,
+        166.911,
+        168.53,
+        181.21,
+        170.974,
+        176.847,
+        177.337,
+        170.181,
+        177.183,
+        169.862,
+        166.762,
+        169.354,
+        165.837,
+        170.596
+      ],
+      "min": 163.649,
+      "median": 166.911,
+      "p90": 176.847,
+      "method": "격리 사이드카(소스) + 합성 프로젝트 150개(워크트리 10) + 실제 LAN 리스너·WebSocket(agentstoz-local-v9). projects.list 한 페이지 요청→응답(page ≥1). 표본=모든 걸음의 모든 페이지.",
+      "reproducible": true,
+      "notes": "페이지마다 등록 프로젝트 전체를 다시 열거한다(RemoteControlCore.#refreshProjectCards → listRemoteControlRegisteredProjects, lsof 포함) — 한 페이지 비용 ≈ 전체 열거 비용.",
+      "loadavg": {
+        "start": [
+          8.7,
+          6.54,
+          5.75
+        ],
+        "end": [
+          7.81,
+          6.44,
+          5.73
+        ]
+      },
+      "regressionFloor": 50
+    },
+    "remote.list.pair-first-page": {
+      "unit": "ms",
+      "samples": [
+        171.401,
+        186.379,
+        167.967,
+        167.689,
+        169.106
+      ],
+      "min": 167.689,
+      "median": 169.106,
+      "p90": 186.379,
+      "method": "격리 사이드카(소스) + 합성 프로젝트 150개(워크트리 10) + 실제 LAN 리스너·WebSocket(agentstoz-local-v9). controller.pair 전송부터 session.ready(첫 페이지 카드 포함)까지. 첫 걸음은 버림.",
+      "reproducible": true,
+      "notes": "카드 160장 / 8페이지. pair는 등록 프로젝트 전체를 새로 읽어 카드를 만든다.",
+      "loadavg": {
+        "start": [
+          8.7,
+          6.54,
+          5.75
+        ],
+        "end": [
+          7.81,
+          6.44,
+          5.73
+        ]
+      },
+      "regressionFloor": 100
+    },
+    "remote.workroom.list-poll": {
+      "unit": "ms",
+      "samples": [
+        17.649,
+        17.451,
+        18.401,
+        19.589,
+        20.24,
+        16.474,
+        16.062,
+        17.898,
+        22.374,
+        17.146,
+        229.644,
+        21.341,
+        17.56,
+        17.06,
+        20.665,
+        17.493,
+        17.073,
+        17.328,
+        24.418,
+        16.888
+      ],
+      "min": 16.062,
+      "median": 17.605,
+      "p90": 22.374,
+      "method": "격리 사이드카(소스) + 합성 프로젝트 150개(워크트리 10) + 실제 LAN 리스너·WebSocket(agentstoz-local-v9). 워크룸 접근을 허용한 LAN 세션에서 terminal.request {operation:'list'} 왕복, 250ms 간격 연속 20회(부팅 뒤 첫 요청 제외).",
+      "reproducible": true,
+      "notes": "휴대폰 워크룸 화면의 세션 목록·출력 폴링 한 번의 호스트 몫. 부팅 뒤 첫 요청은 2333ms(대상 인벤토리 첫 생성).",
+      "loadavg": {
+        "start": [
+          8.7,
+          6.54,
+          5.75
+        ],
+        "end": [
+          5.9,
+          6.1,
+          5.63
+        ]
+      },
+      "regressionFloor": 30
+    },
+    "remote.workroom.list-poll-after-idle": {
+      "unit": "ms",
+      "samples": [
+        295.118,
+        225.901,
+        293.226
+      ],
+      "min": 225.901,
+      "median": 293.226,
+      "p90": 295.118,
+      "method": "격리 사이드카(소스) + 합성 프로젝트 150개(워크트리 10) + 실제 LAN 리스너·WebSocket(agentstoz-local-v9). 같은 세션에서 5.5초 쉬었다가 보내는 terminal list(읽기 전용 캐시 5초가 만료된 뒤).",
+      "reproducible": true,
+      "notes": "바인딩(taskTargetBindings)과 대상 인벤토리를 다시 만드는 값 — 폴링이 5초마다 한 번씩 치르는 비용.",
+      "loadavg": {
+        "start": [
+          8.7,
+          6.54,
+          5.75
+        ],
+        "end": [
+          5.9,
+          6.1,
+          5.63
+        ]
+      },
+      "regressionFloor": 100
+    },
+    "sidecar.start.installed-binary.empty": {
+      "unit": "ms",
+      "samples": [
+        282.887,
+        281.533,
+        279.609,
+        279.236,
+        287.266
+      ],
+      "min": 279.236,
+      "median": 281.533,
+      "p90": 287.266,
+      "method": "설치된 앱 번들의 컴파일된 사이드카를 격리 HOME·APP_DATA_DIR·빈 포트로 띄워 /api/health 첫 200까지. Tauri 창 생성은 포함하지 않는다.",
+      "reproducible": false,
+      "notes": "설치본 v640.0.0 — 앱을 다시 설치하면 바뀌므로 비교 대상이 아니다. 실제 앱 시작 = Tauri 부팅 + 이 값.",
+      "loadavg": {
+        "start": [
+          4.4,
+          5.02,
+          5.17
+        ],
+        "end": [
+          4.36,
+          5.01,
+          5.16
+        ]
+      },
+      "regressionFloor": 150
+    },
+    "sidecar.start.source.150-projects": {
+      "unit": "ms",
+      "samples": [
+        307.836,
+        305.68,
+        297.584,
+        311.346,
+        342.564
+      ],
+      "min": 297.584,
+      "median": 307.836,
+      "p90": 342.564,
+      "method": "위와 같되 합성 프로젝트 150개(git 저장소, 10개는 링크된 워크트리 1개씩)가 등록된 ports.json으로.",
+      "reproducible": true,
+      "notes": "부팅 중 프로젝트 수에 비례하는 일이 health를 늦추는지 본다.",
+      "loadavg": {
+        "start": [
+          4.34,
+          5.03,
+          5.17
+        ],
+        "end": [
+          4.4,
+          5.02,
+          5.17
+        ]
+      },
+      "regressionFloor": 150
+    },
+    "sidecar.start.source.empty": {
+      "unit": "ms",
+      "samples": [
+        293.525,
+        295.477,
+        289.235,
+        287.606,
+        285.779
+      ],
+      "min": 285.779,
+      "median": 289.235,
+      "p90": 295.477,
+      "method": "`bun api-server.ts`(이 작업 트리 소스)를 격리 HOME·APP_DATA_DIR·빈 포트로 띄워 /api/health 첫 200까지(5ms 폴링). 같은 격리 폴더로 재시작(첫 실행 1회 버림).",
+      "reproducible": true,
+      "notes": "앱 데이터가 빈 상태. 소스 모드라 TS 변환 비용이 들어간다 — 설치 앱은 컴파일된 바이너리다.",
+      "loadavg": {
+        "start": [
+          4.46,
+          5.06,
+          5.19
+        ],
+        "end": [
+          4.34,
+          5.03,
+          5.17
+        ]
+      },
+      "regressionFloor": 150
+    },
+    "ui.bookmarks.first-card": {
+      "unit": "ms",
+      "samples": [
+        55.3,
+        54.3,
+        49.9,
+        49.4,
+        54.4
+      ],
+      "min": 49.4,
+      "median": 54.3,
+      "p90": 55.3,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 북마크 탭 클릭(capture 리스너 시각)부터 첫 카드가 보일 때까지(북마크 200개, 카테고리 8).",
+      "reproducible": true,
+      "notes": "카드 40/40/40/40/40개(한 페이지). PortalManager는 lazy chunk라 첫 방문에 React 19 Suspense 공개 지연을 받는다(react-dom-client: globalMostRecentFallbackTime + 300). chunk는 클릭 뒤 ~10ms에 도착한다.",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      },
+      "regressionFloor": 60
+    },
+    "ui.bookmarks.first-card-after-dwell": {
+      "unit": "ms",
+      "samples": [
+        58.3,
+        65.5,
+        55.7,
+        131.4,
+        65.1
+      ],
+      "min": 55.7,
+      "median": 65.1,
+      "p90": 131.4,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 첫 화면이 안정된 뒤 3000ms 머문 다음 북마크 탭을 눌러 첫 카드가 보일 때까지(새 페이지마다 첫 방문).",
+      "reproducible": true,
+      "notes": "사람이 화면을 본 뒤 누르는 보통의 경우. 유휴 미리 데우기(src/lazyTabPreload.ts)가 lazy 탭을 동기 thenable로 준비해 Suspense 공개 지연(300ms)을 피한다. 즉시 클릭(ui.bookmarks.first-card)은 그 전이라 여전히 지연을 받는 최악 경우다.",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      },
+      "regressionFloor": 60
+    },
+    "ui.bookmarks.first-page-settled": {
+      "unit": "ms",
+      "samples": [
+        55.3,
+        54.3,
+        49.9,
+        49.4,
+        54.4
+      ],
+      "min": 49.4,
+      "median": 54.3,
+      "p90": 55.3,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 탭 클릭부터 카드 개수가 800ms 동안 그대로인 마지막 변화 시각까지.",
+      "reproducible": true,
+      "notes": "",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      },
+      "regressionFloor": 60
+    },
+    "ui.bookmarks.long-tasks": {
+      "unit": "count",
+      "samples": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "median": 0,
+      "p90": 0,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 탭 클릭~카드 안정까지 Long Task 수.",
+      "reproducible": true,
+      "notes": "최대 0ms.",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      }
+    },
+    "ui.projects.long-tasks": {
+      "unit": "count",
+      "samples": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "median": 0,
+      "p90": 0,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 탐색 시작~행 안정까지 50ms 이상 Long Task 수(PerformanceObserver).",
+      "reproducible": true,
+      "notes": "최대 0ms, 합 0ms(실행 중 최대).",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      }
+    },
+    "ui.projects.rows-settled": {
+      "unit": "ms",
+      "samples": [
+        117.6,
+        114.4,
+        118.3,
+        119.3,
+        115
+      ],
+      "min": 114.4,
+      "median": 117.6,
+      "p90": 119.3,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 탐색 시작부터 행 개수가 800ms 동안 그대로인 마지막 변화 시각까지.",
+      "reproducible": true,
+      "notes": "행이 한 번에 다 그려지면 rows-visible과 같다.",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      },
+      "regressionFloor": 100
+    },
+    "ui.projects.rows-visible": {
+      "unit": "ms",
+      "samples": [
+        117.6,
+        114.4,
+        118.3,
+        119.3,
+        115
+      ],
+      "min": 114.4,
+      "median": 117.6,
+      "p90": 119.3,
+      "method": "격리 Vite 빌드 + 합성 /api(모든 요청 가로챔, 3001·DB 없음) + Playwright chromium 1440×900, 실행마다 새 컨텍스트(첫 실행 버림). 시각은 페이지 안 rAF에서 잰다. 탐색 시작부터 사이드바 프로젝트 행이 처음 보일 때까지(프로젝트 150개).",
+      "reproducible": true,
+      "notes": "행 150/150/150/150/150개. 외부 요청은 차단(www.google.com).",
+      "loadavg": {
+        "start": [
+          5.59,
+          6.03,
+          5.61
+        ],
+        "end": [
+          6.04,
+          6.09,
+          5.64
+        ]
+      },
+      "regressionFloor": 100
+    },
+    "workroom.read.from-start": {
+      "unit": "ms",
+      "samples": [
+        0.022,
+        0.006,
+        0.005,
+        0.006,
+        0.005,
+        0.005,
+        0.005,
+        0.005,
+        0.006,
+        0.004,
+        0.008,
+        0.005,
+        0.004,
+        0.008,
+        0.005,
+        0.007,
+        0.004,
+        0.005,
+        0.005,
+        0.007
+      ],
+      "min": 0.004,
+      "median": 0.005,
+      "p90": 0.008,
+      "method": "AiTerminalService.perform(read) 한 번의 호스트 처리 시간, 400KB(yes|head -c) 출력이 쌓인 세션. after:0 (재생 첫 페이지).",
+      "reproducible": true,
+      "notes": "",
+      "loadavg": {
+        "start": [
+          5.94,
+          5.32,
+          5.27
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 5
+    },
+    "workroom.read.snapshot": {
+      "unit": "ms",
+      "samples": [
+        1.773,
+        1.645,
+        1.812,
+        1.744,
+        1.746,
+        1.941,
+        1.443,
+        2.11,
+        2.081,
+        1.728,
+        1.401,
+        1.47,
+        1.408,
+        1.381,
+        1.374,
+        1.35,
+        2.149,
+        1.433,
+        1.6,
+        1.668
+      ],
+      "min": 1.35,
+      "median": 1.656,
+      "p90": 2.081,
+      "method": "AiTerminalService.perform(read) 한 번의 호스트 처리 시간, 400KB(yes|head -c) 출력이 쌓인 세션. snapshot:true after:0 (늦게 붙은 휴대폰의 첫 화면).",
+      "reproducible": true,
+      "notes": "headless 화면 직렬화 비용이 들어간다.",
+      "loadavg": {
+        "start": [
+          5.94,
+          5.32,
+          5.27
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 10
+    },
+    "workroom.read.tail-poll": {
+      "unit": "ms",
+      "samples": [
+        0.014,
+        0.004,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.003,
+        0.002,
+        0.002,
+        0.003,
+        0.002,
+        0.002,
+        0.002,
+        0.002,
+        0.002
+      ],
+      "min": 0.002,
+      "median": 0.002,
+      "p90": 0.003,
+      "method": "AiTerminalService.perform(read) 한 번의 호스트 처리 시간, 400KB(yes|head -c) 출력이 쌓인 세션. 끝 커서에서 새 출력 없는 폴링(화면이 1초마다 하는 일).",
+      "reproducible": true,
+      "notes": "",
+      "loadavg": {
+        "start": [
+          5.94,
+          5.32,
+          5.27
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 5
+    },
+    "workroom.real-cli.claude.first-output": {
+      "unit": "ms",
+      "samples": [
+        973.963,
+        220.191,
+        177.799
+      ],
+      "min": 177.799,
+      "median": 220.191,
+      "p90": 973.963,
+      "method": "실제 claude 바이너리를 AiTerminalService로 띄워 첫 PTY 바이트까지(격리 HOME, 입력 없음, 바로 close). 첫 바이트는 그려진 화면이 아니라 터미널 질의(DSR 등) 시퀀스일 수 있다.",
+      "reproducible": false,
+      "notes": "claude 2.1.292 (Claude Code); CLI 버전·네트워크·로그인 화면 여부가 바꾸므로 비교 대상이 아님.",
+      "loadavg": {
+        "start": [
+          5.94,
+          5.32,
+          5.27
+        ],
+        "end": [
+          13.79,
+          6.96,
+          5.85
+        ]
+      }
+    },
+    "workroom.real-cli.codex.first-output": {
+      "unit": "ms",
+      "samples": [
+        72.252,
+        26.858,
+        45.622
+      ],
+      "min": 26.858,
+      "median": 45.622,
+      "p90": 72.252,
+      "method": "실제 codex 바이너리를 AiTerminalService로 띄워 첫 PTY 바이트까지(격리 HOME, 입력 없음, 바로 close). 첫 바이트는 그려진 화면이 아니라 터미널 질의(DSR 등) 시퀀스일 수 있다.",
+      "reproducible": false,
+      "notes": "codex codex-cli 0.160.0; CLI 버전·네트워크·로그인 화면 여부가 바꾸므로 비교 대상이 아님.",
+      "loadavg": {
+        "start": [
+          13.79,
+          6.96,
+          5.85
+        ],
+        "end": [
+          13.79,
+          6.96,
+          5.85
+        ]
+      }
+    },
+    "workroom.start.first-output": {
+      "unit": "ms",
+      "samples": [
+        25.118,
+        31.151,
+        24.518,
+        31.605,
+        48.731
+      ],
+      "min": 24.518,
+      "median": 31.151,
+      "p90": 48.731,
+      "method": "AiTerminalService(실제 PTY·headless 화면)에 결정적 가짜 CLI(0/+50/+100ms 세 프레임). 워밍업 1회 제외. start 호출부터 read로 첫 청크가 보일 때까지(2ms 폴링).",
+      "reproducible": true,
+      "notes": "휴대폰·창이 「뭔가 떴다」고 보는 시점의 호스트 쪽 하한.",
+      "loadavg": {
+        "start": [
+          4.36,
+          5.01,
+          5.16
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 30
+    },
+    "workroom.start.request": {
+      "unit": "ms",
+      "samples": [
+        18.207,
+        24.493,
+        18.122,
+        26.967,
+        41.785
+      ],
+      "min": 18.122,
+      "median": 24.493,
+      "p90": 41.785,
+      "method": "AiTerminalService(실제 PTY·headless 화면)에 결정적 가짜 CLI(0/+50/+100ms 세 프레임). 워밍업 1회 제외. perform(start)가 돌려줄 때까지.",
+      "reproducible": true,
+      "notes": "spawn + 세션 등록. 화면은 아직 없다.",
+      "loadavg": {
+        "start": [
+          4.36,
+          5.01,
+          5.16
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 30
+    },
+    "workroom.start.settled": {
+      "unit": "ms",
+      "samples": [
+        135,
+        146,
+        144,
+        144,
+        170
+      ],
+      "min": 135,
+      "median": 144,
+      "p90": 170,
+      "method": "AiTerminalService(실제 PTY·headless 화면)에 결정적 가짜 CLI(0/+50/+100ms 세 프레임). 워밍업 1회 제외. start 호출부터 마지막 출력 시각(inspectSession.lastOutputAt)까지, 300ms 조용하면 끝.",
+      "reproducible": true,
+      "notes": "가짜 CLI 자체가 100ms를 쓴다 — 그 위가 앱 비용.",
+      "loadavg": {
+        "start": [
+          4.36,
+          5.01,
+          5.16
+        ],
+        "end": [
+          5.94,
+          5.32,
+          5.27
+        ]
+      },
+      "regressionFloor": 50
+    }
+  }
+}

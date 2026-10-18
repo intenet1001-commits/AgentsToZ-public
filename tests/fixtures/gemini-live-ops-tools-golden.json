@@ -1,0 +1,293 @@
+{
+ "note": "Gemini Live functionDeclarations (name + parameters) built from the real OPS voice tools; descriptions are checked against the tools themselves. Update deliberately when a tool changes.",
+ "declarations": [
+  {
+   "name": "list_projects",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "query": {
+      "type": "STRING"
+     },
+     "offset": {
+      "type": "INTEGER",
+      "minimum": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "resolve_target_alias",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "alias": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "alias"
+    ]
+   }
+  },
+  {
+   "name": "connect_project_delegate",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "targetId": {
+      "type": "STRING"
+     },
+     "agent": {
+      "type": "STRING",
+      "description": "워크룸 AI. 클로드=claude, 코덱스=codex, 헤르메스로·헤르메스 AI=hermes, 안티그래비티·에이지와이=agy.",
+      "enum": [
+       "codex",
+       "claude",
+       "hermes",
+       "agy"
+      ],
+      "format": "enum"
+     }
+    },
+    "required": [
+     "targetId"
+    ]
+   }
+  },
+  {
+   "name": "return_to_ops"
+  },
+  {
+   "name": "delegate_status"
+  },
+  {
+   "name": "read_delegate_workroom",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "after": {
+      "type": "INTEGER",
+      "minimum": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "recall_project_memory",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "query": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  },
+  {
+   "name": "prepare_delegate_instruction",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "text": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  },
+  {
+   "name": "prepare_ops_instruction",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "text": {
+      "type": "STRING"
+     },
+     "agent": {
+      "type": "STRING",
+      "description": "워크룸 AI. 클로드=claude, 코덱스=codex, 헤르메스로·헤르메스 AI=hermes, 안티그래비티·에이지와이=agy.",
+      "enum": [
+       "codex",
+       "claude",
+       "hermes",
+       "agy"
+      ],
+      "format": "enum"
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  },
+  {
+   "name": "recall_ops",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "query": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  },
+  {
+   "name": "read_workroom",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "targetId": {
+      "type": "STRING"
+     },
+     "sessionId": {
+      "type": "STRING"
+     },
+     "after": {
+      "type": "INTEGER",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "targetId",
+     "sessionId"
+    ]
+   }
+  },
+  {
+   "name": "list_workrooms",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "targetId": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "targetId"
+    ]
+   }
+  },
+  {
+   "name": "prepare_workroom_instruction",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "targetId": {
+      "type": "STRING"
+     },
+     "sessionId": {
+      "type": "STRING"
+     },
+     "text": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "targetId",
+     "sessionId",
+     "text"
+    ]
+   }
+  },
+  {
+   "name": "start_workroom",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "targetId": {
+      "type": "STRING"
+     },
+     "agent": {
+      "type": "STRING",
+      "description": "워크룸 AI. 클로드=claude, 코덱스=codex, 헤르메스로·헤르메스 AI=hermes, 안티그래비티·에이지와이=agy.",
+      "enum": [
+       "codex",
+       "claude",
+       "hermes",
+       "agy"
+      ],
+      "format": "enum"
+     }
+    },
+    "required": [
+     "targetId",
+     "agent"
+    ]
+   }
+  },
+  {
+   "name": "propose_ops_memory",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "title": {
+      "type": "STRING"
+     },
+     "body": {
+      "type": "STRING"
+     },
+     "evidence": {
+      "type": "STRING"
+     }
+    },
+    "required": [
+     "title",
+     "body",
+     "evidence"
+    ]
+   }
+  },
+  {
+   "name": "answer_workroom_prompt",
+   "parameters": {
+    "type": "OBJECT",
+    "properties": {
+     "keys": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "minItems": 1,
+      "items": {
+       "type": "STRING",
+       "enum": [
+        "enter",
+        "esc",
+        "tab",
+        "up",
+        "down",
+        "left",
+        "right",
+        "space",
+        "backspace",
+        "ctrl-c",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "y",
+        "n"
+       ],
+       "format": "enum"
+      }
+     }
+    },
+    "required": [
+     "keys"
+    ]
+   }
+  }
+ ]
+}

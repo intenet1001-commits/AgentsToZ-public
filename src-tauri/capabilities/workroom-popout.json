@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workroom-popout",
+  "description": "Workroom pop-out windows (workroom-<n>). They are created by the Rust command open_workroom_window, so no window may create windows from JS. Custom commands (agent_runtime_request, load_ports) are app commands and need no entry here; the only plugin call a pop-out makes is setting its own title when the session changes.",
+  "windows": [
+    "workroom-*"
+  ],
+  "permissions": [
+    "core:window:allow-set-title"
+  ]
+}

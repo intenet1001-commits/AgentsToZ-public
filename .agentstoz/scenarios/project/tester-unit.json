@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "project.tester-unit",
+  "title": "테스터 앱 연결 단위 검사",
+  "intent": "앱이 테스터를 설치·실행·취소·요약하는 호스트, API, 모바일, 개요 계약을 확인한다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "tester",
+    "unit"
+  ],
+  "paths": [
+    "src/tester*",
+    "src/mobileTester*",
+    "src/*Tester*",
+    "scripts/agentstoz-maintainer.py",
+    "tests/tester-*"
+  ],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 60
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/tester-agent-client.test.ts",
+        "./tests/tester-agent-host.test.ts",
+        "./tests/tester-agent-api.test.ts",
+        "./tests/tester-mobile.test.ts",
+        "./tests/tester-overview.test.ts"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "tester runner regression",
+    "테스터 프로젝트"
+  ]
+}

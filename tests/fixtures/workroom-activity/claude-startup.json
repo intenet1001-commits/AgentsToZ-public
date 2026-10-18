@@ -1,0 +1,1293 @@
+{
+ "schema": "workroom-activity-calibration/v1",
+ "cli": "claude",
+ "version": "2.1.301 (Claude Code)",
+ "scenario": "startup",
+ "recordedOn": "2026-10-16",
+ "host": "AiTerminalService in-process (real PTY + host headless screen), macOS arm64",
+ "terminal": {
+  "cols": 100,
+  "rows": 30
+ },
+ "isolation": "isolated HOME + config dir, dummy API key, local fake model server, HTTPS_PROXY to a dead port; no account",
+ "argv": [
+  "<CLAUDE_BIN>",
+  "--session-id",
+  "<SESSION_ID>"
+ ],
+ "timeUnit": "ms since the start request",
+ "phases": [
+  {
+   "name": "startup-to-trust-screen",
+   "kind": "startup",
+   "start": 503,
+   "end": 535,
+   "durationMs": 32,
+   "output": {
+    "events": 8,
+    "maxGapMs": 21,
+    "medianGapMs": 0,
+    "p90GapMs": 8,
+    "p99GapMs": 8,
+    "leadingGapMs": 0,
+    "trailingGapMs": 21
+   },
+   "screenContent": {
+    "events": 0,
+    "maxGapMs": 32,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 32,
+    "trailingGapMs": 32
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 32,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 32,
+    "trailingGapMs": 32,
+    "stateAtStart": null,
+    "statesSeen": {},
+    "stateAtEnd": null
+   },
+   "samples": 0,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "trust-screen-waiting",
+   "kind": "prompt",
+   "start": 535,
+   "end": 10427,
+   "durationMs": 9892,
+   "output": {
+    "events": 2,
+    "maxGapMs": 9598,
+    "medianGapMs": 7,
+    "p90GapMs": 7,
+    "p99GapMs": 7,
+    "leadingGapMs": 9598,
+    "trailingGapMs": 287
+   },
+   "screenContent": {
+    "events": 2,
+    "maxGapMs": 9620,
+    "medianGapMs": 9620,
+    "p90GapMs": 9620,
+    "p99GapMs": 9620,
+    "leadingGapMs": 0,
+    "trailingGapMs": 272
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 9892,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 9892,
+    "trailingGapMs": 9892,
+    "stateAtStart": null,
+    "statesSeen": {},
+    "stateAtEnd": null
+   },
+   "samples": 2,
+   "awaitsAnswerSamples": 2,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "idle-composer-after-trust",
+   "kind": "idle",
+   "start": 13560,
+   "end": 33562,
+   "durationMs": 20002,
+   "output": {
+    "events": 1,
+    "maxGapMs": 12902,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 7100,
+    "trailingGapMs": 12902
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 12842,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 7160,
+    "trailingGapMs": 12842
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 20002,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20002,
+    "trailingGapMs": 20002,
+    "stateAtStart": "idle-glyph",
+    "statesSeen": {},
+    "stateAtEnd": "idle-glyph"
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "turn",
+   "kind": "working",
+   "start": 33562,
+   "end": 35114,
+   "durationMs": 1552,
+   "output": {
+    "events": 20,
+    "maxGapMs": 144,
+    "medianGapMs": 102,
+    "p90GapMs": 125,
+    "p99GapMs": 144,
+    "leadingGapMs": 1,
+    "trailingGapMs": 2
+   },
+   "screenContent": {
+    "events": 13,
+    "maxGapMs": 205,
+    "medianGapMs": 103,
+    "p90GapMs": 205,
+    "p99GapMs": 205,
+    "leadingGapMs": 49,
+    "trailingGapMs": 67
+   },
+   "title": {
+    "updates": 4,
+    "events": 4,
+    "maxGapMs": 945,
+    "medianGapMs": 504,
+    "p90GapMs": 945,
+    "p99GapMs": 945,
+    "leadingGapMs": 84,
+    "trailingGapMs": 2,
+    "stateAtStart": "idle-glyph",
+    "statesSeen": {
+     "busy": 3,
+     "idle-glyph": 1
+    },
+    "stateAtEnd": "idle-glyph"
+   },
+   "samples": 13,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 12
+  },
+  {
+   "name": "idle-after-turn",
+   "kind": "idle",
+   "start": 35114,
+   "end": 55318,
+   "durationMs": 20204,
+   "output": {
+    "events": 1,
+    "maxGapMs": 20204,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 0,
+    "trailingGapMs": 20204
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 20168,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 36,
+    "trailingGapMs": 20168
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 20204,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20204,
+    "trailingGapMs": 20204,
+    "stateAtStart": "idle-glyph",
+    "statesSeen": {},
+    "stateAtEnd": "idle-glyph"
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  }
+ ],
+ "actions": [
+  {
+   "t": 2,
+   "action": "start"
+  },
+  {
+   "t": 123,
+   "action": "condition",
+   "note": "first screen settled (2 s quiet)"
+  },
+  {
+   "t": 123,
+   "action": "observe",
+   "note": "holding the startup/trust screen 10 s"
+  },
+  {
+   "t": 10126,
+   "action": "input",
+   "data": "\u001b[B",
+   "note": "arrow down"
+  },
+  {
+   "t": 10427,
+   "action": "input",
+   "data": "\r",
+   "note": "trust: moved off the highlighted \"No, exit\", then Enter"
+  },
+  {
+   "t": 13560,
+   "action": "condition",
+   "note": "composer idle"
+  },
+  {
+   "t": 13560,
+   "action": "observe",
+   "note": "idle composer 20 s"
+  },
+  {
+   "t": 33562,
+   "action": "input",
+   "data": "CALIB_HELLO say hello\r",
+   "note": "submit"
+  },
+  {
+   "t": 35115,
+   "action": "condition",
+   "note": "model done"
+  },
+  {
+   "t": 35318,
+   "action": "condition",
+   "note": "turn ended in transcript"
+  },
+  {
+   "t": 35318,
+   "action": "observe",
+   "note": "idle after turn 20 s"
+  },
+  {
+   "t": 55318,
+   "action": "close"
+  }
+ ],
+ "model": [
+  {
+   "t": 33657,
+   "kind": "side-call",
+   "scenario": null,
+   "step": null
+  },
+  {
+   "t": 33657,
+   "kind": "first-byte",
+   "scenario": "side",
+   "step": 0
+  },
+  {
+   "t": 33657,
+   "kind": "done",
+   "scenario": "side",
+   "step": 0
+  },
+  {
+   "t": 33682,
+   "kind": "request",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 34483,
+   "kind": "first-byte",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 35088,
+   "kind": "done",
+   "scenario": "HELLO",
+   "step": 0
+  }
+ ],
+ "output": [
+  [
+   503,
+   13
+  ],
+  [
+   511,
+   6
+  ],
+  [
+   511,
+   24
+  ],
+  [
+   513,
+   1024
+  ],
+  [
+   513,
+   279
+  ],
+  [
+   514,
+   5
+  ],
+  [
+   514,
+   13
+  ],
+  [
+   514,
+   3
+  ],
+  [
+   10133,
+   12
+  ],
+  [
+   10140,
+   109
+  ],
+  [
+   10439,
+   29
+  ],
+  [
+   10443,
+   316
+  ],
+  [
+   10633,
+   24
+  ],
+  [
+   10652,
+   20
+  ],
+  [
+   10674,
+   1024
+  ],
+  [
+   10674,
+   752
+  ],
+  [
+   10719,
+   8
+  ],
+  [
+   10862,
+   85
+  ],
+  [
+   11048,
+   83
+  ],
+  [
+   11243,
+   83
+  ],
+  [
+   11431,
+   77
+  ],
+  [
+   11557,
+   130
+  ],
+  [
+   11621,
+   158
+  ],
+  [
+   11869,
+   92
+  ],
+  [
+   11991,
+   77
+  ],
+  [
+   12058,
+   77
+  ],
+  [
+   20660,
+   31
+  ],
+  [
+   33563,
+   44
+  ],
+  [
+   33569,
+   80
+  ],
+  [
+   33646,
+   20
+  ],
+  [
+   33652,
+   394
+  ],
+  [
+   33663,
+   20
+  ],
+  [
+   33784,
+   54
+  ],
+  [
+   33890,
+   49
+  ],
+  [
+   33994,
+   51
+  ],
+  [
+   34119,
+   49
+  ],
+  [
+   34220,
+   49
+  ],
+  [
+   34342,
+   48
+  ],
+  [
+   34486,
+   68
+  ],
+  [
+   34565,
+   103
+  ],
+  [
+   34590,
+   50
+  ],
+  [
+   34608,
+   20
+  ],
+  [
+   34667,
+   53
+  ],
+  [
+   34787,
+   74
+  ],
+  [
+   34906,
+   49
+  ],
+  [
+   35010,
+   78
+  ],
+  [
+   35112,
+   20
+  ],
+  [
+   35114,
+   211
+  ],
+  [
+   55320,
+   32
+  ],
+  [
+   55320,
+   6
+  ],
+  [
+   55320,
+   99
+  ],
+  [
+   55321,
+   6
+  ],
+  [
+   55326,
+   91
+  ],
+  [
+   55326,
+   119
+  ],
+  [
+   55332,
+   6
+  ]
+ ],
+ "titles": [
+  [
+   10652,
+   "✳ Claude Code"
+  ],
+  [
+   33646,
+   "◐ Claude Code"
+  ],
+  [
+   33663,
+   "◐ Calibration"
+  ],
+  [
+   34608,
+   "◑ Calibration"
+  ],
+  [
+   35112,
+   "✳ Calibration"
+  ],
+  [
+   55326,
+   ""
+  ]
+ ],
+ "screens": [
+  {
+   "t": 24,
+   "hash": "a0bdb7e71846",
+   "cursor": [
+    0,
+    0
+   ],
+   "alternate": false,
+   "awaitsAnswer": false,
+   "rows": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "t": 535,
+   "hash": "5abda0fbf422",
+   "cursor": [
+    15,
+    1
+   ],
+   "alternate": false,
+   "awaitsAnswer": true,
+   "rows": {
+    "1": "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "2": " Accessing workspace:",
+    "4": " <PATH>",
+    "5": " <PATH>",
+    "7": " Quick safety check: Is this a project you created or one you trust? (Like your own code, a",
+    "8": " well-known open source project, or work from your team). If not, take a moment to review what's in",
+    "9": " this folder first.",
+    "11": " Claude Code'll be able to read, edit, and execute files here.",
+    "13": " Security guide",
+    "15": " ❯ No, exit",
+    "16": "   Yes, I trust this folder",
+    "18": " Enter to confirm · Esc to cancel"
+   }
+  },
+  {
+   "t": 10155,
+   "hash": "456d42647156",
+   "cursor": [
+    16,
+    1
+   ],
+   "alternate": false,
+   "awaitsAnswer": true,
+   "rows": {
+    "15": "   No, exit",
+    "16": " ❯ Yes, I trust this folder"
+   }
+  },
+  {
+   "t": 10464,
+   "hash": "a0bdb7e71846",
+   "cursor": [
+    0,
+    0
+   ],
+   "alternate": false,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": "",
+    "2": "",
+    "4": "",
+    "5": "",
+    "7": "",
+    "8": "",
+    "9": "",
+    "11": "",
+    "13": "",
+    "15": "",
+    "16": "",
+    "18": ""
+   }
+  },
+  {
+   "t": 10773,
+   "hash": "5b0e268187ee",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": "           Claude Code v2.1.301",
+    "2": "           claude-calibration · API Usage Billing",
+    "3": "           ~/project",
+    "5": "⚠ Model \"claude-calibration\" isn't recognized · context assumed to be 200k tokens · update Claude ",
+    "6": "  Code, or see https://code.claude.com/docs/en/model-config",
+    "8": "▎ Auto mode is now Claude Code's default permission mode.",
+    "9": "▎ Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for ",
+    "10": "▎ risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and ",
+    "11": "▎ blocks the rest.",
+    "12": "▎ https://code.claude.com/docs/en/permission-modes",
+    "25": "                                                                                  ● high · /effort",
+    "26": "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "27": "❯  ",
+    "28": "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "29": "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+   }
+  },
+  {
+   "t": 10875,
+   "hash": "07ee1bcb4250",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "3": " ▐▛███▛█   ~/project"
+   }
+  },
+  {
+   "t": 11080,
+   "hash": "48348fcb01cf",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "3": " ▐█▟███▟   ~/project"
+   }
+  },
+  {
+   "t": 11284,
+   "hash": "4beead85f2f0",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "3": " ▐▟███▟█   ~/project"
+   }
+  },
+  {
+   "t": 11489,
+   "hash": "07ee1bcb4250",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "3": " ▐▛███▛█   ~/project"
+   }
+  },
+  {
+   "t": 11591,
+   "hash": "2de81dc6042d",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "2": " ▐▛███▛█   claude-calibration · API Usage Billing",
+    "3": "▝▜██████▀  ~/project"
+   }
+  },
+  {
+   "t": 11695,
+   "hash": "a83d25ce2aa4",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": "▗▟▛███▛█▄  Claude Code v2.1.301",
+    "2": " ▜██████▘  claude-calibration · API Usage Billing",
+    "3": " ▝▝   ▝▝   ~/project"
+   }
+  },
+  {
+   "t": 11901,
+   "hash": "fe8610429c30",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": " ▐▛███▛█   Claude Code v2.1.301",
+    "2": "▝▜██████▀  claude-calibration · API Usage Billing"
+   }
+  },
+  {
+   "t": 12003,
+   "hash": "24ee4afa3259",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": " ▐▂███▂█   Claude Code v2.1.301"
+   }
+  },
+  {
+   "t": 12104,
+   "hash": "fe8610429c30",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": " ▐▛███▛█   Claude Code v2.1.301"
+   }
+  },
+  {
+   "t": 20720,
+   "hash": "b3f7785f50e3",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "25": ""
+   }
+  },
+  {
+   "t": 33611,
+   "hash": "e50bc6a4bfbd",
+   "cursor": [
+    27,
+    23
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "27": "❯ CALIB_HELLO say hello ",
+    "29": "  ⏵⏵ auto mode on (shift+tab to cycle)"
+   }
+  },
+  {
+   "t": 33712,
+   "hash": "bf07bc4a181f",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "14": "❯ CALIB_HELLO say hello                                                                             ",
+    "24": "✽ Philosophizing… ",
+    "27": "❯  ",
+    "29": "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents"
+   }
+  },
+  {
+   "t": 33815,
+   "hash": "5b3dc3f33a99",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✻ Philosophizing… "
+   }
+  },
+  {
+   "t": 33918,
+   "hash": "1c768b665334",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✶ Philosophizing… "
+   }
+  },
+  {
+   "t": 34123,
+   "hash": "01b734468fd3",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✳ Philosophizing… "
+   }
+  },
+  {
+   "t": 34225,
+   "hash": "7c0375d9f800",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✢ Philosophizing… "
+   }
+  },
+  {
+   "t": 34430,
+   "hash": "0525325780d7",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "· Philosophizing… "
+   }
+  },
+  {
+   "t": 34534,
+   "hash": "23750d86e621",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "· Actualizing… "
+   }
+  },
+  {
+   "t": 34636,
+   "hash": "00f77f529d12",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "16": "⏺",
+    "24": "· Actualizing… (0s · ↓ 2 tokens)"
+   }
+  },
+  {
+   "t": 34739,
+   "hash": "87b2a4ed14e0",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "· Actualizing… (1s · ↓ 2 tokens)"
+   }
+  },
+  {
+   "t": 34841,
+   "hash": "f02eb8a8675a",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✢ Actualizing… (1s · ↓ 2 tokens)"
+   }
+  },
+  {
+   "t": 34944,
+   "hash": "5ad1a0155d86",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✳ Actualizing… (1s · ↓ 2 tokens)"
+   }
+  },
+  {
+   "t": 35047,
+   "hash": "fa03bdfa42e2",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "24": "✳ Actualizing… (1s · ↓ 4 tokens)"
+   }
+  },
+  {
+   "t": 35150,
+   "hash": "0b1dc84828fc",
+   "cursor": [
+    27,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "16": "⏺ Hello from the calibration model.",
+    "18": "✻ Sautéed for 1s · done 9:06 AM",
+    "24": "",
+    "29": "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+   }
+  },
+  {
+   "t": 55355,
+   "hash": "ac8bc2932104",
+   "cursor": [
+    3,
+    0
+   ],
+   "alternate": false,
+   "awaitsAnswer": false,
+   "rows": {
+    "1": "Resume this session with:",
+    "2": "claude --resume <UUID>",
+    "3": "",
+    "5": "",
+    "6": "",
+    "8": "",
+    "9": "",
+    "10": "",
+    "11": "",
+    "12": "",
+    "14": "",
+    "16": "",
+    "18": "",
+    "26": "",
+    "27": "",
+    "28": "",
+    "29": ""
+   }
+  }
+ ],
+ "transcript": [
+  {
+   "seenAt": 33713,
+   "writtenAtApprox": null,
+   "type": "mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 33713,
+   "writtenAtApprox": null,
+   "type": "permission-mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 33713,
+   "writtenAtApprox": null,
+   "type": "atis-latch",
+   "subtype": null
+  },
+  {
+   "seenAt": 33713,
+   "writtenAtApprox": null,
+   "type": "ai-title",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": null,
+   "type": "file-history-snapshot",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33752,
+   "type": "user",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33751,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33751,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33751,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33751,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33751,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33767,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33767,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33768,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33768,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 33815,
+   "writtenAtApprox": 33815,
+   "type": "api-request-shape",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "api-request-blob",
+   "subtype": null,
+   "content": [
+    "text",
+    "text",
+    "text"
+   ]
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "api-request-blob",
+   "subtype": null,
+   "content": [
+    "text"
+   ]
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": 33815,
+   "type": "api-request",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "last-prompt",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "ai-title",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "permission-mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 33816,
+   "writtenAtApprox": null,
+   "type": "atis-latch",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": 35232,
+   "type": "assistant",
+   "subtype": null,
+   "stopReason": "end_turn",
+   "content": [
+    "text"
+   ]
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": 35234,
+   "type": "attachment",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": 35238,
+   "type": "system",
+   "subtype": "turn_duration",
+   "durationMs": 1496
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": null,
+   "type": "last-prompt",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": null,
+   "type": "ai-title",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": null,
+   "type": "mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": null,
+   "type": "permission-mode",
+   "subtype": null
+  },
+  {
+   "seenAt": 35254,
+   "writtenAtApprox": null,
+   "type": "atis-latch",
+   "subtype": null
+  },
+  {
+   "seenAt": 55355,
+   "writtenAtApprox": null,
+   "type": "cost-state",
+   "subtype": null
+  },
+  {
+   "seenAt": 55355,
+   "writtenAtApprox": null,
+   "type": "cost-state",
+   "subtype": null
+  }
+ ],
+ "keychain": {
+  "shimRequests": [
+   "security find-generic-password -a calib -w -s Claude Code-credentials-<ISOLATED_CONFIG_HASH>",
+   "security find-generic-password -a calib -w -s Claude Code-<ISOLATED_CONFIG_HASH>"
+  ],
+  "securityChildProcesses": 2,
+  "psPolls": 842,
+  "securityFrameworkLogLines": 7
+ },
+ "claudeSessionIdMatchesTranscript": true
+}

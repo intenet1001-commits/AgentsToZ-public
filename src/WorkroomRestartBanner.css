@@ -1,0 +1,49 @@
+/* 업데이트 전 실행 중이던 작업 세션 이어 열기 (w14). Semantic tokens only (src/appearanceTokens.css). */
+.workroom-restart-banner { display:grid; gap:8px; margin:10px 0; padding:12px 14px; border:1px solid var(--line-2); border-left:3px solid var(--warn);
+  border-radius:10px; background:var(--surface); color:var(--ink); font-size:13px; line-height:1.5; min-width:0; }
+.workroom-restart-head { display:flex; align-items:center; gap:8px; min-width:0; }
+.workroom-restart-head svg { color:var(--warn); flex:none; }
+.workroom-restart-head strong { font-size:13px; font-weight:700; overflow-wrap:anywhere; }
+.workroom-restart-text { margin:0; color:var(--ink-2); overflow-wrap:anywhere; }
+.workroom-restart-actions, .workroom-restart-confirm, .workroom-restart-row-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.workroom-restart-confirm { padding:10px; border:1px solid rgb(var(--warn-rgb) / .35); border-radius:8px; background:rgb(var(--warn-rgb) / .08); }
+.workroom-restart-confirm p { flex:1 1 100%; margin:0; color:var(--ink); }
+.workroom-restart-confirm p:focus { outline:none; }
+.workroom-restart-hint { color:var(--ink-3); font-size:11.5px; }
+.workroom-restart-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:6px 11px; border:1px solid var(--line-2);
+  border-radius:8px; background:var(--raised); color:var(--ink); font:inherit; font-size:12.5px; cursor:pointer; }
+.workroom-restart-btn:disabled { opacity:.55; cursor:default; }
+.workroom-restart-btn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.workroom-restart-btn--primary { border-color:rgb(var(--accent-rgb) / .55); background:rgb(var(--accent-rgb) / .14); font-weight:700; }
+.workroom-restart-rows { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.workroom-restart-rows li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:6px 10px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--raised); }
+.workroom-restart-rows li > .workroom-restart-confirm { grid-column:1 / -1; }
+.workroom-restart-row-text { display:grid; gap:2px; min-width:0; }
+.workroom-restart-row-text strong { font-size:12.5px; overflow-wrap:anywhere; }
+.workroom-restart-row-text small { color:var(--ink-2); font-size:11.5px; overflow-wrap:anywhere; }
+.workroom-restart-rows li[data-availability="ready"] small, .workroom-restart-rows li[data-availability="check"] small { color:var(--ok); }
+.workroom-restart-rows li[data-availability="pending"] small { color:var(--warn); }
+@media (max-width:640px), (pointer:coarse) {
+  .workroom-restart-btn { min-height:44px; font-size:16px; }
+  .workroom-restart-rows li { grid-template-columns:minmax(0,1fr); }
+}
+
+/* The phone (w14, Build B): folded to one 44px button with 16px text; rows and buttons are 44px tap targets. */
+.workroom-restart-banner--phone { gap:6px; padding:6px 12px; font-size:16px; }
+.workroom-restart-collapsed { display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:6px 0; border:0; background:transparent;
+  color:var(--ink); font:inherit; font-size:16px; font-weight:700; line-height:1.35; text-align:left; cursor:pointer; touch-action:manipulation; }
+.workroom-restart-collapsed > span { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+.workroom-restart-collapsed svg { color:var(--warn); flex:none; }
+.workroom-restart-collapsed .workroom-restart-chevron { color:var(--ink-3); }
+.workroom-restart-collapsed:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+.workroom-restart-body { display:grid; gap:8px; padding-bottom:6px; min-width:0; }
+.workroom-restart-banner--phone .workroom-restart-text { font-size:15px; }
+.workroom-restart-text--strong { color:var(--ink); font-weight:700; }
+.workroom-restart-banner--phone .workroom-restart-rows li { min-height:44px; }
+.workroom-restart-banner--phone .workroom-restart-row-text strong { font-size:16px; }
+.workroom-restart-banner--phone .workroom-restart-row-text small { font-size:14px; }
+.workroom-restart-banner--phone .workroom-restart-btn { min-height:44px; font-size:16px; touch-action:manipulation; }
+.workroom-restart-banner--phone .workroom-restart-confirm p:focus { outline:none; }
+.workroom-restart-banner--phone .workroom-restart-hint { flex:1 1 100%; font-size:13px; }
+/* A phone on its side has room: a row's 「이어 열기」 sits beside its title again. */
+@media (min-width:560px) { .workroom-restart-banner--phone .workroom-restart-rows li { grid-template-columns:minmax(0,1fr) auto; } }

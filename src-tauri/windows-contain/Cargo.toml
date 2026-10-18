@@ -1,0 +1,11 @@
+# The Windows containment launcher (see src/main.rs). A separate package so the Tauri bundle of the app never
+# carries it on any platform; build-sidecar.ts builds it on Windows only and ships it as a resource
+# (tauri.windows.conf.json).
+[package]
+name = "agentstoz-windows-contain"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+app = { path = ".." }

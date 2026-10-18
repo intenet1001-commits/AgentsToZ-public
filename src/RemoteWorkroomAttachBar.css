@@ -1,0 +1,96 @@
+/* Phone Workroom attachments (w13 step B, src/RemoteWorkroomAttachBar.tsx): 「+」 and its menu in the docked composer, the two
+   entries in the 「새 작업」 sheet, the chips row and the drop overlay. Semantic tokens only; the chip states follow the
+   glossary of colours: on its way = --info, offline/waiting = --ink-3, failed = --danger, ready = no badge. */
+
+/* 「+」 sits left of the text box: the field gets a third column. */
+.ai-terminal-panel .ai-terminal-command .ai-terminal-command-field.ai-terminal-command-field--attach { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ai-terminal-panel.ai-terminal-session-view .ai-terminal-command--docked .ai-terminal-command-field.ai-terminal-command-field--attach { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ai-terminal-remote-attach { position: relative; display: flex; align-items: flex-end; }
+/* Restated inside the command field: its own `.ai-terminal-btn { min-width: 116px }` rule (0,3,0) stretched 「+」 to 116px
+   in a desktop browser's inline composer (review w13). */
+.ai-terminal-panel .ai-terminal-remote-attach-plus,
+.ai-terminal-panel .ai-terminal-command-field .ai-terminal-remote-attach-plus { width: 44px; height: 44px; min-width: 44px; max-width: 44px; min-height: 44px; padding: 0; justify-content: center; border-radius: 10px; touch-action: manipulation; }
+.ai-terminal-panel .ai-terminal-remote-attach-plus[aria-disabled="true"] { color: var(--at-ink-3); border-style: dashed; }
+.ai-terminal-panel .ai-terminal-remote-attach-plus { position: relative; }
+.ai-terminal-remote-attach-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--at-accent); color: var(--on-accent); font-size: 10px; font-weight: 750; line-height: 16px; text-align: center; pointer-events: none;
+}
+.ai-terminal-panel .ai-terminal-remote-attach-plus[aria-expanded="true"] { border-color: var(--at-accent-line); background: var(--at-accent-soft); color: var(--at-ink); }
+
+/* The menu opens above the dock, no taller than the room between the top bar and the composer (as the @ menu). */
+.ai-terminal-panel .ai-terminal-remote-attach-menu {
+  position: absolute; z-index: 7; left: 0; bottom: calc(100% + 6px); display: grid; gap: 4px;
+  width: max-content; min-width: 220px; max-width: min(320px, calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: min(60vh, var(--workroom-menu-room, 320px)); overflow: auto; padding: 6px;
+  border: 1px solid var(--at-line-2); border-radius: 12px; background: var(--at-bg); box-shadow: var(--shadow-lg);
+}
+.ai-terminal-panel .ai-terminal-remote-attach-menu:focus { outline: none; }
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem] {
+  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--at-ink); font: inherit; font-size: 15px; font-weight: 650; text-align: left; cursor: pointer; touch-action: manipulation;
+}
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem] span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem] small { color: var(--at-ink-3); font-size: 12px; font-weight: 500; }
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem]:hover:not(:disabled),
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem]:focus-visible { outline: 0; background: var(--at-accent-soft); }
+.ai-terminal-panel .ai-terminal-remote-attach-menu [role=menuitem]:disabled { color: var(--at-ink-3); cursor: default; }
+.ai-terminal-panel .ai-terminal-remote-attach-reason { margin: 0; padding: 6px 8px; color: var(--at-ink-2); }
+
+/* The sheet: two buttons and one line about what they take. */
+.ai-terminal-remote-attach-sheet { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ai-terminal-panel .ai-terminal-remote-attach-sheet .ai-terminal-btn { gap: 6px; min-height: 44px; }
+.ai-terminal-remote-attach-sheet-note { flex: 1 1 100%; }
+
+/* The chips row: above the field in the dock, scrolling sideways instead of widening the page. No safe-area padding of its
+   own: the session view and the 「새 작업」 sheet already pad env(safe-area-inset-left/right) — a second one moved the chips
+   ~47pt off the field below them in landscape (review w13). */
+.ai-terminal-remote-attach-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ai-terminal-panel .ai-terminal-remote-attach-chips { flex-wrap: nowrap; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 2px; }
+.ai-terminal-panel .ai-terminal-remote-attach-chips .ai-terminal-image-chip { flex: 0 0 auto; max-width: min(320px, 82vw); }
+.ai-terminal-panel .ai-terminal-remote-attach-chips .ai-terminal-remote-attach-name { max-width: 180px; }
+.ai-terminal-panel .ai-terminal-remote-attach-state { flex: 0 0 auto; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 650; white-space: nowrap; color: var(--info); background: rgb(var(--info-rgb) / .12); }
+.ai-terminal-panel [data-chip-state="waiting"] .ai-terminal-remote-attach-state,
+.ai-terminal-panel [data-chip-state="held"] .ai-terminal-remote-attach-state { color: var(--at-ink-3); background: var(--at-line); }
+.ai-terminal-panel [data-chip-state="failed"] { border-color: rgb(var(--danger-rgb) / .45); }
+.ai-terminal-panel [data-chip-state="failed"] .ai-terminal-remote-attach-state { color: var(--at-danger); background: var(--at-danger-soft); }
+.ai-terminal-panel .ai-terminal-remote-attach-count { display: none; }
+.ai-terminal-remote-attach-summary { display: grid; gap: 4px; margin: 0; padding: 8px 10px; border: 1px solid rgb(var(--danger-rgb) / .35); border-radius: 8px; background: var(--at-danger-soft); color: var(--at-ink); }
+.ai-terminal-remote-attach-summary p, .ai-terminal-remote-attach-summary ul { margin: 0; }
+.ai-terminal-remote-attach-summary ul { padding-left: 18px; color: var(--at-ink-2); }
+.ai-terminal-remote-attach-summary li { overflow-wrap: anywhere; }
+.ai-terminal-remote-attach-summary-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The refusal notice with its own close button (it no longer outlives the picks it is about). */
+.ai-terminal-remote-attach-notice-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ai-terminal-remote-attach-notice { flex: 1 1 auto; min-width: 0; margin: 0; }
+.ai-terminal-panel .ai-terminal-remote-attach-notice-close {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--at-line-2); border-radius: 8px; background: transparent; color: var(--at-ink-2); cursor: pointer; touch-action: manipulation;
+}
+/* The session view's dock: the row never grows past a capped height; what does not fit scrolls inside it, so failed
+   reasons and notices cannot push the terminal off a phone screen (review w13: 20px of terminal left at 320×568). */
+.ai-terminal-panel.ai-terminal-session-view .ai-terminal-remote-attach-row { max-height: min(22vh, 132px); overflow-y: auto; overscroll-behavior: contain; }
+.ai-terminal-panel .ai-terminal-remote-attach-drop { z-index: 40; }
+
+/* Touch: every target is 44px (×, 다시 시도, the summary's buttons, the count). Also restated for the body-level layers. */
+@media (max-width: 640px), (pointer: coarse) {
+  .ai-terminal-panel .ai-terminal-remote-attach-chips .ai-terminal-image-chip { min-height: 44px; }
+  .ai-terminal-panel .ai-terminal-remote-attach-chips .ai-terminal-image-chip button { min-width: 44px; min-height: 44px; }
+  .ai-terminal-panel .ai-terminal-remote-attach-summary .ai-terminal-btn,
+  .ai-terminal-panel .ai-terminal-remote-attach-count { min-height: 44px; }
+  .ai-terminal-panel .ai-terminal-remote-attach-notice-close { width: 44px; height: 44px; }
+  .ai-terminal-panel .ai-terminal-remote-attach-chips .ai-terminal-remote-attach-name { font-size: 12px; }
+}
+/* Folded: the keyboard is up (the view shrank to what is left above it), or a short landscape phone (the dock is one row).
+   Chips, the failure summary and its reasons go behind one 「첨부 N · M개 못 함」 button; a notice keeps one line. */
+.ai-terminal-panel.ai-terminal-session-view[data-keyboard="open"] .ai-terminal-remote-attach-row[data-attention="false"][data-expanded="false"] { display: none; }
+.ai-terminal-panel.ai-terminal-session-view[data-keyboard="open"] .ai-terminal-remote-attach-count { display: inline-flex; align-self: flex-start; }
+.ai-terminal-panel.ai-terminal-session-view[data-keyboard="open"] .ai-terminal-remote-attach-row[data-expanded="false"] :is(.ai-terminal-remote-attach-chips, .ai-terminal-remote-attach-summary) { display: none; }
+.ai-terminal-panel.ai-terminal-session-view[data-keyboard="open"] .ai-terminal-remote-attach-row[data-expanded="false"] .ai-terminal-remote-attach-notice { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .ai-terminal-panel .ai-terminal-remote-attach-count { display: inline-flex; align-self: flex-start; }
+  .ai-terminal-panel .ai-terminal-remote-attach-row[data-expanded="false"] :is(.ai-terminal-remote-attach-chips, .ai-terminal-remote-attach-summary) { display: none; }
+  .ai-terminal-panel .ai-terminal-remote-attach-row[data-expanded="false"] .ai-terminal-remote-attach-notice { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+/* The inline request box (a desktop browser) holds the drop overlay too. */
+.ai-terminal-panel .ai-terminal-prompt { position: relative; }
