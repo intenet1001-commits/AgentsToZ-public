@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "project.persona-experience",
+  "title": "사용자 페르소나 경험 검사",
+  "intent": "8개 사용자 목표에 연결된 실제 단위·계약 검사를 Python에서 중복 없이 실행하고 각 페르소나별 결과를 보고한다.",
+  "origin": "manual:persona-pilot-2026-10-03",
+  "tags": ["persona", "ux", "python"],
+  "paths": ["scripts/persona-tests.py", "tests/personas/**", "src/projectSearch.ts", "src/remote-control-portal-main.tsx", "src/AiTerminalPanel.tsx"],
+  "safety": "read-only",
+  "risk": 2,
+  "cost": {"estimateSeconds": 90},
+  "requires": ["node_modules"],
+  "steps": [{"type":"command","argv":["python3","scripts/persona-tests.py","--root","."],"timeoutSeconds":900}],
+  "memoryQueries": ["persona testing UX", "사용자 페르소나 테스트"]
+}

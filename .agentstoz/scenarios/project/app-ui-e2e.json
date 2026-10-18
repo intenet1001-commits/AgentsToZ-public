@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "project.app-ui-e2e",
+  "title": "실제 앱 화면: 역할 칩·OPS 프로필·프로젝트 탭",
+  "intent": "빌드한 데스크톱 화면을 격리된 브라우저에서 조작해 역할 칩, 아젠투지(OPS) 프로필, 프로젝트 탭 설정·가이드 모드 회귀를 확인한다. 모든 API는 합성 응답이다.",
+  "origin": "manual:2026-09-25-missed-regression",
+  "tags": [
+    "ui",
+    "browser",
+    "projects",
+    "onboarding"
+  ],
+  "paths": [
+    "src/App.tsx",
+    "src/ProjectRoleLabels.tsx",
+    "src/ControlProfilePanel.tsx",
+    "src/ProjectMemoryPanel.tsx",
+    "src/PortalManager.tsx",
+    "src/projectRole.ts",
+    "tests/onboarding-first-project-app-ui.mjs",
+    "tests/projects-tab-ui.e2e.mjs"
+  ],
+  "safety": "writes-temp",
+  "risk": 3,
+  "cost": {
+    "estimateSeconds": 150
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "scripts/check-app-ui.ts"
+      ],
+      "timeoutSeconds": 900
+    }
+  ],
+  "memoryQueries": [
+    "role chip OPS profile app ui"
+  ]
+}

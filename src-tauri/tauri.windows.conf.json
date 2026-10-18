@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "resources": [
+      "resources/agentstoz-api-sidecar*",
+      "resources/agentstoz-agent-runtime-guard*",
+      "resources/agentstoz-windows-contain*",
+      "resources/agentstoz-use-mcp*",
+      "resources/agentstoz-kmsg*",
+      "resources/windows-process-supervisor.ps1",
+      "resources/pty-runtime/",
+      "resources/templates/"
+    ]
+  }
+}
