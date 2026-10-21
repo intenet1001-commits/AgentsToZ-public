@@ -1,0 +1,659 @@
+{
+ "version": 1,
+ "rateMs": 10000,
+ "heuristicHoldMs": 8000,
+ "cases": [
+  {
+   "name": "needs-answer is announced at once",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 1000
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "an exact turn end says the work finished",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 5000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 5000,
+       "turn": 2,
+       "exact": true
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 2,
+       "kind": "turn-finished",
+       "exact": true,
+       "text": "작업이 끝났습니다",
+       "at": 5000
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a heuristic turn end waits 8 s and never claims done",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 8999
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9000
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "turn-finished",
+       "exact": false,
+       "text": "응답이 멈췄습니다 · 확인해 보세요",
+       "at": 9000
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 20000
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "an exact end during the hold replaces the heuristic one",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 3000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 3000,
+       "turn": 1,
+       "exact": true
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "turn-finished",
+       "exact": true,
+       "text": "작업이 끝났습니다",
+       "at": 3000
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9000
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "an exact end after a heuristic announcement is not repeated",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9000
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "turn-finished",
+       "exact": false,
+       "text": "응답이 멈췄습니다 · 확인해 보세요",
+       "at": 9000
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 12000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 12000,
+       "turn": 1,
+       "exact": true
+      }
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "moving on cancels a held candidate",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 4000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "working",
+       "since": 4000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9500
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "once per session, turn and kind; then at most one per session every 10 s",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 0,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 0
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "working",
+       "since": 1000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 2000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 2000,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 3000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 3000,
+       "turn": 2,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9999
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 10000
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 2,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 10000
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "the rate limit defers a different kind instead of dropping it",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 0,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 0
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 2000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 2000,
+       "turn": 2,
+       "exact": true
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 10000
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 2,
+       "kind": "turn-finished",
+       "exact": true,
+       "text": "작업이 끝났습니다",
+       "at": 10000
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "only an exit by itself is announced; close, restart and shutdown never are",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "exited",
+       "since": 0,
+       "turn": 3,
+       "exact": true,
+       "exitCode": 3,
+       "cause": "exit"
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 3,
+       "kind": "exited",
+       "exact": true,
+       "text": "종료됨(코드 3)",
+       "at": 0
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-b",
+       "state": "exited",
+       "since": 0,
+       "turn": 1,
+       "exact": true,
+       "exitCode": 0,
+       "cause": "close"
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-c",
+       "state": "exited",
+       "since": 0,
+       "turn": 1,
+       "exact": true,
+       "exitCode": 143,
+       "cause": "restart"
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-d",
+       "state": "exited",
+       "since": 0,
+       "turn": 1,
+       "exact": true,
+       "exitCode": 143,
+       "cause": "shutdown"
+      }
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "a close cancels a held turn end of that session",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 0,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 1000,
+      "event": {
+       "sessionId": "session-a",
+       "state": "exited",
+       "since": 1000,
+       "turn": 1,
+       "exact": true,
+       "exitCode": 0,
+       "cause": "close"
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 20000
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "a reset announces nothing and drops held candidates",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "turn-finished",
+       "since": 0,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "reset",
+      "now": 1000
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 9000
+     },
+     "expect": []
+    }
+   ]
+  },
+  {
+   "name": "sessions are independent",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "needs-answer",
+       "since": 0,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-a",
+       "turn": 1,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 0
+      }
+     ]
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 100,
+      "event": {
+       "sessionId": "session-b",
+       "state": "needs-answer",
+       "since": 100,
+       "turn": 1,
+       "exact": false
+      }
+     },
+     "expect": [
+      {
+       "sessionId": "session-b",
+       "turn": 1,
+       "kind": "needs-answer",
+       "exact": false,
+       "text": "답이 필요합니다",
+       "at": 100
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "idle, starting and working never announce",
+   "steps": [
+    {
+     "step": {
+      "type": "event",
+      "now": 0,
+      "event": {
+       "sessionId": "session-a",
+       "state": "starting",
+       "since": 0,
+       "turn": 0,
+       "exact": true
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 10,
+      "event": {
+       "sessionId": "session-a",
+       "state": "idle",
+       "since": 10,
+       "turn": 0,
+       "exact": false
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "event",
+      "now": 20,
+      "event": {
+       "sessionId": "session-a",
+       "state": "working",
+       "since": 20,
+       "turn": 1,
+       "exact": true
+      }
+     },
+     "expect": []
+    },
+    {
+     "step": {
+      "type": "tick",
+      "now": 60000
+     },
+     "expect": []
+    }
+   ]
+  }
+ ]
+}

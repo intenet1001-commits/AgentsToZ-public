@@ -1,0 +1,45 @@
+/* 아젠투지 character — design tokens only, no literal colors. */
+.az-mascot { flex-shrink: 0; overflow: visible; }
+.az-mascot__shadow { fill: rgb(var(--accent-rgb) / .18); }
+.az-mascot__skin > * { fill: var(--accent); }
+.az-mascot__screen { fill: var(--term); }
+.az-mascot__eyes { fill: none; stroke: var(--ok); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transform-box: fill-box; transform-origin: center; }
+.az-mascot__prompt { fill: none; stroke: var(--ok); stroke-width: 1.1; stroke-linecap: round; }
+.az-mascot__laptop { fill: var(--ink-3); }
+.az-mascot__laptop-logo { fill: var(--accent); }
+.az-mascot__laptop-base { fill: var(--ink-2); }
+.az-mascot__arm-line { fill: none; stroke: var(--accent); stroke-width: 3.2; stroke-linecap: round; }
+.az-mascot__hand, .az-mascot__arm { fill: var(--accent); stroke: var(--on-accent); stroke-width: .8; }
+.az-mascot__mic-handle { fill: var(--ink-2); }
+.az-mascot__mic-head { fill: var(--ink-3); stroke: var(--ink-2); stroke-width: 1; }
+.az-mascot__wave { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; }
+
+/* Like a GIF: typing → mic → wave over 12s. Each pose owns a slice of the cycle. */
+.az-mascot__pose { opacity: 0; }
+.az-mascot[data-mode="cycle"] .az-mascot__pose--typing { animation: az-pose-typing 12s infinite; }
+.az-mascot[data-mode="cycle"] .az-mascot__pose--mic { animation: az-pose-mic 12s infinite; }
+.az-mascot[data-mode="cycle"] .az-mascot__pose--wave { animation: az-pose-wave 12s infinite; }
+@keyframes az-pose-typing { 0%, 38% { opacity: 1; } 41%, 100% { opacity: 0; } }
+@keyframes az-pose-mic { 0%, 40% { opacity: 0; } 43%, 70% { opacity: 1; } 73%, 100% { opacity: 0; } }
+@keyframes az-pose-wave { 0%, 72% { opacity: 0; } 75%, 97% { opacity: 1; } 100% { opacity: 0; } }
+
+.az-mascot__body { animation: az-bob 2.4s ease-in-out infinite; }
+@keyframes az-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+.az-mascot__eyes { animation: az-blink 4.2s infinite; }
+@keyframes az-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.15); } }
+.az-mascot__hand--l { animation: az-tap .32s ease-in-out infinite alternate; }
+.az-mascot__hand--r { animation: az-tap .32s ease-in-out infinite alternate-reverse; }
+@keyframes az-tap { from { transform: translateY(0); } to { transform: translateY(-1.6px); } }
+.az-mascot__wave { animation: az-sound 1.2s ease-in-out infinite; }
+.az-mascot__wave--2 { animation-delay: .3s; }
+@keyframes az-sound { 0%, 100% { opacity: .15; } 50% { opacity: 1; } }
+.az-mascot__waving-arm { transform-box: view-box; transform-origin: 41px 45px; animation: az-wave 0.9s ease-in-out infinite alternate; }
+@keyframes az-wave { from { transform: rotate(-12deg); } to { transform: rotate(10deg); } }
+
+/* Live OPS voice: the mic pose stays up. */
+.az-mascot[data-mode="voice"] .az-mascot__pose--mic { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .az-mascot *, .az-mascot[data-mode] .az-mascot__pose { animation: none !important; }
+  .az-mascot[data-mode="cycle"] .az-mascot__pose--typing { opacity: 1; }
+}
