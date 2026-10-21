@@ -1,0 +1,56 @@
+.helpdesk-shell{box-sizing:border-box;display:flex;flex-direction:column;width:min(780px,calc(100vw - 24px));height:min(780px,calc(100dvh - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:0;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--ink);box-shadow:var(--dialog-shadow);overflow:hidden;font-size:14px;}
+.helpdesk-shell:not([open]):not(.helpdesk-shell--standalone){display:none;}
+.helpdesk-shell::backdrop{background:var(--dialog-scrim);}
+.helpdesk-shell--standalone{margin:16px auto;}
+.helpdesk-header{display:flex;align-items:center;gap:12px;flex-shrink:0;padding:18px 20px;border-bottom:1px solid var(--line);}
+.helpdesk-header h2{font-size:17px;font-weight:700;line-height:1.5;}
+.helpdesk-header p{margin:2px 0 0;color:var(--ink-2);font-size:12px;}
+.helpdesk-avatar{display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;border-radius:14px;background:var(--accent-soft);color:var(--accent);}
+.helpdesk-close{display:grid;place-items:center;margin-left:auto;min-width:36px;min-height:36px;border-radius:10px;}
+.helpdesk-steps{display:flex;flex-shrink:0;gap:4px;padding:10px 16px;border-bottom:1px solid var(--line);}
+.helpdesk-steps button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;flex:1;padding:5px;font-size:12px;border-radius:10px;color:var(--ink-2);}
+.helpdesk-steps button[aria-current]{background:var(--accent-soft);color:var(--ink);font-weight:700;}
+.helpdesk-steps span{display:grid;place-items:center;width:20px;height:20px;border:1px solid var(--line);border-radius:50%;font-size:11px;}
+.helpdesk-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:24px 20px;scroll-padding-bottom:16px;}
+.helpdesk-message{max-width:90%;margin-bottom:18px;}
+.helpdesk-message--user{margin-left:auto;max-width:85%;}
+.helpdesk-speaker{display:block;margin-bottom:6px;font-size:11px;color:var(--ink-2);}
+.helpdesk-message--user .helpdesk-speaker{text-align:right;}
+.helpdesk-bubble{border:1px solid var(--line);border-radius:4px 16px 16px 16px;background:var(--sunken,var(--bg));padding:14px 16px;line-height:1.8;overflow-wrap:anywhere;}
+.helpdesk-bubble p{margin:0;white-space:pre-wrap;}
+.helpdesk-bubble p+p{margin-top:8px;}
+.helpdesk-bubble h3,.helpdesk-greeting{font-weight:700;}
+.helpdesk-message--user .helpdesk-bubble{background:var(--accent-soft);border-radius:16px 4px 16px 16px;}
+.helpdesk-intents{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-top:16px;}
+.helpdesk-intents button,.helpdesk-suggestions button{min-height:42px;border:1px solid var(--line);border-radius:12px;padding:8px 12px;text-align:left;background:var(--surface,var(--bg-card));}
+.helpdesk-intents button:hover,.helpdesk-suggestions button:hover,.helpdesk-button:hover{border-color:var(--accent);}
+.helpdesk-suggestions{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px;}
+.helpdesk-suggestions button{font-size:12px;}
+.helpdesk-button{min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:11px;text-align:center;font-size:13px;}
+.helpdesk-bubble .helpdesk-button{margin-top:12px;}
+.helpdesk-primary{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600;}
+.helpdesk-shell button:disabled{opacity:.5;cursor:default;}
+.helpdesk-shell button:focus-visible,.helpdesk-shell summary:focus-visible,.helpdesk-shell select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.helpdesk-task{flex:1;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px;}
+.helpdesk-task>section{flex-shrink:0;}
+.helpdesk-provider-choices,.helpdesk-actions{display:flex;flex-wrap:wrap;gap:8px;}
+.helpdesk-provider-choices [aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);}
+.helpdesk-composer{flex-shrink:0;padding:14px 20px 8px;border-top:1px solid var(--line);}
+.helpdesk-input{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--line);border-radius:15px;background:var(--surface,var(--bg));padding:8px;}
+.helpdesk-input:focus-within{border-color:var(--accent);}
+.helpdesk-input textarea{resize:vertical;min-width:0;min-height:48px;max-height:130px;flex:1;background:transparent;padding:8px;border:0;outline:none;font-size:16px;line-height:1.5;}
+.helpdesk-input button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:10px 12px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:12px;flex-shrink:0;}
+.helpdesk-composer-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;color:var(--ink-2);font-size:11px;}
+.helpdesk-composer-tools select{background:var(--surface,var(--bg));border:1px solid var(--line);border-radius:7px;min-height:32px;padding:3px 5px;}
+.helpdesk-composer-tools button{min-height:32px;text-decoration:underline;text-underline-offset:3px;}
+.helpdesk-privacy{flex-shrink:0;padding:4px 20px 12px;font-size:11px;color:var(--ink-2);}
+.helpdesk-privacy summary{cursor:pointer;}
+.helpdesk-privacy p{max-height:100px;overflow-y:auto;margin-top:8px;line-height:1.7;}
+.helpdesk-error{flex-shrink:0;padding:10px 20px;color:var(--danger);font-size:12px;}
+.helpdesk-recovery{display:flex;flex-shrink:0;flex-wrap:wrap;gap:6px;padding:0 20px 12px;}
+@media(max-width:480px){.helpdesk-header{padding:14px 12px;gap:8px;}.helpdesk-avatar{width:34px;height:34px;}.helpdesk-header h2{font-size:15px;}.helpdesk-header p{font-size:11px;}.helpdesk-steps{padding:6px;}.helpdesk-steps button{gap:4px;font-size:11px;}.helpdesk-log,.helpdesk-task{padding:16px 12px;}.helpdesk-message{max-width:96%;}.helpdesk-composer{padding:10px 12px 6px;}.helpdesk-input button span{display:none;}.helpdesk-privacy{padding:4px 12px 10px;}}
+
+.helpdesk-service-list{display:grid;gap:8px;}
+.helpdesk-service-list button{text-align:left;display:flex;flex-direction:column;gap:5px;}
+.helpdesk-service-list span{font-size:12px;line-height:1.6;color:var(--ink-2);}
+.helpdesk-service-list [aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft);}

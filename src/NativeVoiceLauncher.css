@@ -1,0 +1,13 @@
+/* 「아젠투지 호출 열기」 — shown in the main window only while the separate voice window is closed
+   (VOC 2026-10-15). Tokens only (src/appearanceTokens.css). z 40 keeps it below every full-screen modal
+   scrim (the lowest is z-50) so an open dialog covers it; toasts (z 10000) and the
+   「별명·카테고리 작업 다시 열기」 button in the same corner are lifted above it through --voice-dock-offset. */
+.voice-dock-reopen {
+  position: fixed; right: 16px; bottom: 16px; z-index: 40;
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--ink);
+  font: 600 12.5px/1 var(--font-sans); box-shadow: var(--shadow); cursor: pointer;
+}
+.voice-dock-reopen svg { color: var(--accent); }
+.voice-dock-reopen:hover { background: rgb(var(--accent-rgb) / .12); border-color: rgb(var(--accent-rgb) / .45); }
+.voice-dock-reopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

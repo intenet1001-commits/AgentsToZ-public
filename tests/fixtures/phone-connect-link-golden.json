@@ -1,0 +1,321 @@
+{
+  "comment": "Shared by tests/phone-connect-link.test.ts and mobile/ios/AgentsToZCore RemoteTests.swift. Regenerate only with intent; both sides must agree.",
+  "build": [
+    {
+      "name": "jwt anon key, Korean label",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "  CS의 MacBook Pro  "
+      },
+      "link": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIn0"
+    },
+    {
+      "name": "publishable key, label with controls and bidi removed",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://db.example.org",
+        "anonKey": "sb_publishable_AbCdEf0123456789_-xyz",
+        "hostName": "Mac‮\u0007 Studio"
+      },
+      "link": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9kYi5leGFtcGxlLm9yZyIsImFub25LZXkiOiJzYl9wdWJsaXNoYWJsZV9BYkNkRWYwMTIzNDU2Nzg5Xy14eXoiLCJob3N0TmFtZSI6Ik1hYyBTdHVkaW8ifQ"
+    },
+    {
+      "name": "missing label becomes Mac",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl"
+      },
+      "link": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6Ik1hYyJ9"
+    },
+    {
+      "name": "long label is shortened",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+      },
+      "link": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IuqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgCJ9"
+    }
+  ],
+  "buildRejects": [
+    {
+      "name": "service_role JWT",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoic2VydmljZV9yb2xlIn0.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "Mac"
+      }
+    },
+    {
+      "name": "secret key",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "sb_secret_AbCdEf0123456789xyz",
+        "hostName": "Mac"
+      }
+    },
+    {
+      "name": "http supabase",
+      "input": {
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "http://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "Mac"
+      }
+    },
+    {
+      "name": "portal with path",
+      "input": {
+        "portalOrigin": "https://portal.example.com/remote/",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "Mac"
+      }
+    }
+  ],
+  "parse": [
+    {
+      "name": "built: jwt anon key, Korean label",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIn0",
+      "expect": {
+        "ok": true,
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "CS의 MacBook Pro"
+      }
+    },
+    {
+      "name": "built: publishable key, label with controls and bidi removed",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9kYi5leGFtcGxlLm9yZyIsImFub25LZXkiOiJzYl9wdWJsaXNoYWJsZV9BYkNkRWYwMTIzNDU2Nzg5Xy14eXoiLCJob3N0TmFtZSI6Ik1hYyBTdHVkaW8ifQ",
+      "expect": {
+        "ok": true,
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://db.example.org",
+        "anonKey": "sb_publishable_AbCdEf0123456789_-xyz",
+        "hostName": "Mac Studio"
+      }
+    },
+    {
+      "name": "built: missing label becomes Mac",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6Ik1hYyJ9",
+      "expect": {
+        "ok": true,
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "Mac"
+      }
+    },
+    {
+      "name": "built: long label is shortened",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IuqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgCJ9",
+      "expect": {
+        "ok": true,
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+      }
+    },
+    {
+      "name": "pasted inside a chat message",
+      "text": "폰 연결 링크입니다 👉 agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIn0 (Mac 제어는 QR로)",
+      "expect": {
+        "ok": true,
+        "portalOrigin": "https://portal.example.com",
+        "supabaseUrl": "https://example-ref.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJlc2lnbmF0dXJl",
+        "hostName": "CS의 MacBook Pro"
+      }
+    },
+    {
+      "name": "service_role JWT",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2ljMlZ5ZG1salpWOXliMnhsSW4wLmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "secret key",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJzYl9zZWNyZXRfQWJDZEVmMDEyMzQ1Njc4OXh5eiIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "alg none",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSnViMjVsSW4wLmV5SnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "http supabase",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cDovL2V4YW1wbGUtcmVmLnN1cGFiYXNlLmNvIiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "supabase with path",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jby9yZXN0IiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "supabase with port",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbzo4NDQzIiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "uppercase host",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9BQkMuc3VwYWJhc2UuY28iLCJhbm9uS2V5IjoiZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW1GaVkyUmxabWRvYVdwcmJHMXViM0FpTENKeWIyeGxJam9pWVc1dmJpSjkuYzJsbmJtRjBkWEpsYzJsbmJtRjBkWEpsIiwiaG9zdE5hbWUiOiJDU-ydmCBNYWNCb29rIFBybyJ9",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "portal with credentials",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3VzZXJAcG9ydGFsLmV4YW1wbGUuY29tIiwic3VwYWJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUtcmVmLnN1cGFiYXNlLmNvIiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "extra key",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIiwicGFpcmluZ1NlY3JldCI6IngifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "missing hostName",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "version 2",
+      "text": "agentstoz://connect#eyJ2IjoyLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIn0",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "version as string",
+      "text": "agentstoz://connect#eyJ2IjoiMSIsInBvcnRhbCI6Imh0dHBzOi8vcG9ydGFsLmV4YW1wbGUuY29tIiwic3VwYWJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUtcmVmLnN1cGFiYXNlLmNvIiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "version as boolean",
+      "text": "agentstoz://connect#eyJ2Ijp0cnVlLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IkNT7J2YIE1hY0Jvb2sgUHJvIn0",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "hostName with control char",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6Ik1hY1x1MDAwNyJ9",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "hostName with bidi override",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6Ik1hY-KArm9jLmVzYWJhcHVzIn0",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "hostName with surrounding space",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IiBNYWMifQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "hostName empty",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IiJ9",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "hostName too long",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiJleUpoYkdjaU9pSklVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKcGMzTWlPaUp6ZFhCaFltRnpaU0lzSW5KbFppSTZJbUZpWTJSbFptZG9hV3ByYkcxdWIzQWlMQ0p5YjJ4bElqb2lZVzV2YmlKOS5jMmxuYm1GMGRYSmxjMmxuYm1GMGRYSmwiLCJob3N0TmFtZSI6IuqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgOqwgCJ9",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "key with whitespace",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLXJlZi5zdXBhYmFzZS5jbyIsImFub25LZXkiOiIgZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW1GaVkyUmxabWRvYVdwcmJHMXViM0FpTENKeWIyeGxJam9pWVc1dmJpSjkuYzJsbmJtRjBkWEpsYzJsbmJtRjBkWEpsIiwiaG9zdE5hbWUiOiJDU-ydmCBNYWNCb29rIFBybyJ9",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "payload is an array",
+      "text": "agentstoz://connect#WzFd",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "payload not JSON",
+      "text": "agentstoz://connect#aGVsbG8gd29ybGQ",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "truncated payload",
+      "text": "agentstoz://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYX",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "empty payload",
+      "text": "agentstoz://connect#",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "https URL instead of link",
+      "text": "https://portal.example.com/remote/",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "QR pair fragment on the link scheme",
+      "text": "agentstoz://connect#pair=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": {
+        "ok": false
+      }
+    },
+    {
+      "name": "other scheme",
+      "text": "agentstoz-mobile://connect#eyJ2IjoxLCJwb3J0YWwiOiJodHRwczovL3BvcnRhbC5leGFtcGxlLmNvbSIsInN1cGFiYXNlVXJsIjoiaHR0cHM6Ly9hYmNkZWZnaGlqa2xtbm9wLnN1cGFiYXNlLmNvIiwiYW5vbktleSI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpwYzNNaU9pSnpkWEJoWW1GelpTSXNJbkpsWmlJNkltRmlZMlJsWm1kb2FXcHJiRzF1YjNBaUxDSnliMnhsSWpvaVlXNXZiaUo5LmMybG5ibUYwZFhKbGMybG5ibUYwZFhKbCIsImhvc3ROYW1lIjoiQ1PsnZggTWFjQm9vayBQcm8ifQ",
+      "expect": {
+        "ok": false
+      }
+    }
+  ]
+}
