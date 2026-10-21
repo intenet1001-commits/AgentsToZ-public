@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "project.onboarding-ui",
+  "title": "첫 프로젝트 온보딩 화면이 끝까지 진행된다",
+  "intent": "격리된 브라우저에서 첫 프로젝트 만들기와 준비 단계 화면을 실제로 조작한다. 설치된 앱·계정·원격 서비스에 닿지 않는다.",
+  "origin": "manual:seed-2026-09-25",
+  "tags": [
+    "onboarding",
+    "ui",
+    "browser"
+  ],
+  "paths": [
+    "src/onboarding*",
+    "src/*Onboarding*",
+    "tests/fixtures/onboarding-*/**",
+    "tests/onboarding-*-ui.mjs",
+    "src/index.css"
+  ],
+  "safety": "writes-temp",
+  "risk": 2,
+  "cost": {
+    "estimateSeconds": 90
+  },
+  "requires": [
+    "node_modules"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "tests/onboarding-first-project-ui.mjs"
+      ],
+      "timeoutSeconds": 600
+    },
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "tests/onboarding-preparation-ui.mjs"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "memoryQueries": [
+    "control onboarding fixture"
+  ]
+}

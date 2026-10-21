@@ -1,0 +1,39 @@
+name: Native iOS simulator
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Simulator host (Intel provides more memory on standard runners)
+        type: choice
+        default: macos-26-intel
+        options:
+          - macos-26-intel
+          - macos-26
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Foundation contracts
+        run: swift test --package-path mobile/ios/AgentsToZCore
+
+      - name: Build and test onboarding through actual iOS controls
+        timeout-minutes: 16
+        # No personal origin/account in CI. HTTPS test must be reported skipped.
+        run: python3 mobile/ios/scripts/check-ui.py
+
+      - name: Preserve build and onboarding evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ios-evidence
+          path: mobile/ios/build/ui-evidence/
+          if-no-files-found: error
+          retention-days: 7

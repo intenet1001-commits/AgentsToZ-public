@@ -1,0 +1,872 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-13",
+  "timezone": "Asia/Seoul",
+  "projectHead": "8711599f3c928437063a80d3744d36a2cc734db3",
+  "targetApp": {
+    "path": "/Applications/ChatGPT.app",
+    "bundleId": "com.openai.codex",
+    "version": "26.928.21956",
+    "build": "12404",
+    "archiveSha256": "3bda98f2265ad23677dfe0163d1cc7855beade6bef11d27f830f6663d7658406",
+    "codesignDeepStrictVerification": "passed"
+  },
+  "rea": {
+    "cliVersion": "6.4.0",
+    "path": "/Users/cs-work/.local/bin/rea",
+    "codexMcpRegistration": "config_drift",
+    "nativeProviderConfigured": false,
+    "staticCliAnalysisSucceeded": true
+  },
+  "uiObservation": {
+    "attempt": "cua.getApp(ChatGPT)",
+    "result": "denied",
+    "reportedReason": "Computer Use is not allowed to use com.openai.codex for safety reasons",
+    "runtimeUiBehaviorVerified": false
+  },
+  "artifactIntegrity": {
+    "initialFailClosedInspection": "artifact_integrity_mismatch",
+    "recordOnlyInspectionContradictions": 7,
+    "mismatchedNativeContentUsedAsTrustedEvidence": false,
+    "selectedEntries": 50,
+    "selectedEntryHashesVerified": true
+  },
+  "sources": [
+    {
+      "path": ".vite/build/browser-page-preload.js",
+      "size": 511863,
+      "sha256": "93f17404f2b27280c8cd225e004199dbf6bf6e77adb641ed552e37df6fc18bf1",
+      "declaredSha256Matches": true,
+      "asarOffset": 8430884
+    },
+    {
+      "path": ".vite/build/desktop-open-path-queue-BHXvnlW9.js",
+      "size": 3749,
+      "sha256": "1027c4a75a7e1cf8729e35a3096e78fd7d30de86bc10879628bd9353adef617e",
+      "declaredSha256Matches": true,
+      "asarOffset": 9057744
+    },
+    {
+      "path": ".vite/build/early-bootstrap.js",
+      "size": 3162,
+      "sha256": "3696eb1540209b52d1850ee941040d143ee31f37dceece70bd8f1fbe0f2ec28a",
+      "declaredSha256Matches": true,
+      "asarOffset": 9061623
+    },
+    {
+      "path": ".vite/build/main-BbeJ4AAR.js",
+      "size": 3712034,
+      "sha256": "1ff5a43bde26ea6c1b77dbcf782625c890e35a836d489163c19d5ba9942d68b4",
+      "declaredSha256Matches": true,
+      "asarOffset": 9068699
+    },
+    {
+      "path": ".vite/build/preload.js",
+      "size": 6909,
+      "sha256": "a3e622f8d80a83e58fb3cfcc640fa7e14e6461cccdae9ef7d7b0c821dde256b7",
+      "declaredSha256Matches": true,
+      "asarOffset": 12832136
+    },
+    {
+      "path": ".vite/build/sandbox-preload.js",
+      "size": 2102,
+      "sha256": "e24e4d655e339484eb0ef842393bebfa13fb86a7863350ef49cd6a63eb1bddfa",
+      "declaredSha256Matches": true,
+      "asarOffset": 12840637
+    },
+    {
+      "path": "package.json",
+      "size": 5603,
+      "sha256": "f97036d45e3d5208cf63aeae64037c9a1b3f74e96f390cdcb0d44b9c4aaf948c",
+      "declaredSha256Matches": true,
+      "asarOffset": 22474645
+    },
+    {
+      "path": "webview/assets/composer-policy-9f8a78af22fb.js",
+      "size": 5726,
+      "sha256": "2b8d9f0fe18ac50f00d85d9d3e185d485d739bac4732e32bb5155b48b15d7d37",
+      "declaredSha256Matches": true,
+      "asarOffset": 128365884
+    },
+    {
+      "path": "webview/assets/composer-state-564218bd8a67.js",
+      "size": 1801,
+      "sha256": "8307b63fe8723d00c232b57257a86a16338fc235c1db3dc17533241dbf2fe8f6",
+      "declaredSha256Matches": true,
+      "asarOffset": 128380286
+    },
+    {
+      "path": "webview/assets/composer-state-57c258d79737.js",
+      "size": 101,
+      "sha256": "1909f16d05965b1c0375e1cc1712a5359ee7ab0bbf22b9d4896360b9b6d35c0d",
+      "declaredSha256Matches": true,
+      "asarOffset": 128382087
+    },
+    {
+      "path": "webview/assets/composer-state-944b38a29983.js",
+      "size": 5178,
+      "sha256": "bac8aab1299b2f80160d1e514925c7258412ef9527dcf437c651d84e9b6c88ef",
+      "declaredSha256Matches": true,
+      "asarOffset": 128382188
+    },
+    {
+      "path": "webview/assets/conversation-gap-fed51cf9731a.js",
+      "size": 583,
+      "sha256": "3139923112ec04876231329471e06f7b57d03a1d9f02d4cd524e3cd3abdcceab",
+      "declaredSha256Matches": true,
+      "asarOffset": 131645489
+    },
+    {
+      "path": "webview/assets/conversation-load-error-23985f064a8f.js",
+      "size": 841,
+      "sha256": "41f555b4a545790bd8eea3b646f7f358ba88b6dea7371b654ef69c296c9a6f2a",
+      "declaredSha256Matches": true,
+      "asarOffset": 131646072
+    },
+    {
+      "path": "webview/assets/conversation-navigation-state-7b217f856bf6.js",
+      "size": 312,
+      "sha256": "9a2778f424ec324c97c4b1d9b614460a95200d6fa27709b5f6277fcc920c354b",
+      "declaredSha256Matches": true,
+      "asarOffset": 131674274
+    },
+    {
+      "path": "webview/assets/conversation-source-6780e9e6783e.js",
+      "size": 12143,
+      "sha256": "203ddb0ad1319a16023abbf986b571633c4c521696984fa2d256f118b6380015",
+      "declaredSha256Matches": true,
+      "asarOffset": 131674694
+    },
+    {
+      "path": "webview/assets/draft-25a86e6c112a.js",
+      "size": 87,
+      "sha256": "c84c629079bea4de5474282ead278c7236c7b2e221e189598fe7fdbf77daed72",
+      "declaredSha256Matches": true,
+      "asarOffset": 157760615
+    },
+    {
+      "path": "webview/assets/draft-9da6ce96ce83.js",
+      "size": 7742,
+      "sha256": "6b7c5804bb832f857f17c679e1d361073b5543dc0df2c5e53098948dc1400995",
+      "declaredSha256Matches": true,
+      "asarOffset": 157760702
+    },
+    {
+      "path": "webview/assets/draft-email-5fdd1ae9f321.js",
+      "size": 6198,
+      "sha256": "698cef2b1c723b6013094be4a69cc2cab3e16961e7d2e38bcdbcb8177401c476",
+      "declaredSha256Matches": true,
+      "asarOffset": 157768444
+    },
+    {
+      "path": "webview/assets/draft-network-policy-c859e6bcdd4d.js",
+      "size": 406,
+      "sha256": "0ab4456d24716cb67f96adb51fd6c2eafae021892dc2d1460509e520d1ce76a2",
+      "declaredSha256Matches": true,
+      "asarOffset": 157774642
+    },
+    {
+      "path": "webview/assets/draft-state-10cdbb1202cf.js",
+      "size": 563,
+      "sha256": "09bc8916bd045dd5a0c872ecb32a9b5ef676ba94e9e65b52679d400d26381db4",
+      "declaredSha256Matches": true,
+      "asarOffset": 157775048
+    },
+    {
+      "path": "webview/assets/draft-state-2313289a0dbe.js",
+      "size": 152,
+      "sha256": "9e574956693a1d1c7a83997cfbe7bccf9510ff57a328cbbf0cb3e981c81f9b64",
+      "declaredSha256Matches": true,
+      "asarOffset": 157775611
+    },
+    {
+      "path": "webview/assets/draft-state-eb5f4cd906c6.js",
+      "size": 2734,
+      "sha256": "2d6996781efa3c4bd9ce441b94eb0b6ecaa776f96643a6d0ab2009fabf5559e1",
+      "declaredSha256Matches": true,
+      "asarOffset": 157775763
+    },
+    {
+      "path": "webview/assets/host-136dbe3579e1.js",
+      "size": 1729,
+      "sha256": "2f42e6a3c7834bab224a719ec2a4c5ee63031d820c211af22f2c1d2fe71d144e",
+      "declaredSha256Matches": true,
+      "asarOffset": 215950198
+    },
+    {
+      "path": "webview/assets/host-16719b019a53.js",
+      "size": 10505,
+      "sha256": "c7946ad7b0a3fcbeed1f152568e243c58e0a6c1ab6f048a138e8f8f05fe90e4c",
+      "declaredSha256Matches": true,
+      "asarOffset": 215951927
+    },
+    {
+      "path": "webview/assets/host-274f3becb3f6.js",
+      "size": 11662,
+      "sha256": "4104312afdbd3f6c09a431e1fb3c186d3fc039691f0f12c61caf666c7faf5266",
+      "declaredSha256Matches": true,
+      "asarOffset": 215962432
+    },
+    {
+      "path": "webview/assets/host-2fbd8af1f95b.css",
+      "size": 765,
+      "sha256": "622bf0f7ea3c7a57a01dbdc50bc8b1d76e74027eb840c9f3251ed390da1224d3",
+      "declaredSha256Matches": true,
+      "asarOffset": 215974094
+    },
+    {
+      "path": "webview/assets/host-5b6144e21baf.css",
+      "size": 248,
+      "sha256": "4fcc9459b90e9f1b32cecdd1c868245c52262f590785ef0e43fc0ea3ef70d385",
+      "declaredSha256Matches": true,
+      "asarOffset": 215974859
+    },
+    {
+      "path": "webview/assets/host-b13c483d28f3.js",
+      "size": 29998,
+      "sha256": "e9e6f94198b7812299f014fffe39e89e9264ed80bffb861295735921387e7e80",
+      "declaredSha256Matches": true,
+      "asarOffset": 215975107
+    },
+    {
+      "path": "webview/assets/queued-message-list-3ff8f553d6e5.js",
+      "size": 19971,
+      "sha256": "a9d88808dd711b951990327aa5f8d3958a47ac4d2c59c31c128ac140b1639db4",
+      "declaredSha256Matches": true,
+      "asarOffset": 388180943
+    },
+    {
+      "path": "webview/assets/remote-connection-editor-dialog-b17149a961f5.js",
+      "size": 13312,
+      "sha256": "f14f5ee6af282aaf6840bb78213c4de0b38bfde6b62aad4207301373ea026902",
+      "declaredSha256Matches": true,
+      "asarOffset": 397331546
+    },
+    {
+      "path": "webview/assets/remote-connection-editor-draft-3deccfcf68c8.js",
+      "size": 1980,
+      "sha256": "a73d433d1b293c1bb999fb48f995ae53850c8e31c0dae9d2158558b9446252d2",
+      "declaredSha256Matches": true,
+      "asarOffset": 397344858
+    },
+    {
+      "path": "webview/assets/remote-connection-editor-modal-5653d88f9deb.js",
+      "size": 6973,
+      "sha256": "646e31ba7666b26a9f420a50d87c6395f1dd3500490fded55385914d0d582db2",
+      "declaredSha256Matches": true,
+      "asarOffset": 397346838
+    },
+    {
+      "path": "webview/assets/remote-connections-page-dfd345254609.js",
+      "size": 647,
+      "sha256": "17902708ba55b610d68e837c7da3b0090d0f729855d6d6304f32317834a67c41",
+      "declaredSha256Matches": true,
+      "asarOffset": 397353811
+    },
+    {
+      "path": "webview/assets/remote-connections-settings-412b2a6b1159.js",
+      "size": 169411,
+      "sha256": "7ab75513dcc67690d08cb5a59ba82c1fcb56e41708a554638f95827a539c6deb",
+      "declaredSha256Matches": true,
+      "asarOffset": 397354458
+    },
+    {
+      "path": "webview/assets/remote-control-authorization-dialog-artwork-4391da067e32.png",
+      "size": 429920,
+      "sha256": "784aae83b257c9772b9ba3fd93e83932ace4f2383824ee29eeec884beb089526",
+      "declaredSha256Matches": true,
+      "asarOffset": 397523869
+    },
+    {
+      "path": "webview/assets/remote-control-connections-visibility-97137c36a76a.js",
+      "size": 1165,
+      "sha256": "ce2beb38df13d81813436f2315f2ede73495be8067410bff0246f36d50c4988b",
+      "declaredSha256Matches": true,
+      "asarOffset": 397953789
+    },
+    {
+      "path": "webview/assets/remote-conversation-page-55e2fc589444.js",
+      "size": 75548,
+      "sha256": "8a4fb004990c9637fcffa2c973bd3b63fe89a656616b4cb337cf4ef70a635e71",
+      "declaredSha256Matches": true,
+      "asarOffset": 397954954
+    },
+    {
+      "path": "webview/assets/remote-hosted-pip-anchor-bridge-7f7ea60a0d0e.js",
+      "size": 5638,
+      "sha256": "e0ea0056b2be5bd1e4665a5ac9eb29e38b651babcac5b0b3baacbcfc1d0823f4",
+      "declaredSha256Matches": true,
+      "asarOffset": 398030502
+    },
+    {
+      "path": "webview/assets/remote-hosted-pip-frame-filter.worker-4b82a84542ac.js",
+      "size": 539,
+      "sha256": "837db1f44c0d1b452682aec5cf5ae21e90dbe34b08ff836f557c5d03bec24876",
+      "declaredSha256Matches": true,
+      "asarOffset": 398036140
+    },
+    {
+      "path": "webview/assets/remote-middleware-b46270e4dd36.js",
+      "size": 1124,
+      "sha256": "5b5ec36dffd4dc7e099d1d2046ccab4bc87266ba4a6eb8df7500c57f5b5eda5f",
+      "declaredSha256Matches": true,
+      "asarOffset": 398036679
+    },
+    {
+      "path": "webview/assets/remote-workspace-root-dialog-89bdb96668ef.js",
+      "size": 1302,
+      "sha256": "e319e8e94c60e12871c3ad15870c37e19a9ad825e9acab72c23aed6b15d63293",
+      "declaredSha256Matches": true,
+      "asarOffset": 398037803
+    },
+    {
+      "path": "webview/assets/thread-bridge-ae40bb573dd5.js",
+      "size": 1066,
+      "sha256": "e164c5bf5ca6102b2678b27d813adba5b6d87e78e33edb28631817cf8fc01f66",
+      "declaredSha256Matches": true,
+      "asarOffset": 481561645
+    },
+    {
+      "path": "webview/assets/thread-handoff-modal-452ac106cdaa.js",
+      "size": 42836,
+      "sha256": "983bd8f82bf286ad46d4632a557043dbadc8b8690fdb88718e8be66862061d61",
+      "declaredSha256Matches": true,
+      "asarOffset": 481573919
+    },
+    {
+      "path": "webview/assets/thread-recovery-notice-1c5a2941798a.js",
+      "size": 1753,
+      "sha256": "73ff452e3e8731920df8f0be88dcc7fe4d1d30ef688b0e9034b52147c7f7aa13",
+      "declaredSha256Matches": true,
+      "asarOffset": 481639376
+    },
+    {
+      "path": "webview/assets/thread-scroll-layout-24b9bd243051.css",
+      "size": 2404,
+      "sha256": "afc0befc6951a4bcf9d3f54d1fc0b3e320734d7ac4e909f579e0ce2cb08c3835",
+      "declaredSha256Matches": true,
+      "asarOffset": 481641654
+    },
+    {
+      "path": "webview/assets/thread-scroll-layout-6554245fc75e.js",
+      "size": 21709,
+      "sha256": "4192c606520410e2d6e68352967c524d4bc222071d3ac14b150828fc88685ec5",
+      "declaredSha256Matches": true,
+      "asarOffset": 481644058
+    },
+    {
+      "path": "webview/assets/thread-virtualizer-e1964ca5c039.js",
+      "size": 2131,
+      "sha256": "d1a120db42f0789fa5c7b6381b76090413ac027377844731ab7c4b5ccf3fcfb0",
+      "declaredSha256Matches": true,
+      "asarOffset": 481873366
+    },
+    {
+      "path": "webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js",
+      "size": 33764,
+      "sha256": "0e59a01ef190ccc5f74a84f227439a88b120ce748de49866968fa7b19b16f391",
+      "declaredSha256Matches": true,
+      "asarOffset": 495743667
+    },
+    {
+      "path": "webview/assets/unrestored-thread-tab-route-5b0e5510d59d.js",
+      "size": 1888,
+      "sha256": "535bd8623133457f5326b58604e5650c58359d4de38fe41b48eb8c7bcbf99bc9",
+      "declaredSha256Matches": true,
+      "asarOffset": 495956657
+    },
+    {
+      "path": "webview/assets/use-resume-conversation-if-needed-337394ec06dd.js",
+      "size": 7724,
+      "sha256": "b6ecc13f5143a0829cc6020dac823e8be8b22dc04a3dce3c78bdacaa07b0481e",
+      "declaredSha256Matches": true,
+      "asarOffset": 500054856
+    }
+  ],
+  "analysis": [
+    {
+      "operation": "inspect_artifact",
+      "evidenceId": "ev_19c21390a23cbe7fe17deb1d8513616a24f2889ca3b4222e8c17172fac8ebbf8",
+      "authority": "shipped-artifact",
+      "confidence": "observed",
+      "subject": {
+        "name": "app.asar",
+        "digest": {
+          "sha256": "3bda98f2265ad23677dfe0163d1cc7855beade6bef11d27f830f6663d7658406"
+        },
+        "format": "asar",
+        "architecture": null,
+        "local_path": "/Applications/ChatGPT.app/Contents/Resources/app.asar"
+      },
+      "limitations": [
+        "7 integrity contradiction(s) were recorded; mismatched content is observed-untrusted.",
+        "Inspection derives bounded static hypotheses and next probes; it does not execute the artifact or claim format-specific semantics."
+      ],
+      "statistics": null,
+      "graphCoverage": null,
+      "semanticCoverage": null,
+      "rawEvidencePath": "/Users/cs-work/.codex/visualizations/2026/10/13/01a134f0-df8e-7b13-87e0-3ed16f402d24/rea-evidence/artifact-recorded.json.gz",
+      "rawJsonSha256": "33be94f9db6c652a56ecb351c6e72b000d893a53c16f4e09ad63041b1578a3eb"
+    },
+    {
+      "operation": "analyze_javascript_application",
+      "evidenceId": "ev_23d34534fcf2d8e14514f0060e0a5986cc7a7af780fb2ff40400ed9da8614efc",
+      "authority": "shipped-artifact",
+      "confidence": "derived",
+      "subject": {
+        "name": "selected-app",
+        "digest": {
+          "sha256": "5f6e593a574816fd266a8c3e0870d2587454806ea784831a179684591dd795f3"
+        },
+        "format": "directory",
+        "architecture": null,
+        "local_path": "/private/tmp/agentstoz-rea-research-20261013/selected-app"
+      },
+      "limitations": [
+        ".vite/build/browser-page-preload.js: Resource constraint during analyze_javascript_application: Owned JavaScript worker exhausted its heap while analyzing .vite/build/browser-page-preload.js during semantic",
+        ".vite/build/main-BbeJ4AAR.js: Resource constraint during analyze_javascript_application: Owned JavaScript worker exhausted its heap while analyzing .vite/build/main-BbeJ4AAR.js during semantic",
+        "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+        "Dynamic IPC channel expressions remain unresolved and are never paired by textual similarity.",
+        "Electron API identity follows proven lexical module aliases. Reassigned bindings, dynamic selections, and visibly overwritten namespace members are unresolved; missing findings do not establish absence. Arbitrary call side effects and runtime registration are not evaluated.",
+        "Electron relationships are derived from inert syntax; runtime registration, reachability, defaults, and enforcement remain unproven.",
+        "Graph coverage is incomplete; unavailable facts remain explicit and must not be read as absence.",
+        "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+        "Resource constraint during analyze_javascript_application: Expanded application relationships for webview/assets/thread-handoff-modal-452ac106cdaa.js exceed the parent's result budget; complete static facts were retained on the file node",
+        "Resource constraint during analyze_javascript_application: Expanded application relationships for webview/assets/thread-scroll-layout-6554245fc75e.js exceed the parent's result budget; complete static facts were retained on the file node",
+        "Resource constraint during analyze_javascript_application: Expanded application relationships for webview/assets/thread-virtualizer-e1964ca5c039.js exceed the parent's result budget; complete static facts were retained on the file node",
+        "Resource constraint during analyze_javascript_application: Expanded application relationships for webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js exceed the parent's result budget; complete static facts were retained on the file node",
+        "Resource constraint during analyze_javascript_application: Expanded application relationships for webview/assets/unrestored-thread-tab-route-5b0e5510d59d.js exceed the parent's result budget; complete static facts were retained on the file node",
+        "Sender, frame, URL, and origin checks are observations only; REA does not claim that they enforce a complete authorization policy.",
+        "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+        "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+        "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code.",
+        "webview/assets/queued-message-list-3ff8f553d6e5.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/queued-message-list-3ff8f553d6e5.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-connection-editor-dialog-b17149a961f5.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-connection-editor-dialog-b17149a961f5.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-connection-editor-modal-5653d88f9deb.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-connection-editor-modal-5653d88f9deb.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-connections-settings-412b2a6b1159.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-connections-settings-412b2a6b1159.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-conversation-page-55e2fc589444.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-conversation-page-55e2fc589444.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-hosted-pip-anchor-bridge-7f7ea60a0d0e.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-hosted-pip-anchor-bridge-7f7ea60a0d0e.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-middleware-b46270e4dd36.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-middleware-b46270e4dd36.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/remote-workspace-root-dialog-89bdb96668ef.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/remote-workspace-root-dialog-89bdb96668ef.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/thread-bridge-ae40bb573dd5.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/thread-bridge-ae40bb573dd5.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/thread-handoff-modal-452ac106cdaa.js: Resource constraint during analyze_javascript_application: webview/assets/thread-handoff-modal-452ac106cdaa.js: Resource constraint during analyze_javascript_application: The parent reserved its remaining result capacity for static observations; semantic analysis of webview/assets/thread-handoff-modal-452ac106cdaa.js was not started",
+        "webview/assets/thread-recovery-notice-1c5a2941798a.js: Resource constraint during analyze_javascript_application: Semantic graph for webview/assets/thread-recovery-notice-1c5a2941798a.js exceeds the parent's remaining result budget; static and module facts were retained",
+        "webview/assets/thread-scroll-layout-6554245fc75e.js: Resource constraint during analyze_javascript_application: webview/assets/thread-scroll-layout-6554245fc75e.js: Resource constraint during analyze_javascript_application: The parent reserved its remaining result capacity for static observations; semantic analysis of webview/assets/thread-scroll-layout-6554245fc75e.js was not started",
+        "webview/assets/thread-virtualizer-e1964ca5c039.js: Resource constraint during analyze_javascript_application: webview/assets/thread-virtualizer-e1964ca5c039.js: Resource constraint during analyze_javascript_application: The parent reserved its remaining result capacity for static observations; semantic analysis of webview/assets/thread-virtualizer-e1964ca5c039.js was not started",
+        "webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js: Resource constraint during analyze_javascript_application: webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js: Resource constraint during analyze_javascript_application: The parent reserved its remaining result capacity for static observations; semantic analysis of webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js was not started",
+        "webview/assets/unrestored-thread-tab-route-5b0e5510d59d.js: Resource constraint during analyze_javascript_application: webview/assets/unrestored-thread-tab-route-5b0e5510d59d.js: Resource constraint during analyze_javascript_application: The parent reserved its remaining result capacity for static observations; semantic analysis of webview/assets/unrestored-thread-tab-route-5b0e5510d59d.js was not started"
+      ],
+      "statistics": {
+        "relevant_files": 46,
+        "nested_asar_containers": 0,
+        "text_bytes_read": 4754364,
+        "invalid_utf8_files": 0,
+        "parsed_javascript_files": 45,
+        "visited_ast_nodes": 1245825,
+        "findings": 1983,
+        "modules": 0,
+        "parse_failures": 0
+      },
+      "graphCoverage": {
+        "status": "partial",
+        "truncated": false,
+        "omitted_count": null,
+        "limits": [
+          {
+            "name": "javascript_analysis_parent_result_budget_bytes",
+            "value": 1992442560,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_semantic_result_budget_bytes",
+            "value": 0,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_worker_heap_limit_bytes",
+            "value": 830472192,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_worker_timeout_ms",
+            "value": 15000,
+            "unit": "milliseconds"
+          }
+        ]
+      },
+      "semanticCoverage": {
+        "status": "partial",
+        "truncated": true,
+        "omitted_nodes": null,
+        "omitted_relations": null,
+        "limits": [
+          {
+            "name": "javascript_analysis_parent_result_budget_bytes",
+            "value": 1992442560,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_semantic_result_budget_bytes",
+            "value": 0,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_worker_heap_limit_bytes",
+            "value": 830472192,
+            "unit": "bytes"
+          },
+          {
+            "name": "javascript_analysis_worker_timeout_ms",
+            "value": 15000,
+            "unit": "milliseconds"
+          }
+        ],
+        "families": [
+          {
+            "family": "boundary",
+            "status": "partial",
+            "retained_relations": 20,
+            "omitted_relations": null,
+            "unknownIdCount": 27
+          },
+          {
+            "family": "call-flow",
+            "status": "partial",
+            "retained_relations": 589,
+            "omitted_relations": null,
+            "unknownIdCount": 1919
+          },
+          {
+            "family": "child-process",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": null,
+            "unknownIdCount": 17
+          },
+          {
+            "family": "closure",
+            "status": "partial",
+            "retained_relations": 2550,
+            "omitted_relations": null,
+            "unknownIdCount": 17
+          },
+          {
+            "family": "configuration",
+            "status": "partial",
+            "retained_relations": 3,
+            "omitted_relations": null,
+            "unknownIdCount": 17
+          },
+          {
+            "family": "data-flow",
+            "status": "partial",
+            "retained_relations": 18251,
+            "omitted_relations": null,
+            "unknownIdCount": 2106
+          },
+          {
+            "family": "event",
+            "status": "partial",
+            "retained_relations": 12,
+            "omitted_relations": null,
+            "unknownIdCount": 27
+          },
+          {
+            "family": "object-flow",
+            "status": "partial",
+            "retained_relations": 2931,
+            "omitted_relations": null,
+            "unknownIdCount": 3370
+          },
+          {
+            "family": "promise-ownership",
+            "status": "partial",
+            "retained_relations": 130,
+            "omitted_relations": null,
+            "unknownIdCount": 86
+          },
+          {
+            "family": "request",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": null,
+            "unknownIdCount": 17
+          },
+          {
+            "family": "resource-lifecycle",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": null,
+            "unknownIdCount": 17
+          },
+          {
+            "family": "timer",
+            "status": "partial",
+            "retained_relations": 2,
+            "omitted_relations": null,
+            "unknownIdCount": 19
+          }
+        ]
+      },
+      "rawEvidencePath": "/Users/cs-work/.codex/visualizations/2026/10/13/01a134f0-df8e-7b13-87e0-3ed16f402d24/rea-evidence/javascript-analysis.json.gz",
+      "rawJsonSha256": "7c4147acf476f5a0126015a8a8c20ec358795085654601b02af0d4e8bbb48b55"
+    },
+    {
+      "operation": "analyze_javascript_application",
+      "evidenceId": "ev_2bff661a5d91e43368b88c513de528f7cd2b03ce7ae660889fbe41e0325b69a5",
+      "authority": "shipped-artifact",
+      "confidence": "derived",
+      "subject": {
+        "name": "focused-app",
+        "digest": {
+          "sha256": "5de97d083102514f94812a88630d5930e6fdad133262bec92f278c66a6abe11a"
+        },
+        "format": "directory",
+        "architecture": null,
+        "local_path": "/private/tmp/agentstoz-rea-research-20261013/focused-app"
+      },
+      "limitations": [
+        "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+        "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+        "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+        "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+        "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code."
+      ],
+      "statistics": {
+        "relevant_files": 4,
+        "nested_asar_containers": 0,
+        "text_bytes_read": 30289,
+        "invalid_utf8_files": 0,
+        "parsed_javascript_files": 4,
+        "visited_ast_nodes": 8308,
+        "findings": 191,
+        "modules": 0,
+        "parse_failures": 0
+      },
+      "graphCoverage": {
+        "status": "complete",
+        "truncated": false,
+        "omitted_count": 0,
+        "limits": []
+      },
+      "semanticCoverage": {
+        "status": "unknown",
+        "truncated": false,
+        "omitted_nodes": 0,
+        "omitted_relations": 0,
+        "limits": [],
+        "families": [
+          {
+            "family": "boundary",
+            "status": "partial",
+            "retained_relations": 2,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "call-flow",
+            "status": "partial",
+            "retained_relations": 58,
+            "omitted_relations": 0,
+            "unknownIdCount": 362
+          },
+          {
+            "family": "child-process",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "closure",
+            "status": "partial",
+            "retained_relations": 558,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "configuration",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "data-flow",
+            "status": "partial",
+            "retained_relations": 3807,
+            "omitted_relations": 0,
+            "unknownIdCount": 475
+          },
+          {
+            "family": "event",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "object-flow",
+            "status": "partial",
+            "retained_relations": 790,
+            "omitted_relations": 0,
+            "unknownIdCount": 830
+          },
+          {
+            "family": "promise-ownership",
+            "status": "partial",
+            "retained_relations": 6,
+            "omitted_relations": 0,
+            "unknownIdCount": 5
+          },
+          {
+            "family": "request",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "resource-lifecycle",
+            "status": "partial",
+            "retained_relations": 0,
+            "omitted_relations": 0,
+            "unknownIdCount": 0
+          },
+          {
+            "family": "timer",
+            "status": "partial",
+            "retained_relations": 1,
+            "omitted_relations": 0,
+            "unknownIdCount": 2
+          }
+        ]
+      },
+      "rawEvidencePath": "/Users/cs-work/.codex/visualizations/2026/10/13/01a134f0-df8e-7b13-87e0-3ed16f402d24/rea-evidence/focused-javascript-analysis.json.gz",
+      "rawJsonSha256": "b5b223d41a41c4bb4159f70ae1b45fab93835a8200c077b8b02ffeb243ab3cf2"
+    }
+  ],
+  "observations": [
+    {
+      "id": "chat-resume",
+      "file": "webview/assets/use-resume-conversation-if-needed-337394ec06dd.js",
+      "claim": "Client passes verified conversation/host and workspace inputs to resumeConversation, checks current selection after asynchronous work, and distinguishes recovery failure categories.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "reaAnchors": [
+        {
+          "kind": "expression",
+          "identity": {
+            "artifact_sha256": "b6ecc13f5143a0829cc6020dac823e8be8b22dc04a3dce3c78bdacaa07b0481e",
+            "module_path": "webview/assets/use-resume-conversation-if-needed-337394ec06dd.js",
+            "source_range": {
+              "start": {
+                "line": 1,
+                "column": 1759
+              },
+              "end": {
+                "line": 1,
+                "column": 1785
+              }
+            },
+            "role_key": "object:read:1759:1785"
+          },
+          "function_node_id": "jsrg_node_3875177d07e6ea93c76695e737833869493b493c1c07ec40eff43413d13a2177",
+          "application_node_ids": [],
+          "label": "read:/resumeConversation",
+          "properties": {
+            "operation_kind": "read",
+            "property_path": [
+              "resumeConversation"
+            ]
+          },
+          "evidence": {
+            "context_id": "jsrg_evidence_29d663d63c6af19b3076001e98c600c3c0b8ba1f0cc293578b98b93bdd250554",
+            "location": {
+              "available": true,
+              "value": {
+                "kind": "source-range",
+                "source": "webview/assets/use-resume-conversation-if-needed-337394ec06dd.js",
+                "start": {
+                  "line": 1,
+                  "column": 1759
+                },
+                "end": {
+                  "line": 1,
+                  "column": 1785
+                }
+              }
+            }
+          },
+          "node_id": "jsrg_node_c3aaec0f9a5589d0145bcbb87583ae41afddef0df6c079654f5d7bdb1639aaab"
+        }
+      ],
+      "sourceSha256": "b6ecc13f5143a0829cc6020dac823e8be8b22dc04a3dce3c78bdacaa07b0481e",
+      "asarByteOffset": 500054856,
+      "sourceBytes": 7724
+    },
+    {
+      "id": "writer-conflict",
+      "file": "webview/assets/use-resume-conversation-if-needed-337394ec06dd.js",
+      "claim": "Client exposes isWriterConflict and a distinct live-writer conflict message; server lock implementation remains unknown.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "sourceSha256": "b6ecc13f5143a0829cc6020dac823e8be8b22dc04a3dce3c78bdacaa07b0481e",
+      "asarByteOffset": 500054856,
+      "sourceBytes": 7724
+    },
+    {
+      "id": "recovery-notice",
+      "file": "webview/assets/thread-recovery-notice-1c5a2941798a.js",
+      "claim": "Client renders loading/reconnecting recovery notices with role=status and aria-live=polite.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "sourceSha256": "73ff452e3e8731920df8f0be88dcc7fe4d1d30ef688b0e9034b52147c7f7aa13",
+      "asarByteOffset": 481639376,
+      "sourceBytes": 1753
+    },
+    {
+      "id": "queued-messages",
+      "file": "webview/assets/queued-message-list-3ff8f553d6e5.js",
+      "claim": "UI supplies edit/delete/reorder/send-now/side-chat callbacks and an explicit resume action for an interrupted queue. Queue persistence is unproven.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "sourceSha256": "a9d88808dd711b951990327aa5f8d3958a47ac4d2c59c31c128ac140b1639db4",
+      "asarByteOffset": 388180943,
+      "sourceBytes": 19971
+    },
+    {
+      "id": "task-status",
+      "file": "webview/assets/unavailable-local-conversation-page-f5fc4b97aa58.js",
+      "claim": "UI distinguishes approval, running, idle, error, and unread response status.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "sourceSha256": "0e59a01ef190ccc5f74a84f227439a88b120ce748de49866968fa7b19b16f391",
+      "asarByteOffset": 495743667,
+      "sourceBytes": 33764
+    },
+    {
+      "id": "connection-errors",
+      "file": "webview/assets/remote-connections-settings-412b2a6b1159.js",
+      "claim": "Connection management distinguishes authentication renewal from generic list retrieval failure.",
+      "authority": "static-source-review",
+      "runtimeVerified": false,
+      "sourceSha256": "7ab75513dcc67690d08cb5a59ba82c1fcb56e41708a554638f95827a539c6deb",
+      "asarByteOffset": 397354458,
+      "sourceBytes": 169411
+    }
+  ],
+  "notEstablished": [
+    "Server-side locking/storage/encryption implementation",
+    "Crash durability of ChatGPT drafts and queued messages",
+    "Observed runtime feature availability",
+    "Measured reliability or UX performance comparison",
+    "Native decompilation findings"
+  ],
+  "officialSources": [
+    "https://rea.tools/get-started/",
+    "https://learn.chatgpt.com/docs/mobile",
+    "https://learn.chatgpt.com/docs/projects",
+    "https://learn.chatgpt.com/docs/app-server"
+  ]
+}

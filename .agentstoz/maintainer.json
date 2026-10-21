@@ -1,0 +1,2035 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "quick": [
+      "maintainer-self",
+      "essential-contracts",
+      "voice-remote-benchmark",
+      "workroom-submission",
+      "workroom-effort",
+      "workroom-effort-screen",
+      "voice-regression",
+      "voice-text-only-screen",
+      "common-memory-contracts",
+      "common-memory-screen",
+      "common-memory-link-picker-screen",
+      "cli-account-contracts",
+      "cli-account-screen",
+      "common-memory-personas",
+      "memory-corrections",
+      "ops-requests",
+      "ops-requests-screen",
+      "community-threads",
+      "community-threads-screen",
+      "community-desktop-ux-screen",
+      "phone-workroom-history-contracts",
+      "phone-workroom-history-screen",
+      "phone-workroom-entry-screen",
+      "workroom-number-keys-screen",
+      "device-memory-language-contracts",
+      "device-memory-language-screen",
+      "platform-cli-contracts",
+      "platform-cli-screen",
+      "platform-cli-onboarding-screen",
+      "tester-improvements-contracts",
+      "tester-improvements-screen",
+      "prompt-origin-contracts",
+      "prompt-origin-screen",
+      "developer-report-contracts",
+      "developer-report-screen",
+      "native-confirmation-contracts",
+      "native-confirmation-screen"
+    ],
+    "mobile-workroom": [
+      "maintainer-self",
+      "essential-contracts",
+      "community-threads",
+      "community-threads-screen",
+      "community-desktop-ux-screen",
+      "phone-workroom-history-contracts",
+      "phone-workroom-history-screen",
+      "phone-workroom-entry-screen"
+    ],
+    "verify": [
+      "repository-verify"
+    ],
+    "tester": [
+      "maintainer-self",
+      "tester-integration"
+    ],
+    "persona": [
+      "persona-experience"
+    ],
+    "web": [
+      "maintainer-self",
+      "tester-integration",
+      "web-workroom",
+      "web-orchestration",
+      "web-mobile",
+      "web-performance",
+      "voice-regression",
+      "voice-text-only-screen",
+      "community-threads",
+      "community-threads-screen",
+      "community-desktop-ux-screen",
+      "phone-workroom-entry-screen",
+      "workroom-number-keys-screen",
+      "device-memory-language-contracts",
+      "device-memory-language-screen"
+    ],
+    "native": [
+      "ios-preflight",
+      "ios-core",
+      "ios-ui"
+    ],
+    "device": [
+      "ios-preflight",
+      "iphone-workroom"
+    ],
+    "full": [
+      "essential-contracts",
+      "repository-verify",
+      "tester-integration",
+      "web-workroom",
+      "web-orchestration",
+      "web-mobile",
+      "web-performance",
+      "voice-regression",
+      "voice-text-only-screen",
+      "ios-preflight",
+      "ios-core",
+      "ios-ui",
+      "iphone-workroom",
+      "context-contracts",
+      "persona-context-screen",
+      "voice-popout-screen",
+      "common-memory-requests-screen",
+      "community-threads",
+      "community-threads-screen",
+      "community-desktop-ux-screen",
+      "phone-workroom-entry-screen",
+      "workroom-number-keys-screen",
+      "device-memory-language-contracts",
+      "device-memory-language-screen"
+    ],
+    "context": [
+      "maintainer-self",
+      "context-contracts",
+      "persona-context-screen",
+      "voice-popout-screen",
+      "common-memory-requests-screen",
+      "common-memory-contracts",
+      "common-memory-recovery-guidance-screen"
+    ],
+    "persona-layers": [
+      "maintainer-self",
+      "tester-persona-layers",
+      "persona-context-screen",
+      "tester-sets-screen"
+    ],
+    "platform-cli": [
+      "maintainer-self",
+      "essential-contracts",
+      "cli-account-contracts",
+      "platform-cli-contracts",
+      "platform-cli-screen",
+      "platform-cli-onboarding-screen"
+    ],
+    "mac-onboarding": [
+      "maintainer-self",
+      "essential-contracts",
+      "cli-account-contracts",
+      "platform-cli-contracts",
+      "platform-cli-screen",
+      "platform-cli-onboarding-screen",
+      "mac-onboarding-contracts",
+      "mac-onboarding-screen",
+      "developer-report-contracts",
+      "developer-report-screen",
+      "helpdesk-contracts",
+      "helpdesk-screen",
+      "public-guide-contracts"
+    ],
+    "mac-distribution": [
+      "maintainer-self",
+      "macos-distribution-contracts",
+      "native-confirmation-contracts",
+      "native-confirmation-screen"
+    ],
+    "public-guide": [
+      "maintainer-self",
+      "public-guide-contracts"
+    ],
+    "workroom-improvement": [
+      "maintainer-self",
+      "essential-contracts",
+      "project-entry-screen",
+      "phone-workroom-grant-contracts",
+      "community-threads",
+      "community-threads-screen",
+      "community-desktop-ux-screen",
+      "phone-workroom-history-contracts",
+      "phone-workroom-history-screen",
+      "phone-workroom-entry-screen",
+      "tester-improvements-contracts",
+      "tester-improvements-screen",
+      "workroom-submission",
+      "memory-status-contracts",
+      "memory-status-screen",
+      "port-upload-status-contracts",
+      "appearance-settings-screen",
+      "prompt-origin-contracts",
+      "prompt-origin-screen",
+      "native-confirmation-contracts",
+      "native-confirmation-screen"
+    ]
+  },
+  "checks": [
+    {
+      "id": "phone-workroom-grant-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/remote-terminal-grant.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 60,
+      "evidence": "durable-grant-binding-expiry-CAS-and-registration-contracts-no-live-device-write",
+      "paths": [
+        "api-server.ts",
+        "src/remoteTerminalGrant.ts",
+        "src/remoteTerminalGrantStore.ts",
+        "tests/remote-terminal-grant.test.ts"
+      ],
+      "covers": [
+        "Editing a current phone grant retains unavailable existing projects while new additions require current registration",
+        "Revoked or expired grants and another host or phone cannot supply retained target IDs",
+        "History is separately granted; reconnect and compare-and-swap preserve device consent"
+      ]
+    },
+    {
+      "id": "project-entry-screen",
+      "argv": [
+        "bun",
+        "tests/control-profile-startup-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "actual-App-Chromium-WebKit-isolated-sidecar-no-live-profile-write",
+      "paths": [
+        "src/App.tsx",
+        "tests/control-profile-startup-ui.mjs"
+      ],
+      "covers": [
+        "Cmd/Ctrl+F focuses the visible project search; Korean input filters projects and Escape clears then exits",
+        "A delayed initial project read recovers the existing OPS without creating a replacement profile"
+      ]
+    },
+    {
+      "id": "workroom-effort",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/workroom-effort-runtime.test.ts",
+        "./tests/workroom-effort-modes-service.test.ts",
+        "./tests/workroom-effort-controls.test.tsx",
+        "./tests/workroom-effort-policy.test.ts",
+        "./tests/workroom-effort-launch.test.ts",
+        "./tests/workroom-effort-screen.test.ts",
+        "./tests/workroom-effort-setting.test.ts",
+        "./tests/workroom-effort-view.test.ts",
+        "./tests/workroom-effort-workspace.test.ts",
+        "./tests/codex-effort-model.test.ts",
+        "./tests/workroom-launch-options.test.ts",
+        "./tests/workroom-effort-runtime-support.test.ts",
+        "./tests/workroom-cli-commands.test.ts",
+        "./tests/project-agent-effort.test.ts",
+        "./tests/project-agent-terminal.test.ts",
+        "./tests/model-effort-advice-policy.test.ts",
+        "./tests/external-cli-effort.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "paths": [
+        "src/workroomEffort*",
+        "src/WorkroomEffortControls.tsx",
+        "src/codexEffortModel.ts",
+        "src/aiTerminalService.ts",
+        "src/aiTerminalLaunchArgs.ts",
+        "src/mobileWorkspaceProtocol.ts",
+        "src/projectAgentEffort.ts",
+        "src/projectAgentTerminal.ts",
+        "packages/runtime-sdk/*",
+        "src/modelEffortAdvicePolicy.ts",
+        "src/LaunchEffortControls.tsx",
+        "src/externalCliEffort*.ts",
+        "api-sidecar-entry.ts"
+      ],
+      "covers": [
+        "First request chooses supported low medium high effort without changing models",
+        "Host-wide auto recommendation and off modes persist and migrate legacy choices",
+        "Safe native session-only effort changes precede follow-up submission on Codex Claude and Hermes",
+        "Unconfirmed native changes preserve the request and never replay a write",
+        "Mode mutations are never background read probes",
+        "Auto ON resumes contextual adjustment after native effort choices; OFF keeps a fixed effort",
+        "Late reads never overwrite a changed setting or another Mac",
+        "Community peers cannot change host effort settings",
+        "External registered-project SDK and CLI hosts share mode changes without a Workroom window",
+        "Auto ON permits contextual changes from manual max while preserving project session model account bindings and bounded pending work",
+        "Unsupported native controls return recommendations without claiming application",
+        "Run Tools shares confirmed auto advice and off settings across terminal selections",
+        "External macOS CLI single-line requests use verified native controls and re-evaluate manual xhigh under auto while preserving uncertain input",
+        "Standalone external PTY client starts no API listener or provider evaluation",
+        "Desktop apps only recommend or turn off, independently of CLI auto recommendation and off, even with native control",
+        "Memory-delivered guidance reads bounded host preferences without provider calls or transcript history"
+      ],
+      "evidence": "deterministic-policy-fake-pty-and-transport-no-live-provider"
+    },
+    {
+      "id": "workroom-effort-screen",
+      "argv": [
+        "node",
+        "tests/workroom-effort-auto.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "paths": [
+        "src/WorkroomEffortControls.tsx",
+        "src/AiTerminalPanel.tsx",
+        "src/WorkroomSessionFooter.tsx",
+        "tests/workroom-effort-auto.e2e.mjs"
+      ],
+      "covers": [
+        "Mac and phone show host automatic effort setting and session advice",
+        "Unsupported hosts hide the option without repeated probes",
+        "Phone controls fit 320px and 390px with 44px targets",
+        "Switching Macs drops retired reader responses including StrictMode cleanup"
+      ],
+      "evidence": "rendered-chromium-webkit-owned-loopback-server-synthetic-host-no-live-provider"
+    },
+    {
+      "id": "workroom-submission",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/workroom-submission.test.ts",
+        "./tests/workroom-conversation-history.test.ts",
+        "./tests/ai-terminal.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "bounded-submission-real-sqlite-and-pty-fixtures-no-live-provider",
+      "paths": [
+        "src/workroomSubmissionProtocol.ts",
+        "src/workroomSubmissionClient.ts",
+        "src/workroomSubmissions.ts",
+        "src/workroomConversationJournal.ts",
+        "src/aiTerminalService.ts",
+        "src/AiTerminalPanel.tsx"
+      ],
+      "covers": [
+        "Complete Unicode request is validated before terminal writes",
+        "Lost acknowledgement and restart never replay a write_started submission",
+        "Grant loss during paste settling prevents Enter",
+        "Reviewed voice input reuses one durable submission identity",
+        "Version-bound correction context is recorded separately from efficacy"
+      ]
+    },
+    {
+      "id": "voice-remote-benchmark",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/voice-remote-benchmark.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 60,
+      "evidence": "synthetic-reported-evidence-admission-and-readonly-file-cli-no-live-runtime",
+      "paths": [
+        "src/voiceRemoteBenchmark.ts",
+        "benchmark-voice-remote.ts",
+        "tests/voice-remote-benchmark.test.ts"
+      ],
+      "covers": [
+        "Precommitted paired trials retain omitted and failed attempts",
+        "Independent semantic evidence precedes paired latency statistics",
+        "CLI proxy never proves native product superiority",
+        "Hourly metadata is not correction efficacy",
+        "Bounded file reports contain no transcript or credential fields"
+      ]
+    },
+    {
+      "id": "memory-corrections",
+      "argv": [
+        "bun",
+        "run",
+        "test:memory-corrections"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "evidence": "version-bound-correction-local-api-Chromium-WebKit-no-provider-call",
+      "paths": [
+        "src/ProjectMemoryCorrections.tsx",
+        "src/projectMemoryCorrectionReview.ts",
+        "src/projectMemoryFeedback.ts",
+        "src/projectMemoryRecall.ts",
+        "project-memory-server.ts",
+        "tests/project-memory-corrections*"
+      ],
+      "covers": [
+        "user correction and failure cause reach next task context",
+        "stale body reports never taint revised memory",
+        "lost receipt retries preserve one durable event",
+        "hourly bounded review without positive self-promotion",
+        "shared OPS corrections retain human review",
+        "project switch discards late correction UI responses"
+      ],
+      "memoryQueries": [
+        "교정 실패 기억"
+      ]
+    },
+    {
+      "id": "tester-sets-screen",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "tester"
+      ],
+      "timeoutSeconds": 300,
+      "requires": [
+        "node_modules"
+      ],
+      "paths": [
+        "src/ProjectTesterSets*",
+        "src/testerSets*",
+        "src/ProjectTesterPanel.tsx",
+        "src/App.tsx"
+      ],
+      "covers": [
+        "프로젝트·폴더 페이지에서 두 테스트 세트 구성 보기",
+        "모바일에서도 역할·상황·여정·성공 기준 확인",
+        "구성 화면을 열 때 테스트나 AI가 실행되지 않음"
+      ],
+      "evidence": "production-desktop-and-mobile-chromium"
+    },
+    {
+      "id": "tester-persona-layers",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/tester-agent-host.test.ts",
+        "./tests/tester-personas.test.ts",
+        "./tests/tester-agent-api.test.ts",
+        "./tests/tester-agent-client.test.ts",
+        "./tests/tester-sets.test.ts"
+      ],
+      "timeoutSeconds": 180,
+      "requires": [
+        "node_modules"
+      ],
+      "paths": [
+        "src/Tester*Persona*",
+        "src/ProjectTesterSets*",
+        "src/testerSets*",
+        "src/testerAgent*",
+        "scripts/agentstoz-maintainer.py",
+        "tests/maintainer/test_persona*",
+        "tests/maintainer/test_contextual_personas.py",
+        "tests/personas/**"
+      ],
+      "covers": [
+        "공통 페르소나에서 프로젝트 여정과 실제 검사 연결",
+        "공통 업데이트 뒤 프로젝트 설정 보존과 재검사",
+        "등록 응답 유실의 동일 요청 복구",
+        "같은 목표의 서로 다른 역할 보존과 검사 없는 후보 구분",
+        "프로젝트별 일반·페르소나 구성의 제한된 읽기"
+      ],
+      "evidence": "real-python-project-persona-contracts"
+    },
+    {
+      "id": "persona-experience",
+      "argv": [
+        "{python}",
+        "scripts/persona-tests.py",
+        "--root",
+        "."
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 900,
+      "evidence": "python-orchestrated-real-persona-contracts",
+      "paths": [
+        "scripts/persona-tests.py",
+        "tests/personas/**",
+        "src/projectSearch.ts",
+        "src/remote-control-portal-main.tsx",
+        "src/AiTerminalPanel.tsx",
+        "src/AgentsToZVoiceDock.tsx"
+      ],
+      "covers": [
+        "Korean keyboard search",
+        "remote permission comprehension",
+        "voice continuity",
+        "dedicated Workroom sessions",
+        "first-run clarity",
+        "sync conflict safety",
+        "mobile accessibility",
+        "memory context"
+      ],
+      "memoryQueries": [
+        "persona testing UX",
+        "사용자 페르소나 테스트"
+      ]
+    },
+    {
+      "id": "tester-integration",
+      "argv": [
+        "bun",
+        "run",
+        "test:tester"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 300,
+      "evidence": "real-python-isolated-api-chromium-webkit",
+      "paths": [
+        "scripts/agentstoz-maintainer.py",
+        "src/tester*",
+        "src/*Tester*",
+        "src/mobileTester*",
+        "tests/tester-*"
+      ],
+      "covers": [
+        "tester setup and preservation",
+        "idempotency and cancellation",
+        "restart receipts",
+        "AI handoff",
+        "project and worktree selection",
+        "mobile tester permissions and reconnect",
+        "Control test overview"
+      ],
+      "memoryQueries": [
+        "tester runner regression",
+        "테스터 프로젝트"
+      ]
+    },
+    {
+      "id": "maintainer-self",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/maintainer",
+        "-v"
+      ],
+      "timeoutSeconds": 90,
+      "evidence": "python-behavioral-tests",
+      "paths": [
+        "scripts/agentstoz-maintainer.py",
+        "tests/maintainer/**",
+        ".agentstoz/**"
+      ],
+      "tags": [
+        "smoke"
+      ],
+      "covers": [
+        "maintainer execution",
+        "failure reporting",
+        "memory recall",
+        "project scaffolding"
+      ]
+    },
+    {
+      "id": "essential-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "--cwd",
+        "tests",
+        "--max-concurrency=1",
+        "remote-control-lan-reconnect.integration.test.ts",
+        "remote-control-relay-controller.test.ts",
+        "remote-control-relay-session-vault.test.ts",
+        "remote-project-create-client.test.ts",
+        "remote-project-create-result.test.ts",
+        "agentstoz-use-code-app-mode.test.ts",
+        "agentstoz-use-control.test.ts",
+        "control-profile-store.test.ts",
+        "control-profile-restore.test.ts",
+        "control-profile-connections.test.ts",
+        "workroom-close-evidence.test.ts",
+        "codex-auto-remember-coordinator.test.ts",
+        "claude-auto-remember.test.ts",
+        "workroom-session-directory.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "evidence": "source-contracts-and-local-fixtures",
+      "covers": [
+        "remote reconnect",
+        "input ordering",
+        "create project",
+        "MCP open",
+        "control profile",
+        "automatic save",
+        "save before close",
+        "human remote input overtakes background reads without starving them",
+        "queued requests cannot cross a host-session replacement"
+      ],
+      "memoryQueries": [
+        "workroom remote session regression",
+        "워크룸 저장"
+      ]
+    },
+    {
+      "id": "repository-verify",
+      "argv": [
+        "bun",
+        "run",
+        "verify"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 1800,
+      "evidence": "typescript-bun-rust-source-verification",
+      "covers": [
+        "all repository unit and integration contracts",
+        "Rust host",
+        "sidecar build"
+      ],
+      "memoryQueries": [
+        "verify test regression"
+      ]
+    },
+    {
+      "id": "web-workroom",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "workroom"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 900,
+      "evidence": "real-browser-synthetic-api",
+      "covers": [
+        "terminal touch and keyboard",
+        "save before close",
+        "runtime selector",
+        "remote grant",
+        "context and save status"
+      ],
+      "memoryQueries": [
+        "workroom terminal touch regression",
+        "워크룸 저장"
+      ]
+    },
+    {
+      "id": "web-orchestration",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "orchestration"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 600,
+      "evidence": "real-browser-synthetic-api",
+      "covers": [
+        "desktop onboarding",
+        "control preparation",
+        "AI work request",
+        "project detail Workroom entry point"
+      ],
+      "memoryQueries": [
+        "control onboarding fixture"
+      ]
+    },
+    {
+      "id": "web-mobile",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "mobile"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 420,
+      "evidence": "chromium-webkit-mobile-fixture",
+      "covers": [
+        "project inventory",
+        "login recovery",
+        "tabs",
+        "memory panel",
+        "project creation idempotency"
+      ],
+      "memoryQueries": [
+        "mobile login project fixture",
+        "모바일 프로젝트"
+      ]
+    },
+    {
+      "id": "web-performance",
+      "argv": [
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "performance"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "evidence": "isolated-production-initial-render-five-cold-five-warm",
+      "covers": [
+        "mobile initial render FCP LCP CLS TBT"
+      ],
+      "memoryQueries": [
+        "performance resource rendering"
+      ]
+    },
+    {
+      "id": "voice-text-only-screen",
+      "argv": [
+        "bun",
+        "tests/voice-text-only.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "actual-dock-panel-client-Chromium-WebKit-denied-microphone-synthetic-RTC-no-provider",
+      "paths": [
+        "src/voiceMediaClient.ts",
+        "src/voicePreferences.ts",
+        "src/geminiPcmClient.ts",
+        "src/VoiceSessionPanel.tsx",
+        "src/components/AgentsToZVoiceDock*",
+        "tests/fixtures/voice/*",
+        "tests/voice-text-only.e2e.mjs",
+        "src/remote-control-portal.css"
+      ],
+      "covers": [
+        "Mac and phone start text conversation without microphone permission or playback",
+        "Text consent never enables microphone consent, including a changed next provider",
+        "Korean composition confirmation never submits a request",
+        "Immediate double submission sends one request and full-screen mode preserves the text draft",
+        "Text replies remain visible with captions off and @ selects the exact project recipient",
+        "Microphone refusal during mode conversion preserves the same conversation and working text mode",
+        "Phone caller header and composer form one aligned card in Korean, English and German, including landscape",
+        "Phone call controls stay beside the title without overlap and clear bottom navigation, including a project recipient"
+      ]
+    },
+    {
+      "id": "voice-regression",
+      "argv": [
+        "bun",
+        "run",
+        "test:voice"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 420,
+      "evidence": "unit-keychain-chromium-webkit-no-provider-call",
+      "paths": [
+        "src/voice*",
+        "src/Voice*",
+        "src/*Voice*",
+        "tests/voice-*",
+        "scripts/check-voice-*",
+        "src/gemini*",
+        "tests/gemini*"
+      ],
+      "covers": [
+        "OpenAI and Gemini settings",
+        "Keychain exact round-trip",
+        "microphone lifecycle",
+        "VAD and transcripts",
+        "OPS panel persistence",
+        "project context and memory actions",
+        "same-session bounded network recovery",
+        "late voice replies cannot mutate a replacement session",
+        "microphone end preserves captured PCM and input ordering"
+      ],
+      "memoryQueries": [
+        "voice session regression",
+        "OPS 음성",
+        "프로젝트 음성"
+      ]
+    },
+    {
+      "id": "ios-preflight",
+      "argv": [
+        "bun",
+        "mobile/ios/scripts/preflight.ts"
+      ],
+      "platforms": [
+        "darwin"
+      ],
+      "timeoutSeconds": 45,
+      "evidence": "local-build-prerequisites-only",
+      "covers": [
+        "Xcode SDK",
+        "app icon",
+        "privacy resources"
+      ]
+    },
+    {
+      "id": "ios-core",
+      "argv": [
+        "bun",
+        "run",
+        "test:ios"
+      ],
+      "platforms": [
+        "darwin"
+      ],
+      "needs": [
+        "ios-preflight"
+      ],
+      "timeoutSeconds": 420,
+      "evidence": "native-swift-to-bun-fixture",
+      "covers": [
+        "pairing",
+        "native transport",
+        "restore session",
+        "cancel request"
+      ],
+      "memoryQueries": [
+        "native transport resume session"
+      ]
+    },
+    {
+      "id": "ios-ui",
+      "argv": [
+        "{python}",
+        "mobile/ios/scripts/check-ui.py"
+      ],
+      "platforms": [
+        "darwin"
+      ],
+      "needs": [
+        "ios-preflight"
+      ],
+      "timeoutSeconds": 1800,
+      "evidence": "production-swiftui-owned-simulator-xcuitest",
+      "covers": [
+        "native onboarding controls",
+        "Korean input",
+        "LAN warning and cancel"
+      ],
+      "memoryQueries": [
+        "native onboarding simulator XCUITest"
+      ]
+    },
+    {
+      "id": "iphone-workroom",
+      "argv": [
+        "bun",
+        "mobile/ios/scripts/check-workroom.ts",
+        "--device",
+        "{env:AGENTSTOZ_TEST_DEVICE}",
+        "{env:AGENTSTOZ_TEST_IOS_TEMPLATE}",
+        "{env:AGENTSTOZ_TEST_SIGNING_IDENTITY}"
+      ],
+      "platforms": [
+        "darwin"
+      ],
+      "needs": [
+        "ios-preflight"
+      ],
+      "timeoutSeconds": 600,
+      "evidence": "physical-iphone-wkwebview-lan-fake-cli",
+      "covers": [
+        "native dialog",
+        "workroom consent",
+        "PTY input output",
+        "background",
+        "reconnect",
+        "explicit disconnect"
+      ],
+      "memoryQueries": [
+        "iPhone WKWebView fixture",
+        "네이티브 대화창"
+      ]
+    },
+    {
+      "id": "common-memory-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/common-memory.test.ts",
+        "./tests/common-memory-service.test.ts",
+        "./tests/common-memory-sql.test.ts",
+        "./tests/sdk-project-management.test.ts",
+        "./tests/common-memory-projects.test.ts",
+        "./tests/common-memory-remote.test.ts",
+        "./tests/common-memory-mcp-stdio.test.ts",
+        "./tests/common-memory-intent.test.ts",
+        "./tests/common-memory-crypto.test.ts",
+        "./tests/common-memory-followup.test.ts",
+        "./tests/sdk-project-folders.test.ts",
+        "./tests/common-memory-topics.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "goal-selection-cloud-CAS-and-portable-SDK",
+      "paths": [
+        "src/commonMemory*",
+        "src/CommonMemoryPanel.tsx",
+        "common-memory-server.ts",
+        "src/sdkProjectManagement.ts",
+        "tests/common-memory*",
+        "tests/sdk-project-management.test.ts",
+        "common-memory-projects-server.ts",
+        "src/commonMemoryIntent.ts",
+        "src/RemoteCommonMemoryPanel.tsx",
+        "src/CommonMemoryProjectsPanel.tsx"
+      ],
+      "covers": [
+        "A+B and B+C independent goals",
+        "source and goal changes",
+        "pinned publication and cloud scope",
+        "reported application review",
+        "portable SDK preparation",
+        "per-device member notices and exact single-member replay",
+        "remote cloud/root grants and transfer admission",
+        "actual stdio MCP source catalog/read"
+      ],
+      "memoryQueries": [
+        "공통기억 목표 SDK"
+      ]
+    },
+    {
+      "id": "common-memory-screen",
+      "argv": [
+        "bun",
+        "tests/common-memory-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "rendered-Chromium-WebKit-with-owned-Git-clones-and-isolated-cloud",
+      "paths": [
+        "src/CommonMemoryPanel.tsx",
+        "src/CommonMemoryProjectsPanel.tsx",
+        "tests/common-memory-ui.mjs",
+        "tests/fixtures/common-memory/*"
+      ],
+      "covers": [
+        "first-use and overlapping groups",
+        "goal-scoped source selection and recommendation pin clearing",
+        "bulk clone partial failure exact retry",
+        "reload receipt with no original memory body in storage",
+        "16px inputs 44px buttons no mobile overflow"
+      ]
+    },
+    {
+      "id": "common-memory-link-picker-screen",
+      "argv": [
+        "bun",
+        "tests/common-memory-link-picker-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "evidence": "rendered-Chromium-WebKit-request-counted-isolated-cloud",
+      "paths": [
+        "src/MetaCommonMemoryPanel.tsx",
+        "src/metaCommonMemoryClient.ts",
+        "src/CommonMemoryPanel.tsx",
+        "tests/common-memory-link-picker-ui.mjs",
+        "tests/fixtures/common-memory/*"
+      ],
+      "covers": [
+        "opening a group asks read and history only",
+        "link a long-term memory not registered on this Mac by memoryId",
+        "older Mac keeps this Mac's rows and the project-card form",
+        "16px inputs 44px buttons no mobile overflow"
+      ]
+    },
+    {
+      "id": "cli-account-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/cli-accounts.test.ts",
+        "./tests/cli-accounts-api.test.ts",
+        "./tests/cli-account-observers.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-account-auth-MCP-PTY-and-observation",
+      "paths": [
+        "src/cliAccount*",
+        "src/CliAccountPicker.tsx",
+        "src/aiTerminal*",
+        "tests/cli-account*"
+      ]
+    },
+    {
+      "id": "cli-account-screen",
+      "argv": [
+        "bun",
+        "tests/cli-accounts-ui.mjs"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "rendered-Chromium-WebKit-fake-official-login-no-user-credentials",
+      "paths": [
+        "src/CliAccountPicker.tsx",
+        "src/AiTerminalPanel*",
+        "tests/cli-accounts-ui.mjs",
+        "tests/fixtures/cli*"
+      ]
+    },
+    {
+      "id": "common-memory-personas",
+      "argv": [
+        "{python}",
+        "scripts/persona-tests.py",
+        "--root",
+        ".",
+        "--persona",
+        "shared-memory-newcomer",
+        "--persona",
+        "shared-memory-curator",
+        "--persona",
+        "shared-memory-returning-user",
+        "--persona",
+        "shared-memory-mcp-operator"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "four-persona-deduplicated-contract-stdio-Chromium-WebKit",
+      "paths": [
+        "src/CommonMemoryPanel.tsx",
+        "src/MetaCommonMemoryPanel.tsx",
+        "src/commonMemory*",
+        "common-memory-server.ts",
+        "common-memory-migration-server.ts",
+        "tests/common-memory-personas*",
+        "tests/common-memory-mcp-stdio.test.ts",
+        "tests/personas/catalog.json"
+      ]
+    },
+    {
+      "id": "context-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/voice-popout.test.ts",
+        "./tests/tester-agent-host.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "paths": [
+        "src/tester*",
+        "src/voicePopout.ts",
+        "tests/voice-popout.test.ts"
+      ],
+      "evidence": "reviewed-context-persona-contracts",
+      "covers": [
+        "페르소나 후보의 오래된 맥락과 중복 승인 거부"
+      ]
+    },
+    {
+      "id": "persona-context-screen",
+      "argv": [
+        "bun",
+        "tests/persona-evolution-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "paths": [
+        "src/*Persona*",
+        "src/ProjectTesterPanel.tsx",
+        "scripts/agentstoz-maintainer.py"
+      ],
+      "evidence": "real-python-chromium-webkit",
+      "covers": [
+        "개발 맥락의 후보 검토와 실제 페르소나 검사"
+      ]
+    },
+    {
+      "id": "voice-popout-screen",
+      "argv": [
+        "bun",
+        "tests/voice-popout-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "paths": [
+        "src/VoicePopout*",
+        "src/NativeVoiceLauncher.tsx",
+        "src-tauri/src/voice_popout.rs"
+      ],
+      "evidence": "chromium-webkit-component-native-ipc-fixture",
+      "covers": [
+        "독립 음성 창의 단일 마이크 소유권과 종료",
+        "처음 연 음성 창에서 네이티브 표시 영역 차이와 좁은 폭에도 텍스트 입력·전송 버튼이 잘리지 않는다"
+      ]
+    },
+    {
+      "id": "common-memory-requests-screen",
+      "argv": [
+        "bun",
+        "tests/common-memory-panel-requests-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "paths": [
+        "src/CommonMemoryPanel.tsx"
+      ],
+      "evidence": "chromium-webkit-request-counted",
+      "covers": [
+        "공통기억에서 장기기억 읽기와 프로젝트 가져오기 분리"
+      ]
+    },
+    {
+      "id": "ops-requests",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/ops-request.test.ts",
+        "./tests/ops-request-mcp.test.ts",
+        "./tests/control-profile-api.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 90,
+      "evidence": "encrypted-sqlite-and-real-loopback-mcp-no-live-provider",
+      "paths": [
+        "src/opsRequest*",
+        "src/OpsRequest*",
+        "src/agentDialogueControl*",
+        "src/agentDialogueHost.ts",
+        "agentstoz-use-mcp-server.ts",
+        "api-server.ts"
+      ],
+      "covers": [
+        "Caller AI is independent of the receiving OPS AI",
+        "Explicit cross-device task opens the receiver Workroom and returns result and evidence",
+        "Receipt loss and restart never replay a started task",
+        "Exact community membership and result capability protect each task",
+        "Completed worker lifetime preserves user-continued Workrooms"
+      ]
+    },
+    {
+      "id": "ops-requests-screen",
+      "argv": [
+        "bun",
+        "tests/ops-request-screen.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "rendered-chromium-owned-loopback-fixture-no-provider",
+      "paths": [
+        "src/OpsRequestPanel.tsx",
+        "src/OpsRequestPanel.css",
+        "src/opsRequest*",
+        "tests/ops-request-screen.e2e.mjs",
+        "tests/fixtures/ops-request-screen.ts"
+      ],
+      "covers": [
+        "OPS request composer shows running, result and evidence, then offers a new task",
+        "A refused or never-admitted request returns to the composer with a new request ID",
+        "A lost answer keeps the same request ID and never submits a second task",
+        "The task limit is counted in bytes before sending"
+      ]
+    },
+    {
+      "id": "community-threads",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/workroom-threads.test.ts",
+        "./tests/workroom-thread-groups.test.ts",
+        "./tests/mobile-workspace.test.ts",
+        "./tests/community-submission.test.ts",
+        "./tests/agent-dialogue-control.test.ts",
+        "./tests/workroom-conversation-history.test.ts",
+        "./tests/ai-terminal-activity.test.ts",
+        "./tests/workroom-composer-keys.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "encrypted-sqlite-real-terminal-submissions-synthetic-pty-no-provider",
+      "paths": [
+        "src/workroomThread*",
+        "src/CommunityWorkspace*",
+        "src/CommunityThreadMemory.tsx",
+        "src/aiTerminalService.ts",
+        "src/mobileWorkspace*",
+        "src/workroomConversationService.ts",
+        "src/WorkroomTerminalKeys.tsx"
+      ],
+      "covers": [
+        "A device channel creates one project-bound Workroom per task",
+        "Workroom and thread replies share one durable record and never echo execution",
+        "Stale revisions, revoked grants and changed checkout identities refuse delivery",
+        "Lost acknowledgements, missing keys and host restarts never replay a task",
+        "An observed CLI exit reopens the exact saved conversation once on a new thread post",
+        "At 70% a verified completed turn saves through the shared dispatcher before closing; new input or uncertain save preserves the CLI",
+        "Fresh context reads preserved thread history and retains original project and CLI account",
+        "Old session publishers and concurrent follow-ups cannot attach to or start another execution",
+        "One shared task atomically admits multiple authorized projects and starts distinct Workrooms once",
+        "All participant questions, results and direct Workroom replies share one ordered encrypted journal",
+        "A selected project receives each follow-up; phone control IDs never expose runtime target IDs",
+        "Mac-created task journals share replies with approved phones without granting raw Workroom history",
+        "Every participant grant is required and internal child IDs cannot bypass shared-task authorization",
+        "An earlier MCP result never suppresses a different native final answer; identical text deduplicates only within its request and project"
+      ]
+    },
+    {
+      "id": "community-threads-screen",
+      "argv": [
+        "bun",
+        "tests/workroom-threads.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "rendered-chromium-webkit-real-encrypted-store-synthetic-terminal-no-live-service",
+      "paths": [
+        "src/CommunityWorkspace*",
+        "src/CommunityThreadMemory.tsx",
+        "src/workroomThread*",
+        "tests/workroom-threads.e2e.mjs"
+      ],
+      "covers": [
+        "Phone device channels and typed project mentions select the exact recipient",
+        "Questions and both answer surfaces appear in the same task thread",
+        "Stale refusal preserves editable drafts and lost receipts recover without a second start",
+        "Memory receipt is separate from task completion and phone tap targets are at least 44px",
+        "Typed @ calls add projects without replacing existing recipients; headings use @",
+        "Multiple project Workrooms report into the same visible task and follow-ups select one exact recipient",
+        "Native final answers remain visible after earlier tool results in single and multi-project tasks"
+      ]
+    },
+    {
+      "id": "community-desktop-ux-screen",
+      "argv": [
+        "bun",
+        "tests/community-desktop-ux.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "actual-React-Chromium-WebKit-synthetic-device-fixture-no-live-CLI",
+      "paths": [
+        "src/CommunityWorkspace*",
+        "src/CommunityThreadMemory.tsx",
+        "src/WorkroomDeviceSwitch.tsx",
+        "src/remote-control-portal.css",
+        "src/components/AgentsToZVoiceDock.tsx",
+        "src/WorkroomSessionDirectory*",
+        "tests/community-desktop-ux.e2e.mjs",
+        "tests/fixtures/community-desktop/*",
+        "src/aiTerminalScheduling.ts",
+        "src/AiTerminalPanel.tsx",
+        "src/WorkroomSessionFooter.tsx"
+      ],
+      "covers": [
+        "Mac channels, task list and conversation retain selected task and draft identity",
+        "Refreshing an open conversation updates the other visible task states",
+        "Loading or failed thread reads never expose new-task submission",
+        "A lost reply receipt clears only its original draft and never resends",
+        "First task opens a phone composer from an empty loading list and retains its draft when returning",
+        "The idle OPS dock leaves the phone keyboard task composer usable, preserves its draft and keeps active call controls",
+        "Light and dark desktop layouts, enlarged text and phone widths keep actions visible",
+        "Session directory and work threads remain accessible from one mode switch",
+        "LAN WebViews without crypto.randomUUID can list work sessions and submit requests"
+      ]
+    },
+    {
+      "id": "phone-workroom-history-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/workroom-history-remote.test.ts",
+        "./tests/remote-workroom-history-client.test.ts",
+        "./tests/remote-workroom-history-layout.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-history-service-receipts-and-phone-client-no-live-CLI",
+      "paths": [
+        "src/*workroomHistory*",
+        "src/RemoteWorkroomHistoryPanel.tsx",
+        "src/remoteWorkroomHistoryClient.ts",
+        "tests/*workroom-history*"
+      ],
+      "covers": [
+        "History read and resume require separate project-scoped grants and revocation is rechecked before launch",
+        "Lost responses and unknown outcomes only query the original receipt without executing twice",
+        "A restored session is selected only on its original Mac while preserving a new-task draft",
+        "Saved conversations with the same title and minute have distinct visible labels without exposing provider IDs"
+      ]
+    },
+    {
+      "id": "phone-workroom-history-screen",
+      "argv": [
+        "bun",
+        "tests/remote-workroom-history-confirm.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "rendered-Chromium-WebKit-synthetic-history-host-no-live-CLI",
+      "paths": [
+        "src/RemoteWorkroomHistoryPanel.tsx",
+        "src/remoteWorkroomHistoryClient.ts",
+        "tests/remote-workroom-history-confirm.e2e.mjs",
+        "tests/fixtures/remote-workroom-history-confirm.tsx"
+      ],
+      "covers": [
+        "A deliberate resume opens the saved conversation once and selects its actual session",
+        "Choosing the second of two same-minute conversation labels reviews only that conversation",
+        "A lost execute reply is checked without a second execution and then selects the restored session",
+        "Double taps never confirm execution and cancel or refresh clears the decision",
+        "Delayed history lists and resume results never replace another Mac's view or select its session",
+        "Hidden or unavailable Workroom views and disconnected Macs never select a delayed resumed session",
+        "Offline and project-less views explain disabled actions without sending reads",
+        "Loading and permission recovery show the next action without granting permissions from the phone"
+      ]
+    },
+    {
+      "id": "workroom-number-keys-screen",
+      "argv": [
+        "node",
+        "tests/workroom-number-keys.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "actual-Mac-phone-React-Chromium-WebKit-isolated-transport-no-live-CLI",
+      "paths": [
+        "src/WorkroomTerminalKeys.tsx",
+        "src/workroomComposerKeys.ts",
+        "src/AiTerminalPanel.tsx",
+        "src/AiTerminalPanel.css",
+        "tests/workroom-number-keys.e2e.mjs"
+      ],
+      "covers": [
+        "Mac and phone number buttons send exactly one key with no implicit Enter or raw-keyboard activation",
+        "More exposes 4 through 9 and 0 in a viewport-bounded keyboard-accessible popup",
+        "Popup Escape does not reach the CLI and failed delivery never retries automatically"
+      ]
+    },
+    {
+      "id": "phone-workroom-entry-screen",
+      "argv": [
+        "node",
+        "tests/workroom-open-entry.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "rendered-chromium-webkit-402x874-synthetic-transport-no-live-phone",
+      "paths": [
+        "src/AiTerminalPanel.tsx",
+        "src/remote-control-portal-main.tsx",
+        "tests/workroom-open-entry.e2e.mjs"
+      ],
+      "covers": [
+        "A phone project with no session opens the new-task sheet",
+        "An existing project session opens directly and a different project opens its own sheet",
+        "List failure remains visible and opening a project never starts a paid AI by itself"
+      ]
+    },
+    {
+      "id": "device-memory-language-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/device-operating-memory.test.ts",
+        "./tests/device-memory-remote.test.ts",
+        "./tests/app-language.test.ts",
+        "./tests/voice-utterance-review.test.ts",
+        "./tests/voice-review-relay.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 90,
+      "evidence": "deterministic-isolation-retry-permission-and-original-audio-contracts",
+      "paths": [
+        "src/deviceOperatingMemory*",
+        "src/i18n.ts",
+        "src/voiceUtteranceReview.ts",
+        "src/voiceAudioTranscription.ts",
+        "device-operating-memory-server.ts",
+        "tests/device-memory*",
+        "tests/device-operating-memory*",
+        "tests/app-language*",
+        "tests/voice-review*",
+        "tests/voice-utterance*"
+      ],
+      "covers": [
+        "device-specific OPS memory is isolated and cloud backup failure preserves local entries",
+        "legacy migration supersedes only after verified backup",
+        "mobile memory permission is explicitly opted in",
+        "seven menu languages persist across windows",
+        "same-utterance recheck cannot silently relay a changed number or polarity"
+      ]
+    },
+    {
+      "id": "device-memory-language-screen",
+      "argv": [
+        "bun",
+        "tests/device-memory-language.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "chromium-webkit-react-screen-scripted-host-no-cloud-write",
+      "paths": [
+        "src/DeviceOperatingMemoryPanel.tsx",
+        "src/RemoteDeviceMemoryPanel.tsx",
+        "src/useAppLanguage.tsx",
+        "src/i18n.ts",
+        "tests/device-memory-language.e2e.mjs",
+        "tests/fixtures/device-memory/*"
+      ],
+      "covers": [
+        "phone and desktop memory save retains an identical request after backup failure",
+        "all seven menu choices render and persist",
+        "shared-window language changes and 320px layout"
+      ]
+    },
+    {
+      "id": "platform-cli-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/platform-cli-accounts.test.ts",
+        "./tests/platform-cli-account-options.test.ts",
+        "./tests/platform-cli-login.test.ts",
+        "./tests/platform-cli-setup.test.ts",
+        "./tests/ui-glossary.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-vault-project-binding-MCP-CLI-exact-push-and-retry-contracts",
+      "paths": [
+        "src/platformCli*",
+        "src/platformGithubPush.ts",
+        "src/PlatformCliSettings.tsx",
+        "src/PlatformGithubPushDialog.tsx",
+        "tests/platform-cli*",
+        "src/PlatformCliLoginPanel.tsx",
+        "src/platformGoogleOAuthClient.ts",
+        "src/PlatformGoogleClientSetup.tsx",
+        "src/platformCliSetup.ts",
+        "src/platformCliSetupGuide.ts",
+        "src/PlatformCliPreparation.tsx",
+        "src/SupabaseSetupAccountPicker.tsx",
+        "src/platformCliAccountOptions.ts"
+      ],
+      "covers": [
+        "multiple provider accounts stay isolated across projects and agent hosts",
+        "current native login and project origin are the default while explicit project choices take precedence",
+        "general project CLI accounts cannot receive or change the AgentsToZ data Supabase connection",
+        "changed account repository branch or commit prevents execution",
+        "uncertain push retries never duplicate transmission",
+        "Device default email intent blocks fallback until OAuth proves the requested account",
+        "Project overrides take priority and running work pins the original account",
+        "Official CLI browser approvals stay isolated and wrong-email approvals are refused",
+        "Vercel OAuth refresh data survives isolated invocations",
+        "Google Console Desktop client JSON stays in the OS vault and does not register an account",
+        "Invalid Google client files cannot replace a working client or redirect OAuth endpoints",
+        "Multiple Google accounts retain independent project bindings and the device default",
+        "A device with no or some CLIs distinguishes installation from authentication without reading credentials",
+        "Existing provider logins are connected only after the requested email is verified",
+        "App sync explicitly chooses one verified Supabase account and returns only a public client key",
+        "A failed selected account never falls back to another Supabase login",
+        "Service account setup uses the shared 기기 vocabulary consistently",
+        "The same GitHub login appears once without changing a saved native credential binding"
+      ]
+    },
+    {
+      "id": "platform-cli-screen",
+      "argv": [
+        "bun",
+        "tests/platform-cli-accounts-ui.mjs"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "real-settings-and-push-dialog-Chromium-WebKit-fake-provider-credentials",
+      "paths": [
+        "src/PlatformCliSettings.tsx",
+        "src/PlatformGithubPushDialog.tsx",
+        "tests/platform-cli-accounts-ui.mjs",
+        "tests/fixtures/platform-cli*",
+        "src/PlatformCliLoginPanel.tsx",
+        "src/PlatformGoogleClientSetup.tsx"
+      ],
+      "covers": [
+        "existing GitHub logins are selected without a credential copy or global account switch",
+        "app and conversational account selection share one project binding",
+        "project account choice survives changing projects",
+        "push review displays the selected account repository branch and commit before sending",
+        "credential inputs clear after submission and the screen fits a narrow viewport",
+        "Device intent shows sign-in required and project inheritance remains explicit",
+        "Browser approval verifies the expected email and preserves project overrides",
+        "Google Console attachment guides the user from file preparation through separate browser approval",
+        "Three Google accounts can share one client file and the project can select another account",
+        "A verified account card switches the device default in one click without changing a project override",
+        "Google client JSON accepts file picker and browser file drops with the same validation",
+        "Tauri native JSON drops use the shared single-owner router and reject oversized files before reading"
+      ]
+    },
+    {
+      "id": "platform-cli-onboarding-screen",
+      "argv": [
+        "bun",
+        "tests/platform-cli-setup-ui.mjs"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "first-device-no-cli-partial-cli-existing-login-and-explicit-app-sync-account-Chromium-WebKit",
+      "paths": [
+        "src/PlatformCliPreparation.tsx",
+        "src/PlatformCliLoginPanel.tsx",
+        "src/PlatformCliSettings.tsx",
+        "src/SetupWizard.tsx",
+        "src/SupabaseSetupAccountPicker.tsx",
+        "src/OnboardingInfrastructureCenter.tsx",
+        "tests/platform-cli-setup-ui.mjs",
+        "tests/fixtures/platform-cli*"
+      ],
+      "covers": [
+        "First-time users with no CLIs see an actionable AI handoff and cannot mistake installation for login",
+        "A partially prepared device installs only missing tools and rechecks actual installation",
+        "An existing login is verified and explicitly selected as a device default",
+        "App sync can use a different Supabase management account and phone login email",
+        "The same selected Supabase account is used for project listing public key and local administrator setup"
+      ]
+    },
+    {
+      "id": "mac-onboarding-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/mac-setup.test.ts",
+        "./tests/platform-cli-operation.test.ts"
+      ],
+      "timeoutSeconds": 90,
+      "kind": "contract",
+      "covers": [
+        "fresh Mac without AI",
+        "partial installation",
+        "verified app execution",
+        "sequential account admission",
+        "Keychain waiting receipt",
+        "restart without replay",
+        "native onboarding capability"
+      ],
+      "paths": [
+        "src/macSetup*",
+        "src/platformCliOperation*",
+        "tests/mac-setup.test.ts",
+        "tests/platform-cli-operation.test.ts"
+      ]
+    },
+    {
+      "id": "mac-onboarding-screen",
+      "argv": [
+        "bun",
+        "tests/mac-setup-ui.mjs"
+      ],
+      "timeoutSeconds": 180,
+      "kind": "screen",
+      "covers": [
+        "novice program selection",
+        "same request after reload",
+        "cancel pending installation",
+        "retry remaining tools only",
+        "separate app data storage"
+      ],
+      "paths": [
+        "src/MacSetupPanel.tsx",
+        "src/OnboardingAppDataSection.tsx",
+        "tests/mac-setup-ui.mjs",
+        "tests/fixtures/mac-setup/**"
+      ]
+    },
+    {
+      "id": "macos-distribution-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/macos-base-app.test.ts",
+        "./tests/macos-direct-distribution.test.ts",
+        "./tests/macos-notary-preflight.test.ts",
+        "./tests/public-release-version.test.ts",
+        "./tests/public-publish-integration.test.ts",
+        "./tests/public-publish-safety.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "artifact-signing-public-orphan-and-failure-contracts-no-Apple-upload",
+      "paths": [
+        "src/macOSBase*",
+        "src/macOSDirectDistributionPipeline.ts",
+        "src/publicReleaseVersion.ts",
+        "scripts/publish.ts",
+        "scripts/verify-mac-fresh-profile.py"
+      ],
+      "covers": [
+        "A clean public orphan preserves the source build number without private ancestry",
+        "The full desktop package includes tester and signed KakaoTalk helper resources",
+        "Signing and notarization stages cannot claim installation or publication",
+        "Fresh-profile artifact testing is explicit and isolated from the real Mac profile"
+      ]
+    },
+    {
+      "id": "public-guide-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/onboarding-first-run-clarity.regression.test.ts",
+        "./tests/onboarding-infrastructure.test.ts",
+        "./tests/public-guide-windows-install-path.regression-1.test.ts",
+        "./tests/public-guide-vercel-primary-path.regression-1.test.ts",
+        "./tests/public-guide-ai-handoff.regression-1.test.ts",
+        "./tests/public-guide-deploy.test.ts",
+        "./tests/guide-deployment.test.ts",
+        "./tests/public-guide-share.test.ts",
+        "./tests/guide-content-coverage.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "public-download-install-account-scope-and-static-guide-deployment-contracts",
+      "paths": [
+        "src/onboarding-guide-main.tsx",
+        "docs/user-guide/**",
+        "docs/macos-direct-distribution.md",
+        "README.md"
+      ],
+      "covers": [
+        "First-time Mac users download the pinned signed DMG without Git Bun clone or service accounts",
+        "Source execution stays collapsed as a developer option",
+        "Project service accounts remain separate from app data sync",
+        "The published guide contains only audited public static assets"
+      ]
+    },
+    {
+      "id": "tester-improvements-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/tester-improvements.test.ts",
+        "./tests/tester-agent-host.test.ts",
+        "./tests/tester-agent-client.test.ts",
+        "./tests/tester-agent-api.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "kind": "contract",
+      "evidence": "isolated-local-journal-host-and-workspace-lease",
+      "paths": [
+        "src/testerImprovement*",
+        "src/testerAgent*",
+        "tests/tester-improvements*"
+      ],
+      "covers": [
+        "Scenario observations changes and rechecks accumulate separately from deterministic verdicts",
+        "Lost acknowledgements and stale revisions cannot duplicate a journal entry",
+        "Capacity redaction malformed state and linked-folder boundaries preserve existing records"
+      ]
+    },
+    {
+      "id": "tester-improvements-screen",
+      "argv": [
+        "bun",
+        "tests/tester-improvements.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "kind": "screen",
+      "evidence": "actual-React-Chromium-WebKit-with-durable-isolated-host-no-provider",
+      "paths": [
+        "src/TesterImprovementPanel.tsx",
+        "tests/tester-improvements.e2e.mjs",
+        "tests/fixtures/tester-improvements.tsx"
+      ],
+      "covers": [
+        "A first-time tester records an observation then improvement and recheck in one scenario",
+        "A lost save acknowledgement retains the note and retries the same request ID",
+        "Changing projects reloads the open panel and discards late previous-project results",
+        "Phone layout retains 16px input without horizontal overflow and works without randomUUID"
+      ]
+    },
+    {
+      "id": "memory-status-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/project-memory-panel-status.test.ts",
+        "./tests/project-memory-panel-status.integration.test.ts",
+        "./tests/project-memory-sync-state.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-local-panel-status-and-lease-contention-no-live-cloud-write",
+      "paths": [
+        "src/ProjectMemoryPanel.tsx",
+        "src/projectMemoryPanelStatus.ts",
+        "tests/project-memory-panel-status.test.ts",
+        "tests/project-memory-panel-status.integration.test.ts",
+        "tests/project-memory-sync-state.test.ts"
+      ],
+      "covers": [
+        "A failed or busy remote status read preserves existing local memory",
+        "A local-only poll does not claim a remote success"
+      ]
+    },
+    {
+      "id": "memory-status-screen",
+      "argv": [
+        "bun",
+        "scripts/check-maintainer-web.ts",
+        "memory-status"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "actual-App-Chromium-desktop-and-mobile-isolated-API-no-live-profile-write",
+      "paths": [
+        "src/ProjectMemoryPanel.tsx",
+        "scripts/check-maintainer-web.ts",
+        "tests/project-memory-hung-sidecar-ui.mjs"
+      ],
+      "covers": [
+        "An existing local memory shows the failed status reason and a read-only retry",
+        "Retry reads exactly once while busy and never pushes pulls or creates memory",
+        "A successful retry clears the stale failure and shows the matching remote status"
+      ]
+    },
+    {
+      "id": "appearance-settings-screen",
+      "argv": [
+        "bun",
+        "scripts/check-maintainer-web.ts",
+        "appearance-settings"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "Chromium-WebKit-real-settings-component-isolated-API-native-AX-requires-separate-Mac-proof",
+      "paths": [
+        "src/AppearanceSettings.tsx",
+        "tests/appearance-settings-ui.mjs",
+        "scripts/check-maintainer-web.ts"
+      ],
+      "covers": [
+        "Settings uses a document-level modal boundary to preserve Mac sibling-body accessibility on return",
+        "Repeated close and Escape retain the same unsent draft and restore body keyboard interaction",
+        "Settings keeps keyboard focus inside the modal and never contacts a live account"
+      ]
+    },
+    {
+      "id": "port-upload-status-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/port-auto-upload-status.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 60,
+      "evidence": "contracts",
+      "paths": [
+        "src/portAutoUploadStatus.ts",
+        "tests/port-auto-upload-status.test.ts"
+      ],
+      "covers": [
+        "Native string and sidecar Error file-lock timeouts identify local storage contention and the next safe action",
+        "Upload stops distinguish local locks, cloud connectivity, schema, authorization and uncertain committed writes without exposing raw errors"
+      ]
+    },
+    {
+      "id": "prompt-origin-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/what-i-said-codex-delivery.test.ts",
+        "./tests/what-i-said-prompt-origin.test.ts",
+        "./tests/what-i-said-transcript-collector.test.ts",
+        "./tests/prompt-guide-suggestions.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-transcript-registry-encrypted-store-and-guide-contracts-no-live-history-write",
+      "paths": [
+        "src/whatISaidCodexDelivery.ts",
+        "src/whatISaidPromptOriginRegistry.ts",
+        "src/whatISaidTranscriptCollector.ts",
+        "api-server.ts",
+        "tests/what-i-said-codex-delivery.test.ts",
+        "tests/what-i-said-prompt-origin.test.ts",
+        "tests/what-i-said-transcript-collector.test.ts",
+        "tests/prompt-guide-suggestions.test.ts"
+      ],
+      "covers": [
+        "Scheduled Codex delivery uses exact producer metadata, turn, full-text and time binding; quoted XML remains a user message",
+        "Missing or mismatched provenance stays unknown and scheduled instructions do not enter guide suggestions",
+        "Incremental scan restart preserves bounded evidence, originals and deduplication without reclassifying existing rows"
+      ]
+    },
+    {
+      "id": "prompt-origin-screen",
+      "argv": [
+        "bun",
+        "scripts/check-maintainer-web.ts",
+        "prompt-origin"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "Chromium-WebKit-real-record-guide-components-synthetic-read-only-API",
+      "paths": [
+        "src/WhatISaidPanel.tsx",
+        "src/PromptGuideBar.tsx",
+        "tests/what-i-said-origin-ui.mjs",
+        "tests/prompt-guide-smoke.mjs",
+        "scripts/check-maintainer-web.ts"
+      ],
+      "covers": [
+        "Korean and English origin labels do not claim physical typing for legacy general messages",
+        "Read-only origin filters preserve the existing wire values and display unknown original messages",
+        "Guide review explains legacy uncertainty and does not save or send a request automatically"
+      ]
+    },
+    {
+      "id": "developer-report-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/voc-client.test.ts",
+        "./tests/developer-error-report.test.ts",
+        "./tests/voc-remote.test.ts",
+        "./tests/voc-desktop-attachments.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "evidence": "isolated-delivery-and-public-draft-contracts-no-live-report",
+      "paths": [
+        "src/voc/**",
+        "src/WorkroomPopoutApp.tsx",
+        "tests/developer-error-report*",
+        "tests/voc-client.test.ts"
+      ],
+      "covers": [
+        "Missing receiver is distinct from successful developer delivery",
+        "Public issue draft excludes local paths and token-shaped strings",
+        "Existing local save and direct opt-in delivery remain separate"
+      ]
+    },
+    {
+      "id": "developer-report-screen",
+      "argv": [
+        "bun",
+        "tests/developer-error-report-ui.mjs"
+      ],
+      "timeoutSeconds": 180,
+      "evidence": "rendered-Chromium-WebKit-real-VOC-fake-clipboard-and-browser-opener-no-external-submit",
+      "paths": [
+        "src/voc/**",
+        "tests/developer-error-report-ui.mjs",
+        "tests/fixtures/developer-error-report/**"
+      ],
+      "covers": [
+        "A Mac user reviews and edits a public report before copying",
+        "A failed browser open preserves the draft and retry opens once",
+        "Losing receiver configuration clears direct send while preserving local save",
+        "Copy and open never submit a report or expose its content in the URL"
+      ]
+    },
+    {
+      "id": "common-memory-recovery-guidance-screen",
+      "argv": [
+        "bun",
+        "tests/common-memory-recovery-guidance-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "paths": [
+        "src/CommonMemoryPanel.tsx",
+        "src/MetaCommonMemoryPanel.tsx",
+        "tests/common-memory-recovery-guidance-ui.mjs",
+        "tests/fixtures/common-memory/*"
+      ],
+      "evidence": "isolated-Chromium-WebKit-search-recovery-and-production-cloud-export-serializer",
+      "covers": [
+        "Recover from an empty common-memory search with keyboard focus and no memory mutation",
+        "Distinguish archive-filter and partially loaded catalog results",
+        "Cloud JSON export is a content copy, not an available file-restore operation; original group remains unchanged"
+      ],
+      "memoryQueries": [
+        "공통기억 검색 빈 결과 내보내기 사본 복원"
+      ]
+    },
+    {
+      "id": "native-confirmation-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/confirm-action.test.ts",
+        "./tests/workroom-draft-queue-earlier.test.ts",
+        "./tests/workroom-route-delivery.test.ts",
+        "./tests/workroom-popout.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 120,
+      "paths": [
+        "src/confirmAction.ts",
+        "src/workroomDraftQueue.ts",
+        "src/workroomRouteDelivery.ts",
+        "tests/confirm-action.test.ts",
+        "tests/workroom-draft-queue-earlier.test.ts",
+        "tests/workroom-route-delivery.test.ts",
+        "src-tauri/capabilities/workroom-popout.json",
+        "tests/workroom-popout.test.ts"
+      ],
+      "evidence": "deferred-native-and-synchronous-browser-confirmation-contracts",
+      "covers": [
+        "Only an explicit confirmation reply authorizes a mutation; cancellation, missing or failing dialogs and concurrent prompts perform none",
+        "Duplicate-risk draft take-back and cross-project handoff await confirmation before vault deletion, start or terminal input",
+        "Only workroom-* windows receive the native confirm command; main and unrelated file/filesystem/window privileges remain unchanged"
+      ]
+    },
+    {
+      "id": "native-confirmation-screen",
+      "argv": [
+        "bun",
+        "tests/native-confirmation.e2e.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "paths": [
+        "src/confirmAction.ts",
+        "src/AiTerminalPanel.tsx",
+        "src/ProjectMemoryApiKeys.tsx",
+        "tests/native-confirmation.e2e.mjs"
+      ],
+      "evidence": "isolated-Chromium-WebKit-real-panel-native-promise-fixture",
+      "covers": [
+        "Pending, cancelled or failed native restart confirmation changes no runtime; one approval restarts exactly the originally selected session",
+        "Changing conversations during a confirmation invalidates its later answer",
+        "Pending or cancelled connection-key revocation sends no RPC; approval sends exactly one"
+      ]
+    },
+    {
+      "id": "helpdesk-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/helpdesk.test.ts"
+      ],
+      "timeoutSeconds": 120,
+      "kind": "contract",
+      "paths": [
+        "src/helpdesk*",
+        "src/HelpdeskPanel.tsx",
+        "api-server.ts",
+        "src-tauri/src/lib.rs",
+        "tests/helpdesk.test.ts"
+      ],
+      "covers": [
+        "AI-free guidance and selected batch preparation preserve existing installations",
+        "Official authentication precedes one tool-free answer",
+        "Durable IDs, revision, cancellation and restart never replay an unknown question"
+      ]
+    },
+    {
+      "id": "helpdesk-screen",
+      "argv": [
+        "bun",
+        "tests/helpdesk-ui.mjs"
+      ],
+      "timeoutSeconds": 180,
+      "kind": "screen",
+      "paths": [
+        "src/HelpdeskPanel.tsx",
+        "src/MacSetupPanel.tsx",
+        "src/helpdesk*",
+        "tests/helpdesk-ui.mjs",
+        "tests/fixtures/helpdesk/*"
+      ],
+      "evidence": "real-receipt-host-components-synthetic-installers-auth-AI",
+      "covers": [
+        "Fresh Mac user prepares programs once then authenticates",
+        "Pre-auth FAQ and fixed application destinations work without AI",
+        "Rendered answer, lost acknowledgement, cancellation and reopening preserve one explicit request"
+      ]
+    }
+  ],
+  "limits": [
+    "A source or fixture pass does not prove the installed Mac app or a TestFlight download works.",
+    "Real provider authentication and actual Codex/Claude/Hermes/agy responses need separate account-level checks.",
+    "Personal internet relay, cellular handover, camera QR scan and 30-day expiry are not end-to-end verified by these fixture checks.",
+    "Performance measures the isolated mobile initial page, not signed-in project workload or AI latency.",
+    "The simulator's optional personal HTTPS test can be skipped when no personal origin is supplied; inspect native UI evidence."
+  ]
+}

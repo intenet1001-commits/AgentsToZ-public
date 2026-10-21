@@ -1,0 +1,11 @@
+{
+  "cases": [
+    { "input": null, "expected": {} },
+    { "input": 0, "expected": {} },
+    { "input": -1, "expected": {} },
+    { "input": 1.5, "expected": {} },
+    { "input": "9000", "expected": {} },
+    { "input": 9000, "expected": { "PORT": "9000", "API_PORT": "9001" } },
+    { "input": 65535, "expected": { "PORT": "65535" } }
+  ]
+}
