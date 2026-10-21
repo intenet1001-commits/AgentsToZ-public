@@ -1,0 +1,32 @@
+src-tauri/target
+src-tauri/.cargo
+src-tauri
+mobile
+vendor/kmsg/.build
+node_modules
+dist
+dist-portal
+# .git stays: the portal's build number is counted from git history (buildVersion.ts). The served
+# output is dist-portal only, and the Vercel CLI never uploads .git anyway.
+iTerm2
+test-results
+tests/results/screenshots
+.agent-memory
+.env
+.env.*
+portal.json
+ports.json
+supabase-service.json
+supabase/.temp
+output
+worktrees
+.playwright-cli
+.playwright-mcp
+.omc
+.bkit
+.cs-artifacts
+tests/results
+tests
+logs
+# Local release evidence can contain database backups and signed build artifacts.
+release

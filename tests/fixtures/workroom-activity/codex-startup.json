@@ -1,0 +1,1421 @@
+{
+ "schema": "workroom-activity-calibration/v1",
+ "cli": "codex",
+ "version": "codex-cli 0.162.1",
+ "scenario": "startup",
+ "recordedOn": "2026-10-16",
+ "host": "AiTerminalService in-process (real PTY + host headless screen), macOS arm64",
+ "terminal": {
+  "cols": 100,
+  "rows": 30
+ },
+ "isolation": "isolated HOME + config dir, dummy API key, local fake model server, HTTPS_PROXY to a dead port; no account",
+ "argv": [
+  "<CODEX_BIN>",
+  "-c",
+  "tui.status_line=[\"context-remaining\"]"
+ ],
+ "timeUnit": "ms since the start request",
+ "phases": [
+  {
+   "name": "startup-to-trust-screen",
+   "kind": "startup",
+   "start": 99,
+   "end": 636,
+   "durationMs": 537,
+   "output": {
+    "events": 36,
+    "maxGapMs": 256,
+    "medianGapMs": 2,
+    "p90GapMs": 17,
+    "p99GapMs": 256,
+    "leadingGapMs": 0,
+    "trailingGapMs": 88
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 332,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 332,
+    "trailingGapMs": 205
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 537,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 537,
+    "trailingGapMs": 537,
+    "stateAtStart": null,
+    "statesSeen": {},
+    "stateAtEnd": null
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "trust-screen-waiting",
+   "kind": "prompt",
+   "start": 636,
+   "end": 12553,
+   "durationMs": 11917,
+   "output": {
+    "events": 0,
+    "maxGapMs": 11917,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 11917,
+    "trailingGapMs": 11917
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 11917,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 0,
+    "trailingGapMs": 11917
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 11917,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 11917,
+    "trailingGapMs": 11917,
+    "stateAtStart": null,
+    "statesSeen": {},
+    "stateAtEnd": null
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 1,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "idle-composer-after-trust",
+   "kind": "idle",
+   "start": 14327,
+   "end": 34327,
+   "durationMs": 20000,
+   "output": {
+    "events": 0,
+    "maxGapMs": 20000,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20000,
+    "trailingGapMs": 20000
+   },
+   "screenContent": {
+    "events": 0,
+    "maxGapMs": 20000,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20000,
+    "trailingGapMs": 20000
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 20000,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20000,
+    "trailingGapMs": 20000,
+    "stateAtStart": "plain",
+    "statesSeen": {},
+    "stateAtEnd": "plain"
+   },
+   "samples": 0,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  },
+  {
+   "name": "turn",
+   "kind": "working",
+   "start": 34327,
+   "end": 36156,
+   "durationMs": 1829,
+   "output": {
+    "events": 91,
+    "maxGapMs": 110,
+    "medianGapMs": 2,
+    "p90GapMs": 49,
+    "p99GapMs": 110,
+    "leadingGapMs": 7,
+    "trailingGapMs": 2
+   },
+   "screenContent": {
+    "events": 10,
+    "maxGapMs": 820,
+    "medianGapMs": 102,
+    "p90GapMs": 820,
+    "p99GapMs": 820,
+    "leadingGapMs": 97,
+    "trailingGapMs": 91
+   },
+   "title": {
+    "updates": 18,
+    "events": 18,
+    "maxGapMs": 331,
+    "medianGapMs": 101,
+    "p90GapMs": 192,
+    "p99GapMs": 199,
+    "leadingGapMs": 331,
+    "trailingGapMs": 2,
+    "stateAtStart": "plain",
+    "statesSeen": {
+     "spinner": 17,
+     "plain": 1
+    },
+    "stateAtEnd": "plain"
+   },
+   "samples": 10,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 1
+  },
+  {
+   "name": "idle-after-turn",
+   "kind": "idle",
+   "start": 36156,
+   "end": 56198,
+   "durationMs": 20042,
+   "output": {
+    "events": 1,
+    "maxGapMs": 20042,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 0,
+    "trailingGapMs": 20042
+   },
+   "screenContent": {
+    "events": 1,
+    "maxGapMs": 20031,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 11,
+    "trailingGapMs": 20031
+   },
+   "title": {
+    "updates": 0,
+    "events": 0,
+    "maxGapMs": 20042,
+    "medianGapMs": null,
+    "p90GapMs": null,
+    "p99GapMs": null,
+    "leadingGapMs": 20042,
+    "trailingGapMs": 20042,
+    "stateAtStart": "plain",
+    "statesSeen": {},
+    "stateAtEnd": "plain"
+   },
+   "samples": 1,
+   "awaitsAnswerSamples": 0,
+   "escToInterruptSamples": 0
+  }
+ ],
+ "actions": [
+  {
+   "t": 4,
+   "action": "start"
+  },
+  {
+   "t": 2551,
+   "action": "condition",
+   "note": "first screen settled (2 s quiet)"
+  },
+  {
+   "t": 2551,
+   "action": "observe",
+   "note": "holding the startup/trust screen 10 s"
+  },
+  {
+   "t": 12553,
+   "action": "input",
+   "data": "\r",
+   "note": "answer trust/startup screen (Enter = highlighted default)"
+  },
+  {
+   "t": 14327,
+   "action": "condition",
+   "note": "composer idle"
+  },
+  {
+   "t": 14327,
+   "action": "observe",
+   "note": "idle composer 20 s"
+  },
+  {
+   "t": 34327,
+   "action": "input",
+   "data": "CALIB_HELLO say hello\r",
+   "note": "submit"
+  },
+  {
+   "t": 36198,
+   "action": "condition",
+   "note": "model done"
+  },
+  {
+   "t": 36198,
+   "action": "condition",
+   "note": "turn ended in transcript"
+  },
+  {
+   "t": 36198,
+   "action": "observe",
+   "note": "idle after turn 20 s"
+  },
+  {
+   "t": 56198,
+   "action": "close"
+  }
+ ],
+ "model": [
+  {
+   "t": 34707,
+   "kind": "request",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 34748,
+   "kind": "request",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 35508,
+   "kind": "first-byte",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 35549,
+   "kind": "first-byte",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 36111,
+   "kind": "done",
+   "scenario": "HELLO",
+   "step": 0
+  },
+  {
+   "t": 36153,
+   "kind": "done",
+   "scenario": "HELLO",
+   "step": 0
+  }
+ ],
+ "output": [
+  [
+   99,
+   8
+  ],
+  [
+   100,
+   20
+  ],
+  [
+   100,
+   27
+  ],
+  [
+   356,
+   34
+  ],
+  [
+   356,
+   40
+  ],
+  [
+   356,
+   6
+  ],
+  [
+   356,
+   9
+  ],
+  [
+   364,
+   14
+  ],
+  [
+   364,
+   1024
+  ],
+  [
+   364,
+   712
+  ],
+  [
+   364,
+   14
+  ],
+  [
+   364,
+   8
+  ],
+  [
+   366,
+   43
+  ],
+  [
+   369,
+   35
+  ],
+  [
+   369,
+   8
+  ],
+  [
+   373,
+   43
+  ],
+  [
+   382,
+   43
+  ],
+  [
+   399,
+   68
+  ],
+  [
+   401,
+   43
+  ],
+  [
+   403,
+   43
+  ],
+  [
+   412,
+   43
+  ],
+  [
+   440,
+   43
+  ],
+  [
+   444,
+   35
+  ],
+  [
+   444,
+   8
+  ],
+  [
+   527,
+   43
+  ],
+  [
+   533,
+   43
+  ],
+  [
+   535,
+   43
+  ],
+  [
+   537,
+   35
+  ],
+  [
+   537,
+   8
+  ],
+  [
+   539,
+   43
+  ],
+  [
+   544,
+   35
+  ],
+  [
+   544,
+   8
+  ],
+  [
+   546,
+   48
+  ],
+  [
+   548,
+   14
+  ],
+  [
+   548,
+   1024
+  ],
+  [
+   548,
+   265
+  ],
+  [
+   12566,
+   40
+  ],
+  [
+   12567,
+   9
+  ],
+  [
+   12572,
+   1024
+  ],
+  [
+   12572,
+   704
+  ],
+  [
+   12574,
+   43
+  ],
+  [
+   12576,
+   43
+  ],
+  [
+   12578,
+   43
+  ],
+  [
+   12589,
+   43
+  ],
+  [
+   12606,
+   43
+  ],
+  [
+   12619,
+   12
+  ],
+  [
+   12623,
+   43
+  ],
+  [
+   12631,
+   14
+  ],
+  [
+   12631,
+   518
+  ],
+  [
+   12634,
+   43
+  ],
+  [
+   12654,
+   43
+  ],
+  [
+   12665,
+   43
+  ],
+  [
+   12739,
+   16
+  ],
+  [
+   12744,
+   43
+  ],
+  [
+   12748,
+   43
+  ],
+  [
+   12752,
+   12
+  ],
+  [
+   12758,
+   43
+  ],
+  [
+   34334,
+   43
+  ],
+  [
+   34334,
+   83
+  ],
+  [
+   34334,
+   29
+  ],
+  [
+   34334,
+   14
+  ],
+  [
+   34335,
+   35
+  ],
+  [
+   34335,
+   8
+  ],
+  [
+   34335,
+   43
+  ],
+  [
+   34335,
+   43
+  ],
+  [
+   34335,
+   35
+  ],
+  [
+   34335,
+   8
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34336,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34337,
+   43
+  ],
+  [
+   34338,
+   43
+  ],
+  [
+   34338,
+   43
+  ],
+  [
+   34370,
+   98
+  ],
+  [
+   34480,
+   44
+  ],
+  [
+   34486,
+   132
+  ],
+  [
+   34487,
+   110
+  ],
+  [
+   34536,
+   43
+  ],
+  [
+   34548,
+   43
+  ],
+  [
+   34558,
+   93
+  ],
+  [
+   34658,
+   16
+  ],
+  [
+   34660,
+   175
+  ],
+  [
+   34693,
+   43
+  ],
+  [
+   34695,
+   22
+  ],
+  [
+   34702,
+   43
+  ],
+  [
+   34736,
+   22
+  ],
+  [
+   34737,
+   35
+  ],
+  [
+   34737,
+   8
+  ],
+  [
+   34769,
+   43
+  ],
+  [
+   34803,
+   43
+  ],
+  [
+   34837,
+   22
+  ],
+  [
+   34837,
+   43
+  ],
+  [
+   34872,
+   43
+  ],
+  [
+   34906,
+   43
+  ],
+  [
+   34939,
+   22
+  ],
+  [
+   34939,
+   43
+  ],
+  [
+   34975,
+   43
+  ],
+  [
+   35009,
+   43
+  ],
+  [
+   35044,
+   22
+  ],
+  [
+   35044,
+   43
+  ],
+  [
+   35079,
+   43
+  ],
+  [
+   35114,
+   22
+  ],
+  [
+   35114,
+   43
+  ],
+  [
+   35149,
+   43
+  ],
+  [
+   35183,
+   43
+  ],
+  [
+   35218,
+   22
+  ],
+  [
+   35218,
+   35
+  ],
+  [
+   35218,
+   8
+  ],
+  [
+   35252,
+   85
+  ],
+  [
+   35286,
+   43
+  ],
+  [
+   35320,
+   22
+  ],
+  [
+   35320,
+   43
+  ],
+  [
+   35356,
+   85
+  ],
+  [
+   35390,
+   43
+  ],
+  [
+   35425,
+   22
+  ],
+  [
+   35425,
+   77
+  ],
+  [
+   35425,
+   8
+  ],
+  [
+   35460,
+   43
+  ],
+  [
+   35496,
+   43
+  ],
+  [
+   35518,
+   22
+  ],
+  [
+   35518,
+   14
+  ],
+  [
+   35518,
+   78
+  ],
+  [
+   35518,
+   8
+  ],
+  [
+   35610,
+   67
+  ],
+  [
+   35710,
+   22
+  ],
+  [
+   35710,
+   68
+  ],
+  [
+   35811,
+   22
+  ],
+  [
+   35813,
+   22
+  ],
+  [
+   35813,
+   54
+  ],
+  [
+   35813,
+   8
+  ],
+  [
+   35912,
+   68
+  ],
+  [
+   36012,
+   22
+  ],
+  [
+   36013,
+   51
+  ],
+  [
+   36013,
+   8
+  ],
+  [
+   36113,
+   22
+  ],
+  [
+   36117,
+   43
+  ],
+  [
+   36120,
+   18
+  ],
+  [
+   36128,
+   154
+  ],
+  [
+   36128,
+   8
+  ],
+  [
+   36154,
+   12
+  ],
+  [
+   36156,
+   43
+  ]
+ ],
+ "titles": [
+  [
+   12619,
+   "project"
+  ],
+  [
+   12739,
+   "⠙ project"
+  ],
+  [
+   12752,
+   "project"
+  ],
+  [
+   34658,
+   "⠋ project"
+  ],
+  [
+   34695,
+   "⠋ ⠋ | project"
+  ],
+  [
+   34736,
+   "⠙ ⠙ | project"
+  ],
+  [
+   34837,
+   "⠹ ⠹ | project"
+  ],
+  [
+   34939,
+   "⠸ ⠸ | project"
+  ],
+  [
+   35044,
+   "⠼ ⠼ | project"
+  ],
+  [
+   35114,
+   "⠴ ⠴ | project"
+  ],
+  [
+   35218,
+   "⠦ ⠦ | project"
+  ],
+  [
+   35320,
+   "⠧ ⠧ | project"
+  ],
+  [
+   35425,
+   "⠇ ⠇ | project"
+  ],
+  [
+   35518,
+   "⠏ ⠏ | project"
+  ],
+  [
+   35710,
+   "⠋ ⠋ | project"
+  ],
+  [
+   35811,
+   "⠙ ⠙ | project"
+  ],
+  [
+   35813,
+   "⠹ ⠹ | project"
+  ],
+  [
+   36012,
+   "⠸ ⠸ | project"
+  ],
+  [
+   36113,
+   "⠴ ⠴ | project"
+  ],
+  [
+   36120,
+   "⠴ | project"
+  ],
+  [
+   36154,
+   "project"
+  ]
+ ],
+ "screens": [
+  {
+   "t": 24,
+   "hash": "a0bdb7e71846",
+   "cursor": [
+    0,
+    0
+   ],
+   "alternate": false,
+   "awaitsAnswer": false,
+   "rows": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "t": 431,
+   "hash": "89eb42d8afa3",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "0": " ",
+    "1": "  >_ OpenAI Codex (v0.162.1)",
+    "2": "     ~/project",
+    "6": "                                             ⣀⣤⣤⣤⣀⣀",
+    "7": "                                          ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀",
+    "8": "                                        ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄",
+    "9": "                                       ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧",
+    "10": "                                    ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇",
+    "11": "                                   ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷",
+    "12": "                                  ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀",
+    "13": "                                  ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄",
+    "14": "                                  ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿",
+    "15": "                                  ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇",
+    "16": "                                    ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿",
+    "17": "                                    ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃",
+    "18": "                                    ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁",
+    "19": "                                     ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁",
+    "20": "                                      ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟",
+    "21": "                                         ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏",
+    "22": "                                                ⠈⠙⠛⠿⠿⠿⠿⠛⠉",
+    "26": "› Ask Codex to do anything",
+    "29": "  ? for shortcuts"
+   }
+  },
+  {
+   "t": 636,
+   "hash": "85394c50c2c3",
+   "cursor": [
+    26,
+    1
+   ],
+   "alternate": true,
+   "awaitsAnswer": true,
+   "rows": {
+    "1": "  Folder access",
+    "2": "  <PATH>",
+    "3": "  <PATH>                                             ",
+    "5": "  Trust this folder? Codex can read, edit, and run files here, subject to your permission",
+    "6": "  settings. Folder settings can run code automatically, even without a model request. Continue",
+    "7": "  only if you trust these files. Your trust decision will be saved.",
+    "8": "",
+    "9": "› 1. Trust and continue                                                                             ",
+    "10": "  2. Quit",
+    "11": "",
+    "12": "  enter continue · esc quit",
+    "13": "",
+    "14": "",
+    "15": "",
+    "16": "",
+    "17": "",
+    "18": "",
+    "19": "",
+    "20": "",
+    "21": "",
+    "22": "",
+    "26": " ",
+    "29": ""
+   }
+  },
+  {
+   "t": 12602,
+   "hash": "5a280b9c8479",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "0": "",
+    "1": "  >_ OpenAI Codex (v0.162.1)",
+    "2": "     ~/project",
+    "3": "",
+    "5": "",
+    "6": "                                             ⣀⣤⣤⣤⣀⣀",
+    "7": "                                          ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀",
+    "8": "                                        ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄",
+    "9": "                                       ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧",
+    "10": "                                    ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇",
+    "11": "                                   ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷",
+    "12": "                                  ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀",
+    "13": "                                  ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄",
+    "14": "                                  ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿",
+    "15": "                                  ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇",
+    "16": "                                    ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿",
+    "17": "                                    ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃",
+    "18": "                                    ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁",
+    "19": "                                     ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁",
+    "20": "                                      ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟",
+    "21": "                                         ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏",
+    "22": "                                                ⠈⠙⠛⠿⠿⠿⠿⠛⠉",
+    "26": "› Ask Codex to do anything",
+    "29": "  ? for shortcuts"
+   }
+  },
+  {
+   "t": 12704,
+   "hash": "290eedf0f69c",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "6": "",
+    "7": "",
+    "8": "",
+    "9": "",
+    "10": "",
+    "11": "",
+    "12": "",
+    "13": "",
+    "14": "",
+    "15": "",
+    "16": "",
+    "17": "",
+    "18": "",
+    "19": "",
+    "20": "",
+    "21": "",
+    "22": "",
+    "28": "  Context 100% left",
+    "29": "  ? for shortcuts                                                          ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 34424,
+   "hash": "ff0c90b2654c",
+   "cursor": [
+    26,
+    23
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "26": "› CALIB_HELLO say hello",
+    "29": "                                                                           ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 34526,
+   "hash": "fbdddee5b985",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "5": "› CALIB_HELLO say hello",
+    "26": "› Ask Codex to do anything",
+    "29": "  ? for shortcuts                                                          ⚠ 1 warning · f2 to view"
+   }
+  },
+  {
+   "t": 34627,
+   "hash": "d28c5471e868",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "29": "  ? for shortcuts                                                         ⚠ 2 warnings · f2 to view"
+   }
+  },
+  {
+   "t": 34734,
+   "hash": "bcd0142abf42",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "23": "• Working (0s • esc to interrupt)"
+   }
+  },
+  {
+   "t": 35554,
+   "hash": "d0795b829966",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello",
+    "23": " "
+   }
+  },
+  {
+   "t": 35656,
+   "hash": "bfd45b380c1a",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello from t"
+   }
+  },
+  {
+   "t": 35760,
+   "hash": "8aa8a3b55b28",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello from the cal"
+   }
+  },
+  {
+   "t": 35861,
+   "hash": "08fc92da6f23",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello from the calibrati"
+   }
+  },
+  {
+   "t": 35963,
+   "hash": "8475e0caf316",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello from the calibration mod"
+   }
+  },
+  {
+   "t": 36065,
+   "hash": "f0e7435c4fe4",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "8": "• Hello from the calibration model."
+   }
+  },
+  {
+   "t": 36167,
+   "hash": "274a03994e32",
+   "cursor": [
+    26,
+    2
+   ],
+   "alternate": true,
+   "awaitsAnswer": false,
+   "rows": {
+    "10": "  Worked for 1s • 8:54 AM                                                                           "
+   }
+  }
+ ],
+ "transcript": [
+  {
+   "seenAt": 34629,
+   "writtenAtApprox": 34627,
+   "type": "session_meta",
+   "subtype": null
+  },
+  {
+   "seenAt": 34630,
+   "writtenAtApprox": 34630,
+   "type": "event_msg",
+   "subtype": "task_started"
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34715,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34716,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34719,
+   "type": "world_state",
+   "subtype": null
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34720,
+   "type": "turn_context",
+   "subtype": null
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34729,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 34734,
+   "writtenAtApprox": 34729,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 36167,
+   "writtenAtApprox": 36151,
+   "type": "event_msg",
+   "subtype": "item_completed"
+  },
+  {
+   "seenAt": 36167,
+   "writtenAtApprox": 36152,
+   "type": "response_item",
+   "subtype": "message"
+  },
+  {
+   "seenAt": 36167,
+   "writtenAtApprox": 36153,
+   "type": "token_usage_record",
+   "subtype": null
+  },
+  {
+   "seenAt": 36167,
+   "writtenAtApprox": 36154,
+   "type": "event_msg",
+   "subtype": "token_count"
+  },
+  {
+   "seenAt": 36167,
+   "writtenAtApprox": 36156,
+   "type": "event_msg",
+   "subtype": "task_complete"
+  }
+ ],
+ "keychain": {
+  "shimRequests": [],
+  "securityChildProcesses": 0,
+  "psPolls": 921,
+  "securityFrameworkLogLines": 0
+ }
+}

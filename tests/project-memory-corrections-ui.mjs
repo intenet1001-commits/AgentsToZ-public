@@ -1,0 +1,72 @@
+import {chromium,webkit} from 'playwright';
+import assert from 'node:assert/strict';
+import {mkdirSync} from 'node:fs';
+const built=await Bun.build({entrypoints:['tests/fixtures/memory-corrections/panel.tsx'],target:'browser',format:'esm',define:{'process.env.NODE_ENV':'"production"'}});
+if(!built.success)throw Error(built.logs.join('\n'));
+const js=built.outputs.find(file=>file.path.endsWith('.js'));
+const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:r=>new URL(r.url).pathname==='/app.js'?new Response(js,{headers:{'Content-Type':'text/javascript'}}):new Response('<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:12px;--surface:#18181b;--ink:#fafafa;--ink-2:#d4d4d8;--line:#52525b;background:#0a0a0b}</style><div id="root"></div><script type="module" src="/app.js"></script>',{headers:{'Content-Type':'text/html'}})});
+const output='.agentstoz/maintainer/corrections-20261014';mkdirSync(output,{recursive:true});
+try{for(const [name,engine] of Object.entries({chromium,webkit})){
+ const browser=await engine.launch();try{
+  const page=await browser.newPage({viewport:{width:320,height:760}});const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto(server.url.toString());await page.getByText('교정·실패 기억하기',{exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.calls.length),0,'opening does not read every memory');
+  const outcomes=page.getByTestId('project-memory-correction-outcomes');await outcomes.waitFor();
+  const outcomeText=await outcomes.innerText();
+  assert.ok(outcomeText.includes('반복 1')&&outcomeText.includes('대기 1')&&outcomeText.includes('제외 1'),'outcome counts are shown');
+  assert.ok(outcomeText.includes('작성칸·음성 요청과 요청 전체로 입력된 @ 전달만'),'the coverage note is visible');
+  assert.ok(!outcomeText.includes('shell'),'no task or evidence text in the outcome line');
+  // S4-05/S4-06: the attestation section is collapsed and makes no request until it is opened.
+  assert.equal(await page.evaluate(()=>window.outcomeCalls.length),0,'a collapsed attestation section asks nothing');
+  await page.getByText('요청 결과 직접 확인하기',{exact:true}).click();
+  const row=page.getByTestId('correction-attest-row');await row.waitFor();
+  assert.equal(await page.evaluate(()=>window.outcomeCalls.filter(c=>c.operation==='list').length),1);
+  const rowText=await row.innerText();
+  assert.ok(rowText.includes('셸 입력 수정 대화')&&rowText.includes('project-a shell rule'),'titles are shown');
+  assert.ok(!rowText.includes('Use JSON')&&!rowText.includes('실패 원인'),'no task or evidence text in the list');
+  for(const button of await row.getByRole('button').all())assert.ok((await button.boundingBox()).height>=44,'touch-size buttons');
+  await row.getByRole('button',{name:'피했다',exact:true}).click();
+  await page.getByTestId('correction-attest-notice').filter({hasText:'결과를 남겼습니다'}).waitFor();
+  const attests=await page.evaluate(()=>window.outcomeCalls.filter(c=>c.operation==='attest'));
+  assert.equal(attests.length,1,'one click posts once');
+  assert.deepEqual([attests[0].unitId,attests[0].verdict],['1'.repeat(64),'avoided']);
+  await row.getByText('남긴 결과: 피했다').waitFor();
+  await row.getByRole('checkbox',{name:'shell-input'}).check();await row.getByRole('button',{name:'검사 연결',exact:true}).click();
+  await page.getByTestId('correction-attest-notice').filter({hasText:'검사를 연결했습니다'}).waitFor();
+  const binds=await page.evaluate(()=>window.outcomeCalls.filter(c=>c.operation==='bind'));
+  assert.equal(binds.length,1);assert.deepEqual(binds[0].checkIds,['shell-input']);
+  await row.getByText('연결된 검사: shell-input').waitFor();
+  // A press that lost the race with finalization says so and shows the row as it now is — no stale buttons, no 「남겼습니다」.
+  await page.evaluate(()=>{window.finalizeOnAttest=true;});
+  await row.getByRole('button',{name:'반복됐다',exact:true}).click();
+  await page.getByTestId('correction-attest-notice').filter({hasText:'남기는 사이'}).waitFor();
+  await row.getByText('확정: 알 수 없음',{exact:false}).waitFor();
+  assert.equal(await row.getByRole('button',{name:'피했다',exact:true}).count(),0,'a finalized row offers no verdict buttons');
+  assert.ok(!(await page.getByTestId('correction-attest-notice').innerText()).includes('결과를 남겼습니다'),'a refused write never reads as recorded');
+  assert.equal(await page.getByRole('button',{name:'기억 검색',exact:true}).isDisabled(),true);
+  await page.getByRole('textbox',{name:'교정할 기억 검색'}).fill('shell');await page.getByRole('button',{name:'기억 검색',exact:true}).click();
+  await page.getByRole('button',{name:'project-a shell rule'}).click();
+  await page.getByRole('textbox',{name:'실패 원인',exact:true}).fill('JSON 입력에서 shell 치환이 실행됐다.');
+  await page.getByRole('textbox',{name:'다음 처리 방법',exact:true}).fill('안전하게 인수를 인용하고 실제 바이트를 확인한다.');
+  for(const input of await page.locator('input,textarea').all())assert.ok(parseFloat(await input.evaluate(el=>getComputedStyle(el).fontSize))>=16);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  await page.screenshot({path:output+'/'+name+'.png',fullPage:true});
+  await page.getByRole('button',{name:'교정 저장'}).click();await page.getByRole('status').filter({hasText:'응답 연결 끊김'}).waitFor();
+  assert.equal(await page.getByRole('textbox',{name:'실패 원인',exact:true}).inputValue(),'JSON 입력에서 shell 치환이 실행됐다.');
+  await page.getByRole('button',{name:'교정 저장'}).click();await page.getByRole('status').filter({hasText:'교정을 저장했습니다'}).waitFor();
+  assert.equal(await page.evaluate(()=>window.receipts.size),1);assert.equal(await page.evaluate(()=>window.writes.length),2);
+  assert.equal(await page.evaluate(()=>localStorage.length),0);
+  await page.evaluate(()=>{window.holdSearch=true;});await page.getByRole('button',{name:'기억 검색',exact:true}).click();
+  await page.waitForFunction(()=>typeof window.releaseSearch==='function');
+  await page.evaluate(()=>{window.changeFolder('project-b');});await page.getByText('교정·실패 기억하기',{exact:true}).click();
+  await page.evaluate(()=>{window.holdSearch=false;window.releaseSearch();});await page.waitForTimeout(30);
+  assert.equal(await page.getByRole('button',{name:'project-a shell rule'}).count(),0);
+  assert.equal(await page.getByRole('textbox',{name:'교정할 기억 검색'}).inputValue(),'');
+  await page.evaluate(()=>{window.oldServer=true;});await page.getByRole('textbox',{name:'교정할 기억 검색'}).fill('shell');await page.getByRole('button',{name:'기억 검색',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'로컬 서비스를 업데이트'}).waitFor();
+  await page.evaluate(()=>{window.oldServer=false;window.corrupt=true;});await page.getByRole('button',{name:'기억 검색',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'교정 기록 복구 필요'}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'project-b shell rule'}).count(),0);
+  assert.deepEqual(errors,[]);console.log(name+': correction, lost receipt retry, target switch, unavailable ledger, old server and mobile layout passed');
+ }finally{await browser.close();}
+}}finally{server.stop(true);}
