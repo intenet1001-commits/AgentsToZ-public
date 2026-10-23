@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="610" viewBox="0 0 520 610" role="img" aria-labelledby="title desc">
+<title id="title">지시는 업무 스레드에서, 실제 실행과 실무 기억은 프로젝트에서</title>
+<desc id="desc">사용자와 OPS의 운영 맥락을 바탕으로 업무 스레드에서 지시합니다. 프로젝트 워크룸에서 실제 작업하고, 별도로 저장한 프로젝트 기억을 다음 업무에 회상합니다. 모든 요청이 OPS를 거칠 필요는 없습니다.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0L6 3L0 6" fill="none" stroke="#67d5c4" stroke-width="1.5"/></marker></defs>
+<rect width="520" height="610" rx="20" fill="#101b20"/>
+<g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" text-anchor="middle">
+<rect x="26" y="20" width="468" height="76" rx="12" fill="#192c33" stroke="#38625f"/>
+<text x="260" y="50" fill="#f0f7f5" font-size="22" font-weight="700">사용자 · OPS 운영 맥락</text>
+<text x="260" y="76" fill="#b7ccc9" font-size="17">프로젝트 관계와 공통 운영 결정</text>
+<path d="M260 100V116" stroke="#67d5c4" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="26" y="120" width="468" height="76" rx="12" fill="#192c33" stroke="#38625f"/>
+<text x="260" y="150" fill="#f0f7f5" font-size="22" font-weight="700">업무 스레드</text>
+<text x="260" y="176" fill="#b7ccc9" font-size="17">기기·프로젝트를 선택하고 업무 지시</text>
+<path d="M260 200V216" stroke="#67d5c4" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="26" y="220" width="468" height="76" rx="12" fill="#192c33" stroke="#38625f"/>
+<text x="260" y="250" fill="#f0f7f5" font-size="22" font-weight="700">프로젝트 워크룸</text>
+<text x="260" y="276" fill="#b7ccc9" font-size="17">실제 파일 수정 · 명령 실행 · 검사</text>
+<path d="M260 300V316" stroke="#67d5c4" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="26" y="320" width="468" height="76" rx="12" fill="#192c33" stroke="#38625f"/>
+<text x="260" y="350" fill="#f0f7f5" font-size="22" font-weight="700">프로젝트 기억</text>
+<text x="260" y="376" fill="#b7ccc9" font-size="17">다음에 쓸 원인 · 결정 · 검증 결과</text>
+<path d="M260 400V416" stroke="#67d5c4" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="26" y="420" width="468" height="76" rx="12" fill="#192c33" stroke="#38625f"/>
+<text x="260" y="450" fill="#f0f7f5" font-size="22" font-weight="700">다음 업무</text>
+<text x="260" y="476" fill="#b7ccc9" font-size="17">기억을 회상하고 현재 상태와 대조</text>
+<text x="260" y="548" fill="#67d5c4" font-size="18" font-weight="600">작업 완료와 기억 저장은 별도입니다.</text>
+<text x="260" y="578" fill="#b7ccc9" font-size="16">직접 저장 · 별도로 동의해 켠 자동 저장</text>
+</g></svg>

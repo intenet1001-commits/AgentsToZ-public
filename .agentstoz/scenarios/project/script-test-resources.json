@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "project.script-test-resources",
+  "title": "test:resources 스크립트",
+  "intent": "package.json의 `test:resources` 스크립트를 그대로 실행한다.",
+  "origin": "discovered:package-script",
+  "tags": [
+    "package-script"
+  ],
+  "paths": [
+    "**"
+  ],
+  "safety": "read-only",
+  "risk": 0,
+  "cost": {
+    "estimateSeconds": 120
+  },
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "run",
+        "test:resources"
+      ],
+      "timeoutSeconds": 600
+    }
+  ],
+  "requires": [
+    "node_modules"
+  ]
+}

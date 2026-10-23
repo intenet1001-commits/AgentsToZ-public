@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "transport": {"web": "POST /api/agent-runtime/browser-context", "tauri": "invoke('agent_runtime_request', {path:'/api/agent-runtime/browser-context',method:'POST',body:request})", "contentType":"application/json"},
+  "requests": {
+    "status": {"operation":"status"},
+    "open": {"operation":"open", "url":"https://example.com/"},
+    "read": {"operation":"read", "sessionId":"opaque UUID", "screenshot":false},
+    "close": {"operation":"close", "sessionId":"opaque UUID"}
+  },
+  "responses": {
+    "status": {"success":true,"available":true,"runtime":"isolated-chromium","reason":null,"limits":{"maxSessions":2,"ttlMs":600000,"textChars":12000,"links":40},"sessions":[]},
+    "open": {"success":true,"session":{"sessionId":"opaque UUID","url":"https://example.com/","title":"Example Domain","createdAt":"ISO timestamp","expiresAt":"ISO timestamp"}},
+    "read": {"success":true,"snapshot":{"sessionId":"opaque UUID","url":"https://example.com/","title":"Example Domain","text":"bounded visible document text","links":[{"text":"Example","url":"https://example.com/"}],"capturedAt":"ISO timestamp","untrusted":true,"truncated":false,"screenshotDataUrl":null}},
+    "close": {"success":true},
+    "error": {"success":false,"error":"safe user-facing message","code":"browser_context_unavailable"}
+  },
+  "policy": {"readOnly":true,"scripts":false,"cookies":"fresh ephemeral context; no profile import","redirects":"blocked","subresources":"blocked","url":"explicit http(s), no userinfo/query/fragment; public DNS addresses only, or registered localhost app port excluding AgentsToZ management ports","requests":"single bounded document GET, resolved IP pinned; no caller evaluation, CDP, file paths, forms or downloads","attachment":"UI selects snapshot fields explicitly; never auto-send to AI"}
+}

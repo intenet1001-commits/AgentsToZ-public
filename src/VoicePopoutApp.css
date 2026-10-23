@@ -1,0 +1,22 @@
+.voice-popout {height:100dvh;overflow:auto;background:var(--bg);color:var(--ink);}
+.voice-popout__content {display:flex;flex-direction:column;gap:10px;box-sizing:border-box;padding:10px;width:100%;}
+.voice-popout .az-voice-dock {position:relative;inset:auto;width:100%;max-width:none;max-height:none;align-items:stretch;pointer-events:auto;}
+.voice-popout .az-voice-dock__main {justify-content:space-between;flex-wrap:wrap;}
+.voice-popout .az-voice-dock__call {min-width:0;max-width:100%;}
+.voice-popout .az-voice-dock__call small {max-width:170px;}
+.voice-popout .az-voice-dock__controls {flex-wrap:wrap;margin-left:auto;}
+.voice-popout .az-voice-dock__picker,.voice-popout .az-voice-dock__type,.voice-popout .az-voice-dock__draft {width:100%;box-sizing:border-box;}
+.voice-popout .voice-panel {position:relative;inset:auto;width:100%;max-height:none;padding:16px;margin:0;box-shadow:none;}
+.voice-popout .az-voice-dock--fullscreen {height:680px;width:100%;}
+.voice-popout .az-voice-dock__fullscreen-panel {height:680px;}
+.voice-popout .az-voice-dock--compact {max-width:none;align-items:center;}
+
+/* macOS overlay title bar: preserve native traffic lights and a draggable caption. */
+.voice-popout:has(.voice-popout__titlebar) .voice-popout__content{padding-top:0;}
+.voice-popout__titlebar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:6px;min-height:38px;flex-shrink:0;user-select:none;}
+.voice-popout__titlebar--mac>span{margin-left:70px;}
+.voice-popout__titlebar>button{grid-column:3;grid-row:1;}
+.voice-popout__titlebar>span{font-size:11px;flex:1;pointer-events:auto;color:var(--ink-2);white-space:nowrap;}
+.voice-popout__titlebar button{display:flex;align-items:center;gap:5px;min-height:30px;padding:4px 8px;border:1px solid var(--line);border-radius:9px;font-size:11px;background:var(--surface);color:var(--ink);cursor:pointer;}
+.voice-popout__titlebar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+@media(max-width:400px){.voice-popout__titlebar>span{font-size:0;}}

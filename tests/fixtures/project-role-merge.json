@@ -1,0 +1,13 @@
+[
+  {"name":"legacy omission preserves ops","desired":[{"id":"p","name":"edited"}],"current":[{"id":"p","name":"old","role":"ops"}],"expected":[{"id":"p","name":"edited","role":"ops"}]},
+  {"name":"snapshot omission preserves dev","base":[{"id":"p","role":"dev"}],"desired":[{"id":"p","name":"edited"}],"current":[{"id":"p","role":"dev"}],"expected":[{"id":"p","name":"edited","role":"dev"}]},
+  {"name":"concurrent role change wins over unchanged baseline","base":[{"id":"p","role":"managed"}],"desired":[{"id":"p","role":"managed","name":"edited"}],"current":[{"id":"p","role":"ops"}],"expected":[{"id":"p","role":"ops","name":"edited"}]},
+  {"name":"explicit managed changes role","base":[{"id":"p","role":"dev"}],"desired":[{"id":"p","role":"managed"}],"current":[{"id":"p","role":"dev"}],"expected":[{"id":"p","role":"managed"}]},
+  {"name":"role omission alone cannot resurrect deleted row","base":[{"id":"p","role":"ops"}],"desired":[{"id":"p"}],"current":[],"expected":[]},
+  {"name":"same-id addition preserves current role","base":[],"desired":[{"id":"p"}],"current":[{"id":"p","role":"dev"}],"expected":[{"id":"p","role":"dev"}]},
+  {"name":"future role round trip","desired":[{"id":"p","role":"future"}],"current":[{"id":"p","role":"future"}],"expected":[{"id":"p","role":"future"}]},
+  {"name":"future role omission","desired":[{"id":"p"}],"current":[{"id":"p","role":"future"}],"expected":[{"id":"p","role":"future"}]},
+  {"name":"reject invalid new role","desired":[{"id":"p","role":"future"}],"current":[],"error":true},
+  {"name":"reject null erasure","desired":[{"id":"p","role":null}],"current":[{"id":"p","role":"ops"}],"error":true},
+  {"name":"reject invalid snapshot role","base":[{"id":"p","role":"ops"}],"desired":[{"id":"p","role":"admin"}],"current":[{"id":"p","role":"ops"}],"error":true}
+]

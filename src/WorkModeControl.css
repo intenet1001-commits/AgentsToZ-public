@@ -1,0 +1,27 @@
+.work-mode{position:relative;min-width:0;color:var(--ink);font-size:12px;}
+.work-mode button{font-family:inherit;cursor:pointer;}
+.work-mode__trigger{display:flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);white-space:nowrap;}
+.work-mode[data-active=true] .work-mode__trigger{color:var(--accent);border-color:var(--accent);background:var(--bg);}
+.work-mode__panel{box-sizing:border-box;position:absolute;z-index:50;top:100%;left:10px;width:calc(100% - 20px);min-width:240px;max-height:calc(100dvh - 100px);overflow:auto;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);text-align:left;white-space:normal;box-shadow:var(--shadow-lg);}
+.work-mode__heading{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.work-mode__heading button{padding:4px;border:0;background:transparent;color:var(--ink-2);}
+.work-mode__panel p{font-size:12px;line-height:1.6;margin:6px 0;color:var(--ink-2);}
+.work-mode__panel .work-mode__status{color:var(--accent);}
+.work-mode__presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:10px 0;}
+.work-mode__presets .work-mode__always{grid-column:1/-1;}
+.work-mode__panel button{min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);padding:5px 7px;font-size:12px;justify-content:center;}
+.work-mode__presets button[aria-pressed=true],.work-mode__actions button:first-child{border-color:var(--accent);color:var(--accent);}
+.work-mode__duration,.work-mode__display{display:flex;align-items:center;gap:6px;margin:10px 0;font-size:12px;}
+.work-mode__duration input{box-sizing:border-box;width:76px;min-width:0;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;}
+.work-mode__display input{accent-color:var(--accent);}
+.work-mode__actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+.work-mode__panel small{display:block;font-size:10px;line-height:1.6;color:var(--ink-2);}
+.work-mode button:focus-visible,.work-mode input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.work-mode button:disabled{opacity:.5;cursor:wait;}
+/* In the sidebar the toolbar has no side padding of its own, so the trigger's border sat on x=0 and read as
+   cut, while the brand row is inset 18px and the tabs 10px (UI audit 2026-10-24). Same inset as the tabs. */
+[data-testid="top-toolbar"]>.work-mode{padding:0 10px 6px;}
+.work-mode--compact{display:contents;}
+.work-mode--compact>.work-mode__trigger{grid-column:2;grid-row:1;}
+.work-mode--compact>.work-mode__panel{position:static;width:auto;min-width:0;max-height:none;overflow:visible;grid-column:1/-1;grid-row:2;margin:0 0 4px;box-shadow:none;}
+@media(max-width:400px){.work-mode--compact>.work-mode__trigger>span{display:none;}}
