@@ -9,6 +9,8 @@ import type {WorkroomEffortLevel} from './workroomEffortPolicy';
  * Every catalog model of codex-cli 0.162.1 offers low, medium and high (strings of the installed binary, 2026-10-16);
  * auto never chooses anything else. Anything unproven — another model, provider, profile, catalog file, base URL, a
  * launch argument that picks a model, a line we cannot parse, a file we cannot read — answers `ok:false` (no flag).
+ * `launchModel` is the `-m` the app itself passes (a team member's chosen model): it replaces every config `model`, so
+ * it is the one proven against the catalog, while the provider, profile, catalog and base-URL checks still apply.
  *
  * Read-only and bounded: the same files `codexHooksAreAgentsToZOnly` reads (`$CODEX_HOME/config.toml`, each
  * `.codex/config.toml` from the working folder up to the repository root) plus the legacy managed config. Only the
@@ -93,8 +95,9 @@ function launchArgsPickModel(args: readonly string[]): boolean {
   return false;
 }
 
-export function codexEffortModel(input: {env: Record<string, string | undefined>; cwd: string; args?: readonly string[]; managedConfigPath?: string}, files: CodexEffortConfigFiles = realFiles): CodexEffortModel {
+export function codexEffortModel(input: {env: Record<string, string | undefined>; cwd: string; args?: readonly string[]; launchModel?: string; managedConfigPath?: string}, files: CodexEffortConfigFiles = realFiles): CodexEffortModel {
   if (launchArgsPickModel(input.args ?? [])) return {ok: false, why: 'launch-args'};
+  if (input.launchModel !== undefined && !Object.hasOwn(CODEX_EFFORT_CATALOG, input.launchModel)) return {ok: false, why: 'model'};
   if (input.env.OPENAI_BASE_URL) return {ok: false, why: 'base-url'};
   const codexHome = input.env.CODEX_HOME || join(input.env.HOME || homedir(), '.codex');
   const paths = [join(codexHome, 'config.toml'), input.managedConfigPath ?? CODEX_MANAGED_CONFIG_PATH];
@@ -120,10 +123,10 @@ export function codexEffortModel(input: {env: Record<string, string | undefined>
     if (values.oss_provider !== undefined) return {ok: false, why: 'provider'};
     if (values.openai_base_url !== undefined) return {ok: false, why: 'base-url'};
     if (values.model_provider !== undefined && values.model_provider !== 'openai') return {ok: false, why: 'provider'};
-    if (values.model !== undefined) models.push(values.model);
+    if (values.model !== undefined && input.launchModel === undefined) models.push(values.model);
   }
   if (models.some(model => !Object.hasOwn(CODEX_EFFORT_CATALOG, model))) return {ok: false, why: 'model'};
   // Precedence among several files does not matter: every one of them names a catalog model.
-  const model = models.at(-1) ?? null;
+  const model = input.launchModel ?? models.at(-1) ?? null;
   return {ok: true, model, allowed: model ? CODEX_EFFORT_CATALOG[model]! : LMH};
 }

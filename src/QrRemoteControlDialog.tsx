@@ -1,6 +1,6 @@
 import {confirmAction} from './confirmAction';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, Loader2, QrCode, RefreshCw, ShieldCheck, Smartphone, Unplug, X } from 'lucide-react';
+import { Check, Copy, Loader2, MonitorSmartphone, QrCode, RefreshCw, ShieldCheck, Smartphone, Unplug, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   formatQrRemoteControlRemaining,
@@ -17,6 +17,10 @@ import { qrRemoteControlApi, type QrRemoteControlApi } from './qrRemoteControlCl
 // the protocol module: remoteControlCore pulls in node:crypto.
 import { REMOTE_CONTROL_MAX_SESSIONS } from './remoteControlProtocol';
 import {RemoteConnectionLabel,connectionDisplayName,lanConnectionLabelKey} from './RemoteConnectionLabel';
+import { workModeCopy } from './i18n';
+import { useAppLanguage } from './useAppLanguage';
+import { useScreenHelper } from './useScreenHelper';
+import { screenHelperLines } from './workModeScreenHelper';
 
 export interface QrRemoteControlDialogProps {
   open: boolean;
@@ -48,6 +52,45 @@ const readableTime = (value: string | null): string => {
     ? date.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '확인할 수 없음';
 };
+
+/**
+ * Seeing and using this Mac from an iPhone or iPad is AgentsToZ Screen, a separate app with its own QR — and this is
+ * where people look for it (2026-10-25). Same status and 「열기」 as the work-mode panel; desktop app only.
+ */
+function ScreenHelperEntry() {
+  const [lang] = useAppLanguage(), copy = workModeCopy(lang);
+  const { status, opening, note, error, open } = useScreenHelper(copy.screenUnverified);
+  if (!status?.supported) return null;
+  const { line, notes, canOpen } = screenHelperLines(status, copy);
+  return (
+    <section data-testid="qr-remote-screen" aria-labelledby="qr-remote-screen-title" className="mb-4 rounded-2xl border border-[rgb(var(--surface-highlight-rgb))]/[0.08] bg-[rgb(var(--surface-highlight-rgb))]/[0.02] p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 id="qr-remote-screen-title" className="m-0 flex items-center gap-2 text-sm font-semibold text-zinc-100">
+            <MonitorSmartphone className="h-4 w-4 shrink-0" aria-hidden="true" />{copy.screenHeading}
+          </h3>
+          <p data-testid="qr-remote-screen-status" className="m-0 mt-1 text-xs leading-5 text-zinc-300">{line}</p>
+        </div>
+        {canOpen && (
+          <button
+            type="button"
+            data-testid="qr-remote-screen-open"
+            onClick={() => void open()}
+            disabled={opening}
+            className="flex min-h-11 items-center gap-2 rounded-xl border border-[rgb(var(--surface-highlight-rgb))]/10 bg-[rgb(var(--surface-highlight-rgb))]/[0.03] px-3 text-xs text-zinc-200 hover:bg-[rgb(var(--surface-highlight-rgb))]/[0.06] disabled:cursor-wait disabled:opacity-40"
+          >
+            {opening ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <MonitorSmartphone className="h-4 w-4" aria-hidden="true" />}
+            {opening ? copy.screenOpening : copy.screenOpen}
+          </button>
+        )}
+      </div>
+      {notes.map(text => <p key={text} className="m-0 mt-2 text-xs leading-5 text-amber-100">{text}</p>)}
+      {note && <p role="status" className="m-0 mt-2 text-xs leading-5 text-teal-100">{note}</p>}
+      {error && <p role="alert" className="m-0 mt-2 text-xs leading-5 text-red-200">{error}</p>}
+      {canOpen && <p className="m-0 mt-2 text-xs leading-5 text-zinc-400">{copy.screenHint}</p>}
+    </section>
+  );
+}
 
 export function QrRemoteControlDialog({
   open,
@@ -372,6 +415,8 @@ export function QrRemoteControlDialog({
               파일 내용·Git 변경·AI 대화·자격증명·장기기억·프롬프트 데이터에는 접근 권한을 주지 않습니다.
             </p>
           </div>
+
+          <ScreenHelperEntry />
 
           {notice && (
             <div

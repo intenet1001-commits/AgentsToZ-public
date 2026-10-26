@@ -1,0 +1,54 @@
+/* 팀 현황 strip above the Workroom terminal: global tokens only (appearanceTokens.css), like the team builder. */
+.workroom-team-status{display:flex;flex-direction:column;gap:6px;margin:4px 0;min-width:0;color:var(--ink);font-size:12px;}
+.workroom-team-status__team{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface);min-width:0;}
+.workroom-team-status__team[data-team-state="closed"]{opacity:.85;}
+.workroom-team-status button{font:inherit;cursor:pointer;}
+.workroom-team-status__head{display:flex;align-items:center;gap:6px;min-width:0;}
+.workroom-team-status__head strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.workroom-team-status__role,.workroom-team-status__count{color:var(--ink-2);white-space:nowrap;}
+.workroom-team-status__count{margin-right:auto;font-variant-numeric:tabular-nums;}
+.workroom-team-status__icon{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:24px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink-2);}
+.workroom-team-status__btn{min-width:0;max-width:100%;min-height:24px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);white-space:normal;overflow-wrap:anywhere;}
+.workroom-team-status button:disabled{opacity:.5;cursor:default;}
+.workroom-team-status button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.workroom-team-status__members{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;min-width:0;}
+.workroom-team-status__member{display:flex;flex-direction:column;gap:3px;padding-top:6px;border-top:1px solid var(--line);min-width:0;}
+.workroom-team-status__member:first-child{padding-top:0;border-top:0;}
+.workroom-team-status__line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0;}
+.workroom-team-status__name{display:inline-flex;align-items:center;gap:4px;}
+.workroom-team-status__name small{padding:0 5px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500;}
+.workroom-team-status__name .workroom-team-status__tag{background:var(--violet-soft);color:var(--violet);}
+.workroom-team-status__name .workroom-team-status__tag--attached{background:var(--info-soft);color:var(--info);}
+.workroom-team-status__model{flex:1 1 14em;min-width:0;color:var(--ink-2);overflow-wrap:anywhere;}
+.workroom-team-status__activity{color:var(--ink-3);}
+.workroom-team-status__line .workroom-team-status__btn{margin-left:auto;}
+.workroom-team-status__chip{padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);white-space:nowrap;}
+.workroom-team-status__chip--starting{border-color:var(--info);color:var(--info);background:var(--info-soft);}
+.workroom-team-status__chip--working{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+.workroom-team-status__chip--reported{border-color:var(--ok);color:var(--ok);background:var(--ok-soft);}
+.workroom-team-status__chip--blocked{border-color:var(--warn);color:var(--warn);background:var(--warn-soft);}
+.workroom-team-status__chip--failed{border-color:var(--danger);color:var(--danger);background:var(--danger-soft);}
+.workroom-team-status__chip--ended,.workroom-team-status__chip--unknown{border-style:dashed;}
+/* Waiting is its own look: dashed like 「확인 불가」 and warm like 「막힘」 — visibly not 「작업 중」, visibly not a failure. */
+.workroom-team-status__chip--awaiting-connection,.workroom-team-status__chip--awaiting-manual-join,.workroom-team-status__chip--awaiting-ack{
+ border-style:dashed;border-color:var(--warn);color:var(--warn);background:var(--warn-soft);}
+.workroom-team-status__task,.workroom-team-status__report,.workroom-team-status__git,.workroom-team-status__error,
+.workroom-team-status__surface,.workroom-team-status__note{margin:0;line-height:1.45;overflow-wrap:anywhere;}
+/* The surface a member runs on, and what the host actually knows about it. */
+.workroom-team-status__surface{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;color:var(--ink-3);min-width:0;}
+.workroom-team-status__surface .workroom-team-status__tag{min-width:0;max-width:100%;padding:0 5px;border-radius:999px;background:var(--sunken);color:var(--ink-2);white-space:normal;overflow-wrap:anywhere;}
+.workroom-team-status__surface small[data-delivery="unknown"],.workroom-team-status__surface small[data-delivery="not-sent"]{color:var(--warn);}
+.workroom-team-status__note{color:var(--ink-3);}
+/* The actions for a surface the host cannot drive; 8px apart, as every button group in this app. */
+.workroom-team-status__manual{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;}
+.workroom-team-status__report-form{display:flex;flex-wrap:wrap;gap:8px;min-width:0;}
+.workroom-team-status__brief-copy{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;}
+.workroom-team-status__report-form label{flex:1 0 100%;min-width:0;}
+.workroom-team-status__report-form textarea,.workroom-team-status__brief{display:block;box-sizing:border-box;width:100%;min-width:0;min-height:72px;resize:vertical;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit;}
+.workroom-team-status__report-form select{min-width:0;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;}
+.workroom-team-status__report .workroom-team-status__tag{margin-left:4px;padding:0 5px;border-radius:999px;background:var(--warn-soft);color:var(--warn);white-space:nowrap;}
+.workroom-team-status__task{color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.workroom-team-status__report{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.workroom-team-status__report[data-status="blocked"] b{color:var(--warn);}
+.workroom-team-status__git{color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.workroom-team-status__error{color:var(--danger);}

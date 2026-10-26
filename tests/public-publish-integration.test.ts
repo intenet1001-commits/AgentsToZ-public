@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, chmodSync, symlinkSync, existsSync, utimesSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { generateKeyPairSync } from 'node:crypto';
 
 const publishScript = resolve(import.meta.dir, '../scripts/publish.ts');
 const roots: string[] = [];
@@ -117,6 +118,30 @@ describe('public publisher integration', () => {
     expect(git(root, ['branch', '--show-current'])).toBe('main');
     expect(git(root, ['rev-parse', 'HEAD'])).toBe(source);
     expect(readFileSync(join(root, '.git', 'index')).equals(index)).toBe(true);
+    expect(git(root, ['for-each-ref', '--format=%(refname)', 'refs/agentstoz/publication-candidates/'])).toBe('');
+  });
+
+  test('dry-run rejects an actual PEM private key without exposing its contents', () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentstoz-publish-private-key-'));
+    roots.push(root);
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+    writeFileSync(join(root, 'fixture.pem'), pem);
+    git(root, ['init', '-b', 'main']);
+    git(root, ['config', 'user.name', 'AgentsToZ Test']);
+    git(root, ['config', 'user.email', 'test@example.com']);
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-m', 'fixture']);
+    git(root, ['remote', 'add', 'publish', 'https://github.com/example/public.git']);
+    const source = git(root, ['rev-parse', 'HEAD']);
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, publishScript, '--dry-run'],
+      cwd: root, stdout: 'pipe', stderr: 'pipe',
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('PEM 개인키');
+    expect(result.stdout.toString() + result.stderr.toString()).not.toContain(pem);
+    expect(git(root, ['rev-parse', 'HEAD'])).toBe(source);
     expect(git(root, ['for-each-ref', '--format=%(refname)', 'refs/agentstoz/publication-candidates/'])).toBe('');
   });
 

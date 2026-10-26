@@ -602,9 +602,9 @@ export default function PortalMemoryDirectory({ supabaseUrl, supabaseKey, device
           ? '이미 존재하는 profile 이름입니다.'
           : '')
     : onboardingMode === 'project-hermes' && onboardingProjectId && !onboardingPath
-      ? '선택한 프로젝트의 canonical path를 로컬에서 readback한 뒤 복사할 수 있습니다.'
+      ? '선택한 프로젝트의 실제 폴더 경로(canonical path)를 로컬에서 확인한 뒤 복사할 수 있습니다.'
       : onboardingMode === 'profile-telegram' && !deviceId
-        ? '현재 기기의 authoritative device_id를 readback하지 못해 Telegram 연결 prompt를 복사할 수 없습니다.'
+        ? '현재 기기의 기준 기기 ID(authoritative device_id)를 확인하지 못해 Telegram 연결 prompt를 복사할 수 없습니다.'
         : '';
   const displayedEntries = visible.slice(0, visibleLimit);
   const legacyDirectorySource = loadedDirectory?.source === 'legacy-revisions';
@@ -1916,7 +1916,7 @@ export default function PortalMemoryDirectory({ supabaseUrl, supabaseKey, device
             <span className={SECTION_TITLE}>Hermes profile 현황</span>
             <span className={tagClass('violet')}>{onboardingProfiles.length}개</span>
           </div>
-          <div data-testid="hermes-profile-device-scope" className={SECTION_DESC}>이 기기 · <span className="text-[color:var(--info)]">{deviceName || '이름 미등록'}{deviceId ? ` · ${deviceId.slice(0, 8)}` : ''}</span> · 로컬 Bot 서버와 Telegram Gateway를 각각 readback합니다.</div>
+          <div data-testid="hermes-profile-device-scope" className={SECTION_DESC}>이 기기 · <span className="text-[color:var(--info)]">{deviceName || '이름 미등록'}{deviceId ? ` · ${deviceId.slice(0, 8)}` : ''}</span> · 로컬 Bot 서버와 Telegram Gateway 상태를 각각 확인합니다.</div>
         </div>
         <div className={SECTION_ACTIONS}>
           <button type="button" onClick={() => openOnboarding('profile-telegram')} className={BTN_ROW}>default Telegram 연결</button>
@@ -2317,7 +2317,7 @@ export default function PortalMemoryDirectory({ supabaseUrl, supabaseKey, device
                 {onboardingMode === 'profile-telegram' && onboardingProfile && <div className="mt-3 space-y-2 rounded-lg border border-[color:var(--line)] bg-[var(--surface)] p-3">
                   <div className={OVERLINE}>진행 순서</div>
                   <ol className="mb-0 list-decimal space-y-0.5 pl-4 text-[11.5px] text-[color:var(--ink-2)]"><li>{telegramConnectionMode === 'automatic' ? 'Automatic(QR) 연결을 선택하고 Telegram 승인 화면에서 Bot 표시 이름을 확인합니다.' : '아래 이름과 username을 확인하거나 수정합니다.'}</li><li>Hermes Telegram 설정 열기를 누릅니다.</li><li>{telegramConnectionMode === 'automatic' ? '열린 Hermes 창에서 Telegram → Automatic(1번)을 선택합니다.' : '열린 Hermes 창에서 Telegram → Manual(2번)을 선택하고 token을 직접 입력합니다.'}</li><li>{telegramConnectionMode === 'automatic' ? '터미널 QR을 Telegram으로 스캔하고 Create Bot을 확인합니다.' : 'BotFather에서 Bot을 만든 뒤 token을 Hermes 공식 setup에 직접 입력합니다.'}</li></ol>
-                  <div className="text-[11px] text-[color:var(--ink-3)]">현재 연결 대상 기기: <span className="text-[color:var(--info)]">{deviceName || '이름 미등록'}</span> · device_id: <code className={`${MONO} ${deviceId ? 'text-[color:var(--ink)]' : 'text-[color:var(--warn)]'}`}>{deviceId || 'readback 필요'}</code></div>
+                  <div className="text-[11px] text-[color:var(--ink-3)]">현재 연결 대상 기기: <span className="text-[color:var(--info)]">{deviceName || '이름 미등록'}</span> · device_id: <code className={`${MONO} ${deviceId ? 'text-[color:var(--ink)]' : 'text-[color:var(--warn)]'}`}>{deviceId || '확인 필요'}</code></div>
                   {!deviceId && <div className="text-[11px] text-[color:var(--warn)]">authoritative device_id가 확인될 때까지 Telegram 연결 prompt 복사를 차단합니다.</div>}
                   <div className={OVERLINE}>연결 방식</div>
                   <div className="grid grid-cols-2 gap-2">
@@ -2372,7 +2372,7 @@ export default function PortalMemoryDirectory({ supabaseUrl, supabaseKey, device
                 <div className={OVERLINE}>선택 내용 확인</div>
                 <div className="mt-1.5">프로젝트: <span className="font-semibold text-[color:var(--accent)]">{onboardingProject?.name ?? '선택 안 됨'}</span></div>
                 <div>memory_id: <code className={`${MONO} text-[color:var(--ink)]`}>{onboardingProject?.id ?? '—'}</code></div>
-                <div className="mt-1">canonical path: <code className={`${MONO} ${onboardingPath ? 'text-[color:var(--ink)]' : 'text-[color:var(--warn)]'}`}>{onboardingPath ?? '확인 필요 — 로컬 프로젝트 path readback 대기'}</code></div>
+                <div className="mt-1">canonical path: <code className={`${MONO} ${onboardingPath ? 'text-[color:var(--ink)]' : 'text-[color:var(--warn)]'}`}>{onboardingPath ?? '확인 필요 — 로컬 프로젝트 경로 확인 대기'}</code></div>
                 <div>Hermes profile: <span className="font-semibold text-[color:var(--violet)]">{newProfileMode ? (newProfileName || '새 profile 이름 입력 필요') : (onboardingProfile || '선택 안 됨')}</span></div>
               </div>
               {onboardingCopyBlockReason && <div className="mt-2 text-[11px] text-[color:var(--warn)]">복사 대기 이유: {onboardingCopyBlockReason}</div>}

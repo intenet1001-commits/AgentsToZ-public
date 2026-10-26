@@ -20,6 +20,7 @@ import {localWorkroomTransport} from './aiTerminalClient';
 import {AgentRuntimeClient} from './agentRuntimeClient';
 import {reconcileRegisteredWorkroomTargets} from './workroomProjectMention';
 import {SERVICE_USE_CHANGED_EVENT} from './projectUseMention';
+import {localUsePhones} from './serviceUseLocalClient';
 import {openWorkroomPopout} from './workroomPopoutClient';
 import {workroomPopoutTitle} from './workroomPopout';
 import type {WorkroomThreadSummary} from './workroomThreadProtocol';
@@ -46,10 +47,14 @@ export function WorkroomDeviceSwitch({sessionDirectory=false,initialDevice,onEnt
   const dialog=useRef<HTMLDialogElement>(null),visible=props.visible!==false;
   useEffect(()=>{if(!visible||!hub)return;let alive=true,flight=false;const load=()=>{if(flight)return;flight=true;void listCommunityControlDevices().then(r=>{if(alive)setPeers(prior=>JSON.stringify(prior)===JSON.stringify(r.devices)?prior:r.devices);}).catch(e=>{if(alive)setNotice(e instanceof Error?e.message:String(e));}).finally(()=>{flight=false;});};load();const timer=setInterval(load,15000);return()=>{alive=false;clearInterval(timer);};},[visible,hub]);
   useEffect(()=>{if(props.entry)setHub(false);},[props.entry?.nonce]);
+  const localRequest=useMemo(()=>createTerminalRequester(props.transport??localAiTerminalTransport,false),[props.transport]);
   const channels=useMemo<CommunityWorkspaceChannel[]>(()=>[
-    {id:'local',projectState:projectStateRequest,readToolBatch:readToolBatchRequest,workPacks:workPackClient,label:props.deviceName?.trim()||'이 기기',projectRevision:JSON.stringify([props.projects,useRevision]),projects:async()=>reconcileRegisteredWorkroomTargets(props.projects,(await new AgentRuntimeClient().targets({includeProductUses:true})).targets),transport:props.workspaceTransport??localWorkroomTransport},
-    ...peers.map(peer=>({id:peer.endpointId,label:communityDeviceLabel(peer.displayName),projects:async()=>(await loadCommunityRemoteProjects(peer.endpointId)).projects,transport:communityWorkroomTransport(peer.endpointId)})),
-  ],[props.projects,props.deviceName,props.workspaceTransport,peers,useRevision]);
+    {id:'local',projectState:projectStateRequest,readToolBatch:readToolBatchRequest,workPacks:workPackClient,label:props.deviceName?.trim()||'이 기기',projectRevision:JSON.stringify([props.projects,useRevision]),projects:async()=>reconcileRegisteredWorkroomTargets(props.projects,(await new AgentRuntimeClient().targets({includeProductUses:true})).targets),transport:props.workspaceTransport??localWorkroomTransport,...(props.workspaceTransport?{}:{usePhones:localUsePhones,
+      // 팀 작전's account list: read through this Mac's own Workroom `accounts` `list`, never `select` (src/teamAccountChoices.ts).
+      teamAccounts:(targetId,agent)=>localRequest({operation:'accounts',accountAction:'list',targetId,agent}).then(r=>r.accounts)})},
+    // Another Mac runs USE under a non-local owner, which no app connection accepts.
+    ...peers.map(peer=>({id:peer.endpointId,label:communityDeviceLabel(peer.displayName),projects:async()=>(await loadCommunityRemoteProjects(peer.endpointId)).projects,transport:communityWorkroomTransport(peer.endpointId),productUse:false})),
+  ],[props.projects,props.deviceName,props.workspaceTransport,localRequest,peers,useRevision]);
   useEffect(()=>{const el=dialog.current;if(!el)return;if(threadOpen&&visible&&!el.open)el.showModal();else if((!threadOpen||!visible)&&el.open)el.close();},[threadOpen,visible]);
   const openThread=async(id:string,targetId:string,thread:WorkroomThreadSummary)=>{
     if(!thread.sessionId)return;const channel=channels.find(c=>c.id===id);if(!channel)return;
@@ -59,8 +64,8 @@ export function WorkroomDeviceSwitch({sessionDirectory=false,initialDevice,onEnt
   return <>
     {!props.popout&&<nav className="community-entry" aria-label="대화 보기"><button type="button" aria-pressed={!hub} onClick={()=>setHub(false)}><Terminal size={16} aria-hidden="true"/>작업 세션</button><button type="button" aria-pressed={hub} onClick={()=>setHub(true)}><MessagesSquare size={16} aria-hidden="true"/>커뮤니티 · 업무 스레드</button></nav>}
     {notice&&<p role="status">{notice}</p>}
-    <div hidden={hub}>{sessionDirectory?<WorkroomSessionDirectory {...props} visible={visible&&!hub} onEntryConsumed={onEntryConsumed}/>:<WorkroomDeviceWorkspace {...props} visible={visible&&!hub} initialDevice={initialDevice}/>}</div>
-    <div hidden={!hub}><CommunityWorkspace channels={channels} visible={visible&&hub} onOpenWorkroom={(id,target,thread)=>void openThread(id,target,thread)}/></div>
+    <div className="workroom-device-content" hidden={hub}>{sessionDirectory?<WorkroomSessionDirectory {...props} visible={visible&&!hub} onEntryConsumed={onEntryConsumed}/>:<WorkroomDeviceWorkspace {...props} visible={visible&&!hub} initialDevice={initialDevice}/>}</div>
+    <div className="workroom-device-content" hidden={!hub}><CommunityWorkspace channels={channels} visible={visible&&hub} onOpenWorkroom={(id,target,thread)=>void openThread(id,target,thread)}/></div>
     <dialog ref={dialog} className="community-workroom-dialog" aria-label={threadView?threadView.thread.title+' · 연결 워크룸':'연결 워크룸'} onCancel={()=>setThreadOpen(false)} onClose={()=>setThreadOpen(false)}>
       <button type="button" onClick={()=>setThreadOpen(false)}><ArrowLeft size={15} aria-hidden="true"/>워크룸 보기 닫기</button>
       {threadView&&<AiTerminalPanel key={threadView.channel.id+':'+threadView.thread.id} projects={[{targetId:threadView.targetId,label:threadView.thread.title}]} visible={visible&&threadOpen} remote={threadView.channel.id!=='local'} slowPolling={threadView.channel.id!=='local'} sessionScope={'community-thread:'+threadView.channel.id}
@@ -203,7 +208,7 @@ function WorkroomDeviceWorkspace(props:PanelProps&{initialDevice?:string}){
   const value=remote?.endpointId===device.endpointId?remote.value:null;
   // OPS를 함께 고르라는 요청이 있었고 목록이 왔으면 그 프로젝트를 한 번 고른다.
   const entry=opsRequest&&value?.opsTargetId?{nonce:opsRequest,targetId:value.opsTargetId}:props.entry;
-  return <AiTerminalPanel key={'community:'+device.deviceId} remote slowPolling popout={props.popout} visible={props.visible} entry={entry}
+  return <AiTerminalPanel key={'community:'+device.deviceId} remote slowPolling useRunsHere={false} popout={props.popout} visible={props.visible} entry={entry}
     onActiveSessionChange={props.onActiveSessionChange}
     bypassPermissions={props.bypassPermissions} onBypassPermissionsChange={props.onBypassPermissionsChange}
     bypassUnavailable={COMMUNITY_BYPASS_UNAVAILABLE} effortReadOnly={WORKROOM_EFFORT_ELSEWHERE}

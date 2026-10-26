@@ -88,7 +88,7 @@ export function MacOSRuntimeBrokerSetup({
         await refresh();
       }
     } catch {
-      setError('네이티브 런타임 작업을 완료하지 못했습니다.');
+      setError('네이티브 런타임 작업을 완료하지 못했습니다. 시스템 설정에서 백그라운드 항목 승인을 확인하거나 다시 확인을 눌러 주세요.');
     } finally {
       setBusy(false);
     }

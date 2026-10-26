@@ -56,6 +56,8 @@ export interface CommonMemoryDispatchDeps{
 export interface CommonMemoryDispatchOptions{
   /** A phone maps registered projects to device-bound references; it supplies its own loader. */
   projects?:ProjectsLoader;
+  /** MCP only: the answer for a knowledge ID that names no cloud common memory (an AI may have sent a long-term memoryId). */
+  knowledgeNotFound?:string;
 }
 
 /** Knowledge operations an AI connection may not run: accepting, directly saving or importing stays on the review surface. */
@@ -63,6 +65,11 @@ export const COMMON_MEMORY_AI_REFUSED_KNOWLEDGE=['review-entry','review-entries'
 const MCP_DISPATCHED=new Set(['updates','prepare-workroom','knowledge','migration-preview','migration-execute','project-links','catalog','read-source','read-cloud-source','topic-candidates','projects-status','projects-plan','projects-add','operation-status','project-add-status']);
 export const COMMON_MEMORY_MCP_LIST_PAGE=10;
 export const COMMON_MEMORY_MCP_INSPECT_PAGE=5;
+// MCP-only wording below: the phone relay and the app call dispatch()/remote(), whose answers stay as they are.
+export const COMMON_MEMORY_MCP_KNOWLEDGE_NOT_FOUND='이 ID의 공통기억을 찾지 못했습니다. groupId에는 list_common_memories나 manage_common_knowledge list로 받은 공통기억 ID를 넣으세요(장기기억 memoryId가 아닌지 확인).';
+export const COMMON_MEMORY_MCP_KNOWLEDGE_TOPIC_RECALL='이 공통기억은 게시본이 아니라 기억 항목으로 씁니다. 주제 전체는 manage_common_knowledge {operation:"read", groupId}로 읽고, 프로젝트에 맞는 항목은 recall_common_memory {memoryId 또는 portId, query}로 불러오세요.';
+/** Where a person accepts the candidate an AI just proposed: AI connections cannot accept, and recall skips candidates. */
+export const commonMemoryReviewPointer=(name:string)=>`AgentsToZ 앱의 공통기억 탭 → 「${name}」 → 「검토 후보」에서 확정하세요. 확정하기 전에는 다른 프로젝트의 AI가 불러오지 않습니다.`;
 
 export function createCommonMemoryDispatch(deps:CommonMemoryDispatchDeps){
   const scopeChanged=()=>new CommonMemoryError('COMMON_MEMORY_SCOPE_CHANGED','선택된 공통기억의 클라우드 연결이 바뀌었습니다.');
@@ -93,7 +100,7 @@ export function createCommonMemoryDispatch(deps:CommonMemoryDispatchDeps){
       if(request.operation==='projects')return {projects:await projects()};
       if(request.operation==='prepare-project')throw new CommonMemoryError('COMMON_MEMORY_PERMISSION_REQUIRED','전용 기억 준비는 프로젝트 영역에서 수행하세요.',403);
       const r=await createCommonMemoryMigration(deps.store,service,projects).legacy(request);
-      if(!r.handled)throw new CommonMemoryError('COMMON_MEMORY_KNOWLEDGE_INVALID','클라우드로 이관된 공통기억을 선택하세요.');return r.result;
+      if(!r.handled)throw new CommonMemoryError('COMMON_MEMORY_KNOWLEDGE_INVALID',options.knowledgeNotFound??'클라우드로 이관된 공통기억을 선택하세요.');return r.result;
     }
     // Names come from the cached catalog walk (30 s), not a fresh page loop per call.
     if(operation==='project-names'){const [local,catalog]=await Promise.all([deps.projects(),service.catalogAll()]),names=new Map(catalog.sources.map(source=>[source.memoryId,source.name]));return {projects:local.map(p=>({projectId:p.id,name:p.memoryId?names.get(p.memoryId)??p.name:p.name,memoryId:p.memoryId}))};}
@@ -172,6 +179,10 @@ export function createCommonMemoryDispatch(deps:CommonMemoryDispatchDeps){
   const mcp=async(r:Record<string,any>,portId?:string):Promise<any>=>{
     const {op,...fields}=r;
     if(op==='knowledge'&&(COMMON_MEMORY_AI_REFUSED_KNOWLEDGE as readonly string[]).includes(String(fields.request?.operation)))throw new CommonMemoryError('COMMON_MEMORY_PERMISSION_REQUIRED','AI 변경은 propose-entry로 제안하세요. 후보 승인·직접 저장은 앱의 검토 화면에서 합니다.',403);
+    if(op==='knowledge'){
+      const result=await dispatch(op,fields,deps.service,undefined,'local',{knowledgeNotFound:COMMON_MEMORY_MCP_KNOWLEDGE_NOT_FOUND});
+      return ['propose-entry','propose-source-entry'].includes(String(fields.request?.operation))&&typeof result?.memory?.name==='string'?{...result,nextStep:commonMemoryReviewPointer(result.memory.name)}:result;
+    }
     if(MCP_DISPATCHED.has(op))return dispatch(op,fields);
     if(op==='list')return {...await deps.service.listPage(fields.offset??0,COMMON_MEMORY_MCP_LIST_PAGE),paged:true};
     if(op==='inspect')return deps.service.inspect(fields.groupId,fields.offset??0,0,fields.analysis===true,COMMON_MEMORY_MCP_INSPECT_PAGE);
@@ -181,7 +192,11 @@ export function createCommonMemoryDispatch(deps:CommonMemoryDispatchDeps){
       if(memoryId===undefined){const project=await deps.resolveProject(fields.portId);if(!project.memoryId)throw new CommonMemoryError('COMMON_MEMORY_PROJECT_MEMORY_REQUIRED','이 프로젝트의 장기기억을 먼저 시작하세요.');memoryId=project.memoryId;}
       return dispatch('recall',{memoryId,query:fields.query,...(fields.scopeId?{scopeId:fields.scopeId}:{})});
     }
-    if(op==='recall')return deps.service.recall(fields.groupId,fields.task,fields.revisionId,fields.scopeId);
+    if(op==='recall')return deps.service.recall(fields.groupId,fields.task,fields.revisionId,fields.scopeId).catch(async(error:unknown)=>{
+      // A knowledge topic has no publication: the goal form's '검토·게시' answer would point at a step the app no longer shows.
+      if(error instanceof CommonMemoryError&&error.code==='COMMON_MEMORY_REVIEW_REQUIRED'&&(await deps.service.get(fields.groupId).catch(()=>null))?.state.goalConfigured===false)throw new CommonMemoryError(error.code,COMMON_MEMORY_MCP_KNOWLEDGE_TOPIC_RECALL,error.status);
+      throw error;
+    });
     if(op==='recommend')return deps.service.recommend(fields.projectGoal);
     if(op==='manage')return deps.service.action(fields.request);
     if(op==='history')return {revisions:await deps.service.history(fields.groupId)};
@@ -196,6 +211,8 @@ export function createCommonMemoryDispatch(deps:CommonMemoryDispatchDeps){
 export function commonMemoryMcpView(op:string,data:any,offset=0){
   const goal=(g:any)=>({...g,objective:String(g.objective).slice(0,600),include:g.include.slice(0,3).map((s:string)=>s.slice(0,100)),exclude:g.exclude.slice(0,3).map((s:string)=>s.slice(0,100)),conditions:g.conditions.slice(0,3).map((s:string)=>s.slice(0,100)),checks:g.checks.slice(0,3).map((s:string)=>s.slice(0,100)),sdkModules:(g.sdkModules??[]).slice(0,8),summaryOnly:true});
   const summary=(s:any)=>({id:s.id,name:s.name,goalConfigured:s.goalConfigured!==false,knowledgeSummary:s.knowledgeSummary??null,goal:goal(s.goal),goalVersion:s.goalVersion,sourceMemoryIds:s.sourceMemoryIds,archived:s.archived,publication:s.publication?{id:s.publication.id,goalVersion:s.publication.goalVersion}:null});
+  // Recall hits keep memoryId/memoryName for the group (the shared MetaMemoryRecall DTO); the AI also gets the group's own names.
+  const hits=(rows:any[])=>rows.map(h=>({groupId:h.memoryId,groupName:h.memoryName,...h}));
   const page=(rows:any[],start:number,size:number)=>{const selected:any[]=[];let bytes=0;for(const row of rows.slice(start,start+size)){const length=Buffer.byteLength(JSON.stringify(row));if(bytes+length>12_000)break;bytes+=length;selected.push(row);}return {selected,nextOffset:start+selected.length<rows.length?start+selected.length:null};};
   // A paged list (listPage) holds only the requested rows; the byte budget may still stop early.
   if(op==='list'&&data.paged){const p=page(data.groups.map((r:any)=>({state:summary(r.state),version:r.version})),0,10),next=p.selected.length<data.groups.length?offset+p.selected.length:data.nextOffset;return {groups:p.selected,total:next===null?offset+p.selected.length:null,nextOffset:next};}
@@ -205,6 +222,8 @@ export function commonMemoryMcpView(op:string,data:any,offset=0){
   if(op==='manage')return {scopeId:data.scopeId,state:summary(data.state),version:data.version,...(data.replayed?{replayed:true,committedVersion:data.committedVersion}:{})};
   if(op==='recommend'){const rows=data.recommendations.map((r:any)=>({...r,goal:goal(r.goal),reason:r.reason.slice(0,300),conditions:r.conditions.slice(0,3).map((s:string)=>s.slice(0,100))})),p=page(rows,0,8);return {...data,recommendations:p.selected,blocked:data.blocked.slice(0,8),scanComplete:data.scanComplete&&p.nextOffset===null};}
   if(op==='history')return {revisions:data.revisions.map((r:any)=>({...r,goal:goal(r.goal)})).slice(0,5),windowLimit:5};
+  if(op==='recall'&&data?.mode==='memory'&&Array.isArray(data.hits))return {...data,hits:hits(data.hits)};
+  if(op==='knowledge'&&data&&typeof data==='object')return {...data,...(data.memory?.id?{memory:{groupId:data.memory.id,...data.memory}}:{}),...(Array.isArray(data.memories)?{memories:data.memories.map((m:any)=>({groupId:m.id,...m}))}:{}),...(Array.isArray(data.hits)?{hits:hits(data.hits)}:{})};
   return data;
 }
 

@@ -1,3 +1,4 @@
+import {AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from './agentstozMcpAgentChoice';
 import {userMemoryQuery} from './userMemoryRecall';
 import {parseAgentMentionReference} from './agentstozMention';
 import {parseServiceUseRequest,type ServiceUseRequest} from './serviceUseProtocol';
@@ -13,6 +14,7 @@ import {cliAccountAgent, cliAccountId} from './cliAccountProtocol';
 import {AI_INITIAL_PROMPT_MAX_BYTES} from './aiInitialPrompt';
 import {CODE_APP_TASK_MAX_BYTES} from './codeAppTask';
 import {normalizeWorkroomKeys,startsWithShellEscape,WORKROOM_READ_VIEWS,WORKROOM_WAIT_LIMITS,type WorkroomKey,type WorkroomReadView} from './workroomOrchestration';
+import {parseWorkroomTeamRequest,WorkroomTeamError,type WorkroomTeamRequest} from './workroomTeam';
 export const AGENTSTOZ_USE_CONTROL_ENDPOINT = "http://127.0.0.1:3001/api/agentstoz-use/action";
 
 export const AGENTSTOZ_USE_ACTIONS = [
@@ -29,6 +31,7 @@ export const AGENTSTOZ_USE_ACTIONS = [
   "get-control-profile",
   "recall-control-context",
   "recall-user-memory",
+  "recall-user-profile",
   "list-control-memory-candidates",
   "propose-control-memory",
   "list-projects",
@@ -60,6 +63,7 @@ export const AGENTSTOZ_USE_ACTIONS = [
   "open-dashboard",
   "open-code-app",
   "open-buzz-dev",
+  "workroom-team",
 ] as const;
 
 export type AgentsToZUseAction = typeof AGENTSTOZ_USE_ACTIONS[number];
@@ -78,6 +82,8 @@ export type AgentsToZUseActionRequest = {
   commonMemorySelections?:import('./commonMemory').CommonMemorySelection[];
   metaMemory?: MetaMemoryRequest;
   tester?: TesterRequest;
+  /** workroom-team: 팀 작전 (src/workroomTeam.ts). Its portId lives inside, since read·wait·report·close name only a teamId. */
+  team?: WorkroomTeamRequest;
   /** read-ai-label-job · submit-ai-labels (src/aiLabelJobs.ts). */
   aiLabelJob?: {jobId: string; page?: number; results?: unknown[]};
   testerOverview?:TesterOverviewRequest;
@@ -110,6 +116,8 @@ export type AgentsToZUseActionRequest = {
   foreground?: boolean;
   /** start-workroom-session: return the newest running session of the same agent instead of starting. */
   reuse?: boolean;
+  /** Local MCP Workroom only: a fixed Hermes provider preset, never a remote terminal DTO field. */
+  hermesVariant?: 'default'|'claude'|'codex';
   accountId?: string;
   /** close-workroom-session: run the normal session-end memory save (default skips it). */
   saveMemory?: boolean;
@@ -325,7 +333,7 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
   const commonMemorySelections=action==='create-project'&&body.commonMemorySelections!==undefined?parseCommonSelections(body.commonMemorySelections):undefined;
   let commonMemoryIds:string[]|undefined;
   if(action==='create-project'&&body.commonMemoryIds!==undefined){if(!Array.isArray(body.commonMemoryIds)||body.commonMemoryIds.length>8)throw new AgentsToZUseControlError('공통기억은 최대 8개 선택하세요.','COMMON_MEMORY_INPUT_INVALID');commonMemoryIds=[...new Set(body.commonMemoryIds.map(commonMemoryId))];if(commonMemoryIds.length&&!projectGoal)throw new AgentsToZUseControlError('선택한 공통기억을 사용할 프로젝트 목표가 필요합니다.','COMMON_MEMORY_GOAL_REQUIRED');}
-  const requiresProject = action === 'service-use' || action === "recall-user-memory" || action === 'platform-cli' || action === "tester" || action === "project-status" || action==='sdk-project' || action==='common-memory'&&commonMemory?.op==='bind-project'
+  const requiresProject = action === 'service-use' || action === "recall-user-memory" || action === "recall-user-profile" || action === 'platform-cli' || action === "tester" || action === "project-status" || action==='sdk-project' || action==='common-memory'&&commonMemory?.op==='bind-project'
     || action === 'list-workroom-accounts' || action === 'select-workroom-account'
     || action === "list-workroom-sessions"
     || action === "start-workroom-session"
@@ -470,6 +478,9 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     if (!cliAccountAgent(body.agent)) throw new AgentsToZUseControlError('계정 선택은 codex 또는 claude에서 지원합니다.','AGENTSTOZ_USE_AGENT_INVALID');
     agent = body.agent;
   }
+  if (body.hermesVariant !== undefined && (action !== 'start-workroom-session' || agent !== 'hermes' || !['default','claude','codex'].includes(body.hermesVariant as string))) {
+    throw new AgentsToZUseControlError('Hermes 실행 구성은 워크룸의 default, claude 또는 codex 중에서 선택하세요.','AGENTSTOZ_USE_HERMES_VARIANT_INVALID');
+  }
   if (body.accountId !== undefined && (action !== 'start-workroom-session' && action !== 'select-workroom-account' || !cliAccountId(body.accountId) || !cliAccountAgent(agent))
     || action === 'select-workroom-account' && !cliAccountId(body.accountId)) throw new AgentsToZUseControlError('등록된 CLI 계정 ID를 선택하세요.','AGENTSTOZ_USE_ACCOUNT_INVALID');
   if (action === "send-workroom-keys") {
@@ -553,17 +564,26 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     if (!/^[A-Za-z0-9_-]{8,160}$/.test(candidateRequestId)) throw new AgentsToZUseControlError("requestId 형식이 올바르지 않습니다.", "AGENTSTOZ_USE_MISSION_REQUEST_ID_INVALID");
     requestId = candidateRequestId;
   }
-  const controlQuery = action === "recall-user-memory" ? userMemoryQuery(body.query) : action === "recall-control-context" ? controlProfileText(body.query, 2000) : undefined;
+  let controlQuery:string|undefined;
+  if(action==='recall-user-memory'||action==='recall-user-profile'){
+    try{controlQuery=userMemoryQuery(body.query);}
+    catch{throw new AgentsToZUseControlError('조회할 주제와 짧은 검색어를 입력하세요.',action==='recall-user-profile'?'USER_PROFILE_INVALID_INPUT':'USER_MEMORY_QUERY_INVALID',400);}
+  }else if(action==='recall-control-context')controlQuery=controlProfileText(body.query,2000);
   const controlProposal = action === "propose-control-memory" ? {
     requestId: controlProfileText(body.requestId, 200), title: controlProfileText(body.title, 200),
     body: controlProfileText(body.body, 4000), evidence: controlProfileText(body.evidence, 1000),
     expectedRevision: controlProfileText(body.expectedRevision, 64),
   } : undefined;
   const tester = action === 'tester' ? parseTesterRequest(body.tester) : undefined;
+  let team: WorkroomTeamRequest | undefined;
+  if (action === 'workroom-team') {
+    try { team = parseWorkroomTeamRequest(body.team); }
+    catch (error) { throw error instanceof WorkroomTeamError ? new AgentsToZUseControlError(error.message, error.code, error.status) : error; }
+  }
   if(tester && tester.portId !== portId) throw new AgentsToZUseControlError('테스터 프로젝트가 일치하지 않습니다.','TESTER_TARGET_MISMATCH');
   const overview=action==='tester-overview'?parseTesterOverviewRequest(body.testerOverview):undefined;
   const aiLabelJob=action==='read-ai-label-job'||action==='submit-ai-labels'?parseAiLabelJobRequest(action,body.aiLabelJob):undefined;
-  return { ...(platformCli?{platformCli}:{}), ...(aiLabelJob?{aiLabelJob}:{}), ...(overview?{testerOverview:overview}:{}), ...(tester?{tester}:{}), ...(controlQuery ? {controlQuery} : {}), ...(controlProposal ? {controlProposal} : {}), action, controllerPortId, portId, agent, projectName, ...(action==='register-existing-project'?{folderName}:{}), workspaceRootId, channelId, channelName, visibility, archiveMemory, sessionId, after, requestId, instruction, ...(shellCommand?{shellCommand}:{}),
+  return { ...(team?{team}:{}), ...(platformCli?{platformCli}:{}), ...(aiLabelJob?{aiLabelJob}:{}), ...(overview?{testerOverview:overview}:{}), ...(tester?{tester}:{}), ...(controlQuery ? {controlQuery} : {}), ...(controlProposal ? {controlProposal} : {}), action, controllerPortId, portId, agent, projectName, ...(action==='register-existing-project'?{folderName}:{}), workspaceRootId, channelId, channelName, visibility, archiveMemory, sessionId, after, requestId, instruction, ...(shellCommand?{shellCommand}:{}),
     ...(action==='service-use'?{serviceUse:parseServiceUseRequest(body.serviceUse)}:{}),
     ...(action==='read-reference'?{reference:parseAgentMentionReference(body.reference)}:{}),
     ...(action==='resolve-target'?{targetAlias}:{}),
@@ -579,6 +599,7 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     ...(action === "record-mission-project-result" ? { missionId, mentionedPortIds, changedPortIds, decisionPortIds, verifiedResultPortIds, resultSummary } : {}),
     ...(action === "read-workroom-session" ? { view } : {}),
     ...(action === "start-workroom-session" ? { foreground: workroomFlag(body.foreground, "foreground", true), reuse: workroomFlag(body.reuse, "reuse", false) } : {}),
+    ...(body.hermesVariant !== undefined ? {hermesVariant:body.hermesVariant as 'default'|'claude'|'codex'} : {}),
     ...(body.accountId !== undefined ? {accountId: body.accountId as string} : {}),
     ...(action === "close-workroom-session" ? { saveMemory: workroomFlag(body.saveMemory, "saveMemory", false) } : {}),
     ...(action === "send-workroom-keys" ? { keys } : {}),
@@ -616,13 +637,15 @@ export function agentsToZUseControlPromptLines(input: {
     "This project is AgentsToZ itself, so you may also act as its bounded conversational control surface on this device.",
     `The installed local bridge internally uses: ${endpoint}`,
     `Fixed controllerPortId: ${controllerPortId}`,
-    "Use only the installed MCP tools named agentstoz_use_list_projects, agentstoz_use_platform_cli, agentstoz_use_list_workspace_roots, agentstoz_use_create_project, agentstoz_use_register_existing_project, agentstoz_use_connect_buzz_channel, agentstoz_use_create_github_repository, agentstoz_use_project_status, agentstoz_use_list_workroom_sessions, agentstoz_use_read_workroom_session, agentstoz_use_start_workroom_session, agentstoz_use_send_workroom_instruction, agentstoz_use_send_workroom_keys, agentstoz_use_wait_workroom_session, agentstoz_use_close_workroom_session, agentstoz_use_send_shared_shell_command, agentstoz_use_read_shared_shell, agentstoz_use_list_missions, agentstoz_use_create_mission, agentstoz_use_read_mission, agentstoz_use_transition_mission, agentstoz_use_link_mission_utterance, agentstoz_use_record_mission_project_result, agentstoz_use_open_dashboard, agentstoz_use_open_code_app, and agentstoz_use_open_buzz_dev. Do not call the local endpoint through curl, shell networking, or node_repl.",
+    AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE,
+    "Execution calls repeat the settled choices: start_workroom_session uses surface=internal; open_code_app uses the selected app or Orca surface. Hermes also states hermesVariant: default/claude/codex in Workroom, or default for app/Orca current settings. Each fresh create_team member states its surface and, for Hermes, a variant or exact model/provider. Joined sessionId members keep their settings. A valid legacy v1 button block with omitted defaults already means internal and plain Hermes default: make those defaults explicit in the MCP call without asking again.",
+    "Use only the installed MCP tools named agentstoz_use_prepare_agent_launch, agentstoz_use_list_projects, agentstoz_use_platform_cli, agentstoz_use_list_workspace_roots, agentstoz_use_create_project, agentstoz_use_register_existing_project, agentstoz_use_connect_buzz_channel, agentstoz_use_create_github_repository, agentstoz_use_project_status, agentstoz_use_list_workroom_sessions, agentstoz_use_read_workroom_session, agentstoz_use_start_workroom_session, agentstoz_use_send_workroom_instruction, agentstoz_use_send_workroom_keys, agentstoz_use_wait_workroom_session, agentstoz_use_close_workroom_session, agentstoz_use_send_shared_shell_command, agentstoz_use_read_shared_shell, agentstoz_use_list_missions, agentstoz_use_create_mission, agentstoz_use_read_mission, agentstoz_use_transition_mission, agentstoz_use_link_mission_utterance, agentstoz_use_record_mission_project_result, agentstoz_use_open_dashboard, agentstoz_use_open_code_app, and agentstoz_use_open_buzz_dev. Do not call the local endpoint through curl, shell networking, or node_repl.",
     "Use missions only for explicit durable orchestration or multi-project/multi-agent work. Listing projects and simply opening an app stay ephemeral. After interruption or restart, call resume only when the user explicitly asks to continue that mission.",
     "The bridge sends fixed credential-free JSON. Never provide a folder path, URL, private key, token, or credential to a control tool. Only agentstoz_use_send_shared_shell_command may receive a shell command, and only after this exact local Workroom's user has opened its bottom shell and enabled AI input. Ordinary Workroom instruction tools receive bounded natural language, not shell commands. For an explicit other-device task, the additional tools agentstoz_use_list_ops_devices, agentstoz_use_submit_ops_request, agentstoz_use_get_ops_request_result and agentstoz_use_wait_ops_request select an exact community device and return its configured OPS AI's result. Keep the same requestId on retry; admission is not completion. A receiving worker uses agentstoz_use_complete_ops_request with its task-only return capability; never expose it.",
     "For an existing project, first call agentstoz_use_list_projects and use only a portId returned by that tool. For a new project, first call agentstoz_use_list_workspace_roots and pass only a workspaceRootId returned by that tool. Never guess IDs and never call older path-based endpoints.",
     "The local bridge resolves every portId against the registered AgentsToZ project list and rejects actions outside the fixed tool set.",
     "To open AgentsToZ OPS itself, use target=ops without portId on open_dashboard, open_code_app, or the Workroom tools. The existing profile token and bound Control memory resolve it independently of cwd; never substitute DEV or create a replacement project. App-data profiles support the OPS panel and memory, but app/Workroom/Orca launches require an explicitly connected registered Control folder. For Orca pass surface=orca-floating or orca-worktree to open_code_app. agy on the app surface only launches Antigravity.app (projectApplied=false): tell the user to pick the project there. Report fallback and permission-mode warnings; bypass must be explicitly requested.",
-    "To route a request to a desktop app, pass task (natural language, up to 24,000 UTF-8 bytes, no leading !) to agentstoz_use_open_code_app on the app surface. Codex is asked to prefill it into a new conversation without sending it (taskApplied=prefilled, not confirmed by the app); the user checks it and presses send. A task too long for the Codex link (about 900 Korean characters) is not prefilled (taskApplied=false, taskReason=too-large). Claude, Hermes and Antigravity apps cannot receive it (taskApplied=false): tell the user, or start a Workroom with that instruction instead. Orca surfaces refuse task.",
+    "To route a request to a desktop app, pass task (natural language, up to 24,000 UTF-8 bytes, no leading !) to agentstoz_use_open_code_app on the app surface. Codex is asked to prefill it into a new conversation without sending it (taskApplied=prefilled, not confirmed by the app); the user checks it and presses send. A task too long for the Codex link (about 900 Korean characters) is not prefilled (taskApplied=false, taskReason=too-large). Claude, Hermes and Antigravity apps cannot receive it (taskApplied=false): report the limitation and ask before changing the selected surface. Orca surfaces refuse task.",
     "For Codex Desktop first-conversation setup, agentstoz_use_open_code_app accepts mode=prepare only when the user requested starting the first conversation. It may send a fixed connection-test message. The default only reopens an existing conversation. Never substitute a Workroom session or a separately created Codex task and claim the original launch was repaired.",
     "To inspect Workroom, list sessions for a returned project ID first. Read output only with a sessionId returned for that same project. Never guess a session ID or describe a historical session as running.",
     "To start a Codex, Claude, Hermes, or agy Workroom session, use a returned project ID and a fresh requestId, then read its output before sending any instruction because the CLI may present a local setup, trust, profile, or login screen. To instruct an existing session, list it first, use its exact sessionId, and use a fresh requestId. Reuse a requestId only to retry the exact same action; never reuse it for different content.",

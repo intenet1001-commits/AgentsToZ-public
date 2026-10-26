@@ -1,0 +1,112 @@
+/* My Chrome's guided flow, drawn in the page area instead of the settings form it used to be (H1).
+   Colour comes only from tokens (src/index.css); no hex or rgba literal belongs in this file. */
+
+.wb-chrome-card{
+ display:flex;flex-direction:column;gap:12px;
+ box-sizing:border-box;width:100%;max-width:560px;margin:0 auto;padding:16px;
+ background:var(--surface);border:1px solid var(--line);border-radius:12px;color:var(--ink);
+ font:13px/1.5 var(--font-sans);text-align:left;
+}
+.wb-chrome-card__title{margin:0;font-size:15px;font-weight:650;letter-spacing:-.01em;color:var(--ink)}
+/* The page a person is looking at, and the sentence saying where it is. Both stay inside two lines. */
+.wb-chrome-card__meta,.wb-chrome-card__body{margin:0;max-width:46ch;color:var(--ink-2);overflow-wrap:anywhere}
+.wb-chrome-card__meta{font-size:12.5px;color:var(--ink-2)}
+.wb-chrome-card__body{font-size:12.5px;line-height:1.45;color:var(--ink-3)}
+.wb-chrome-card--stage{align-items:center;text-align:center;gap:10px}
+.wb-chrome-card--stage .wb-chrome-card__meta,.wb-chrome-card--stage .wb-chrome-card__body{text-align:center}
+.wb-chrome-tile{
+ display:grid;place-items:center;width:44px;height:44px;border-radius:12px;
+ background:var(--sunken);border:1px solid var(--line);color:var(--ink-2);
+}
+
+/* The three numbered steps. The number is a column of its own so a wrapped step stays aligned. */
+.wb-chrome-steps{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
+.wb-chrome-steps>li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:start}
+.wb-chrome-steps__n{
+ display:grid;place-items:center;width:20px;height:20px;border-radius:50%;
+ background:var(--sunken);border:1px solid var(--line);
+ color:var(--ink-2);font:600 11px/1 var(--font-sans);font-variant-numeric:tabular-nums;
+}
+.wb-chrome-steps__body{display:flex;flex-direction:column;gap:8px;min-width:0}
+.wb-chrome-steps__body p{margin:0;color:var(--ink);overflow-wrap:anywhere}
+
+/* The address to open in Chrome: mono, selectable, with its own copy button. */
+.wb-chrome-address{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wb-chrome-address code{
+ flex:1 1 auto;min-width:0;padding:6px 8px;border-radius:8px;
+ background:var(--sunken);border:1px solid var(--line);color:var(--ink);
+ font:12px/1.4 var(--font-mono);user-select:all;overflow-wrap:anywhere;
+}
+
+/* Profiles and tabs are rows a person can hit, not options inside a native select. */
+.wb-chrome-profiles{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;border:0}
+.wb-chrome-profiles>legend{padding:0;margin:0 0 2px;color:var(--ink-2);font-size:12px}
+.wb-chrome-tabs{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;max-height:244px;overflow:auto}
+.wb-chrome-row{
+ display:flex;align-items:center;gap:10px;
+ box-sizing:border-box;width:100%;min-height:44px;padding:0 10px;
+ background:var(--raised);border:1px solid var(--line);border-radius:10px;
+ color:var(--ink);cursor:pointer;transition:background 120ms ease,border-color 120ms ease;
+}
+.wb-chrome-row:hover{background:var(--surface);border-color:var(--line-2)}
+.wb-chrome-row[data-selected]{border-color:var(--accent-line);background:var(--accent-soft)}
+.wb-chrome-row:has(input:disabled){cursor:default;opacity:.55}
+.wb-chrome-row:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.wb-chrome-row input{flex:none;margin:0;accent-color:var(--accent)}
+.wb-chrome-row__text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.wb-chrome-row__title{
+ font-size:13px;font-weight:600;color:var(--ink);
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wb-chrome-row__meta{
+ font-size:11.5px;color:var(--ink-3);
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* A tab already in this task reads as taken, without hiding it. */
+.wb-chrome-row--tab[data-attached] .wb-chrome-row__meta{color:var(--ink-2)}
+.wb-chrome-mono{
+ display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:8px;
+ background:var(--sunken);border:1px solid var(--line);
+ color:var(--ink-2);font:600 14px/1 var(--font-sans);
+}
+
+/* The one line that gates confirmProfile:true. */
+.wb-chrome-confirm{display:flex;align-items:flex-start;gap:8px;margin:0;color:var(--ink-2);font-size:12.5px;cursor:pointer}
+.wb-chrome-confirm input{flex:none;margin:2px 0 0;accent-color:var(--accent)}
+.wb-chrome-confirm:has(input:disabled){cursor:default;opacity:.6}
+
+/* Buttons sit 8px apart, which the screen check reads back as the measured gap. */
+.wb-chrome-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.wb-chrome-actions--inline{justify-content:flex-start}
+.wb-chrome-primary,.wb-chrome-ghost{
+ display:inline-flex;align-items:center;gap:6px;
+ min-height:34px;padding:0 12px;border-radius:8px;
+ font:600 12.5px/1 var(--font-sans);cursor:pointer;
+ transition:background 120ms ease,border-color 120ms ease,opacity 120ms ease;
+}
+.wb-chrome-primary{background:var(--accent);border:1px solid var(--accent);color:var(--bg)}
+.wb-chrome-primary:hover:not(:disabled){background:var(--accent-hover,var(--accent));border-color:var(--accent-line)}
+.wb-chrome-ghost{background:transparent;border:1px solid var(--line);color:var(--ink-2)}
+.wb-chrome-ghost:hover:not(:disabled){background:var(--raised);color:var(--ink);border-color:var(--line-2)}
+.wb-chrome-primary:disabled,.wb-chrome-ghost:disabled{cursor:default;opacity:.5}
+.wb-chrome-primary:focus-visible,.wb-chrome-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* The shared-login fact as one line, until K3 raises it to the control bar. */
+.wb-chrome-note{
+ display:flex;align-items:flex-start;gap:6px;margin:0;max-width:46ch;
+ color:var(--info);font-size:12px;line-height:1.45;text-align:left;
+}
+.wb-chrome-note svg{flex:none;margin-top:1px}
+
+/* The shared tab strip, when My Chrome owns it. */
+.wb-chrome-strip{min-width:0}
+
+/* A phone keeps 16px in anything typable so iOS does not zoom the panel. */
+@media (pointer:coarse){
+ .wb-chrome-card{font-size:14px}
+ .wb-chrome-row__title,.wb-chrome-confirm,.wb-chrome-address code{font-size:16px}
+ .wb-chrome-primary,.wb-chrome-ghost{min-height:40px;font-size:16px}
+}
+@media (prefers-reduced-motion:reduce){
+ .wb-chrome-row,.wb-chrome-primary,.wb-chrome-ghost{transition:none}
+}

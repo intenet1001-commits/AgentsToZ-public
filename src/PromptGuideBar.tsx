@@ -109,7 +109,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
     // StrictMode's repeated effect setup attaches to the same initial request.
     initialRead.current ??= repository.read();
     void initialRead.current.then(value => {if (active) receiveSnapshot(value);})
-      .catch(error => {if (active) setReadError(message(error, '저장한 가이드를 읽지 못했습니다.'));})
+      .catch(error => {if (active) setReadError(message(error, '저장한 프롬프트를 읽지 못했습니다.'));})
       .finally(() => {if (active) {readBusy.current = false; setReading(false);}});
     return () => {active = false; mounted.current = false; suggestionAbort.current?.abort();};
   }, []);
@@ -144,7 +144,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
     try {
       const value = await repository.read();
       if (mounted.current) {receiveSnapshot(value); if (!quiet) setNotice('저장 목록을 다시 읽었습니다. 작성 중인 초안은 유지했습니다.');}
-    } catch (error) {if (mounted.current) setReadError(message(error, '저장한 가이드를 읽지 못했습니다.'));}
+    } catch (error) {if (mounted.current) setReadError(message(error, '저장한 프롬프트를 읽지 못했습니다.'));}
     finally {readBusy.current = false; if (mounted.current) setReading(false);}
   };
   const rememberDraft = (key: string, value: Draft): boolean => {
@@ -225,7 +225,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
   const persist = async () => {
     const current = snapshotRef.current;
     if (!draft || !activeKey || !current || blocked || mutationBusy.current) return;
-    if (changedSaved) {setActionError('저장본이 변경되거나 삭제되어 덮어쓰지 않았습니다. 현재 초안은 새 가이드로 작성할 수 있습니다.'); return;}
+    if (changedSaved) {setActionError('저장본이 변경되거나 삭제되어 덮어쓰지 않았습니다. 현재 초안은 새 프롬프트로 작성할 수 있습니다.'); return;}
     if (!draft.title.trim() || draft.title.length > 120 || !draft.body.trim() || draft.body.length > MAX_BODY
       || /[\x00-\x1f\x7f]/.test(draft.title) || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(draft.body)) {
       setActionError('제목은 1~120자, 본문은 1~16,384자로 입력해 주세요. 제어 문자는 저장할 수 없습니다.'); return;
@@ -235,14 +235,14 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
       const separateDraft = activeKey !== currentSaved.id ? next[currentSaved.id] : undefined;
       delete next[activeKey];
       next[currentSaved.id] = separateDraft && dirty(separateDraft) ? separateDraft : editDraft(currentSaved);
-      draftsRef.current = next; setDrafts(next); setActiveKey(currentSaved.id); setActionError(''); setNotice('같은 가이드가 이미 저장되어 있음을 확인했습니다.'); return;
+      draftsRef.current = next; setDrafts(next); setActiveKey(currentSaved.id); setActionError(''); setNotice('같은 프롬프트가 이미 저장되어 있음을 확인했습니다.'); return;
     }
     const entry: PromptGuideEntry = {id: draft.id, title: draft.title.trim(), body: draft.body, pinned: draft.pinned, updatedAt: new Date().toISOString(),
       ...(draft.kind === 'command' ? {kind: 'command' as const} : {})};
     // A built-in 규격 명령 is not stored until the user first changes it; then its copy is appended.
     const entries = draft.base && current.entries.some(item => item.id === entry.id)
       ? current.entries.map(item => item.id === entry.id ? entry : item) : [...current.entries, entry];
-    if (entries.length > 100) {setActionError('가이드는 최대 100개까지 저장할 수 있습니다. 기존 가이드를 정리해 주세요. 초안은 유지했습니다.'); return;}
+    if (entries.length > 100) {setActionError('프롬프트는 최대 100개까지 저장할 수 있습니다. 기존 프롬프트를 정리해 주세요. 초안은 유지했습니다.'); return;}
     if (new TextEncoder().encode(JSON.stringify({expectedRevision: current.revision, entries})).byteLength > MAX_STORE_BYTES) {
       setActionError('전체 저장 용량 1 MiB를 넘었습니다. 일부 내용을 줄인 뒤 다시 저장해 주세요. 초안은 유지했습니다.'); return;
     }
@@ -254,7 +254,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
       assertSubmittedReceipt(value, entries, current);
       const saved = value.entries.find(item => item.id === entry.id);
       receiveSnapshot(value);
-      if (!saved) throw new Error('저장 결과에서 해당 가이드를 확인하지 못했습니다. 초안은 유지했습니다.');
+      if (!saved) throw new Error('저장 결과에서 해당 프롬프트를 확인하지 못했습니다. 초안은 유지했습니다.');
       const next = copyDrafts(draftsRef.current);
       // A lost new-guide receipt can leave both NEW_DRAFT and an edited saved-id
       // draft. Confirming that receipt must not overwrite the separate edit.
@@ -281,7 +281,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
       if (!dirty(draft)) {
         const next = copyDrafts(draftsRef.current); delete next[removingKey]; draftsRef.current = next; setDrafts(next); setActiveKey(null);
       }
-      setNotice(dirty(draft) ? '저장본을 삭제했습니다. 작성 중인 초안은 유지했습니다.' : '가이드를 삭제했습니다.');
+      setNotice(dirty(draft) ? '저장본을 삭제했습니다. 작성 중인 초안은 유지했습니다.' : '프롬프트를 삭제했습니다.');
     } catch (error) {if (mounted.current) storeFailure(error);}
     finally {mutationBusy.current = false; if (mounted.current) setSaving(false);}
   };
@@ -352,7 +352,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
   };
   const chooseSuggestion = (candidate: PromptGuideSuggestion) => {
     if (candidate.title.length > 120 || candidate.body.length > MAX_BODY || !candidate.title.trim() || !candidate.body.trim()) {
-      setSuggestionError('추천 내용이 가이드 입력 범위를 벗어났습니다. 저장하지 않았습니다.'); return;
+      setSuggestionError('추천 내용이 프롬프트 입력 범위를 벗어났습니다. 저장하지 않았습니다.'); return;
     }
     asNew({title: candidate.title, body: candidate.body, pinned: false});
   };
@@ -379,7 +379,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
       <div className="flex max-h-[calc(100dvh-24px)] min-w-0 flex-col">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--line)] p-4">
           <div className="min-w-0"><h2 id={dialogTitle} className="text-base font-semibold">자주 쓰는 프롬프트</h2>
-            <p className="mt-1 text-xs text-[var(--ink-3)]">{shared ? '개인 Supabase의 허용 회원끼리 공유합니다. 모바일에서도 복사해 원하는 AI에 붙여 넣으세요.' : '이 기기에서 암호화해 보관합니다. 복사한 뒤 원하는 AI에 붙여 넣으세요.'}</p></div>
+            <p className="mt-1 text-xs text-[var(--ink-3)]">{shared ? '개인 Supabase의 허용된 계정끼리 공유합니다. 모바일에서도 복사해 원하는 AI에 붙여 넣으세요.' : '이 기기에서 암호화해 보관합니다. 복사한 뒤 원하는 AI에 붙여 넣으세요.'}</p></div>
           <button type="button" data-testid="prompt-guide-close" autoFocus aria-label="자주 쓰는 프롬프트 닫기" onClick={() => dialog.current?.close()} className={button}>닫기</button>
         </header>
         <div className="min-h-0 overflow-y-auto p-4">
@@ -407,7 +407,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
             <summary data-testid="prompt-command-ai-toggle" className="cursor-pointer text-sm font-semibold">AI로 규격 명령 만들기 <span className="text-xs font-normal text-[var(--ink-3)]">— 짧게 설명하면 AI가 양식에 맞춰 초안을 씁니다</span></summary>
             <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-[var(--ink-3)]">
               <li>반복하고 싶은 작업을 한두 줄로 적습니다.</li>
-              <li>{workroom ? '고른 워크룸(기본: OPS 운영 워크룸)에' : 'AI에'} 요청문이 들어갑니다. AI가 목적·전제·단계·확인 기준·금지 사항·보고 형식 양식으로 초안을 씁니다.</li>
+              <li>{workroom ? '고른 워크룸(기본: 아젠투지(OPS) 워크룸)에' : 'AI에'} 요청문이 들어갑니다. AI가 목적·전제·단계·확인 기준·금지 사항·보고 형식 양식으로 초안을 씁니다.</li>
               <li>결과를 읽어 보고, 완성본을 「규격 명령」 본문에 붙여 넣은 뒤 직접 저장합니다. AI 결과는 자동으로 저장되지 않습니다.</li>
             </ol>
             <label className="mt-2 block text-xs">어떤 작업을 규격 명령으로 만들까요?
@@ -502,7 +502,7 @@ export const PromptGuideBar = memo(function PromptGuideBar({loadSuggestions, rep
                 <p className="mt-1">{Object.entries(analysis.stats.excludedByReason).filter(([,count])=>count>0).map(([reason,count])=>`${exclusionLabels[reason] ?? reason} ${count}개`).join(' · ')}</p>
               </details>}
               <h4 className="mb-2 text-xs font-semibold">자주 쓰는 요청 추천</h4>
-              {analysis.candidates.length === 0 ? <p className="text-xs">반복 조건에 맞는 추천이 없습니다. 아래 최근 입력에서 직접 골라 가이드로 만들 수 있습니다.</p> : <ul className="max-h-56 space-y-2 overflow-y-auto">
+              {analysis.candidates.length === 0 ? <p className="text-xs">반복 조건에 맞는 추천이 없습니다. 아래 최근 입력에서 직접 골라 프롬프트로 만들 수 있습니다.</p> : <ul className="max-h-56 space-y-2 overflow-y-auto">
                 {analysis.candidates.map(candidate => <li key={candidate.id} className="rounded-lg border border-[var(--line)] p-3">
                   <div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><strong className="min-w-0 break-words text-xs [overflow-wrap:anywhere]">{candidate.title} · {candidate.count}회</strong><button type="button" data-testid="prompt-guide-suggestion-use" data-suggestion-id={candidate.id} disabled={saving} onClick={() => chooseSuggestion(candidate)} className={button}>새 초안으로 사용</button></div>
                   <p className="mt-2 whitespace-pre-wrap break-words text-xs text-[var(--ink-3)] [overflow-wrap:anywhere]">{candidate.body}</p>

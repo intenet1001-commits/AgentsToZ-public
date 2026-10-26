@@ -6,7 +6,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-import {createCommonMemoryDispatch,lazyProjects} from '../common-memory-dispatch';
+import {commonMemoryMcpView,createCommonMemoryDispatch,lazyProjects} from '../common-memory-dispatch';
 import {createCommonMemoryService,clearCommonMemoryServiceCaches} from '../common-memory-server';
 import {createCommonMemoryMigration} from '../common-memory-migration-server';
 import {COMMON_MEMORY_HOST_CAPABILITIES} from '../src/commonMemoryCapabilities';
@@ -157,6 +157,42 @@ describe('recall by long-term memory',()=>{
     const w=world(),seen:unknown[][]=[];const service={...w.service,recall:async(...args:unknown[])=>{seen.push(args);return {recalled:true};}} as unknown as typeof w.service;
     const groupId=crypto.randomUUID();
     expect(await w.d.dispatch('recall',{groupId,task:'배포'},service)).toEqual({recalled:true});expect(seen).toEqual([[groupId,'배포',undefined,undefined]]);
+  });
+});
+
+// The AI's review pointer, group aliases and not-found wording live in mcp()/commonMemoryMcpView only: the phone's
+// normalizer refuses unknown keys, and the app and phone pick groups from a list, where the old wording is accurate.
+describe('MCP-only answers',()=>{
+  test('a proposal tells the AI where the person accepts it; the app and phone answers carry no extra key',async()=>{
+    const w=world();let memory=(await w.knowledge({operation:'save',requestId:crypto.randomUUID(),expectedRevision:0,name:'공유 배포',description:'',categories:[],assignments:[{memoryId:B,mode:'include'}]})).memory;
+    const propose=(revision:number)=>({operation:'propose-entry',memoryId:memory.id,expectedRevision:revision,requestId:crypto.randomUUID(),title:'후보',body:'후보 본문'});
+    const ai=await w.d.mcp({op:'knowledge',request:propose(memory.revision)});
+    expect(ai.nextStep).toBe('AgentsToZ 앱의 공통기억 탭 → 「공유 배포」 → 「검토 후보」에서 확정하세요. 확정하기 전에는 다른 프로젝트의 AI가 불러오지 않습니다.');
+    memory=ai.memory;const app=await w.knowledge(propose(memory.revision));expect(app).not.toHaveProperty('nextStep');
+    const phone=await w.knowledge(propose(app.memory.revision),'phone');expect(phone).not.toHaveProperty('nextStep');
+    // A read is not a proposal.
+    expect(await w.d.mcp({op:'knowledge',request:{operation:'read',memoryId:memory.id,withProjects:false}})).not.toHaveProperty('nextStep');
+  });
+  test('a long-term memory sent as the group is named for the AI; the app keeps its wording',async()=>{
+    const w=world();await w.group('공유 배포',[[B,'include']]);
+    await expect(w.d.mcp({op:'knowledge',request:{operation:'read',memoryId:B}})).rejects.toMatchObject({code:'COMMON_MEMORY_KNOWLEDGE_INVALID',message:expect.stringContaining('장기기억 memoryId가 아닌지')});
+    await expect(w.d.dispatch('knowledge',{request:{operation:'read',memoryId:B}})).rejects.toMatchObject({code:'COMMON_MEMORY_KNOWLEDGE_INVALID',message:'클라우드로 이관된 공통기억을 선택하세요.'});
+  });
+  test('recall hits gain groupId/groupName only in the MCP view; the shared recall keeps its shape',async()=>{
+    const w=world(),memory=await w.group('공유 배포',[[B,'include']]);
+    const shared=await w.d.dispatch('recall',{memoryId:B,query:'배포 호환'});
+    expect(shared.hits[0]).not.toHaveProperty('groupId');expect(shared.hits[0].memoryId).toBe(memory.id);
+    const view=commonMemoryMcpView('recall',shared);
+    expect(view.hits[0]).toMatchObject({groupId:memory.id,groupName:'공유 배포',memoryId:memory.id,memoryName:'공유 배포'});expect(view.memoryId).toBe(B);
+    const listed=commonMemoryMcpView('knowledge',await w.knowledge({operation:'list',query:'',offset:0}));
+    expect(listed.memories[0]).toMatchObject({groupId:memory.id,id:memory.id});
+  });
+  test('the goal-form recall of a knowledge topic points at reading it, not at a publish step',async()=>{
+    const w=world(),memory=await w.group('공유 배포',[[B,'include']]);
+    await expect(w.d.mcp({op:'recall',groupId:memory.id,task:'배포'})).rejects.toMatchObject({code:'COMMON_MEMORY_REVIEW_REQUIRED',message:expect.stringContaining('manage_common_knowledge {operation:"read", groupId}')});
+    // A real goal group that needs review keeps the publish wording.
+    const goal=await w.goalGroup('목표 묶음',[D]);
+    await expect(w.d.mcp({op:'recall',groupId:goal,task:'배포'})).rejects.toMatchObject({code:'COMMON_MEMORY_REVIEW_REQUIRED',message:expect.stringContaining('게시')});
   });
 });
 

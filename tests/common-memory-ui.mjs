@@ -81,7 +81,7 @@ for(const [name,engine] of [['chromium',chromium],['webkit',webkit]]){
   await panel.getByRole('button',{name:'AI로 공통기억 추천받기',exact:true}).click();
   const recommendation=page.getByTestId('common-memory-workroom-draft');await recommendation.getByRole('heading',{name:'공통기억 추천',exact:true}).waitFor();
   const recommendationText=await recommendation.innerText();
-  assert.match(recommendationText,/클라우드의 장기기억을 기기과 무관하게/);assert.match(recommendationText,/"cloudSources":\[/);assert.match(recommendationText,/read_cloud_common_memory_source/);assert.doesNotMatch(recommendationText,/"projects":|"portId":/);assert.match(recommendationText,/사용자 선택을 기다리세요/);
+  assert.match(recommendationText,/클라우드의 장기기억을 기기와 무관하게/);assert.match(recommendationText,/"cloudSources":\[/);assert.match(recommendationText,/read_cloud_common_memory_source/);assert.doesNotMatch(recommendationText,/"projects":|"portId":/);assert.match(recommendationText,/사용자 선택을 기다리세요/);
   assert.equal(JSON.stringify((await (await fetch(fixture.url+'/fixture/stats')).json()).groups),savedBeforeRecommendation);
   // Jumps from a project's memory tab: a group id opens that group; a memoryId opens the group that links it, or
   // knowledge creation with it preset when no group does.
@@ -102,3 +102,5 @@ for(const [name,engine] of [['chromium',chromium],['webkit',webkit]]){
  }finally{await browser.close();fixture.stop();}
 }
 console.log(JSON.stringify({fixture:true,physicalDevice:false,report},null,2));
+// The phone's common-memory surfaces run here too: the tester manifest is at its check limit.
+await import('./common-memory-phone-surfaces-ui.mjs');

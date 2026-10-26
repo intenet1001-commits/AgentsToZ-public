@@ -19,11 +19,14 @@ describe('macOS app bundle', () => {
     expect(tauriSource).toContain('let data_dir = legacy_app_data_dir()?;');
     expect(buildScript).toContain('designated => identifier "com.intenet.agentstozbycs"');
     expect(buildScript).toContain('codesign --verify --deep --strict');
-    expect(buildScript).toContain('codesign --force --deep --sign - --preserve-metadata=entitlements');
+    // The separately signed Screen companion must retain its keychain identity. Seal the
+    // GUI alone with its stable requirement, then recursively verify all nested code.
+    expect(buildScript).toContain('codesign --force --sign - --preserve-metadata=entitlements');
+    expect(buildScript).not.toContain('codesign --force --deep --sign - --preserve-metadata=entitlements');
     expect(buildScript).toContain('bun run build:macos-runtime-native');
     expect(buildScript).toContain('stageMacOSRuntimeDevelopmentBundle');
     expect(buildScript.indexOf('stageMacOSRuntimeDevelopmentBundle({'))
-      .toBeLessThan(buildScript.indexOf('codesign --force --deep --sign -'));
+      .toBeLessThan(buildScript.indexOf('codesign --force --sign - --preserve-metadata=entitlements'));
   });
 
   test('uses the recursive xattr compatibility shim while bundling', () => {

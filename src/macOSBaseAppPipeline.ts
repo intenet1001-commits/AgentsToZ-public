@@ -2,6 +2,7 @@ import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirS
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { buildSidecars } from '../build-sidecar';
+import { stageScreenControlBundle } from '../stageScreenControlBundle';
 import { verifyReleaseSource, type ReleaseSource } from '../releaseSourceGuard';
 import { resolveMacOSRuntimeProductionBuildIdentity, type MacOSRuntimeProductionBuildIdentityResolution } from './macOSRuntimeProductionCanary';
 import { validMacOSRuntimeProductionIdentity } from './macOSRuntimeProductionSigningPlan';
@@ -52,6 +53,8 @@ export interface MacOSBasePipelineDependencies {
   createTarget(): string;
   buildSidecars(env: Record<string, string>): Promise<void>;
   stageIcons(projectRoot: string, targetDir: string): Promise<void>;
+  readVersion(): string;
+  stageScreenHelper(app: string, version: string, identity: Readonly<MacOSRuntimeProductionBuildIdentityResolution>): Promise<void>;
   run(command: MacOSBaseBuildCommand): Promise<void>;
   assertFresh(app: string, startedAt: number): void;
   sign(identity: Readonly<MacOSRuntimeProductionBuildIdentityResolution>, app: string, entitlements: Readonly<MacOSBaseEntitlements>): ReturnType<typeof signMacOSBaseApp>;
@@ -78,6 +81,9 @@ export async function executeMacOSBaseAppPipelineForTest(projectRoot: string, de
   await dependencies.run(commands[0]!);
   const startedAt = dependencies.now();
   await dependencies.run(commands[1]!);
+  const version = dependencies.readVersion();
+  if (!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.test(version)) throw new Error('base Screen helper version rejected');
+  await dependencies.stageScreenHelper(app, version, identity);
   dependencies.assertFresh(app, startedAt);
   revalidate();
   const entitlements = Object.freeze({
@@ -91,6 +97,7 @@ export async function executeMacOSBaseAppPipelineForTest(projectRoot: string, de
   const signed = await dependencies.sign(identity, app, entitlements);
   if (signed.mode !== 'developer-id-base' || signed.result !== 'signed-awaiting-notarization'
     || !signed.appSigned || signed.nestedCodeSigned !== MACOS_BASE_CODE.length - 1 || !/^[0-9a-f]{64}$/u.test(signed.bundleDigest)
+    || signed.screenHelperPreserved !== true
     || signed.enhancedRuntimeEnabled !== false || signed.notarized !== false || signed.installed !== false || signed.ready !== false) {
     throw new Error('base signing receipt rejected');
   }
@@ -124,6 +131,11 @@ export async function executeMacOSBaseAppPipeline() {
       return realpathSync(mkdtempSync(join(root, 'candidate-')));
     },
     buildSidecars: env => buildSidecars({ kind: 'macos-developer-id-base' }, { env }),
+    readVersion: () => JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')).version,
+    stageScreenHelper: async (appBundlePath, version, identity) => {
+      await stageScreenControlBundle({ appBundlePath, projectRoot, version,
+        signingIdentity: identity.identity!.certificateFingerprint, timestamp: true });
+    },
     stageIcons: async (root, target) => {
       // The versioned icon must match this release without dirtying the audited checkout.
       const icons = join(target, 'src-tauri/icons');

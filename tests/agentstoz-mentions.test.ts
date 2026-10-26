@@ -2,7 +2,8 @@ import {afterEach, expect, test} from 'bun:test';
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {AGENTSTOZ_MENTION_SKILL, parseAgentMentionReference, referenceExcerpt, withAgentsToZMentions} from '../src/agentstozMention';
+import {AGENTSTOZ_MENTION_SKILL, AGENTSTOZ_MENTION_VERSION, parseAgentMentionReference, referenceExcerpt, withAgentsToZMentions} from '../src/agentstozMention';
+import {AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from '../src/agentstozMcpAgentChoice';
 import {initializeProjectMemory, installProjectMentionAdapters, upgradeProjectMemoryAdapters} from '../project-memory-server';
 import {resolveConversationTargetAlias} from '../src/conversationTargetAlias';
 
@@ -18,6 +19,7 @@ test('project creation and adapter-only upgrade install portable call/reference 
   const memory = readFileSync(join(root, first.config!.sourcePath));
   const skill = join(root, '.agents/skills/agentstoz-mentions/SKILL.md');
   expect(readFileSync(skill, 'utf8')).toBe(AGENTSTOZ_MENTION_SKILL);
+  expect(readFileSync(skill, 'utf8')).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
   expect(readFileSync(join(root, '.claude/skills/agentstoz-mentions/SKILL.md'), 'utf8')).toBe(AGENTSTOZ_MENTION_SKILL);
   expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toContain('# Personal project instructions\n');
   rmSync(skill);
@@ -32,6 +34,11 @@ test('registration installs only guidance, is idempotent and preserves an existi
   expect(existsSync(join(root, '.git'))).toBe(false);
   expect(existsSync(join(root, '.agent-memory'))).toBe(false);
   const before = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  expect(before).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
+  expect(before).toContain(`AgentsToZ mentions-version:${AGENTSTOZ_MENTION_VERSION}`);
+  expect(before).toContain('An @ target selects the project/role, not an AI or launch surface');
+  expect(before).toContain('Pass the chosen surface explicitly to start/open');
+  expect(before).toContain('Hermes open_code_app accepts only an explicit default');
   installProjectMentionAdapters(root);
   expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(before);
   expect(withAgentsToZMentions(before)).toBe(before);

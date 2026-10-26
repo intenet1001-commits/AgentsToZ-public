@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const panelSource = readFileSync(new URL('../src/components/AiUsagePanel.tsx', import.meta.url), 'utf8');
+// The Voice memory guard moved out of the lazy panel so the always-loaded dock can use it (unsaved work, 2026-10-24).
+const memoryPathSource = readFileSync(new URL('../src/contextSessionMemoryPath.ts', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../api-server.ts', import.meta.url), 'utf8');
 
 describe('AI usage session rows', () => {
@@ -57,12 +59,13 @@ describe('AI usage session rows', () => {
   });
 
   test('does not attach pending or conflicting Voice execution to the target project memory', () => {
-    expect(panelSource).toContain("session.voiceBindingState === 'move-pending'");
-    expect(panelSource).toContain("session.voiceBindingState === 'scope-conflict'");
+    expect(memoryPathSource).toContain("session.voiceBindingState === 'move-pending'");
+    expect(memoryPathSource).toContain("session.voiceBindingState === 'scope-conflict'");
+    expect(panelSource).toContain("from '../contextSessionMemoryPath'");
     expect(panelSource).toContain('대상 프로젝트 장기기억에 연결하지 않음');
-    expect(panelSource).toContain('const voiceProjectMemoryIsBlocked');
-    expect(panelSource).toContain("session.voiceBindingState !== 'execution-confirmed'");
-    expect(panelSource).toContain("session.voiceBindingState !== 'assigned-awaiting-execution'");
+    expect(memoryPathSource).toContain('const voiceProjectMemoryIsBlocked');
+    expect(memoryPathSource).toContain("session.voiceBindingState !== 'execution-confirmed'");
+    expect(memoryPathSource).toContain("session.voiceBindingState !== 'assigned-awaiting-execution'");
     expect(panelSource).toContain('장기기억 연결 대기');
     expect(panelSource).toContain("? 'unavailable'");
     expect(apiSource).toContain("chatGptThreadMetadataSnapshot.availability !== 'fresh'");

@@ -885,7 +885,7 @@ function PortsView({ deviceId, deviceIds, creds, showToast, onSwitchDevice, onRe
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
           <Server className="w-10 h-10 text-zinc-700" />
           <p className="text-sm text-zinc-500">동기화된 프로젝트가 없습니다</p>
-          <p className="text-xs text-zinc-600">로컬 앱에서 Push하거나 위 버튼으로 목록에 등록하세요</p>
+          <p className="text-xs text-zinc-600">로컬 앱에서 올리기(Push)하거나 위 버튼으로 목록에 등록하세요</p>
           <p className="text-[10px] text-zinc-700 font-mono">device: {deviceId?.slice(0,8)}… / url: {creds.url.replace('https://','').slice(0,20)}</p>
           {onSwitchDevice && (
             <button onClick={e => {
@@ -1362,7 +1362,8 @@ function DeviceManagerModal({ devices, creds, onClose, onUpdate, showToast }: {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab; visible?: boolean; onRemoteWork?: (project?: {name: string; deviceId: string}) => void }) {
+export function PortalCatalog({ tab, visible = true, onRemoteWork, onOpenCommonMemory }: { tab: Tab; visible?: boolean; onRemoteWork?: (project?: {name: string; deviceId: string}) => void;
+  /** The phone portal: a memory row's 「공통기억」 opens the connected Mac's common memory on that memory. */onOpenCommonMemory?: (memoryId?: string) => void }) {
   useLayoutEffect(() => { setActiveTab(tab); }, [tab]);
   // Never trust a localStorage marker for authorization. The login gate opens
   // only after the current Supabase session passes portmgr_is_member().
@@ -1676,7 +1677,7 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
           </div>
           <div className="max-h-72 overflow-y-auto">
             {devices.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-zinc-500">기기가 없습니다.<br />앱 Push 또는 클라우드 등록을 먼저 진행하세요.</div>
+              <div className="px-3 py-3 text-xs text-zinc-500">기기가 없습니다.<br />앱에서 올리기(Push) 또는 클라우드 등록을 먼저 진행하세요.</div>
             ) : (['desktop', 'remote'] as const).map(kind => {
               const group = devices.filter(device => device.kind === kind);
               if (group.length === 0) return null;
@@ -1774,7 +1775,7 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
 
             {/* Project history button — ports tab only */}
             {activeTab === 'ports' && (
-              <button onClick={openPortsHistory} className={btnCls} title="Push 히스토리">
+              <button onClick={openPortsHistory} className={btnCls} title="올리기(Push) 기록">
                 <Clock className="w-3.5 h-3.5" /><span className="hidden sm:inline">히스토리</span>
               </button>
             )}
@@ -1811,8 +1812,8 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
                 <div className="portal-header-menu" onClick={() => setShowMoreMenu(false)}>
                   {activeTab === 'bookmarks' && (
                     <div className="sm:hidden">
-                      <button disabled={bookmarkSyncState.isSyncing || bookmarkSyncState.isRestoring} aria-busy={bookmarkSyncState.isSyncing} onClick={() => actionsRef.current?.push()}><CloudUpload className="w-4 h-4" />{bookmarkSyncState.isSyncing ? '북마크 Push 중…' : '북마크 Push'}</button>
-                      <button disabled={bookmarkSyncState.isSyncing || bookmarkSyncState.isRestoring} aria-busy={bookmarkSyncState.isRestoring} onClick={() => actionsRef.current?.pull()}><CloudDownload className="w-4 h-4" />{bookmarkSyncState.isRestoring ? '북마크 Pull 중…' : '북마크 Pull'}</button>
+                      <button disabled={bookmarkSyncState.isSyncing || bookmarkSyncState.isRestoring} aria-busy={bookmarkSyncState.isSyncing} onClick={() => actionsRef.current?.push()}><CloudUpload className="w-4 h-4" />{bookmarkSyncState.isSyncing ? '북마크 올리기(Push) 중…' : '북마크 올리기 (Push)'}</button>
+                      <button disabled={bookmarkSyncState.isSyncing || bookmarkSyncState.isRestoring} aria-busy={bookmarkSyncState.isRestoring} onClick={() => actionsRef.current?.pull()}><CloudDownload className="w-4 h-4" />{bookmarkSyncState.isRestoring ? '북마크 받기(Pull) 중…' : '북마크 받기 (Pull)'}</button>
                       <button onClick={() => actionsRef.current?.history()}><Clock className="w-4 h-4" />북마크 히스토리</button>
                     </div>
                   )}
@@ -1905,7 +1906,7 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
             />
           {memoryVisited && <div hidden={activeTab!=='memories'}>{
             creds ? (
-              <PortalMemoryDirectory supabaseUrl={creds.url} supabaseKey={creds.key} showToast={showToast} requiresUserSession={true} supabaseClientFactory={getAuthenticatedSupabaseClient} visible={visible&&activeTab==='memories'} />
+              <PortalMemoryDirectory supabaseUrl={creds.url} supabaseKey={creds.key} showToast={showToast} requiresUserSession={true} supabaseClientFactory={getAuthenticatedSupabaseClient} onOpenCommonMemory={onOpenCommonMemory} visible={visible&&activeTab==='memories'} />
             ) : (
               <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
                 <p className="text-sm text-zinc-500">설정에서 Supabase URL/Key를 입력하세요</p>
@@ -1941,7 +1942,7 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-2.5">
                 <Clock className="w-4 h-4 text-zinc-400" />
-                <span className="text-sm font-semibold text-[var(--text-primary)]">프로젝트 Push 히스토리</span>
+                <span className="text-sm font-semibold text-[var(--text-primary)]">프로젝트 올리기(Push) 기록</span>
               </div>
               <button onClick={() => setShowPortsHistory(false)}
                 className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -1957,7 +1958,7 @@ export function PortalCatalog({ tab, visible = true, onRemoteWork }: { tab: Tab;
                 <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
                   <Clock className="w-8 h-8 text-zinc-700" />
                   <p className="text-sm text-zinc-500">히스토리가 없습니다</p>
-                  <p className="text-xs text-zinc-600">로컬 앱에서 Push하면 기록이 저장됩니다</p>
+                  <p className="text-xs text-zinc-600">로컬 앱에서 올리기(Push)하면 기록이 저장됩니다</p>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-80 overflow-y-auto">

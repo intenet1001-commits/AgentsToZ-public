@@ -24,7 +24,7 @@ export interface BrowserLaunchSpec {
   args: string[];
 }
 
-function chromeUserDataDir({
+export function chromeUserDataDir({
   platform = process.platform,
   homeDir = homedir(),
   env = process.env,

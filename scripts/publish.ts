@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 /**
- * 공개 배포 스크립트 — 현재 main의 파일 상태를 커밋 1개짜리 orphan snapshot으로 만들어
+ * 공개 배포 스크립트 — 현재 main의 파일 상태를 기본적으로 orphan snapshot으로 만들어
  * publish 리모트에 밀어 넣는다. private 히스토리는 절대 따라가지 않는다.
  *
  *   bun run publish            실제 배포
  *   bun run publish --dry-run  스캔까지만 하고 push는 생략
+ *   bun run publish --append-public-history  감사한 public/main만 부모로 이어 붙임
  *
  * 왜 이 스크립트가 필요한가:
  *  - 별도 index에서 snapshot을 만들어 현재 checkout·작업 파일을 유지한다.
@@ -25,6 +26,7 @@ import { PUBLIC_RELEASE_VERSION_FILES, publicReleaseVersionFiles } from "../src/
 const PUBLISH_REMOTE = "publish";
 const SOURCE_BRANCH = "main";
 const DRY_RUN = process.argv.includes("--dry-run");
+const APPEND_PUBLIC_HISTORY = process.argv.includes("--append-public-history");
 
 /** 커밋되면 안 되는 것들. 파일명이 아니라 실제 값의 형태로 잡는다. */
 const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
@@ -192,6 +194,73 @@ const sh = async (cmd: string[]): Promise<string> => {
   return result.stdout.toString().trim();
 };
 
+/** Audit one fixed destination before using any of its commits as public ancestry. */
+async function auditPublicationTarget(remotes: string) {
+  const publishRemoteUrl = await sh(["git", "remote", "get-url", PUBLISH_REMOTE]);
+  const fetchRemoteUrls = (await sh(["git", "remote", "get-url", "--all", PUBLISH_REMOTE]))
+    .split(/\r?\n/).map(url => url.trim()).filter(Boolean);
+  if (fetchRemoteUrls.length !== 1 || fetchRemoteUrls[0] !== publishRemoteUrl) {
+    die("PUBLISH_FETCH_URL_MISMATCH: publish remote must have exactly one audited fetch URL");
+  }
+  const pushRemoteUrls = (await sh(["git", "remote", "get-url", "--push", "--all", PUBLISH_REMOTE]))
+    .split(/\r?\n/)
+    .map(url => url.trim())
+    .filter(Boolean);
+  if (pushRemoteUrls.length !== 1 || pushRemoteUrls[0] !== publishRemoteUrl) {
+    die("PUBLISH_PUSH_URL_MISMATCH: publish remote must have exactly one push URL matching its audited fetch URL");
+  }
+  const repository = githubRepositoryFromRemote(publishRemoteUrl);
+  if (!repository) die("publish 리모트가 credential 없는 GitHub 저장소 URL이 아니다.");
+  const auditedRepository = repository as string;
+
+  const sourceRepositories = (await Promise.all(
+    remotes.split("\n")
+      .filter(remote => remote && remote !== PUBLISH_REMOTE)
+      .map(async remote => {
+        const fetchUrls = (await sh(["git", "remote", "get-url", "--all", remote]))
+          .split(/\r?\n/)
+          .map(url => url.trim())
+          .filter(Boolean);
+        const sourcePushUrls = (await sh(["git", "remote", "get-url", "--push", "--all", remote]))
+          .split(/\r?\n/)
+          .map(url => url.trim())
+          .filter(Boolean);
+        return [...fetchUrls, ...sourcePushUrls].map(githubRepositoryFromRemote);
+      }),
+  )).flat().filter((value): value is string => Boolean(value));
+  const metadataResult = await $`gh repo view ${auditedRepository} --json viewerPermission,visibility,nameWithOwner`
+    .quiet()
+    .nothrow();
+  let metadata: { viewerPermission?: string; visibility?: string; nameWithOwner?: string } = {};
+  try {
+    metadata = JSON.parse(metadataResult.stdout.toString());
+  } catch {
+    die("GitHub target metadata를 안전하게 읽지 못했다.");
+  }
+  if (metadataResult.exitCode !== 0) die("GitHub target metadata를 안전하게 읽지 못했다.");
+  const targetError = publicationTargetError(auditedRepository, sourceRepositories, {
+    nameWithOwner: metadata.nameWithOwner ?? "",
+    visibility: metadata.visibility ?? "",
+  });
+  if (targetError) die(targetError);
+  const viewerPermission = metadata.viewerPermission ?? "";
+  if (!["WRITE", "MAINTAIN", "ADMIN"].includes(viewerPermission)) {
+    die(`GitHub write 권한이 필요하다 (현재: ${viewerPermission || "확인 실패"}).`);
+  }
+
+  const remoteRef = "refs/heads/main";
+  const readRemoteSha = async (): Promise<string> => {
+    const result = await $`git ls-remote --heads ${publishRemoteUrl} ${remoteRef}`.quiet().nothrow();
+    const match = /^([0-9a-f]{40})\s+refs\/heads\/main$/.exec(result.stdout.toString().trim());
+    if (result.exitCode !== 0 || !match) {
+      die("publish/main 원격 SHA를 안전하게 읽지 못했다.");
+    }
+    return match![1]!;
+  };
+  const remoteSha = await readRemoteSha();
+  return { publishRemoteUrl, repository: auditedRepository, remoteSha, readRemoteSha };
+}
+
 const main = async () => {
 // ── 1. 사전 점검 ────────────────────────────────────────────────
 const branch = await sh(["git", "branch", "--show-current"]);
@@ -229,7 +298,24 @@ const trackedPrivatePaths = privatePathResult.stdout
   .filter(Boolean)
   .filter(isPrivateOnlyPath);
 
-// A private index builds an orphan commit without checking out another branch,
+// Appending is opt-in. Only the audited destination's observed main may supply a parent;
+// a local branch, tracking ref, source HEAD, or a newly recaptured lease is never substituted.
+const appendTarget = APPEND_PUBLIC_HISTORY ? await auditPublicationTarget(remotes) : null;
+let publicParentSha: string | null = null;
+if (appendTarget) {
+  const fetched = await $`git fetch --no-tags --no-recurse-submodules ${appendTarget.publishRemoteUrl} ${appendTarget.remoteSha}`.quiet().nothrow();
+  if (fetched.exitCode !== 0) die("PUBLISH_PUBLIC_PARENT_FETCH_FAILED: could not fetch the captured public main.");
+  const fetchedSha = await sh(["git", "rev-parse", "--verify", "FETCH_HEAD"]);
+  const fetchedType = await $`git cat-file -t ${fetchedSha}`.quiet().nothrow();
+  if (fetchedSha !== appendTarget.remoteSha || fetchedType.exitCode !== 0 || fetchedType.stdout.toString().trim() !== "commit") {
+    die("PUBLISH_PUBLIC_PARENT_PROVENANCE: fetched commit does not match the captured public main.");
+  }
+  if (fetchedSha === sourceSha) die("PUBLISH_SOURCE_PARENT_MATCH: source HEAD cannot become the public parent.");
+  publicParentSha = fetchedSha;
+  console.log(`▸ 공개 이력 이어 붙이기: parent ${publicParentSha}`);
+}
+
+// A private index builds a sanitized commit without checking out another branch,
 // removing files, running commit hooks, or replacing an existing candidate ref.
 const candidateRef = `refs/agentstoz/publication-candidates/${randomUUID()}`;
 const scratch = mkdtempSync(join(tmpdir(), "agentstoz-publication-index-"));
@@ -290,9 +376,13 @@ try {
   const treeResult = await $`git write-tree`.env(candidateEnv).quiet().nothrow();
   const treeSha = treeResult.stdout.toString().trim();
   if (treeResult.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(treeSha)) die("snapshot tree를 만들지 못했다.");
-  const commitResult = await $`git commit-tree ${treeSha} -m ${"initial: 배포 스냅샷 (히스토리 없음)"}`.quiet().nothrow();
+  const commitResult = publicParentSha
+    ? await $`git commit-tree ${treeSha} -p ${publicParentSha} -m ${"release: 공개 배포 스냅샷"}`.quiet().nothrow()
+    : await $`git commit-tree ${treeSha} -m ${"initial: 배포 스냅샷 (히스토리 없음)"}`.quiet().nothrow();
   const candidateSha = commitResult.stdout.toString().trim();
-  if (commitResult.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(candidateSha)) die("공개 orphan commit을 만들지 못했다.");
+  if (commitResult.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(candidateSha)) die("공개 snapshot commit을 만들지 못했다.");
+  const candidateParents = await sh(["git", "show", "-s", "--format=%P", candidateSha]);
+  if (candidateParents !== (publicParentSha ?? "")) die("PUBLISH_CANDIDATE_PARENT_MISMATCH: candidate ancestry differs from the audited mode.");
 
   const modes = await $`git ls-tree -rz ${candidateSha}`.quiet().nothrow();
   if (modes.exitCode !== 0 || modes.stdout.toString().split("\0").filter(Boolean)
@@ -335,76 +425,25 @@ try {
   // ── 4. push ────────────────────────────────────────────────────
   if (DRY_RUN) {
     console.log(`\n▸ --dry-run 이므로 push 생략`);
-    console.log(`  실제 배포: bun run publish`);
+    console.log(`  실제 배포: bun run publish${APPEND_PUBLIC_HISTORY ? " --append-public-history" : ""}`);
   } else {
-    const publishRemoteUrl = await sh(["git", "remote", "get-url", PUBLISH_REMOTE]);
-    const pushRemoteUrls = (await sh(["git", "remote", "get-url", "--push", "--all", PUBLISH_REMOTE]))
-      .split(/\r?\n/)
-      .map(url => url.trim())
-      .filter(Boolean);
-    if (pushRemoteUrls.length !== 1 || pushRemoteUrls[0] !== publishRemoteUrl) {
-      die("PUBLISH_PUSH_URL_MISMATCH: publish remote must have exactly one push URL matching its audited fetch URL");
+    const target = appendTarget ?? await auditPublicationTarget(remotes);
+    const { publishRemoteUrl, repository, readRemoteSha } = target;
+    const remoteSha = APPEND_PUBLIC_HISTORY ? publicParentSha! : target.remoteSha;
+    if (APPEND_PUBLIC_HISTORY && await readRemoteSha() !== publicParentSha) {
+      die("PUBLISH_PUBLIC_PARENT_CHANGED: public/main changed after the parent was captured; prepare a new candidate.");
     }
-    const repository = githubRepositoryFromRemote(publishRemoteUrl);
-    if (!repository) die("publish 리모트가 credential 없는 GitHub 저장소 URL이 아니다.");
-    const auditedRepository = repository as string;
-
-    const sourceRepositories = (await Promise.all(
-      remotes.split("\n")
-        .filter(remote => remote && remote !== PUBLISH_REMOTE)
-        .map(async remote => {
-          const fetchUrls = (await sh(["git", "remote", "get-url", "--all", remote]))
-            .split(/\r?\n/)
-            .map(url => url.trim())
-            .filter(Boolean);
-          const sourcePushUrls = (await sh(["git", "remote", "get-url", "--push", "--all", remote]))
-            .split(/\r?\n/)
-            .map(url => url.trim())
-            .filter(Boolean);
-          return [...fetchUrls, ...sourcePushUrls].map(githubRepositoryFromRemote);
-        }),
-    )).flat().filter((value): value is string => Boolean(value));
-    const metadataResult = await $`gh repo view ${auditedRepository} --json viewerPermission,visibility,nameWithOwner`
-      .quiet()
-      .nothrow();
-    let metadata: { viewerPermission?: string; visibility?: string; nameWithOwner?: string } = {};
-    try {
-      metadata = JSON.parse(metadataResult.stdout.toString());
-    } catch {
-      die("GitHub target metadata를 안전하게 읽지 못했다.");
-    }
-    if (metadataResult.exitCode !== 0) die("GitHub target metadata를 안전하게 읽지 못했다.");
-    const targetError = publicationTargetError(auditedRepository, sourceRepositories, {
-      nameWithOwner: metadata.nameWithOwner ?? "",
-      visibility: metadata.visibility ?? "",
-    });
-    if (targetError) die(targetError);
-    const viewerPermission = metadata.viewerPermission ?? "";
-    if (!["WRITE", "MAINTAIN", "ADMIN"].includes(viewerPermission)) {
-      die(`GitHub write 권한이 필요하다 (현재: ${viewerPermission || "확인 실패"}).`);
-    }
-
-    const remoteRef = "refs/heads/main";
-    const readRemoteSha = async (): Promise<string> => {
-      const result = await $`git ls-remote --heads ${PUBLISH_REMOTE} ${remoteRef}`.quiet().nothrow();
-      const sha = result.stdout.toString().trim().split(/\s+/)[0] || "";
-      if (result.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(sha)) {
-        die("publish/main 원격 SHA를 안전하게 읽지 못했다.");
-      }
-      return sha;
-    };
-    const remoteSha = await readRemoteSha();
     const lease = `--force-with-lease=refs/heads/main:${remoteSha}`;
     const refspec = `${candidateSha}:refs/heads/main`;
 
-    const probe = await $`git push --dry-run ${lease} ${PUBLISH_REMOTE} ${refspec}`.quiet().nothrow();
+    const probe = await $`git push --dry-run ${lease} ${publishRemoteUrl} ${refspec}`.quiet().nothrow();
     if (probe.exitCode !== 0) {
       die(`publish dry-run이 실패했다: ${probe.stderr.toString().trim() || "권한/lease 확인 필요"}`);
     }
 
     await assertSourceUnchanged();
     console.log(`▸ ${PUBLISH_REMOTE} 로 lease-protected push 중...`);
-    const pushed = await $`git push ${lease} ${PUBLISH_REMOTE} ${refspec}`.quiet().nothrow();
+    const pushed = await $`git push ${lease} ${publishRemoteUrl} ${refspec}`.quiet().nothrow();
     if (pushed.exitCode !== 0) {
       die(`publish push가 실패했다: ${pushed.stderr.toString().trim() || "원격 확인 필요"}`);
     }

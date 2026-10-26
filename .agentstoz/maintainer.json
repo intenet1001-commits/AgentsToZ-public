@@ -10,6 +10,7 @@
       "workroom-submission",
       "workroom-effort",
       "workroom-effort-screen",
+      "workroom-team-screen",
       "voice-regression",
       "voice-text-only-screen",
       "common-memory-contracts",
@@ -52,7 +53,13 @@
       "native-workflow-foundations",
       "app-language-shell-screen",
       "appearance-settings-screen",
-      "app-use-screen"
+      "app-use-screen",
+      "dock-notices-sessions-contracts",
+      "dock-sessions-screen",
+      "workroom-browser-contracts",
+      "workroom-browser-cdp-screen",
+      "workroom-browser-native-screen",
+      "workroom-browser-package"
     ],
     "mobile-workroom": [
       "maintainer-self",
@@ -65,7 +72,8 @@
       "phone-workroom-entry-screen",
       "ios-preflight",
       "ios-core",
-      "ios-shell-contracts"
+      "ios-shell-contracts",
+      "workroom-number-keys-screen"
     ],
     "verify": [
       "work-mode-screen",
@@ -193,7 +201,11 @@
       "maintainer-self",
       "macos-distribution-contracts",
       "native-confirmation-contracts",
-      "native-confirmation-screen"
+      "native-confirmation-screen",
+      "workroom-browser-contracts",
+      "workroom-browser-cdp-screen",
+      "workroom-browser-native-screen",
+      "workroom-browser-package"
     ],
     "public-guide": [
       "maintainer-self",
@@ -281,7 +293,9 @@
         "./tests/agentstoz-invocation-installer.test.ts",
         "./tests/project-memory-adapter-upgrade.test.ts",
         "./tests/control-profile-api.test.ts",
-        "./tests/app-use.test.ts"
+        "./tests/app-use.test.ts",
+        "./tests/service-use-off.test.ts",
+        "./tests/service-use-off-api.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -309,7 +323,8 @@
         "src/agentstozInvocationInstaller.ts",
         "project-memory-server.ts",
         "src/appUse*",
-        "src/serviceUsePreparation.ts"
+        "src/serviceUsePreparation.ts",
+        "src/workroomThreadService.ts"
       ],
       "covers": [
         "A project keeps independent DEV and USE memory identities while legacy Buzz paths resolve one USE authority",
@@ -324,7 +339,9 @@
         "New and upgraded projects install shared @OPS @Project-DEV @Project-USE and read-only # reference guidance for external connected agents",
         "Authenticated MCP references preserve exact OPS DEV and USE memory boundaries without execution or fallback",
         "Any registered project prepares a DEV Workroom integration request without creating USE memory or starting an agent",
-        "Two signed local generic apps expose separate declared action catalogs and keep durable no-replay receipts"
+        "Two signed local generic apps expose separate declared action catalogs and keep durable no-replay receipts",
+        "Turning a USE off keeps its memory ID, app connection and receipts, and turning it on again continues the same USE",
+        "An off USE leaves @ and # candidates and refuses new local MCP or thread execution with how to turn it back on while status and earlier receipts still answer"
       ]
     },
     {
@@ -353,7 +370,8 @@
         "A USE role mention selects product operations and a lost receipt never starts a DEV terminal",
         "USE follow-ups preserve the service binding and never show DEV memory save actions",
         "OPS Workroom @USE opens only the selected product operation conversation and preserves drafts across close and reopen",
-        "A conflicting DEV suffix and an unavailable USE selection never send an operation to the current DEV terminal"
+        "A conflicting DEV suffix and an unavailable USE selection never send an operation to the current DEV terminal",
+        "The USE setup dialog asks before turning USE off, keeps the same memory ID, and turns it back on through the enable path"
       ]
     },
     {
@@ -416,6 +434,7 @@
         "./tests/workroom-effort-workspace.test.ts",
         "./tests/codex-effort-model.test.ts",
         "./tests/workroom-launch-options.test.ts",
+        "./tests/hermes-variants.test.ts",
         "./tests/workroom-effort-runtime-support.test.ts",
         "./tests/workroom-cli-commands.test.ts",
         "./tests/project-agent-effort.test.ts",
@@ -434,6 +453,8 @@
         "src/codexEffortModel.ts",
         "src/aiTerminalService.ts",
         "src/aiTerminalLaunchArgs.ts",
+        "src/hermesVariants.ts",
+        "src/hermesProviderCredentials.ts",
         "src/aiTerminalSubmit.ts",
         "tests/ai-terminal-submit.test.ts",
         "src/mobileWorkspaceProtocol.ts",
@@ -462,7 +483,8 @@
         "External macOS CLI single-line requests use verified native controls and re-evaluate manual xhigh under auto while preserving uncertain input",
         "Standalone external PTY client starts no API listener or provider evaluation",
         "Desktop apps only recommend or turn off, independently of CLI auto recommendation and off, even with native control",
-        "Memory-delivered guidance reads bounded host preferences without provider calls or transcript history"
+        "Memory-delivered guidance reads bounded host preferences without provider calls or transcript history",
+        "Hermes · Claude and Hermes · Codex are separate launch items whose model and provider come from one preset list, gated by provider name only"
       ],
       "evidence": "deterministic-policy-fake-pty-and-transport-no-live-provider"
     },
@@ -753,7 +775,12 @@
         "workroom-close-evidence.test.ts",
         "codex-auto-remember-coordinator.test.ts",
         "claude-auto-remember.test.ts",
-        "workroom-session-directory.test.ts"
+        "workroom-session-directory.test.ts",
+        "agentstoz-mcp-agent-choice.test.ts",
+        "agentstoz-mcp-launch-flow.test.ts",
+        "team-launch-options.test.ts",
+        "workroom-team-e2e.test.ts",
+        "workroom-team-instruction.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -769,7 +796,10 @@
         "automatic save",
         "save before close",
         "human remote input overtakes background reads without starving them",
-        "queued requests cannot cross a host-session replacement"
+        "queued requests cannot cross a host-session replacement",
+        "A natural-language operator chooses the agent, execution location and Hermes default/Claude/Codex configuration before any window or session is launched.",
+        "Each fresh team member keeps its own explicit location and Hermes configuration; attached sessions retain their settings, unsupported combinations refuse, and button selection blocks preserve settled choices without repeated questions.",
+        "Hermes Workroom presets reach the isolated CLI argv; identical request retries deliver once, changed presets conflict, and reuse never borrows another provider configuration."
       ],
       "memoryQueries": [
         "workroom remote session regression",
@@ -808,13 +838,15 @@
         "node_modules"
       ],
       "timeoutSeconds": 900,
-      "evidence": "real-browser-synthetic-api",
+      "evidence": "rendered-screen-Chromium-WebKit-production-Workroom-frame-deterministic-native-and-broker-fixtures-no-live-accounts",
       "covers": [
         "terminal touch and keyboard",
         "save before close",
         "runtime selector",
         "remote grant",
-        "context and save status"
+        "context and save status",
+        "In Chromium and WebKit the built-in browser keeps its page top fixed through stages, errors, notices and ownership, gives six tabs a page-first panel, and keeps one primary control in view.",
+        "Keyboard entry takes three Tabs; arrows select tabs, Command-L selects the address and Escape stays local. Pointer/keyboard dividers resize both axes, retain a 200px page and native alignment, and restore saved sizes or automatic height."
       ],
       "memoryQueries": [
         "workroom terminal touch regression",
@@ -853,18 +885,33 @@
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 420,
+      "timeoutSeconds": 1500,
       "evidence": "chromium-webkit-mobile-fixture",
       "covers": [
         "project inventory",
         "login recovery",
         "tabs",
         "memory panel",
-        "project creation idempotency"
+        "project creation idempotency",
+        "Phone and iPad remote workroom preserve readable prompt visibility and scrolled-up output",
+        "Numeric choice keys and explicit direct input retain distinct behavior with44px controls",
+        "Remote request fields keep16px fonts in portrait and landscape without iOS focus zoom",
+        "Full phone/tablet, desktop and recovery/history layout matrix in both engines"
       ],
       "memoryQueries": [
         "mobile login project fixture",
         "모바일 프로젝트"
+      ],
+      "paths": [
+        "src/AiTerminalPanel*",
+        "src/WorkroomTerminalKeys.tsx",
+        "src/workroomReadableScreen.ts",
+        "src/remote-control-portal.css",
+        "src/Portal*.tsx",
+        "tests/remote-phone-layout.e2e.mjs",
+        "tests/remote-workroom-ios-zoom.e2e.mjs",
+        "scripts/check-maintainer-web.ts",
+        "src/useAppLanguage.tsx"
       ]
     },
     {
@@ -992,7 +1039,9 @@
         "pairing",
         "native transport",
         "restore session",
-        "cancel request"
+        "cancel request",
+        "Mac screen protocol",
+        "Mac screen session controls"
       ],
       "memoryQueries": [
         "native transport resume session"
@@ -1068,7 +1117,8 @@
         "./tests/common-memory-crypto.test.ts",
         "./tests/common-memory-followup.test.ts",
         "./tests/sdk-project-folders.test.ts",
-        "./tests/common-memory-topics.test.ts"
+        "./tests/common-memory-topics.test.ts",
+        "./tests/common-memory-phone-surfaces.test.tsx"
       ],
       "timeoutSeconds": 120,
       "evidence": "goal-selection-cloud-CAS-and-portable-SDK",
@@ -1082,7 +1132,8 @@
         "common-memory-projects-server.ts",
         "src/commonMemoryIntent.ts",
         "src/RemoteCommonMemoryPanel.tsx",
-        "src/CommonMemoryProjectsPanel.tsx"
+        "src/CommonMemoryProjectsPanel.tsx",
+        "src/RemoteMetaCommonMemoryPanel.tsx"
       ],
       "covers": [
         "A+B and B+C independent goals",
@@ -1092,7 +1143,8 @@
         "portable SDK preparation",
         "per-device member notices and exact single-member replay",
         "remote cloud/root grants and transfer admission",
-        "actual stdio MCP source catalog/read"
+        "actual stdio MCP source catalog/read",
+        "A phone without its own network says so on both common-memory tabs; links read as names and states and history rows in words"
       ],
       "memoryQueries": [
         "공통기억 목표 SDK"
@@ -1113,14 +1165,18 @@
         "src/CommonMemoryPanel.tsx",
         "src/CommonMemoryProjectsPanel.tsx",
         "tests/common-memory-ui.mjs",
-        "tests/fixtures/common-memory/*"
+        "tests/fixtures/common-memory/*",
+        "src/RemoteMetaCommonMemoryPanel.tsx",
+        "tests/common-memory-phone-surfaces-ui.mjs"
       ],
       "covers": [
         "first-use and overlapping groups",
         "goal-scoped source selection and recommendation pin clearing",
         "bulk clone partial failure exact retry",
         "reload receipt with no original memory body in storage",
-        "16px inputs 44px buttons no mobile overflow"
+        "16px inputs 44px buttons no mobile overflow",
+        "A phone user's unsaved create form and entry draft survive a tab switch but never follow the phone to another Mac",
+        "With OPS the phone's AI button only prepares the OPS request; without OPS it is off and says why; a saved link change is marked until the next edit"
       ]
     },
     {
@@ -1515,25 +1571,38 @@
     {
       "id": "workroom-number-keys-screen",
       "argv": [
-        "node",
-        "tests/workroom-number-keys.e2e.mjs"
+        "./node_modules/.bin/tsx",
+        "scripts/check-maintainer-web.ts",
+        "mobile-terminal"
       ],
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 120,
+      "timeoutSeconds": 600,
       "evidence": "actual-Mac-phone-React-Chromium-WebKit-isolated-transport-no-live-CLI",
       "paths": [
         "src/WorkroomTerminalKeys.tsx",
         "src/workroomComposerKeys.ts",
         "src/AiTerminalPanel.tsx",
         "src/AiTerminalPanel.css",
-        "tests/workroom-number-keys.e2e.mjs"
+        "tests/workroom-number-keys.e2e.mjs",
+        "src/AiTerminalPanel*",
+        "src/workroomReadableScreen.ts",
+        "src/remote-control-portal.css",
+        "src/Portal*.tsx",
+        "tests/remote-phone-layout.e2e.mjs",
+        "tests/remote-workroom-ios-zoom.e2e.mjs",
+        "scripts/check-maintainer-web.ts",
+        "src/useAppLanguage.tsx"
       ],
       "covers": [
         "Mac and phone number buttons send exactly one key with no implicit Enter or raw-keyboard activation",
         "More exposes 4 through 9 and 0 in a viewport-bounded keyboard-accessible popup",
-        "Popup Escape does not reach the CLI and failed delivery never retries automatically"
+        "Popup Escape does not reach the CLI and failed delivery never retries automatically",
+        "Phone and iPad remote workroom preserve readable prompt visibility and scrolled-up output",
+        "Numeric choice keys and explicit direct input retain distinct behavior with44px controls",
+        "Remote request fields keep16px fonts in portrait and landscape without iOS focus zoom",
+        "Representative390px phone and1180px iPad in both engines; the full matrix is a separate web/full check"
       ]
     },
     {
@@ -1569,7 +1638,10 @@
         "./tests/voice-utterance-review.test.ts",
         "./tests/voice-review-relay.test.ts",
         "./tests/project-role-filter-all.test.tsx",
-        "./tests/agentstoz-mascot.test.tsx"
+        "./tests/agentstoz-mascot.test.tsx",
+        "./tests/control-memory-entries.test.ts",
+        "./tests/control-profile-surface.test.ts",
+        "./tests/control-profile-restore-button.test.tsx"
       ],
       "requires": [
         "node_modules"
@@ -1588,7 +1660,10 @@
         "tests/voice-review*",
         "tests/voice-utterance*",
         "src/useAppLanguage.tsx",
-        "src/ProjectRoleLabels.tsx"
+        "src/ProjectRoleLabels.tsx",
+        "src/controlMemoryEntries.ts",
+        "src/ControlProfilePanel.tsx",
+        "src/controlProfileSurface.ts"
       ],
       "covers": [
         "device-specific OPS memory is isolated and cloud backup failure preserves local entries",
@@ -1596,7 +1671,10 @@
         "mobile memory permission is explicitly opted in",
         "seven menu languages persist across windows",
         "same-utterance recheck cannot silently relay a changed number or polarity",
-        "All language catalogs preserve interpolation fields and localized time and number formatting"
+        "All language catalogs preserve interpolation fields and localized time and number formatting",
+        "An OPS owner sees saved operating-memory titles newest first without bodies and opens one bounded body by its entry ID; a malformed or vanished entry answers with its problem",
+        "OPS resolves only the actual bound memory; a linked worktree or duplicate row cannot impersonate it",
+        "A Mac without an OPS folder that found another Mac's OPS is offered the restore from 아젠투지 설정"
       ]
     },
     {
@@ -1794,7 +1872,10 @@
         "./tests/macos-notary-preflight.test.ts",
         "./tests/public-release-version.test.ts",
         "./tests/public-publish-integration.test.ts",
-        "./tests/public-publish-safety.test.ts"
+        "./tests/public-publish-safety.test.ts",
+        "./tests/public-publish-append.test.ts",
+        "./tests/macos-browser-upgrade.test.ts",
+        "./tests/macos-developer-id-build.test.ts"
       ],
       "timeoutSeconds": 120,
       "evidence": "artifact-signing-public-orphan-and-failure-contracts-no-Apple-upload",
@@ -1803,13 +1884,27 @@
         "src/macOSDirectDistributionPipeline.ts",
         "src/publicReleaseVersion.ts",
         "scripts/publish.ts",
-        "scripts/verify-mac-fresh-profile.py"
+        "tests/public-publish-append.test.ts",
+        "scripts/verify-mac-fresh-profile.py",
+        "src/macosBrowserUpgrade.ts",
+        "build-macos.ts",
+        "api-server.ts",
+        "tests/macos-browser-upgrade.test.ts",
+        "stageScreenControlBundle.ts",
+        "refreshBundledAppDmgs.ts",
+        "scripts/build-screen-app.ts",
+        "src/macOSDeveloperIdBuild.ts",
+        "src-tauri/src/screen_helper.rs",
+        "tests/macos-developer-id-build.test.ts"
       ],
       "covers": [
         "A clean public orphan preserves the source build number without private ancestry",
+        "Opt-in public history continuation lets an existing clone fast-forward without private source ancestry or a changed-parent lease",
         "The full desktop package includes tester and signed KakaoTalk helper resources",
         "Signing and notarization stages cannot claim installation or publication",
-        "Fresh-profile artifact testing is explicit and isolated from the real Mac profile"
+        "Fresh-profile artifact testing is explicit and isolated from the real Mac profile",
+        "Normal updates preserve an installed Workroom Chromium runtime or fail before replacing the app",
+        "Mac packages include a separately signed Screen companion and preserve its keychain identity instead of applying the GUI signature"
       ]
     },
     {
@@ -2275,7 +2370,10 @@
         "./tests/user-memory-recall.test.ts",
         "./tests/control-profile-api.test.ts",
         "./tests/user-memory-outcomes-api.test.ts",
-        "./tests/project-memory-activity.test.ts"
+        "./tests/project-memory-activity.test.ts",
+        "./tests/user-profile-store.test.ts",
+        "./tests/user-profile-api.test.ts",
+        "./tests/user-profile-mcp.test.ts"
       ],
       "timeoutSeconds": 120,
       "kind": "contract",
@@ -2285,11 +2383,15 @@
         "agentstoz-use-mcp-server.ts",
         "api-server.ts",
         "project-memory-server.ts",
-        "tests/user-memory*"
+        "tests/user-memory*",
+        "src/userProfile*",
+        "tests/user-profile*"
       ],
       "covers": [
         "Authenticated project-local recall preserves provenance and bounds history without capture or policy changes",
-        "Result windows preserve all instructions and report unavailable or partial reads honestly"
+        "Result windows preserve all instructions and report unavailable or partial reads honestly",
+        "Locally encrypted user-confirmed preferences stay separate from historical instructions and OPS memory",
+        "Inactive and other-project preferences are withheld from bounded authenticated recall; stale writes and key loss preserve existing data"
       ]
     },
     {
@@ -2304,11 +2406,15 @@
       "paths": [
         "src/WhatISaidPanel.tsx",
         "src/ControlProfilePanel.tsx",
-        "tests/user-memory-ui.mjs"
+        "tests/user-memory-ui.mjs",
+        "src/UserProfilePanel.tsx",
+        "src/userProfileClient.ts",
+        "tests/user-profile-panel.e2e.mjs"
       ],
       "covers": [
         "A first-time user distinguishes personal instructions, operating memory and project results",
-        "Reopening, same-memory refresh, partial or failed reads and delayed results retain correct instructions and counts"
+        "Reopening, same-memory refresh, partial or failed reads and delayed results retain correct instructions and counts",
+        "A person reviews, scopes, edits, disables and restores confirmed preferences without importing history or automatically applying model, account or permission settings"
       ]
     },
     {
@@ -2587,14 +2693,57 @@
         "src/WorkModeControl*",
         "src/VoicePopout*",
         "src-tauri/src/work_mode*",
-        "src-tauri/src/work_mode/**"
+        "src-tauri/src/work_mode/**",
+        "src/workModeScreenHelper.ts",
+        "src-tauri/src/screen_helper.rs"
       ],
       "evidence": "chromium-webkit-component-native-ipc-fixture",
       "covers": [
         "Local desktop operator selects 24-hour or custom bounded work mode without starting AI",
         "Stop, failed replacement and other-window native status stay truthful",
         "Work mode and helpdesk fit the 280px voice window without hiding the composer",
-        "Always-on (연중무휴) holds the mode with no end time until stopped and takes no duration"
+        "Always-on (연중무휴) holds the mode with no end time until stopped and takes no duration",
+        "Closed-lid work (Mac) stays behind a cancellable one-time grant, is requested only when chosen, never on stop, and reports waiting for power",
+        "The panel shows where AgentsToZ Screen is (missing, stopped, off, on with devices, viewed, permission needed) and opens it with a failed or unconfirmed open said plainly",
+        "While AgentsToZ Screen is on but off an approved network the panel says it is not accepting connections, never a count of devices that can connect"
+      ]
+    },
+    {
+      "id": "workroom-team-screen",
+      "argv": [
+        "bun",
+        "tests/workroom-team-builder-ui.mjs"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 180,
+      "paths": [
+        "src/WorkroomTeamBuilder*",
+        "src/WorkroomTeamStatus*",
+        "src/workroomTeam*",
+        "src/agentstozTeamSkill.ts",
+        "src/AiTerminalPanel.tsx",
+        "src/CommunityWorkspace.tsx",
+        "src/teamLaunchOptions.ts",
+        "src/agentstozMcpAgentChoice.ts",
+        "src/workroomTeamSurfaceCopy.ts",
+        "src/workroomTeamPanelActions.ts",
+        "src/workroomTeamInstruction.ts",
+        "tests/workroom-team-status-ui.mjs"
+      ],
+      "evidence": "chromium-webkit-component-fixture",
+      "covers": [
+        "A Workroom or work-thread leader composes a team: other AIs by default, per-member model (Hermes provider), six members at most",
+        "Invalid model names and an empty goal compose nothing; the builder only fills the composer and never sends",
+        "The team builder fits 280px without horizontal overflow and keeps 16px fields at phone width",
+        "A team's leader and members see 팀 현황 above their terminal: each member's AI, model, effort, state, last output, report and commits, with 「열기」 to that session",
+        "One tap on 빠른 구성 fills the team from the other AIs, and a member can be a read-only 검토 담당 that the leader instruction names and 팀 현황 tags",
+        "A session already open in the project joins as a member without a new Workroom: a worktree session may take work, a main-checkout session only reviews, and the leader instruction names it by sessionId",
+        "Project-opening surfaces and agent variants are selectable per team member; unsupported model/account/effort combinations are refused and an exact machine-readable selection block preserves the requested launch options.",
+        "A local team leader copies the complete member brief, selects it after clipboard denial, confirms manual start, and transcribes a blocked report before updating it to a checked result; these actions use the default local handlers.",
+        "A local team leader confirms only unsettled external members, transcribes blocked/done reports and retains action failures through background refreshes.",
+        "Clipboard denial exposes the full selectable member brief in Chromium and WebKit; external member rows fit 280/320px and display user-facing launch names."
       ]
     },
     {
@@ -2780,6 +2929,223 @@
         "Project operator opens USE preparation from the Workroom directory and stages the exact registered DEV request without starting AI",
         "A non-ShadowLoop app connects explicitly and displays only its own declared action fields before one bounded execution"
       ]
+    },
+    {
+      "id": "dock-notices-sessions-contracts",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/dock-notices-sessions.test.ts",
+        "./tests/claude-md-size.test.ts",
+        "./tests/automatic-save-notices.test.ts",
+        "./tests/voice-dock.test.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 240,
+      "paths": [
+        "src/AutomaticSaveNotice*",
+        "src/automaticSaveNotices.ts",
+        "src/components/AgentsToZVoiceDock*",
+        "src/components/DockSessionsPanel.tsx",
+        "src/VoicePopoutApp.tsx",
+        "src/NativeVoiceLauncher.tsx",
+        "CLAUDE.md",
+        "docs/claude/*"
+      ],
+      "evidence": "source-contracts-and-unit",
+      "covers": [
+        "자동 저장 알림은 페이지 배너가 아니라 「아젠투지 호출」 도크 위에 뜬다",
+        "열린 AI 세션 목록은 펼쳤을 때만 지연 로딩·조회한다",
+        "CLAUDE.md가 Claude Code 크기 상한 아래에 있고 상세 노트 색인이 실제 파일과 맞는다"
+      ]
+    },
+    {
+      "id": "dock-sessions-screen",
+      "argv": [
+        "bun",
+        "scripts/check-voice-dock-sessions.ts"
+      ],
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 300,
+      "paths": [
+        "src/AutomaticSaveNotice*",
+        "src/components/AgentsToZVoiceDock*",
+        "src/components/DockSessionsPanel.tsx",
+        "tests/fixtures/voice/dock-sessions.tsx",
+        "scripts/check-voice-dock-sessions.ts"
+      ],
+      "evidence": "chromium-webkit-synthetic-local-api",
+      "covers": [
+        "자동 저장 알림이 도크 바로 위에 최신순으로 쌓이고 펼치기·닫기·모두 지우기가 된다",
+        "닫은 알림은 새로고침 뒤에도 다시 뜨지 않는다",
+        "열린 프로젝트·AI 세션마다 컨텍스트 %와 로컬·백업 시각을 보고 지금 저장·동기화를 한 번씩 한다",
+        "접혀 있는 동안 세션 목록을 조회하지 않는다"
+      ]
+    },
+    {
+      "id": "owned-browser-native-screen",
+      "argv": [
+        "python3",
+        "experiments/owned-browser-native/verify.py",
+        "--repeat",
+        "3"
+      ],
+      "requires": [
+        "experiments/owned-browser-native/bundle/agentstoz-browser-spike.app/Contents/MacOS/agentstoz-browser-spike"
+      ],
+      "timeoutSeconds": 150,
+      "paths": [
+        "experiments/owned-browser-native/**"
+      ],
+      "covers": [
+        "Real Chromium request contexts isolate same-origin cookies and storage while the trusted Tauri host retains control.",
+        "Human handoff preserves the document; stale revisions and external navigation are rejected; hide and reopen preserve the page; the app exits cleanly."
+      ],
+      "evidence": "real-macos-Tauri-CEF-native-views-synthetic-documents-no-live-accounts",
+      "platforms": [
+        "darwin"
+      ]
+    },
+    {
+      "id": "workroom-browser-contracts",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-contracts.mjs"
+      ],
+      "timeoutSeconds": 300,
+      "paths": [
+        "src/workroomBrowser*",
+        "src/workroomCdpTransport.ts",
+        "src/WorkroomBrowserFrame*",
+        "src/OwnedWorkroomBrowser.tsx",
+        "src/WorkroomBrowserRecoveries.tsx",
+        "stageWorkroomBrowserBundle.ts",
+        "build-macos.ts",
+        "tests/workroom-browser*.test.ts",
+        "experiments/owned-browser-native/**",
+        "tests/workroom-browser-contracts.mjs",
+        "agentstoz-use-mcp-server.ts"
+      ],
+      "covers": [
+        "Chrome profile choice alone grants no control; human takeover fences queued actions; unknown outcomes stop writes until explicit human review; detached browsers and original tabs are preserved.",
+        "A returning operator restores durable completed or unknown receipts after a cold host restart; an unknown result cannot be replayed or bypassed by reconnecting, and a completed request stays deduplicated.",
+        "The official macOS bundle preserves release provenance, stages five sandboxed CEF helpers with unique identities, and rejects a missing SDK or unsupported minimum OS before staging.",
+        "Ended Workrooms release all transient connection slots without closing borrowed Chrome or deleting durable task records.",
+        "A human takeover rejects stale agent commands, waits for the renderer barrier and requires a fresh observation on return.",
+        "Cleanup of an already reaped workspace is idempotent; the client permits only that successful detach without a workspace and still rejects stale bindings and refused operations.",
+        "Built-in page start keeps profile, navigation admission, target, document loading and broker connect separate; a slow document stays loading and is never an error.",
+        "A lost target reply is reported only after the bounded probes; a retry finishes only the connect, and a late result in an ended generation is detached before any newer connect.",
+        "A navigation accepted just as its request was collapsed is still finished by reopening without a second navigation; a close, a changed choice or a newer request withdraws it.",
+        "Agent observations include same- and cross-origin frames by frame reference and open shadow roots, report closed shadow roots as not observable, and refuse a changed frame before any receipt; select, scroll, wait and screenshot stay bounded.",
+        "A Workroom's own tab set (at most 6) is the only set an agent can list or switch; a person adds, shows or releases tabs without closing them; input in any set tab revokes and only the active tab's navigation ends the lease.",
+        "Each built-in tab keeps its own pending connect, keyed by Workroom and tab, and forgetting a Workroom forgets all its tabs; a tab not yet in the set connects to join it, and a late join releases only that page, never the sibling tabs.",
+        "A person reads browser refusals and load failures in their app language with a next step; exceptions, raw states, request IDs and access tokens do not reach the visible screen.",
+        "Browser copy covers seven languages with matching placeholders; omnibox, shortcuts, ownership presentation and theme tokens follow tested contracts. IME composition cannot submit prematurely and address submission uses the current input value."
+      ],
+      "evidence": "bounded-host-contracts-and-on-macOS-original-native-Rust-control-contracts-no-personal-account"
+    },
+    {
+      "id": "workroom-browser-cdp-screen",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-cdp.mjs",
+        "--screen"
+      ],
+      "timeoutSeconds": 180,
+      "platforms": [
+        "darwin"
+      ],
+      "paths": [
+        "src/workroomBrowser*",
+        "src/workroomCdpTransport.ts",
+        "src/WorkroomBrowserFrame*",
+        "src/OwnedWorkroomBrowser.tsx",
+        "tests/workroom-browser*"
+      ],
+      "covers": [
+        "Existing Chrome account user explicitly confirms profile and target, stages a bounded agent grant, takes over and disconnects without losing the original account or tab.",
+        "Production Workroom in Chromium and WebKit preserves xterm and unsent drafts across browser views; trusted human input revokes agent control; stale DOM identity cannot target replacement elements.",
+        "Switching sessions restores the matching browser source; the bounded eight-entry view cache drops old display snapshots without deleting task recovery records.",
+        "Selecting a saved browser task collapses its history and retains the chosen profile so the native viewport can be shown on first open.",
+        "A built-in page request belongs to what was chosen when it started; choosing another saved task, or none, ends it in any stage and a late connect is detached.",
+        "Without a saved task a new built-in page opens and connects in the Workroom's own profile, never in a saved profile left open; a connected page keeps its profile.",
+        "A failed connect falls back to the built-in Chromium once; an ended request sends no further open, and collapsing then expanding the browser does not reconnect.",
+        "On a real Chrome page an agent fills a cross-origin frame, clicks a same-origin frame, fills an open shadow root and selects an option with receipts; scroll, a bounded wait and an unstored viewport screenshot work; human input in a frame revokes.",
+        "On real Chrome an agent lists and switches only within its Workroom's own tabs, never the person's or another Workroom's tab; input in a background tab revokes; in Chromium and WebKit a person adds, shows and releases a tab.",
+        "A second built-in tab collapsed mid-connect leaves only its own page and finishes only its own connect when expanded; the page on screen follows the AI's tab; choosing or closing a tab goes through the Workroom's own set.",
+        "My Chrome has three steps, profile/tab selection, one confirmation and shared controls. Built-in Enter/button submissions search English/Korean once after composition and connect the committed document.",
+        "The actual standalone WorkroomPopoutApp and DeviceSwitch wrapper stack keeps the whole composer and native browser slot visible at 1120x780, grows at 3440x1440, and supports vertical pointer resize and reset before returning to a smaller window."
+      ],
+      "evidence": "real-Chrome-disposable-profile-plus-rendered-production-Workroom-Chromium-WebKit-no-live-auth"
+    },
+    {
+      "id": "workroom-browser-native-screen",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-native.mjs"
+      ],
+      "timeoutSeconds": 150,
+      "platforms": [
+        "darwin"
+      ],
+      "requires": [
+        "output/workroom-browser-native-qa/bundle/app.app/Contents/MacOS/app"
+      ],
+      "paths": [
+        "native/workroom-browser/**",
+        "src-tauri/src/workroom_browser.rs",
+        "src/OwnedWorkroomBrowser.tsx",
+        "src/WorkroomBrowserFrame*",
+        "src/workroomBrowser*",
+        "tests/fixtures/workroom-browser-native*",
+        "tests/workroom-browser-native.mjs"
+      ],
+      "covers": [
+        "A real isolated PTY and production Workroom share a native Tauri window with visible CEF; a scheme-less human address retains the exact local origin and distinct Workroom profiles isolate same-origin cookies and storage.",
+        "Native input locking, bounded agent fill, human takeover, hidden-document retention and clean CEF shutdown preserve the terminal and draft.",
+        "Human login popups retain opener messaging and profile cookies, block AI takeover while open, and close without closing the trusted Workroom.",
+        "Disposable upload and download bytes pass through CEF callbacks; all popup and file requests are blocked during AI ownership; a new Workroom view reopens the saved profile without copying cookies.",
+        "After all native views close and a fresh app process starts, the original saved profile restores cookies and localStorage from disk without a seeding page.",
+        "A lost target discovery reply recovers the exact native page without navigation replay; after its real PTY ends and the host reaps the workspace, a human closes CEF without retaining stale UI errors.",
+        "A fresh app restoring a saved profile requests and connects its first document exactly once; a slow document is shown as loading, never as an error, with the native view fully inside the window.",
+        "During a slow first load another dialog, a Workroom switch, a collapse, or a close and reopen never re-navigate; a late document connects only to its own Workroom once shown again.",
+        "A request closed during its slow load never connects, and a second Workroom cannot open a saved profile that is already open while the first stays connected.",
+        "Dropped target discovery replies end in a lost-target error after the bounded probes while the loaded page stays visible; retrying re-arms discovery only and connects without navigating again.",
+        "Real CEF observes a cross-origin frame and an open shadow root, a bounded fill reaches the frame's own renderer and the visible page is captured as a bounded screenshot.",
+        "In real CEF a second native tab joins only its Workroom's set; the AI lists exactly that Workroom's tabs, never another Workroom's page; its switch-tab moves the visible view, and closing the tab leaves the set and closes only that page.",
+        "Real CEF back, forward, reload and stop preserve fixture history and never resubmit a form; native title/progress reflect the loaded page, and the production refused-address card names the host and cause and offers enabled retry/edit actions.",
+        "After a production UI handoff, blocked native input explains AI ownership and offers takeover; a login popup is centred over its Workroom and the production handler focuses and selects the address after Command-L from the page."
+      ],
+      "evidence": "source-fingerprint-verified-rendered-screen-real-macOS-Tauri-CEF-production-Workroom-real-PTY-fake-CLI-no-AI-provider-or-personal-account"
+    },
+    {
+      "id": "workroom-browser-package",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-package.mjs"
+      ],
+      "timeoutSeconds": 120,
+      "platforms": [
+        "darwin"
+      ],
+      "requires": [
+        "output/workroom-browser-native/app.app/Contents/MacOS/app",
+        "output/workroom-browser-native/app.app/Contents/Resources/Chromium-CREDITS.html"
+      ],
+      "paths": [
+        "stageWorkroomBrowserBundle.ts",
+        "build-macos.ts",
+        "build-workroom-browser-local.ts",
+        "tests/workroom-browser-package.mjs"
+      ],
+      "covers": [
+        "The real compiled main app and pinned CEF framework assemble in a disposable bundle; five helpers sign inside out before the GUI entitlement-preserving signature, and deep strict verification passes without installation."
+      ],
+      "evidence": "real-compiled-main-app-CEF-disposable-bundle-ad-hoc-signature-no-install-no-notarization"
     }
   ],
   "limits": [
@@ -2787,6 +3153,7 @@
     "Real provider authentication and actual Codex/Claude/Hermes/agy responses need separate account-level checks.",
     "Personal internet relay, cellular handover, camera QR scan and 30-day expiry are not end-to-end verified by these fixture checks.",
     "Performance measures the isolated mobile initial page, not signed-in project workload or AI latency.",
-    "The simulator's optional personal HTTPS test can be skipped when no personal origin is supplied; inspect native UI evidence."
+    "The simulator's optional personal HTTPS test can be skipped when no personal origin is supplied; inspect native UI evidence.",
+    "AgentsToZ Screen's Swift core and status-file checks (`bun run test:screen-control`) run inside the ios-core check, since the iOS app links that package; the Mac app's capture, lock notifications and Face ID need a real Mac and iPhone (mobile/ios/DEVICE-CHECKLIST.md)."
   ]
 }

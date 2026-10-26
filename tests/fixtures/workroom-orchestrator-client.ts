@@ -65,7 +65,7 @@ try {
   const initialized = await request('initialize', {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'nested-orchestrator', version: '1'}});
   if (!initialized.result) throw new Error('initialize failed');
   stdin.write(`${JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized'})}\n`);
-  const started = await tool('start_workroom_session', {portId, agent: workerAgent, requestId: `start_${nonce}`, instruction: nonce, foreground: false});
+  const started = await tool('start_workroom_session', {portId, agent: workerAgent, surface: 'internal', ...(workerAgent === 'hermes' ? {hermesVariant: 'default'} : {}), requestId: `start_${nonce}`, instruction: nonce, foreground: false});
   const sessionId: string = started.session.id;
   if (started.session.agent !== workerAgent) throw new Error(`started ${started.session.agent}, not ${workerAgent}`);
   await untilTail(sessionId, `GOT:${workerAgent}:${nonce}`);

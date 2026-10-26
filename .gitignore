@@ -105,6 +105,11 @@ agentstoz-e2e-project/
 
 # Playwright 실행 산출물 — 실제 프로젝트명·개인 절대경로가 스크린샷/스냅샷/트레이스에 통째로 박힘
 output/
+native/workroom-browser/target/
+native/workroom-browser/qa/icons/
+native/workroom-browser/qa/gen/
+experiments/owned-browser-native/gen/
+/docs/design/browser-workroom-persona-2026-10-24/evidence/
 test-results/
 **/traces/
 *.trace

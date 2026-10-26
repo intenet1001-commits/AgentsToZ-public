@@ -1,0 +1,49 @@
+/* 팀 작전 builder: shared by the Workroom composer and the work-thread composer, so only global tokens (appearanceTokens.css). */
+.workroom-team{container:workroom-team / inline-size;display:flex;flex-direction:column;gap:8px;margin:6px 0;padding:10px;border:1px solid var(--line-2);border-radius:10px;background:var(--surface);color:var(--ink);font-size:12px;min-width:0;}
+.workroom-team button{font:inherit;cursor:pointer;}
+.workroom-team__head{display:flex;align-items:center;gap:8px;min-width:0;}
+.workroom-team__head strong{display:inline-flex;align-items:center;gap:5px;}
+.workroom-team__head span{color:var(--ink-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.workroom-team__icon{display:inline-flex;align-items:center;justify-content:center;min-width:26px;min-height:26px;padding:0;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink-2);}
+.workroom-team__goal{display:flex;flex-direction:column;gap:4px;color:var(--ink-2);}
+.workroom-team textarea,.workroom-team input,.workroom-team select{box-sizing:border-box;min-width:0;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;}
+.workroom-team textarea{resize:vertical;}
+.workroom-team__members{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;border:0;min-width:0;}
+.workroom-team__members legend{padding:0;margin-bottom:4px;color:var(--ink-2);}
+.workroom-team__row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr) auto;align-items:center;gap:5px;min-width:0;}
+.workroom-team__taskline,.workroom-team__custom{grid-column:2 / -2;}
+.workroom-team__taskline{display:flex;gap:5px;min-width:0;}
+.workroom-team__taskline .workroom-team__task{flex:1 1 0;}
+.workroom-team__role{flex:0 0 auto;}
+/* An open session keeps its own model and effort: one caption where both lists would be. */
+.workroom-team__attached{grid-column:3 / 5;min-width:0;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.workroom-team__custom{display:flex;gap:5px;min-width:0;}
+.workroom-team__custom input{flex:1 1 0;}
+.workroom-team__launch{grid-column:2 / -2;display:flex;flex-wrap:wrap;align-items:center;gap:5px 8px;min-width:0;}
+.workroom-team__launch select{flex:0 1 auto;max-width:100%;}
+.workroom-team__check{display:inline-flex;align-items:center;gap:4px;min-height:26px;color:var(--ink-2);}
+.workroom-team .workroom-team__check input{width:auto;margin:0;padding:0;accent-color:var(--accent);}
+/* Who carries this member's instructions and reports: the team manages it, waits for a connection, or a person joins it. */
+.workroom-team__management{display:inline-flex;align-items:center;min-height:22px;padding:1px 8px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);white-space:nowrap;}
+.workroom-team__management[data-management="managed"]{border-color:var(--accent);color:var(--accent);}
+.workroom-team__reason{flex:1 1 100%;min-width:0;color:var(--ink-3);line-height:1.45;}
+.workroom-team__index{color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.workroom-team__add,.workroom-team__actions button{display:inline-flex;align-items:center;gap:4px;min-height:28px;padding:4px 9px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);}
+.workroom-team__add{align-self:flex-start;}
+.workroom-team__presets{display:flex;flex-wrap:wrap;align-items:center;gap:5px;color:var(--ink-2);}
+.workroom-team__presets button{min-height:26px;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--ink);}
+.workroom-team__hint{margin:0;line-height:1.55;color:var(--ink-2);}
+.workroom-team__error{margin:0;color:var(--accent);}
+.workroom-team__actions{display:flex;flex-wrap:wrap;gap:6px;}
+.workroom-team__actions .workroom-team__compose{border-color:var(--accent);color:var(--accent);}
+.workroom-team button:disabled{opacity:.5;cursor:default;}
+.workroom-team button:focus-visible,.workroom-team input:focus-visible,.workroom-team select:focus-visible,.workroom-team textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+/* A narrow builder (phone, side dock) puts the effort under the AI so the model list keeps a usable width. */
+@container workroom-team (max-width:420px){
+ .workroom-team__row{grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) auto;}
+ .workroom-team__row > .workroom-team__icon{grid-row:1;grid-column:4;}
+ .workroom-team__effort{grid-row:2;grid-column:2 / 4;}
+ .workroom-team__attached{grid-column:3;}
+}
+/* iOS zooms into any field under 16px (ui-ux.md): phone widths and touch screens get 16px fields. */
+@media (max-width:640px),(pointer:coarse){.workroom-team textarea,.workroom-team input,.workroom-team select{font-size:16px;}}

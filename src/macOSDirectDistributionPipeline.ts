@@ -23,6 +23,7 @@ import {
   type MacOSRuntimeProductionBuildIdentityResolution,
 } from './macOSRuntimeProductionCanary';
 import { validMacOSRuntimeProductionIdentity } from './macOSRuntimeProductionSigningPlan';
+import { SCREEN_HELPER_BUNDLE_PATH } from '../stageScreenControlBundle';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -270,8 +271,14 @@ async function packageApp(appPath: string, archivePath: string): Promise<void> {
 }
 
 async function stapleAndValidate(kind: ArtifactKind, path: string): Promise<void> {
+  if (kind === 'app') {
+    const screen = join(path, SCREEN_HELPER_BUNDLE_PATH);
+    requireSuccess(runBounded('/usr/bin/xcrun', ['stapler', 'staple', screen], 5 * 60_000), 'Screen staple');
+    requireSuccess(runBounded('/usr/bin/xcrun', ['stapler', 'validate', screen], 60_000), 'Screen staple validation');
+  }
   requireSuccess(runBounded('/usr/bin/xcrun', ['stapler', 'staple', path], 5 * 60_000), `${kind} staple`);
   requireSuccess(runBounded('/usr/bin/xcrun', ['stapler', 'validate', path], 60_000), `${kind} staple validation`);
+  if (kind === 'app') requireSuccess(runBounded('/usr/bin/codesign', ['--verify', '--deep', '--strict', path], 60_000), 'app signature after Screen stapling');
 }
 
 async function createDmg(appPath: string, dmgPath: string, outputRoot: string): Promise<void> {

@@ -23,12 +23,12 @@ test('account registration, official login adapter, project selection and MCP st
     expect(state).toMatchObject({authState:'signed-in',loginState:'idle'});
     const listed=await f.call('list_workroom_accounts',{portId:'account-project',agent});expect(listed).toMatchObject({success:true,accounts:{selectedAccountId:HOST_CLI_ACCOUNT_ID}});
     const selected=await f.call('select_workroom_account',{portId:'account-project',agent,accountId:id,requestId:rid()});expect(selected).toMatchObject({success:true,accounts:{selectedAccountId:id}});
-    const launched=await f.call('start_workroom_session',{portId:'account-project',agent,accountId:id,requestId:rid(),foreground:false});expect(launched).toMatchObject({success:true,session:{accountId:id,accountLabel:agent+' 업무'}});
+    const launched=await f.call('start_workroom_session',{portId:'account-project',agent,surface:'internal',accountId:id,requestId:rid(),foreground:false});expect(launched).toMatchObject({success:true,session:{accountId:id,accountLabel:agent+' 업무'}});
     const list=(await f.post(terminal,{operation:'list',requestId:rid()})).body;
     expect(list.sessions.find((s:any)=>s.id===launched.session.id).accountId).toBe(id);
-    const host=await f.call('start_workroom_session',{portId:'account-project',agent,accountId:HOST_CLI_ACCOUNT_ID,reuse:true,requestId:rid(),foreground:false});
+    const host=await f.call('start_workroom_session',{portId:'account-project',agent,surface:'internal',accountId:HOST_CLI_ACCOUNT_ID,reuse:true,requestId:rid(),foreground:false});
     expect(host).toMatchObject({success:true,reused:false,session:{accountId:HOST_CLI_ACCOUNT_ID}});
-    const reused=await f.call('start_workroom_session',{portId:'account-project',agent,accountId:id,reuse:true,requestId:rid(),foreground:false});expect(reused.session.id).toBe(launched.session.id);
+    const reused=await f.call('start_workroom_session',{portId:'account-project',agent,surface:'internal',accountId:id,reuse:true,requestId:rid(),foreground:false});expect(reused.session.id).toBe(launched.session.id);
     await f.post(terminal,{operation:'close',sessionId:launched.session.id,requestId:rid()});await f.post(terminal,{operation:'close',sessionId:host.session.id,requestId:rid()});
     expect(JSON.stringify(selected)).not.toContain('private@example.invalid');expect(JSON.stringify(selected)).not.toContain(f.home);
   }

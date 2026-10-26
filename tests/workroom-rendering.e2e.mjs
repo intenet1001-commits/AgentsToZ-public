@@ -3,8 +3,10 @@
  * Do not give the terminal a test-only height: that can hide native blank screens.
  */
 import assert from 'node:assert/strict';
+import {workroomBackgroundResponse} from './fixtures/workroom-runtime-background-mocks.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {chromium, webkit} from 'playwright';
+import {runRemoteTuiScreen} from './workroom-remote-tui.e2e.mjs';
 const origin = process.env.WORKROOM_TEST_ORIGIN || 'http://127.0.0.1:9000';
 assert.equal(new URL(origin).hostname, '127.0.0.1');
 const source = await fetch(`${origin}/src/AiTerminalPanel.tsx`).then(r => { assert.equal(r.status, 200); return r.text(); });
@@ -46,6 +48,8 @@ const panel=React.createElement(AiTerminalPanel,{visible,remote:${remote},device
 return ${remote?"React.createElement('main',{className:'remote-panel remote-workroom-content'},React.createElement('div',{style:{height:'900px'}},'Mobile project controls'),panel)":"React.createElement('div',{className:'h-screen flex flex-col overflow-hidden'},React.createElement('div',{className:'workspace-shell flex-1 min-h-0','data-mobile':'false'},React.createElement('aside',{'data-testid':'top-toolbar',className:'shrink-0'},'AgentsToZ fixture'),React.createElement('div',{className:'workspace-content'},React.createElement('div',{id:'top-level-terminal-panel',role:'tabpanel',className:'flex-1 min-h-0 overflow-auto flex flex-col'},panel))))"};}
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Harness));</script>`});
      if(!url.pathname.startsWith('/api/'))return route.continue();
+     const background=workroomBackgroundResponse(url.pathname,request.method(),request.postDataJSON());
+     if(background)return route.fulfill({json:background});
      if(url.pathname==='/api/agent-runtime/voice-settings'&&request.method()==='POST'&&JSON.stringify(request.postDataJSON())===JSON.stringify({operation:'status'}))return route.fulfill({json:{supported:true,configured:false,model:'gemini-3.8-live',checkedAt:null,checkedModel:null}});
      if(url.pathname.endsWith('/targets'))return route.fulfill({json:{targets:projects,complete:true,protocolVersion:'agentstoz-tasks-v2'}});
      if(url.pathname.endsWith('/access'))return route.fulfill({json:{connections:[]}});
@@ -181,3 +185,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 }
 await writeFile(new URL('workroom-rendering-results.json',output),JSON.stringify(results,null,2));
 console.log(`${results.length}/4 rendering checks passed`);
+await runRemoteTuiScreen(origin);

@@ -1,0 +1,6 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>AgentsToZ Chromium 실험</title><link rel="stylesheet" href="style.css"><script defer src="host.js"></script></head><body>
+<header><strong>AgentsToZ · 자체 Chromium 기술 검증</strong><p>별도 테스트 앱입니다. 실제 계정·외부 사이트·기존 앱 데이터에는 연결하지 않습니다.</p></header>
+<nav aria-label="실험 제어"><button data-op="open">화면 열기</button><button data-op="observe">현재 화면 읽기</button><button data-op="take">내가 제어</button><button data-op="return">에이전트에게 반환</button><button data-op="hide">화면 숨기기</button><button data-op="reopen">다시 보기</button><button id="smoke">자동 검증</button></nav>
+<aside><h2>워크룸 입력 영역</h2><p>현재는 입력·포커스 실험용입니다.<br>실제 CLI / PTY는 아직 연결하지 않았습니다.</p><label for="host-draft">터미널에 보낼 초안</label><textarea id="host-draft" placeholder="여기에 입력하는 동안 에이전트가 오른쪽 문서를 바꿀 수 있습니다."></textarea><label for="agent-draft">에이전트 문서 입력</label><input id="agent-draft" value="agent task draft"><button id="agent-type">현재 제어권으로 입력</button><output id="message" aria-live="polite">Chromium 준비 중</output><pre id="state"></pre></aside>
+<main><h2>사람 전용 공간 <small>에이전트 접근 금지</small></h2><div id="personal" class="native-slot"></div><h2>작업 공간 <small id="owner">제어권 확인 중</small></h2><div id="task" class="native-slot"></div></main>
+</body></html>

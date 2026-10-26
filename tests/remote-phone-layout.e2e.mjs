@@ -702,7 +702,21 @@ for (const engineName of engines) {
         try { await pre.waitFor({ timeout: 5_000 }); } catch { fail('readable-bottom: no 읽기 보기'); return; }
         await page.waitForFunction(sel => !document.querySelector(sel)?.textContent.includes('불러오는 중'), `${VIEW} [data-testid="workroom-readable-screen"]`, { timeout: 5_000 }).catch(() => {});
         const metrics = () => pre.evaluate(el => ({ top: el.scrollTop, client: el.clientHeight, height: el.scrollHeight, text: el.textContent }));
-        const atBottom = m => m.top + m.client >= m.height - 2;
+        // What a person has to see: the last line that actually says something — the prompt, or the newest output — inside
+        // the box. The remote screen is a fixed grid, so its text ends with blank rows; scrolling to the raw bottom would
+        // show those instead of the prompt, and asserting the implementation's own number would prove nothing about
+        // what is visible. This measures the real range of the last non-whitespace character.
+        const lastLineInView = () => pre.evaluate(el => {
+          const node = el.firstChild, text = node?.textContent ?? '', end = text.search(/\s*$/u);
+          if (!node || node.nodeType !== 3 || end <= 0) return { ok: true, why: 'the screen has no text yet' };
+          const range = el.ownerDocument.createRange();
+          range.setStart(node, end - 1); range.setEnd(node, end);
+          const line = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+          const tail = text.slice(Math.max(0, end - 24), end).replace(/\s+/gu, ' ').trim();
+          return { ok: line.bottom <= box.bottom + 2 && line.top >= box.top - 2, tail,
+            line: Math.round(line.top) + '–' + Math.round(line.bottom), box: Math.round(box.top) + '–' + Math.round(box.bottom) };
+        });
+        const inView = async what => { const v = await lastLineInView(); if (!v.ok) fail(`readable-bottom: ${what} — 「${v.tail}」 sits at ${v.line}, outside the view ${v.box}`); return v.ok; };
         const push = () => { const seq = mac.state.chunks.length + 1; mac.state.chunks.push({ seq, text: Array.from({ length: 4 }, (_, i) => `\r\n  new ${seq}-${i + 1}: 새 출력 ${'라마바사아자 '.repeat(5)}`).join('') + '\r\n\r\n› ' }); };
         const changed = async before => until(async () => (await metrics()).text !== before, 8_000);
         // Enough output to scroll: a bigger font when the screen is roomy (iPad).
@@ -710,12 +724,12 @@ for (const engineName of engines) {
         for (; bigger < 6 && (await metrics()).height <= (await metrics()).client + 60; bigger++) { await press(view.getByTestId('workroom-font-increase')); await page.waitForTimeout(150); }
         let m = await metrics();
         if (m.height <= m.client + 60) { notes.push(`${where} readable-bottom: the screen does not scroll at this size`); return; }
-        if (!atBottom(m)) fail(`readable-bottom: 읽기 보기 opened at ${Math.round(m.top)} of ${Math.round(m.height - m.client)}, not at the bottom`);
+        await inView('읽기 보기 opened without its last line in sight');
         push();
         if (!(await changed(m.text))) { fail('readable-bottom: new output never reached 읽기 보기'); return; }
         await page.waitForTimeout(150);
         m = await metrics();
-        if (!atBottom(m)) fail(`readable-bottom: at the bottom, new output left the view at ${Math.round(m.top)} of ${Math.round(m.height - m.client)}`);
+        await inView('new output arrived while at the bottom, and its last line is not in sight');
         await pre.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
         await page.waitForTimeout(150);
         push();
@@ -731,7 +745,7 @@ for (const engineName of engines) {
           await shot('readable-pill');
           await pill.click({ timeout: 5_000 });
           await page.waitForTimeout(400);
-          if (!atBottom(await metrics())) fail('readable-bottom: tapping the pill did not scroll to the bottom');
+          await inView('tapping 「새 출력 ↓」 did not bring the newest output into sight');
           if (await pill.count()) fail('readable-bottom: the pill stayed after it scrolled down');
         }
         for (let i = 0; i < bigger; i++) await press(view.getByTestId('workroom-font-decrease'));
@@ -804,8 +818,16 @@ for (const engineName of engines) {
         else if (prompt.top < prompt.screenTop - 1 || prompt.bottom > prompt.screenBottom + 1) fail(`session-keyboard: in 원본 터미널 with the keyboard up the prompt row (${Math.round(prompt.top)}–${Math.round(prompt.bottom)}) is outside the terminal (${Math.round(prompt.screenTop)}–${Math.round(prompt.screenBottom)})`);
         await shot('session-keyboard-original');
         await press(view.getByTestId('workroom-readable-toggle'));
-        // The key turned on 터미널 직접 입력; the steps below type in the composer.
-        await press(view.locator('.ai-terminal-key').filter({ hasText: '직접 입력 끄기' }));
+        // 터미널 직접 입력 is a toggle of its own (the only key with aria-pressed). The number keys send a choice and
+        // nothing else — they never switch the session into direct input — so turn it on here, check the state the
+        // person sees, and turn it back off, because the steps below type in the composer again.
+        const rawToggle = view.locator('.ai-terminal-key[aria-pressed]');
+        if ((await rawToggle.getAttribute('aria-pressed')) !== 'false') fail('session-keyboard: the number key left 터미널 직접 입력 on');
+        await press(rawToggle);
+        if ((await rawToggle.getAttribute('aria-pressed')) !== 'true') fail('session-keyboard: 터미널 직접 입력 did not turn on');
+        else if (!/직접 입력 끄기/.test((await rawToggle.innerText()).trim())) fail(`session-keyboard: direct input is on but the key still says 「${(await rawToggle.innerText()).trim()}」`);
+        await press(rawToggle);
+        if ((await rawToggle.getAttribute('aria-pressed')) !== 'false') fail('session-keyboard: 직접 입력 끄기 did not turn direct input off');
         await page.evaluate(() => { const vv = window.visualViewport; delete vv.height; delete vv.offsetTop; vv.dispatchEvent(new Event('resize')); vv.dispatchEvent(new Event('scroll')); });
         await page.waitForFunction(H => Math.abs(document.querySelector('[data-testid="workroom-session-view"]').getBoundingClientRect().height - H) < 1, H, { timeout: 5_000 })
           .catch(() => fail('session-keyboard: the view did not grow back when the keyboard closed'));

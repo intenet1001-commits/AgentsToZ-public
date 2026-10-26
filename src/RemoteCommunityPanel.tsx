@@ -3,6 +3,7 @@ import {MessageSquare,RefreshCw,Send,Users} from 'lucide-react';
 import type {MobileWorkspaceRequest,MobileWorkspaceResult} from './mobileWorkspaceProtocol';
 import {communityMessageTime,REMOTE_COMMUNITY_HISTORY_LIMIT,REMOTE_COMMUNITY_SEND_LIMIT,mergeRemoteCommunityMessages,type RemoteCommunityDevice,type RemoteCommunityState} from './remoteCommunity';
 import {communityDeviceLabel} from './workroomDeviceLabel';
+import {COMMUNITY_KIND_LABEL,communityMessagePreview} from './communityMessageView';
 
 /**
  * 휴대폰에서 보는 아젠투지 단톡방 — 1호 Mac 하나에 들어와 있어도 다른 아젠투지들에게 말을 건다.
@@ -34,7 +35,7 @@ const POLL_MS=12_000;
  * 사람이 AI에게 읽어 달라고 할 때 가져간다(CLAUDE.md 「받은 메시지를 CLI에 자동 입력하지 않는다」). 예전 문구
  * 「각 아젠투지의 총괄 AI가 받습니다」는 일어나지 않는 전달을 약속했다(2026-10-16 감사).
  */
-export const REMOTE_COMMUNITY_SENT_NOTICE='아젠투지 단톡방 방에 남겼습니다. 다른 아젠투지는 읽지 않은 메시지로 보고, AI에게 「아젠투지 단톡방 메시지 읽어줘」라고 하면 가져갑니다.';
+export const REMOTE_COMMUNITY_SENT_NOTICE='아젠투지 단톡방에 남겼습니다. 다른 아젠투지는 읽지 않은 메시지로 보고, AI에게 「아젠투지 단톡방 메시지 읽어줘」라고 하면 가져갑니다.';
 const emptyState:RemoteCommunityState={inside:false,roomId:null,unread:0,members:[],devices:[],messages:[],nextSeq:0};
 
 export function RemoteCommunityPanel({opsTargetId,visible,online,available,transport,onDriveDevice,onDevices}:RemoteCommunityPanelProps){
@@ -43,6 +44,8 @@ export function RemoteCommunityPanel({opsTargetId,visible,online,available,trans
   const [error,setError]=useState('');
   const [draft,setDraft]=useState('');
   const [notice,setNotice]=useState('');
+  /** Messages opened with 「전체 보기」, by seq. */
+  const [expanded,setExpanded]=useState<ReadonlySet<number>>(()=>new Set());
   // 커서는 ref에 둔다 — 폴링 effect가 커서에 매이면 메시지가 올 때마다 다시 시작한다.
   const cursor=useRef(0);
   // 부모가 인라인 람다를 넘겨도 폴링이 다시 시작되지 않게 ref로 고정한다.
@@ -69,7 +72,7 @@ export function RemoteCommunityPanel({opsTargetId,visible,online,available,trans
     reading.current=true;
     return call(action,action==='community.read'?{afterSeq:cursor.current}:{})
       .then(()=>setError(''))
-      .catch((e:unknown)=>setError(e instanceof Error?e.message:'아젠투지 단톡방를 확인하지 못했습니다.'))
+      .catch((e:unknown)=>setError(e instanceof Error?e.message:'아젠투지 단톡방을 확인하지 못했습니다.'))
       .finally(()=>{reading.current=false;});
   },[call]);
 
@@ -97,15 +100,15 @@ export function RemoteCommunityPanel({opsTargetId,visible,online,available,trans
   // 연결이 먼저다: Mac이 없거나 끊긴 동안의 「업데이트 필요」는 연결하지도 않은 Mac을 고치라는 말이었다(2026-10-16 감사).
   if(!online)return <section className="remote-panel remote-community" data-testid="remote-community-offline">
     <h2><Users aria-hidden="true"/>아젠투지 단톡방</h2>
-    <p className="remote-community-empty">Mac에 연결하면 아젠투지 단톡방를 볼 수 있습니다.</p>
+    <p className="remote-community-empty">Mac에 연결하면 아젠투지 단톡방을 볼 수 있습니다.</p>
   </section>;
   if(available===null)return <section className="remote-panel remote-community" data-testid="remote-community-checking" role="status">
     <h2><Users aria-hidden="true"/>아젠투지 단톡방</h2>
-    <p className="remote-community-empty">연결한 Mac이 아젠투지 단톡방를 지원하는지 확인하고 있습니다…</p>
+    <p className="remote-community-empty">연결한 Mac이 아젠투지 단톡방을 지원하는지 확인하고 있습니다…</p>
   </section>;
   if(!available)return <section className="remote-panel remote-community" data-testid="remote-community-update-required">
     <h2><Users aria-hidden="true"/>아젠투지 단톡방</h2>
-    <p className="remote-community-empty">Mac 앱 업데이트 필요 — 연결한 Mac 앱을 업데이트하면 휴대폰에서도 아젠투지 단톡방를 쓸 수 있습니다.</p>
+    <p className="remote-community-empty">Mac 앱 업데이트 필요 — 연결한 Mac 앱을 업데이트하면 휴대폰에서도 아젠투지 단톡방을 쓸 수 있습니다.</p>
   </section>;
   if(!opsTargetId)return <section className="remote-panel remote-community" data-testid="remote-community-ops-missing">
     <h2><Users aria-hidden="true"/>아젠투지 단톡방</h2>
@@ -120,7 +123,7 @@ export function RemoteCommunityPanel({opsTargetId,visible,online,available,trans
       {state===null?'아젠투지 단톡방 상태를 확인하고 있습니다…'
         :inside?`이 Mac이 참여 중 · 함께 있는 대상 ${others}개`
         :state.roomId?'이 Mac이 아직 아젠투지 단톡방에 들어가지 않았습니다. Mac의 「기기 간 대화」(아젠투지 설정 옆)에서 입장하세요.'
-        :'아젠투지 단톡방가 아직 없습니다. Mac의 「기기 간 대화」(아젠투지 설정 옆)에서 입장하면 단체방이 만들어집니다.'}
+        :'아젠투지 단톡방이 아직 없습니다. Mac의 「기기 간 대화」(아젠투지 설정 옆)에서 입장하면 단체방이 만들어집니다.'}
     </p>
     {error&&<p className="remote-community-error" role="alert" data-testid="remote-community-error">{error}</p>}
     {notice&&<p className="remote-community-notice" data-testid="remote-community-notice">{notice}</p>}
@@ -128,10 +131,14 @@ export function RemoteCommunityPanel({opsTargetId,visible,online,available,trans
       <div className="remote-community-messages" data-testid="remote-community-messages">
         {(state?.messages??[]).length===0
           ?<p className="remote-community-empty">새 메시지가 없습니다.</p>
-          :(state?.messages??[]).map(message=><article key={message.seq} className={message.self?'remote-community-message remote-community-message--self':'remote-community-message'}>
-            <header>{message.self?'이 Mac':message.from}<span>{communityMessageTime(message.at)}</span></header>
-            <p>{message.text}{message.truncated?' …':''}</p>
-          </article>)}
+          :(state?.messages??[]).map(message=>{
+            const {preview,folded}=communityMessagePreview(message.text),whole=!folded||expanded.has(message.seq),label=COMMUNITY_KIND_LABEL[message.kind];
+            return <article key={message.seq} className={message.self?'remote-community-message remote-community-message--self':'remote-community-message'}>
+              <header>{message.self?'이 Mac':message.from}{label&&<em className="remote-community-kind">{label}</em>}<span>{communityMessageTime(message.at)}</span></header>
+              <p>{whole?message.text:preview}{whole&&message.truncated?' …':''}</p>
+              {folded&&<button type="button" className="remote-community-more" aria-expanded={whole} data-testid="remote-community-more"
+                onClick={()=>setExpanded(prior=>{const next=new Set(prior);if(!next.delete(message.seq))next.add(message.seq);return next;})}>{whole?'접기':'전체 보기'}</button>}
+            </article>;})}
       </div>
       <div className="remote-community-compose">
         <textarea data-testid="remote-community-draft" rows={2} value={draft}

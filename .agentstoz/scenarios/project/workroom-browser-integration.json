@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "project.workroom-browser-integration",
+  "title": "실제 워크룸 브라우저·Chrome CDP 사용자 여정",
+  "intent": "실제 워크룸·격리 PTY·CEF와 임시 Chrome 계정으로 프로필 확인, 사람과 AI 제어권, 불확실한 결과와 원래 탭 보존을 검증한다. 개인 프로필과 실제 AI 계정은 사용하지 않는다.",
+  "origin": "manual:workroom-browser-2026-10-24",
+  "tags": [
+    "workroom",
+    "browser",
+    "cdp",
+    "personas"
+  ],
+  "paths": [
+    "src/workroomBrowser*",
+    "native/workroom-browser/**"
+  ],
+  "platforms": [
+    "darwin"
+  ],
+  "safety": "writes-temp",
+  "risk": 3,
+  "cost": {
+    "estimateSeconds": 40
+  },
+  "requires": [
+    "output/workroom-browser-native-qa/bundle/app.app/Contents/MacOS/app"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "test",
+        "./tests/workroom-browser.test.ts",
+        "./tests/workroom-browser-recovery.test.ts",
+        "./tests/workroom-browser-bundle.test.ts"
+      ],
+      "timeoutSeconds": 120
+    },
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-cdp.mjs",
+        "--screen"
+      ],
+      "timeoutSeconds": 180
+    },
+    {
+      "type": "command",
+      "argv": [
+        "bun",
+        "tests/workroom-browser-native.mjs"
+      ],
+      "timeoutSeconds": 150
+    }
+  ]
+}

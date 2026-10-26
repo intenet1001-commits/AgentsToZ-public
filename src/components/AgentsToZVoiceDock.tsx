@@ -1,8 +1,8 @@
 import {useAppLanguage,AppLanguagePicker} from '../useAppLanguage';
 import {t} from '../i18n';
 import {voiceInputHintText} from '../voiceInputStats';
-import React,{useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {ChevronDown,ChevronUp,Maximize2,Mic,MicOff,Minimize2,Send,Settings2,Square,VolumeX,MessageSquareText} from 'lucide-react';
+import React,{lazy,Suspense,useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore} from 'react';
+import {ChevronDown,ChevronUp,Layers,Maximize2,Mic,MicOff,Minimize2,Send,Settings2,Square,VolumeX,MessageSquareText} from 'lucide-react';
 import {voiceMediaClient} from '../voiceMediaClient';
 import type {VoiceTransport} from '../voiceSessionClient';
 import {workroomMentionQuery} from '../workroomProjectMention';
@@ -12,7 +12,11 @@ import {CLOSE_OPS_VOICE_EVENT,OPEN_OPS_VOICE_EVENT} from '../VoiceSessionPanel';
 import {readVoiceConsent,readTextConsent,readVoiceProvider,readVoiceRecord,voicePreferenceStorage,writeVoiceProvider,writeVoiceInteractionMode,voiceInteractionModeSnapshot,subscribeVoiceInteractionMode,type VoiceInteractionMode,type VoiceCaptionMode} from '../voicePreferences';
 import {validateDeviceName} from '../deviceName';
 import {AgentsToZMascot} from './AgentsToZMascot';
+import {useUnsavedSessionMemory} from '../unsavedSessionMemory';
 import './AgentsToZVoiceDock.css';
+
+// Loaded on first expand: it pulls in the project-memory client, which stays out of the main bundle.
+const DockSessionsPanel=lazy(()=>import('./DockSessionsPanel').then(m=>({default:m.DockSessionsPanel})));
 
 /** The persistent 아젠투지 voice owner shared with the OPS panel (VoiceSessionPanel). */
 export const OPS_VOICE_OWNER='voice-ops';
@@ -34,7 +38,11 @@ export function voiceDockStatus(p:VoiceActiveTarget|undefined,deviceName?:string
  */
 /** A phone without the OPS project talks to one of its open workrooms instead (the voice it had before the dock). */
 export interface VoiceWorkroomFallback {list():Promise<{targetId:string;sessionId:string;label:string}[]>;transport(targetId:string):VoiceTransport}
-export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailableReason,unavailableStatus,onOpenOpsWorkroom,opsDevices,onOpenDeviceWorkroom,opsMissing=false,workroomFallback}:{transport:VoiceTransport;remote?:boolean;deviceName?:string;
+export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailableReason,unavailableStatus,onOpenOpsWorkroom,opsDevices,onOpenDeviceWorkroom,opsMissing=false,workroomFallback,notifications,localSessions=false}:{transport:VoiceTransport;remote?:boolean;deviceName?:string;
+  /** This Mac's notification stack (confirmed automatic saves), shown at the top of the dock. */
+  notifications?:React.ReactNode;
+  /** This Mac: offer the 「열린 AI 세션」 list (context % with save/sync). A phone has no local API for it. */
+  localSessions?:boolean;
   /** This device may not reach the OPS project; with `workroomFallback` a tap talks to an open workroom's AI. */
   opsMissing?:boolean;workroomFallback?:VoiceWorkroomFallback;
   /** The short status line when voice cannot start (e.g. 「Mac 연결 끊김」); the reason is shown on a tap. */
@@ -54,6 +62,10 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
   const composingInput=useRef(false);
   const runBusy=useRef(false);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[menu,setMenu]=useState(false);
+  // 「열린 AI 세션」 stays open until toggled or Escape — a save in progress must not lose its result to a stray click.
+  const [sessionsOpen,setSessionsOpen]=useState(false);
+  // Read only: the notice stack runs the check, and no stack (the phone) means no count.
+  const unsavedCount=useUnsavedSessionMemory({check:false}).unsaved.length;
   // ⋯: pick any allowed project (and optionally its AI) — the same switch as 「<프로젝트> 담당자 불러」.
   const [picker,setPicker]=useState(false),[query,setQuery]=useState(''),[choices,setChoices]=useState<VoiceProjectChoice[]|null>(null),[agent,setAgent]=useState<''|'codex'|'claude'|'hermes'|'agy'>('');
   const [projectPage,setProjectPage]=useState<{total:number;nextOffset:number|null;legacy?:boolean}|null>(null);
@@ -112,6 +124,11 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
     document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape);
     return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape);};
   },[menu,picker,rooms]);
+  useEffect(()=>{
+    if(!sessionsOpen)return;
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setSessionsOpen(false);};
+    document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);
+  },[sessionsOpen]);
   const partnerNow=owns&&state.session?.activeTarget?JSON.stringify(state.session.activeTarget):'';
   useEffect(()=>{setPicker(false);},[partnerNow]);
   useEffect(()=>{
@@ -242,6 +259,7 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
     </section>
   </aside>;
   return <aside ref={dock} className="az-voice-dock" data-testid="voice-dock" data-active={active?'true':'false'} data-remote={remote?'true':'false'} aria-label={textOnly?'아젠투지 텍스트 대화':'아젠투지 음성'}>
+    {notifications}
     {lines.length>0&&<ol className="az-voice-dock__captions" data-testid="voice-dock-captions" aria-live="polite">
       {lines.map(line=><li key={line.id} data-role={line.role}>
         <span className="az-voice-dock__said"><b>{line.role==='user'?'나':'아젠투지'}</b>{line.text}</span>
@@ -282,6 +300,7 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
         title={`${device.name}에서 OPS를 열어 처리할 작업을 작성하고 결과를 받습니다.`}
         onClick={()=>{setMenu(false);onOpenDeviceWorkroom(device.key);}}>OPS 열고 작업 맡기기 · {device.name}</button>)}
     </div>}
+    {localSessions&&sessionsOpen&&<Suspense fallback={<p className="az-voice-dock__notice" role="status">세션 목록을 불러오는 중…</p>}><DockSessionsPanel/></Suspense>}
     {/* A draft 아젠투지 made waits for the person; the dock must say so, or it looks like nothing happened. */}
     {active&&state.session?.draft&&<div className="az-voice-dock__draft" data-testid="voice-dock-draft" role="group" aria-label="보낼 지시 초안">
       {editText===null
@@ -313,13 +332,14 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
         <button type="button" data-testid="voice-dock-fullscreen-open" aria-label="자막 전체 화면" title="자막 전체 화면" onClick={()=>showView('captions')}><Maximize2 size={15}/></button>
         <button type="button" data-testid="voice-dock-minimize" aria-label="작은 아이콘으로 내리기" title="대화를 유지하며 작은 아이콘으로 내리기" onClick={()=>showView('compact')}><Minimize2 size={15}/></button>
       </div>}
-      <button type="button" className="az-voice-dock__settings" data-testid="voice-dock-settings" aria-label="음성 설정" aria-expanded={menu} title="음성 제공자·자막 설정" onClick={()=>{setProviderState(readVoiceProvider(voicePreferenceStorage())??'openai');setMenu(v=>!v);setPicker(false);}}><Settings2 size={15}/></button>
+      {localSessions&&<button type="button" className="az-voice-dock__settings az-voice-dock__sessions-toggle" data-testid="voice-dock-sessions" aria-label={`${sessionsOpen?'열린 AI 세션 접기':'열린 AI 세션 펼치기 · 컨텍스트와 기억 저장'}${unsavedCount?` · 저장 안 된 프로젝트 ${unsavedCount}개`:''}`} aria-expanded={sessionsOpen} title={unsavedCount?`저장 안 된 프로젝트 ${unsavedCount}개 · 펼쳐서 지금 저장·모두 저장`:'열린 프로젝트·AI 세션의 컨텍스트 %와 지금 저장·동기화'} onClick={()=>{setSessionsOpen(v=>!v);setMenu(false);setPicker(false);}}><Layers size={15}/>{unsavedCount>0&&<span className="az-voice-dock__badge" data-testid="voice-dock-sessions-unsaved" aria-hidden="true">{unsavedCount>9?'9+':unsavedCount}</span>}</button>}
+      <button type="button" className="az-voice-dock__settings" data-testid="voice-dock-settings" aria-label="음성 설정" aria-expanded={menu} title="음성 제공자·자막 설정" onClick={()=>{setProviderState(readVoiceProvider(voicePreferenceStorage())??'openai');setMenu(v=>!v);setPicker(false);setSessionsOpen(false);}}><Settings2 size={15}/></button>
     </div>
     {active&&!folded&&state.partnersSupported!==false&&partners.length>0&&<div className="az-voice-dock__partners" role="group" aria-label="대화 상대" data-testid="voice-dock-partners">
       {partners.map(p=>{const selected=!!current&&partnerKey(current)===partnerKey(p)||!current&&p.kind==='ops';
         return <button type="button" key={partnerKey(p)} aria-pressed={selected} data-testid={p.kind==='ops'?'voice-dock-partner-ops':'voice-dock-partner'} disabled={busy||selected||draftPending} title={draftPending&&!selected?'초안을 보내거나 버린 뒤 대화 상대를 바꿀 수 있습니다':undefined}
           onClick={()=>void run(()=>voiceMediaClient.switchPartner(p.kind==='ops'?{kind:'ops'}:{kind:'workroom',targetId:p.targetId,sessionId:p.sessionId}))}>{selected?'✓ ':''}{voicePartnerName(p,deviceName)}</button>;})}
-      <button type="button" data-testid="voice-dock-partner-more" aria-expanded={picker} aria-label="이 기기의 다른 프로젝트 담당자 고르기" title="이 기기의 다른 프로젝트 담당자 고르기 · 「<이름> 담당자 불러」라고 말해도 됩니다" onClick={()=>{setQuery('');setChoices(null);setPicker(v=>!v);setMenu(false);}}>⋯</button>
+      <button type="button" data-testid="voice-dock-partner-more" aria-expanded={picker} aria-label="이 기기의 다른 프로젝트 담당자 고르기" title="이 기기의 다른 프로젝트 담당자 고르기 · 「<이름> 담당자 불러」라고 말해도 됩니다" onClick={()=>{setQuery('');setChoices(null);setPicker(v=>!v);setMenu(false);setSessionsOpen(false);}}>⋯</button>
     </div>}
     {relay&&!folded&&<p className="az-voice-dock__hint az-voice-dock__relay" data-testid="voice-dock-relay">말하거나 입력하면 {voicePartnerName(relay,deviceName)} 워크룸에 그대로 들어갑니다 · 아젠투지에게는 「아젠투지, …」</p>}
     {!folded&&mentionPicker}

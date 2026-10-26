@@ -31,7 +31,7 @@ export function CommonMemoryProjectsPanel({client=defaultClient,groupId,onChange
   const next=plan?.members.find(m=>m.status==='missing'&&!outcomes.some(o=>o.memoryId===m.memoryId&&['added','present'].includes(o.state)));
   return <section className="grid gap-3 rounded-xl border border-[var(--line)] p-3" data-testid="common-memory-projects">
     <h3 className="m-0 text-base">연결된 장기기억의 프로젝트 가져오기</h3>
-    <p className="m-0 text-sm">선택한 기억에 연결된 GitHub 프로젝트를 이 기기에 가져옵니다. 이미 등록된 프로젝트는 유지합니다. 장기기억 내용을 공통기억에 가져오려면 공통기억의 ‘가져올 기억’에서 선택하세요.</p>
+    <p className="m-0 text-sm">선택한 기억에 연결된 GitHub 프로젝트를 이 기기에 가져옵니다. 이미 등록된 프로젝트는 유지합니다. 여러 장기기억의 공통 내용을 공통기억으로 모으려면 공통기억 목록의 「교집합·카테고리 후보 확인」에서 시작하세요.</p>
     {!open&&<button className={button} disabled={busy} onClick={()=>void run(async()=>{const [r,g]=await Promise.all([client.roots(),groupId?Promise.resolve({groups:[]}):client.list()]);setRoots(r.roots);setGroups(g.groups);setIntents(readCommonMemoryIntents().filter(i=>i.kind==='projects-add'&&i.scopeId===r.scopeId));setOpen(true);})}>이 기기의 누락 프로젝트 확인</button>}
     {open&&<fieldset className="grid gap-3" disabled={busy||!!pending||intents.length>0}>
       {!groupId&&<label>공통기억<select aria-label="프로젝트를 가져올 공통기억" className="min-h-11 w-full rounded-lg bg-[var(--surface)] p-2 text-base" value={group} onChange={e=>{setGroup(e.target.value);setPlan(null);}}><option value="">선택하세요</option>{groups.filter(g=>!g.state.archived).map(g=><option key={g.state.id} value={g.state.id}>{g.state.name}</option>)}</select></label>}

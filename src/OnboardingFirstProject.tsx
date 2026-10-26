@@ -28,18 +28,18 @@ export default function OnboardingFirstProject({onStartProject,onStartControl,on
       {onOpenProjects&&<button type="button" className={button} onClick={onOpenProjects}>등록한 프로젝트 이어서 열기</button>}
     </div>
     {onStartControl && <details data-testid="onboarding-control-center" className="mt-4 rounded-xl border border-[var(--accent-line)] bg-[var(--surface)] p-4">
-      <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-[var(--ink)]">여러 프로젝트의 운영 방식 준비 · AgentsToZ OPS (선택)</summary>
+      <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-[var(--ink)]">여러 프로젝트의 운영 방식 준비 · 아젠투지 (선택)</summary>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-extrabold text-[var(--ink)]">AgentsToZ OPS 운영 프로필 준비</p>
+          <p className="text-sm font-extrabold text-[var(--ink)]">아젠투지(OPS) 준비</p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--ink-2)]">프로젝트와 AI를 바꿔도 같은 운영 방식과 공통 결정을 기억합니다. 기존 운영 폴더(AgentsToZ-OPS · 예전 이름 AgentsToZ-Control)의 기억도 연결할 수 있습니다.</p>
         </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <button type="button" data-testid="onboarding-create-control" className={`${button} bg-[var(--accent)] text-[var(--on-accent)]`} onClick={()=>onStartControl('create')}>내 AgentsToZ OPS 준비</button>
-        <button type="button" data-testid="onboarding-restore-control" className={`${button} bg-[var(--surface)] text-[var(--ink)]`} onClick={()=>onStartControl('restore')}>다른 Mac의 AgentsToZ OPS 복원</button>
+        <button type="button" data-testid="onboarding-create-control" className={`${button} bg-[var(--accent)] text-[var(--on-accent)]`} onClick={()=>onStartControl('create')}>내 아젠투지 준비</button>
+        <button type="button" data-testid="onboarding-restore-control" className={`${button} bg-[var(--surface)] text-[var(--ink)]`} onClick={()=>onStartControl('restore')}>다른 Mac의 아젠투지 복원</button>
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-[var(--ink-3)]">앱 저장소 Pull만으로 운영 폴더는 복제되지 않습니다. 처음이면 AgentsToZ OPS 프로필을 준비하고, 다른 Mac에서 사용 중이면 기존 Private GitHub 저장소를 복원한 뒤 프로필에 연결하세요.</p>
+      <p className="mt-2 text-[11px] leading-relaxed text-[var(--ink-3)]">앱 저장소 받기(Pull)만으로 운영 폴더는 복제되지 않습니다. 처음이면 아젠투지(OPS)를 준비하고, 다른 Mac에서 사용 중이면 기존 Private GitHub 저장소를 복원한 뒤 연결하세요.</p>
     </details>}
     <p className="mt-3 text-xs leading-relaxed text-[var(--ink-3)]">폴더를 등록한 뒤 프로젝트 목록에서 다시 열어 보세요. AI 준비 확인과 실제 첫 작업 성공은 각각 확인합니다.</p>
   </section>;

@@ -189,7 +189,7 @@ export function AgentDialoguePanel({projects,opsProjectId,deviceName,deviceId,on
       <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={consent} onChange={event=>setConsent(event.target.checked)}/><span>이 대상의 기기 간 대화 정보가 Supabase에 저장되는 데 동의합니다.</span></label>
       {progress&&<div className="mt-2 flex flex-wrap items-center gap-2"><p role="status" className="m-0 text-xs text-[var(--ink-2)]" data-testid="agent-dialogue-publish-progress">{progress}</p><button type="button" data-testid="agent-dialogue-publish-stop" disabled={bulkStopping} className="rounded-lg border border-[var(--line)] px-3 py-1 text-xs disabled:opacity-40" onClick={()=>{bulkStopRequested.current=true;setBulkStopping(true);}}>{bulkStopping?'중지 요청됨 · 현재 항목 완료 대기':'현재 항목 뒤 중지'}</button></div>}
       <section className="mt-5 rounded-xl border border-[var(--accent)] p-3" data-testid="agent-dialogue-community">
-        <h3 className="m-0 font-semibold">아젠투지 단톡방 · 이 운영 프로필의 단체방</h3>
+        <h3 className="m-0 font-semibold">아젠투지 단톡방 · 내 기기·프로젝트 단체방</h3>
         <p className="mb-0 mt-1 text-xs text-[var(--ink-2)]">부르는 것이 아니라 <strong>각자 한 번 입장</strong>합니다. 들어와 있는 대상끼리는 초대도 승인도 없이 주고받고, 나가지 않는 한 계속 참여합니다.</p>
         {enabledTargets.length===0?<p className="mt-2 text-sm text-[var(--ink-2)]">위에서 공개할 대상을 먼저 켜세요.</p>:(()=>{
           const view=agentDialogueCommunityView(communityStatus,activePairSource?.endpointId);

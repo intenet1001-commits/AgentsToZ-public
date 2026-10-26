@@ -1,4 +1,6 @@
 import {afterEach, describe, expect, test} from 'bun:test';
+import {parseWorkroomTeamRequest} from '../src/workroomTeam';
+import {HOST_CLI_ACCOUNT_ID, cliAccountId} from '../src/cliAccountProtocol';
 import {
   AGENTSTOZ_USE_MCP_INSTRUCTIONS,
   AGENTSTOZ_USE_MCP_TOOLS,
@@ -44,7 +46,7 @@ describe('B3: Claude Code keeps only about the first 2,000 characters of MCP ins
     'agentstoz_use_send_workroom_instruction (target=ops',
     'self:true',
     // Dispatch (contract 1.31.0): a project to a Workroom CLI, or to a desktop app with a task.
-    '‘<프로젝트>를 <CLI>로 워크룸에서 시작’ → start_workroom_session(portId, agent, instruction)',
+    '‘<프로젝트>를 <CLI>로 워크룸에서 시작’ → start_workroom_session(portId, agent, surface=internal, instruction)',
     '‘<프로젝트>를 <앱>에서 열어’ → open_code_app(portId, agent, surface=app, task)',
     'only Codex takes task (prefill requested, unsent)',
     // Review N2: the rules Claude Code saw before the brief was added must still fit.
@@ -218,7 +220,9 @@ describe('B4: a newer MCP server refuses to report options an older AgentsToZ ig
     servers.push(server);
     const env = {AGENTSTOZ_CONTROLLER_PORT_ID: 'controller-id', AGENTSTOZ_USE_ENDPOINT: `http://127.0.0.1:${server.port}/api/agentstoz-use/action`};
     return async (name: string, args: Record<string, unknown>) => {
-      const response = await handleAgentsToZUseMcpRequest({id: 1, method: 'tools/call', params: {name: `agentstoz_use_${name}`, arguments: args}}, env) as any;
+      // This fixture tests a settled Workroom/app selection against older hosts, not the missing-choice preflight.
+      const selected = name === 'start_workroom_session' ? {surface:'internal', ...args} : name === 'open_code_app' ? {surface:'app', ...args} : args;
+      const response = await handleAgentsToZUseMcpRequest({id: 1, method: 'tools/call', params: {name: `agentstoz_use_${name}`, arguments: selected}}, env) as any;
       return {isError: response.result.isError, body: response.result.structuredContent ?? JSON.parse(response.result.content[0].text)};
     };
   }
@@ -285,3 +289,45 @@ describe('B4: a newer MCP server refuses to report options an older AgentsToZ ig
     expect((await current('open_code_app', {portId: 'study-id', agent: 'codex', mode: 'new'})).isError).toBe(false);
   });
 });
+
+// 팀 작전: Claude Code keeps only ~2,000 characters of the instructions; the team pointer must stay inside them.
+test('the team brief ends inside the first 2,000 characters of the MCP instructions', () => {
+  const brief = '팀 작전: create_team → wait_team → merge → close_team.';
+  const at = AGENTSTOZ_USE_MCP_INSTRUCTIONS.indexOf(brief);
+  expect(at).toBeGreaterThan(0);
+  expect(at + brief.length).toBeLessThanOrEqual(2_000);
+  expect(AGENTSTOZ_USE_MCP_TOOLS.map(tool => tool.name)).toEqual(expect.arrayContaining(['agentstoz_use_create_team', 'agentstoz_use_wait_team', 'agentstoz_use_close_team']));
+});
+
+// MCP aliases are normalized before the strict host parser; every other member option shares its contract.
+test('the create_team member schema reaches the strict host parser with canonical member options', () => {
+  const tool = AGENTSTOZ_USE_MCP_TOOLS.find(entry => entry.name === 'agentstoz_use_create_team');
+  const schema = (tool!.inputSchema as any).properties.members.items.properties as Record<string, unknown>;
+  const declared = Object.keys(schema).sort();
+  expect(declared).toEqual(['accountId', 'agent', 'bypassPermissions', 'effort', 'hermesVariant', 'launchOptions', 'model', 'name', 'provider', 'role', 'sessionId', 'surface', 'task']);
+  expect(schema.hermesVariant).toMatchObject({enum:['default','claude','codex']});
+  // Every project launch surface the contract names is offered to a connected app or CLI, not only the Workroom.
+  expect((schema.surface as {enum: string[]}).enum).toEqual(['internal', 'orca-floating', 'orca-worktree', 'cmux', 'iterm', 'terminal', 'powershell', 'wsl', 'app']);
+  expect(Object.keys((schema.launchOptions as {properties: Record<string, unknown>}).properties).sort()).toEqual(['appMode', 'bgMode', 'reuse', 'tmuxMode']);
+  expect(schema.bypassPermissions).toMatchObject({type: 'boolean'});
+  // The declared account pattern is the host's own rule, so a caller is never told to send an id the parser refuses.
+  const pattern = new RegExp((schema.accountId as {pattern: string}).pattern);
+  for (const candidate of [HOST_CLI_ACCOUNT_ID, 'acct_3f2a9c1e-6b47-4d58-9a0e-7c15d2b8e410', 'acct_3f2a9c1e-6b47-9d58-9a0e-7c15d2b8e410', 'acct_not-a-uuid', 'host-other', '']) {
+    expect(pattern.test(candidate)).toBe(cliAccountId(candidate));
+  }
+  // Every declared key reaches the parser as a known field: an unknown one would be refused by name.
+  for (const key of declared) {
+    if(key==='hermesVariant'){
+      for(const hermesVariant of ['default','claude','codex']){
+        const action=agentsToZUseMcpActionForTool('agentstoz_use_create_team',{portId:'port-demo',requestId:'team-request-schema',title:'팀',goal:'목표',members:[{agent:'hermes',surface:'internal',hermesVariant,task:'작업'}]},'controller-id');
+        expect(parseAgentsToZUseActionRequest(action).team).toBeDefined();
+      }
+      continue;
+    }
+    const members = [{agent: 'codex', task: '작업', [key]: 'probe'}];
+    let message = '';
+    try { parseWorkroomTeamRequest({op: 'create', portId: 'port-demo', requestId: 'team-request-schema', title: '팀', goal: '목표', members}); } catch (error) { message = String((error as Error).message); }
+    expect(message).not.toContain('알 수 없는 필드');
+  }
+});
+

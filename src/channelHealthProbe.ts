@@ -92,7 +92,7 @@ export async function probeAgentsToZUseMcp(options: {
 /** Plain-language reasons for failures a beginner can act on. */
 function friendlyProbeError(raw: string): string {
   if (raw.includes('AGENTSTOZ_CONTROLLER_PORT_ID')) {
-    return 'AgentsToZ 운영 프로필이 연결돼 있지 않아 도구를 쓸 수 없습니다. 운영 프로필 패널에서 프로필을 먼저 준비하세요.';
+    return '아젠투지(OPS)가 아직 준비되지 않아 도구를 쓸 수 없습니다. 도구 및 설정 → 아젠투지 설정에서 먼저 준비하세요.';
   }
   if (/fetch failed|ECONNREFUSED|Unable to connect/i.test(raw)) return 'AgentsToZ 앱의 로컬 서버에 닿지 못했습니다.';
   return raw;

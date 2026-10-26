@@ -31,7 +31,18 @@ describe('agentstoz_use MCP server version comes from the build', () => {
     // 1.40.0 adds context persona discovery, review, acceptance and rejection.
     // 1.42.0 adds project-set composition and contextual role candidates.
     // 1.43.0 adds receiving-device OPS execution and explicit task results.
-    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.48.0');
+    // 1.49.0 adds 팀 작전 (team create/read/wait/report/close).
+    // 1.50.0 adds explicitly granted, bounded Workroom browser operations.
+    // 1.51.0 adds frames/shadow observation, select, scroll, bounded wait and a returned-only screenshot.
+    // 1.52.0 adds the Workroom's own tab set (tabs, switch-tab).
+    // 1.53.0 narrows wait selectors to tag/#id/.class and reports cut option lists (moreOptions, truncated).
+    // 1.54.0 adds a per-member effort to create_team (pinned, or omitted for 에포트 자동).
+    // 1.58.0 adds request-human to the bounded Workroom browser tool.
+    // 1.59.0 hardens how an open session joins a team (checkout root, one worker per checkout).
+    // 1.60.0 gives a team member the project launch choices (accountId, bypassPermissions, surface, launchOptions)
+    // and the manual path an external surface needs (confirm_team_member, report manual: true).
+    // 1.61.0 separates confirmed personal preferences from OPS and historical instructions.
+    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.61.0');
     expect(AGENTSTOZ_USE_MCP_SERVER_VERSION.startsWith(`${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.`)).toBe(true);
   });
 

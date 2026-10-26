@@ -3,6 +3,7 @@ import {aiTerminalPromptArgs} from './aiTerminalPromptArgs';
 import type {AiTerminalResume} from './aiTerminalResume';
 import {CODEX_HOOK_TRUST_FLAG} from './codexHookTrust';
 import {WORKROOM_EFFORT_SUPPORT, type WorkroomEffortLevel} from './workroomEffortPolicy';
+import {launchModelError, type AiTerminalLaunchModel} from './workroomTeamInstruction';
 
 /**
  * Host-only restricted launch (CS duty, src/csDutyAgent.ts). Claude runs in `dontAsk`: anything outside
@@ -24,6 +25,18 @@ export interface AiTerminalLaunchProfile {
 }
 
 /**
+ * Host-only model choice for one launch (team members, src/workroomTeam.ts). Every CLI has its own flag:
+ * Claude `--model`, Codex `-m`, Hermes `chat -m` (+ `--provider`, since a Hermes model may be Claude or OpenAI),
+ * Antigravity `--model`. Never part of a wire request; the value is checked before it reaches argv.
+ */
+export {launchModelError, type AiTerminalLaunchModel} from './workroomTeamInstruction';
+export function launchModelArgs(agent: AiTerminalAgent, choice?: AiTerminalLaunchModel | null): string[] {
+  if (!choice) return [];
+  const error = launchModelError(agent, choice); if (error) throw new Error(error);
+  return agent === 'codex' || agent === 'hermes' ? ['-m', choice.model, ...(choice.provider ? ['--provider', choice.provider] : [])] : ['--model', choice.model];
+}
+
+/**
  * Keep permission flags before positional prompts; Hermes options belong to chat.
  * A restart that continues a conversation (`resume`, src/aiTerminalResume.ts) replaces Claude's
  * `--session-id` with `--resume <id>` (Claude refuses both without `--fork-session`, and a fork would
@@ -36,11 +49,14 @@ export function aiTerminalLaunchArgs(agent: AiTerminalAgent, sessionId: string, 
    * 「에포트 자동」 (w16, workroomEffortPolicy.ts): the level the host chose for this launch, passed with each CLI's own
    * flag. Omitted or null: the arguments are byte-identical to before. Antigravity and restricted launches ignore it.
    */
-  effort?: WorkroomEffortLevel | null): string[] {
+  effort?: WorkroomEffortLevel | null,
+  /** Host-only per-launch model (see AiTerminalLaunchModel). Omitted: byte-identical arguments. */
+  model?: AiTerminalLaunchModel | null): string[] {
   const level = effort && !profile && WORKROOM_EFFORT_SUPPORT[agent] === 'launch' ? effort : null;
   // Hermes' configured TUI rejects --reasoning. Its classic CLI supports the
   // launch-only flag; leave the person's interface preference alone otherwise.
-  if (agent === 'hermes') return ['chat', ...(level ? ['--cli', '--reasoning', level] : []), ...(bypassPermissions ? ['--yolo'] : []), ...(prompt ? ['-q', prompt] : [])];
+  const chosen = launchModelArgs(agent, model);
+  if (agent === 'hermes') return ['chat', ...chosen, ...(level ? ['--cli', '--reasoning', level] : []), ...(bypassPermissions ? ['--yolo'] : []), ...(prompt ? ['-q', prompt] : [])];
   const resumed = resume?.agent === agent ? resume.conversationId : undefined;
   const identity = agent === 'claude' ? (resumed ? ['--resume', resumed] : ['--session-id', sessionId])
     : agent === 'codex' ? [...(codexHookTrust ? [CODEX_HOOK_TRUST_FLAG] : []), ...(resumed ? ['resume', resumed] : []), '-c', 'tui.status_line=["model-with-reasoning","context-remaining"]',
@@ -56,5 +72,5 @@ export function aiTerminalLaunchArgs(agent: AiTerminalAgent, sessionId: string, 
       : agent === 'claude' ? ['--permission-mode', 'default'] : []) : agent === 'codex'
     ? ['--dangerously-bypass-approvals-and-sandbox']
     : agent === 'claude' ? ['--permission-mode', 'bypassPermissions'] : ['--dangerously-skip-permissions'];
-  return [...identity, ...permission, ...(agent === 'claude' && level ? ['--effort', level] : []), ...(prompt ? aiTerminalPromptArgs(agent, prompt) : [])];
+  return [...identity, ...permission, ...chosen, ...(agent === 'claude' && level ? ['--effort', level] : []), ...(prompt ? aiTerminalPromptArgs(agent, prompt) : [])];
 }

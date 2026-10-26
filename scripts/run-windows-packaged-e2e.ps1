@@ -9,7 +9,7 @@ $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::
 $targetRoot = if ($env:CARGO_TARGET_DIR) {
   $env:CARGO_TARGET_DIR
 } else {
-  Join-Path $repoRoot 'cargo-targets\portmanager'
+  Join-Path $env:USERPROFILE 'cargo-targets\portmanager'
 }
 $installerRoot = Join-Path $targetRoot 'release\bundle\nsis'
 $installer = Get-ChildItem -Path $installerRoot -Filter '*.exe' -File |
@@ -74,6 +74,7 @@ try {
 
   $install = Start-Process `
     -FilePath $installer.FullName `
+    -WindowStyle Hidden `
     -ArgumentList @('/S', "/D=$installRoot") `
     -Wait `
     -PassThru
@@ -92,10 +93,13 @@ try {
   }
   $uninstaller = Join-Path $installRoot 'uninstall.exe'
 
-  $tauriConfig = Get-Content (Join-Path $repoRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json
+  $expectedVersion = (& bun --cwd $repoRoot -e 'import {deriveBuildNumber,gitRunner,readBuildNumberFile} from "./buildVersion"; const version=deriveBuildNumber(readBuildNumberFile(process.cwd()),gitRunner(process.cwd())); if(!version.ok) throw new Error(version.reason); console.log(version.buildNumber+".0.0");' | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or $expectedVersion -notmatch '^\d+\.0\.0$') {
+    throw 'Could not derive the expected package version from Git history.'
+  }
   $installedVersion = (Get-Item $appExe).VersionInfo.ProductVersion
-  if ($installedVersion -ne $tauriConfig.version) {
-    throw "Installed app version $installedVersion does not match committed version $($tauriConfig.version)."
+  if ($installedVersion -ne $expectedVersion) {
+    throw "Installed app version $installedVersion does not match derived version $expectedVersion."
   }
 
   if ($HostedRunnerSmoke) {
@@ -233,7 +237,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -Command "`$p = Start-Process 
   $env:APP_DATA_DIR = $originalAppDataDir
   $env:PORTMGR_PARENT_PID = $originalParentPid
   if ($uninstaller -and (Test-Path $uninstaller -PathType Leaf)) {
-    Start-Process -FilePath $uninstaller -ArgumentList @('/S', "_?=$installRoot") -Wait | Out-Null
+    Start-Process -FilePath $uninstaller -ArgumentList @('/S', "_?=$installRoot") -WindowStyle Hidden -Wait | Out-Null
   }
   Remove-Item -Recurse -Force $installRoot, $workspace, $isolatedAppData -ErrorAction SilentlyContinue
 }

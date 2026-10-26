@@ -15,7 +15,12 @@
 .work-mode__duration input{box-sizing:border-box;width:76px;min-width:0;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;}
 .work-mode__display input{accent-color:var(--accent);}
 .work-mode__actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+.work-mode__lid{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin:-4px 0 6px 22px;}
+.work-mode__lid .work-mode__revoke{color:var(--ink-2);}
 .work-mode__panel small{display:block;font-size:10px;line-height:1.6;color:var(--ink-2);}
+.work-mode__screen{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
+.work-mode__screen strong{display:flex;align-items:center;gap:6px;}
+.work-mode__screen button{margin:4px 0;}
 .work-mode button:focus-visible,.work-mode input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 .work-mode button:disabled{opacity:.5;cursor:wait;}
 /* In the sidebar the toolbar has no side padding of its own, so the trigger's border sat on x=0 and read as

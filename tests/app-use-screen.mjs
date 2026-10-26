@@ -62,7 +62,9 @@ try{
  const transport=async r=>{const reply=await fetch('/__threads',{method:'POST',body:JSON.stringify(r)});const value=await reply.json();if(!reply.ok)throw Error(value.error);return value;};
  function App(){const [open,setOpen]=React.useState(false),[prepared,setPrepared]=React.useState(false),[use,setUse]=React.useState(false);return use?React.createElement(CommunityWorkspace,{channels:[{id:'local',label:'테스트 Mac',projects:async()=>projects.map(p=>({targetId:p.id,label:p.name,useServices:['default']})),transport}],onOpenWorkroom:()=>{throw Error('Unexpected DEV open');}}):React.createElement(React.Fragment,null,
  React.createElement(WorkroomSessionDirectory,{projects:projects.map(p=>({targetId:p.id,label:p.name})),onPrepareUse:()=>setOpen(true),visible:true}),prepared&&React.createElement('p',{role:'status'},'워크룸 준비 요청 확인'),prepared&&React.createElement('button',{onClick:()=>setUse(true)},'앱 기능 사용'),open&&React.createElement(Setup,{projects,initialProjectId:${JSON.stringify(id)},onWorkroom:(targetId,title,prompt)=>{window.prepared={targetId,title,prompt};setPrepared(true);},onClose:()=>setOpen(false)}));}
- ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));</script>`;
+ const root=ReactDOM.createRoot(document.getElementById('root'));root.render(React.createElement(App));
+ // A phone or another Mac's channel: USE runs only for this Mac's local owner, so it is not offered there.
+ window.renderPeerChannel=()=>root.render(React.createElement(CommunityWorkspace,{channels:[{id:'peer',label:'다른 기기',productUse:false,projects:async()=>projects.map(p=>({targetId:p.id,label:p.name,useServices:['default']})),transport}],onOpenWorkroom:()=>{}}));</script>`;
  await context.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!==origin)return route.abort();return url.pathname==='/__app-use'?route.fulfill({contentType:'text/html',body:html}):route.continue();});
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(20000);await page.goto(origin+'/__app-use');
  await page.getByRole('button',{name:'USE 준비',exact:true}).click();await page.getByTestId('service-use-readiness').waitFor();
@@ -73,7 +75,15 @@ try{
  assert.equal(await page.evaluate(()=>Object.values(localStorage).concat(Object.values(sessionStorage)).join('').includes('ATZUSE1.fixture-code')),false);
  await page.getByRole('button',{name:'USE 준비 닫기',exact:true}).click();await page.getByRole('button',{name:'앱 기능 사용',exact:true}).click();
  await page.getByLabel('기준 프로젝트').selectOption('use:'+id+':default');await page.getByLabel('USE 앱 동작').waitFor();assert.equal(await page.getByLabel('USE 운영 도구').locator('option').count(),1);assert.equal(await page.getByLabel('USE 앱 동작').inputValue(),'report.create');assert.equal(await page.getByText('승인된 폰에 전달',{exact:true}).count(),0);
- await page.getByLabel('USE 주제').fill('이번 주 학습 결과');await page.getByLabel('프로젝트에 맡길 업무').fill('보고서를 만들어줘');await page.getByRole('button',{name:'업무 맡기기',exact:true}).click();await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('선택한 앱의 실제 테스트 동작 완료',{exact:true}).waitFor();
+ assert.equal(await page.getByTestId('project-state-tools').count(),0);
+ // A generic app action has no material or request IDs, so the form does not point at them.
+ assert.equal(await page.getByText('자료 ID와 요청 ID는',{exact:false}).count(),0);
+ // The action's own fields carry the request; the memo is optional and an empty one records the action label.
+ await page.getByLabel('USE 주제').fill('이번 주 학습 결과');assert.equal(await page.getByLabel('USE 메모 (선택)').inputValue(),'');assert.ok(await page.getByRole('button',{name:'업무 맡기기',exact:true}).isEnabled());
+ await page.getByRole('button',{name:'업무 맡기기',exact:true}).click();await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('선택한 앱의 실제 테스트 동작 완료',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('heading',{name:'보고서 만들기',exact:true}).count(),1);
+ await page.evaluate(()=>window.renderPeerChannel());await page.getByLabel('기준 프로젝트').waitFor();await page.getByLabel('프로젝트에 맡길 업무').waitFor();
+ assert.deepEqual(await page.getByLabel('기준 프로젝트').locator('option').evaluateAll(o=>o.map(e=>e.value).filter(v=>v.startsWith('use:'))),[]);assert.equal(await page.getByLabel('업무 역할').count(),0);
  assert.equal(effects.filter(e=>e.id===id).length,1);assert.equal(effects.filter(e=>e.id===other).length,0);assert.equal(terminalStarts,0);assert.deepEqual(errors,[]);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=402));
  console.log(engineName+': Workroom USE preparation, generic connection and app-specific form passed; no live CLI or app');
  }finally{await context.close();}}finally{await browser.close();}

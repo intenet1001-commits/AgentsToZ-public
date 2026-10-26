@@ -83,6 +83,14 @@ describe('UI glossary', () => {
     expect(app).toContain('label="아젠투지"');
   });
 
+  // UX audit 2026-10-25: channel-health messages sent people to a 「운영 프로필 패널」 that no screen is called.
+  test('messages name 도구 및 설정 → 아젠투지 설정, never a 운영 프로필 패널', () => {
+    const offenders = sourceFiles()
+      .filter(file => !SQL_COPY.test(file))
+      .flatMap(file => visibleSegmentsWith(read(file), /운영 프로필 패널/).map(segment => `${file}: ${segment.trim()}`));
+    expect(offenders).toEqual([]);
+  });
+
   test('the voice panel never prints the runtime label «AgentsToZ OPS» raw', () => {
     // The runtime keeps 'AgentsToZ OPS' as its internal target label; every place the
     // panel prints a session or target label must go through voiceTargetDisplayLabel.

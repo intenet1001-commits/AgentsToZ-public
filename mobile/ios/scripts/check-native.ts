@@ -20,13 +20,21 @@ async function command(args: string[], input?: string, timeoutMs = 120_000) {
 function check(value: unknown, label: string): asserts value { if (!value) throw Error(label); }
 try {
   const sourceDir = join(packagePath, 'Sources/AgentsToZCore');
+  const checkDir = join(packagePath, 'Tests/AgentsToZCoreTests');
+  const swiftFiles = (dir: string) => readdirSync(dir).filter(n => n.endsWith('.swift')).sort().map(n => join(dir, n));
+  // Every check file, so a new one (ScreenViewportTests.swift) cannot be left out of the run.
   const compiled = await command(['swiftc', '-D', 'CORE_CHECKS', '-parse-as-library',
-    ...readdirSync(sourceDir).filter(n => n.endsWith('.swift')).sort().map(n => join(sourceDir, n)),
-    join(packagePath, 'Tests/AgentsToZCoreTests/RemoteTests.swift'), '-o', join(temporary, 'checks')]);
+    ...swiftFiles(sourceDir), ...swiftFiles(checkDir), '-o', join(temporary, 'checks')]);
   check(compiled.code === 0, 'Swift compilation failed: ' + compiled.err);
   const checks = await command([join(temporary, 'checks')]);
   check(checks.code === 0, 'Native contract regression failed');
   console.log(checks.out.trim());
+  // AgentsToZ Screen's core, which the app links as a local package (native/screen-control): the key exchange and
+  // version negotiation, the session's control messages and the viewer's Mac state, over real 127.0.0.1 TCP.
+  const screen = await command([process.execPath, join(root, 'scripts/check-screen-control.ts')], undefined, 300_000);
+  check(screen.code === 0, 'Screen-control checks failed: ' +
+    screen.out.split('\n').filter(line => line.startsWith('FAIL')).join('\n') + screen.err);
+  console.log(screen.out.split('\n').filter(line => line && !line.startsWith('pass')).join('\n'));
   const build = await command(['swift', 'build', '--package-path', packagePath, '--product', 'RemoteProbe']);
   check(build.code === 0, 'Native transport build failed: ' + build.err);
   const bin = await command(['swift', 'build', '--package-path', packagePath, '--show-bin-path']);

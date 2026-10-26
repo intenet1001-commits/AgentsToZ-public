@@ -10,7 +10,8 @@ import {build, createServer, type ViteDevServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const suite = process.argv[2] ?? 'workroom';
-if (!['workroom', 'orchestration', 'tester', 'mobile', 'performance', 'memory-status', 'memory-journey', 'first-project', 'app-language', 'appearance-settings', 'prompt-origin', 'user-memory'].includes(suite)) throw Error('Unknown web suite');
+if (!['workroom', 'orchestration', 'tester', 'mobile', 'mobile-terminal', 'mobile-terminal-full', 'performance', 'memory-status', 'memory-journey', 'first-project', 'app-language', 'appearance-settings', 'prompt-origin', 'user-memory'].includes(suite)) throw Error('Unknown web suite');
+const mobileTerminal = suite === 'mobile-terminal' || suite === 'mobile-terminal-full';
 const temporary = mkdtempSync(join(tmpdir(), 'agentstoz-maintainer-web-'));
 const evidence = join(root, '.agentstoz/maintainer');
 mkdirSync(evidence, {recursive:true, mode:0o700});
@@ -18,6 +19,8 @@ mkdirSync(evidence, {recursive:true, mode:0o700});
 for (const key of Object.keys(process.env)) if (key.startsWith('VITE_')) delete process.env[key];
 process.env.VITE_SUPABASE_URL = 'https://workspace-fixture.supabase.co';
 process.env.VITE_SUPABASE_ANON_KEY = 'fixture-anon-key';
+// The encrypted relay/layout fixture routes this exact synthetic host and seeds its auth storage key.
+if (mobileTerminal) relayFixtureEnvironment();
 const envDir = join(temporary, 'empty-env'); mkdirSync(envDir);
 let vite: ViteDevServer | undefined;
 let child: ChildProcess | undefined;
@@ -62,15 +65,12 @@ async function portalBuild() {
     build:{outDir:dist,emptyOutDir:true},logLevel:'warn'});
   return dist;
 }
-try {
-  if (suite==='memory-status'||suite==='first-project') {
-    const dist=join(temporary,'desktop');
-    await build({configFile:join(root,'vite.config.ts'),configLoader:'runner',root,envDir,mode:'maintainer-test',
-      build:{outDir:dist,emptyOutDir:true},logLevel:'warn'});
-    if(suite==='first-project') await run('desktop-first-project-and-OPS', ['bun','tests/onboarding-first-project-app-ui.mjs',dist]);
-    else await run('desktop-project-memory-status-retry', ['bun','tests/project-memory-hung-sidecar-ui.mjs',dist,
-        join(root,'.agentstoz','maintainer','ui-evidence')]);
-  } else if (suite==='workroom'||suite==='orchestration'||suite==='tester'||suite==='appearance-settings'||suite==='app-language'||suite==='prompt-origin'||suite==='user-memory'||suite==='memory-journey') {
+function relayFixtureEnvironment() {
+  process.env.VITE_SUPABASE_URL = 'https://fixture-offline.supabase.co';
+  process.env.VITE_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImZpeHR1cmUiLCJpYXQiOjAsImV4cCI6OTk5OTk5OTk5OX0.fixture-signature';
+}
+async function ownedViteOrigin() {
+  if (!vite) {
     vite=await createServer({configFile:join(root,'vite.config.ts'),configLoader:'runner',root,envDir,mode:'maintainer-test',
       // Keep Vite's dependency URL shape for the fixtures and Babel's vendor
       // exclusion, while owning a different cache from the user's dev server.
@@ -80,11 +80,35 @@ try {
       });}}],
       server:{host:'127.0.0.1',port:0,strictPort:false,watch:{ignored:['**/.agentstoz/**','**/mobile/ios/build/**']}}});
     await vite.listen();
-    const address=vite.httpServer!.address(); if(!address||typeof address==='string')throw Error('Missing owned fixture address');
-    const origin=`http://127.0.0.1:${address.port}`;
-    if(address.port===3001)throw Error('Fixture must not use the live API port');
+  }
+  const address=vite.httpServer!.address(); if(!address||typeof address==='string')throw Error('Missing owned fixture address');
+  const origin=`http://127.0.0.1:${address.port}`;
+  if(address.port===3001)throw Error('Fixture must not use the live API port');
+  return origin;
+}
+async function remoteTerminalChecks(full: boolean) {
+  relayFixtureEnvironment();
+  const dist=await portalBuild(), origin=await ownedViteOrigin();
+  // Normal: phone+iPad in both engines; full: every declared size, desktop and recovery/history case.
+  const matrix:Record<string,string>=full?{}:{PHONE_LAYOUT_SIZES:'390x844,1180x820',PHONE_LAYOUT_DESKTOP:'0',PHONE_LAYOUT_REVIEW:'0'};
+  await run('remote-phone-layout', ['bun','tests/remote-phone-layout.e2e.mjs',dist,join(evidence,'remote-phone-layout')],matrix,900_000);
+  await run('remote-workroom-ios-zoom', ['node','tests/remote-workroom-ios-zoom.e2e.mjs',origin]);
+}
+try {
+  if(mobileTerminal) await run('workroom-number-keys', ['node','tests/workroom-number-keys.e2e.mjs']);
+  if (suite==='memory-status'||suite==='first-project') {
+    const dist=join(temporary,'desktop');
+    await build({configFile:join(root,'vite.config.ts'),configLoader:'runner',root,envDir,mode:'maintainer-test',
+      build:{outDir:dist,emptyOutDir:true},logLevel:'warn'});
+    if(suite==='first-project') await run('desktop-first-project-and-OPS', ['bun','tests/onboarding-first-project-app-ui.mjs',dist]);
+    else await run('desktop-project-memory-status-retry', ['bun','tests/project-memory-hung-sidecar-ui.mjs',dist,
+        join(root,'.agentstoz','maintainer','ui-evidence')]);
+  } else if (suite==='workroom'||suite==='orchestration'||suite==='tester'||suite==='appearance-settings'||suite==='app-language'||suite==='prompt-origin'||suite==='user-memory'||suite==='memory-journey'||mobileTerminal) {
+    const origin=await ownedViteOrigin();
     const environment={WORKROOM_TEST_ORIGIN:origin,WORKROOM_USABILITY_ORIGIN:origin,INTERNET_APPROVAL_TEST_ORIGIN:origin,AI_WORK_REQUEST_ORIGIN:origin};
-    if(suite==='memory-journey') {
+    if(mobileTerminal) {
+      await remoteTerminalChecks(suite==='mobile-terminal-full');
+    } else if(suite==='memory-journey') {
       await run('project-memory-first-save-and-recovery', ['node','tests/project-memory-journey-ui.mjs',origin]);
       await run('precompaction-recovery-consent-and-isolation', ['node','tests/recovery-checkpoint-ui.mjs',origin]);
     } else if(suite==='user-memory') {
@@ -111,6 +135,8 @@ try {
       await run('save-before-close', ['node','tests/workroom-session-footer.e2e.mjs'],environment);
       await run('workroom-usability', ['node','tests/workroom-usability.e2e.mjs'],environment);
       await run('terminal-rendering', ['node','tests/workroom-rendering.e2e.mjs'],environment);
+      await run('workroom-browser-layout', ['bun','tests/workroom-browser-layout.mjs']);
+      await run('workroom-browser-craft', ['bun','tests/workroom-browser-craft.mjs']);
       await run('internet-grant-dialog', ['node','tests/internet-workroom-approval.e2e.mjs'],environment);
     } else {
       await run('ai-orchestration', ['node','tests/ai-work-request.e2e.mjs'],environment);
@@ -143,6 +169,7 @@ try {
       await run('mobile-project-create', ['node','tests/remote-project-create-lan.e2e.mjs'],environment);
       await run('mobile-connection-safety', ['bun','tests/remote-connection-settings-ui.mjs'],
         {SCREENSHOT_DIR:join(evidence,'connection-safety-ui')});
+      await remoteTerminalChecks(true);
     } else {
       staticServer=createHttpServer(async (request,response)=>{
         const pathname=new URL(request.url ?? '/', 'http://127.0.0.1').pathname;

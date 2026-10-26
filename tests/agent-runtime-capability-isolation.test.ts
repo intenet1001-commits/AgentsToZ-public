@@ -613,10 +613,13 @@ describe('Agent Runtime bundled-sidecar capability isolation', () => {
       const own=await runtimeRequest({baseUrl,path,method:'POST',body});expect(own.response.status).toBe(409);expect(JSON.stringify(own.body)).not.toContain('synthetic-private-web-json');
     }
 
-    for(const path of ['/api/agent-runtime/terminals','/api/agent-runtime/terminals/access','/api/agent-runtime/quick-labels']) {
-      const body=path.endsWith('/terminals')?{operation:'list',requestId:crypto.randomUUID()}:{};
+    // 「Hermes · Claude/Codex」 (src/hermesVariants.ts) is read on its own local path, under the same authority.
+    for(const path of ['/api/agent-runtime/terminals','/api/agent-runtime/terminals/access','/api/agent-runtime/quick-labels','/api/agent-runtime/workroom-teams','/api/agent-runtime/hermes-variants']) {
+      const body=path.endsWith('/terminals')?{operation:'list',requestId:crypto.randomUUID()}:path.endsWith('workroom-teams')?{sessionId:'session_fixture_1',git:false}:{};
       const own=await runtimeRequest({baseUrl,path,method:'POST',body});
       expect(own.response.status).toBe(path.endsWith('quick-labels')?400:200);
+      if(path.endsWith('hermes-variants'))expect((own.body as any).items.map((item:any)=>item.variant)).toEqual(['claude','codex']);
+      if(path.endsWith('workroom-teams'))expect(own.body).toEqual({teams:[]});
       for(const capability of [null,WHAT_I_SAID_CAPABILITY,REMOTE_CONTROL_CAPABILITY]) {
         expect((await runtimeRequest({baseUrl,path,method:'POST',body,capability})).response.status).toBe(403);
       }

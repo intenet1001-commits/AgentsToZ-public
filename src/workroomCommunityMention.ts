@@ -34,6 +34,8 @@ export interface CommunityMentionDeviceProjects extends CommunityMentionDevice {
 export interface CommunityMentionTargets {
   local: readonly WorkroomMentionProject[];
   devices: readonly CommunityMentionDeviceProjects[];
+  /** `false` when these projects belong to a Mac driven from elsewhere: a USE run happens only on its own Mac. */
+  localRunsUse?: boolean;
 }
 
 const projectKey = (value: string) => value.normalize('NFKC').toLocaleLowerCase().trim();
@@ -103,6 +105,9 @@ export function communityMentionState(
   const device = prefix?.device ?? null;
   const pool = device ? device.projects ?? [] : targets.local;
   const query = projectKey(mention.query);
+  // `@<project>-USE` runs the app on that Mac under its own user, so only this Mac's Workroom offers it; `#` (read
+  // its USE memory) stays offered for every device.
+  const runsUse = mention.kind === 'reference' || (!device && targets.localRunsUse !== false);
   return {
     kind: mention.kind,
     start: prefix ? prefix.start : mention.start,
@@ -111,7 +116,8 @@ export function communityMentionState(
     loading: !!device && !device.projects && !device.error,
     error: device?.error ?? '',
     hasMore: !!device?.hasMore,
-    candidates: projectMentionChoices(pool).filter(project => !query || projectKey(project.label).includes(query)).slice(0, limit),
+    candidates: projectMentionChoices(pool).filter(project => (runsUse || project.executionRole !== 'use')
+      && (!query || projectKey(project.label).includes(query))).slice(0, limit),
   };
 }
 

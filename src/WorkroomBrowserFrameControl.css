@@ -1,0 +1,205 @@
+/* The 워크룸 browser's control bar, AI activity drawer, state cards and saved tasks (K2).
+   Tokens only (src/appearanceTokens.css): violet = AI, accent = focus, danger = errors and destructive verbs,
+   warn = waiting/popup/unknown, info = notices. Alpha through rgb(var(--x-rgb) / a). Motion durations come from the
+   frame's --wb-* properties when it sets them, with the same values as fallbacks. Only colour, opacity, outline and
+   transform move; nothing here animates a size or position the native page follows. */
+
+.wb-control,.wb-empty,.wb-state-card,.wb-placeholder{
+ --wbc-fast:var(--wb-fast,120ms);--wbc-med:var(--wb-med,160ms);--wbc-ease:var(--wb-ease,cubic-bezier(.2,0,0,1));
+ font-family:var(--font-sans);
+}
+.wb-control [hidden],.wb-empty [hidden]{display:none !important}
+.wb-spin{animation:wbc-spin 800ms linear infinite}
+@keyframes wbc-spin{to{transform:rotate(360deg)}}
+
+/* ── Buttons: one primary per state, ghosts for the rest ─────────────────────────── */
+.wb-control-btn{
+ display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;
+ height:26px;padding:0 10px;border:1px solid var(--line-2);border-radius:6px;
+ background:transparent;color:var(--ink-2);font:inherit;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;
+ transition:background-color var(--wbc-fast) var(--wbc-ease),border-color var(--wbc-fast) var(--wbc-ease),color var(--wbc-fast) var(--wbc-ease),opacity var(--wbc-fast) var(--wbc-ease);
+}
+.wb-control-btn>svg{flex:none}
+.wb-control-btn:hover:not(:disabled){background:var(--sunken);color:var(--ink)}
+.wb-control-btn:focus-visible,.wb-control-icon:focus-visible,.wb-source-switch>button:focus-visible,.wb-empty-chip:focus-visible,.wb-control summary:focus-visible,.wb-recent-summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wb-control-btn:disabled{opacity:.45;cursor:not-allowed}
+.wb-control-btn[aria-busy=true]:disabled{opacity:.8;cursor:progress}
+/* AI: the colour the app keeps for AI. */
+.wb-control-btn[data-variant=ai]{background:var(--violet-soft);border-color:rgb(var(--violet-rgb) / .45);color:var(--violet);font-weight:700}
+.wb-control-btn[data-variant=ai]:hover:not(:disabled){background:rgb(var(--violet-rgb) / .2);border-color:var(--violet);color:var(--violet)}
+/* Human: filled ink, like the Workroom's start button. */
+.wb-control-btn[data-variant=human]{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:700}
+.wb-control-btn[data-variant=human]:hover:not(:disabled){background:var(--ink);color:var(--bg);opacity:.88}
+.wb-control-btn[data-variant=danger]{background:var(--danger-soft);border-color:rgb(var(--danger-rgb) / .45);color:var(--danger);font-weight:700}
+.wb-control-btn[data-variant=danger]:hover:not(:disabled){background:rgb(var(--danger-rgb) / .2);color:var(--danger)}
+.wb-control-btn[data-variant=warn]{background:var(--warn-soft);border-color:rgb(var(--warn-rgb) / .45);color:var(--warn);font-weight:700}
+.wb-control-btn[data-variant=warn]:hover:not(:disabled){background:rgb(var(--warn-rgb) / .2);color:var(--warn)}
+.wb-control-btn[data-variant=ghost-ai]{border-color:rgb(var(--violet-rgb) / .35);color:var(--violet)}
+.wb-control-btn[data-variant=ghost-ai]:hover:not(:disabled){background:var(--violet-soft);color:var(--violet)}
+.wb-control-btn[data-variant=ghost-warn]{border-color:rgb(var(--warn-rgb) / .4);color:var(--warn)}
+.wb-control-btn[data-variant=ghost-warn]:hover:not(:disabled){background:var(--warn-soft);color:var(--warn)}
+.wb-control-btn[data-variant=ghost-danger]{border-color:transparent;color:var(--ink-3)}
+.wb-control-btn[data-variant=ghost-danger]:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
+.wb-control-btn[data-icon-only]{width:26px;padding:0}
+.wb-control-btn[data-icon-only]>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.wb-control-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink-3);cursor:pointer;transition:background-color var(--wbc-fast) var(--wbc-ease),color var(--wbc-fast) var(--wbc-ease)}
+.wb-control-icon:hover{background:var(--sunken);color:var(--ink)}
+
+/* ── The bar ─────────────────────────────────────────────────────────────────────── */
+.wb-control{display:flex;flex-direction:column;min-width:0;color:var(--ink);font-size:12px;container:wb-control / inline-size}
+.wb-control-bar{
+ display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-height:36px;padding:4px 8px;
+ background:var(--raised);border-top:1px solid var(--line);
+ transition:background-color var(--wbc-med) var(--wbc-ease),box-shadow var(--wbc-med) var(--wbc-ease);
+}
+/* While the AI holds the page the bar carries a faint violet wash and edge; it goes the moment a person takes over. */
+.wb-control[data-tone=ai] .wb-control-bar{background:linear-gradient(rgb(var(--violet-rgb) / .07),rgb(var(--violet-rgb) / .07)),var(--raised);box-shadow:inset 0 1px 0 rgb(var(--violet-rgb) / .35)}
+.wb-control[data-tone=warn] .wb-control-bar{background:linear-gradient(rgb(var(--warn-rgb) / .07),rgb(var(--warn-rgb) / .07)),var(--raised);box-shadow:inset 0 1px 0 rgb(var(--warn-rgb) / .35)}
+.wb-control[data-tone=danger] .wb-control-bar{background:linear-gradient(rgb(var(--danger-rgb) / .07),rgb(var(--danger-rgb) / .07)),var(--raised);box-shadow:inset 0 1px 0 rgb(var(--danger-rgb) / .35)}
+.wb-control-line{display:flex;align-items:center;gap:8px;flex:1 1 160px;min-width:0;min-height:26px}
+.wb-control-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--ink-3);transition:background-color var(--wbc-med) var(--wbc-ease)}
+.wb-control[data-tone=ai] .wb-control-dot{background:var(--violet);box-shadow:0 0 0 3px rgb(var(--violet-rgb) / .2)}
+.wb-control[data-tone=warn] .wb-control-dot{background:var(--warn)}
+.wb-control[data-tone=danger] .wb-control-dot{background:var(--danger)}
+.wb-control[data-tone=info] .wb-control-dot{background:var(--info)}
+.wb-control-glyph{flex:none;color:var(--ink-3)}
+.wb-control[data-tone=ai] .wb-control-glyph{color:var(--violet)}
+.wb-control[data-tone=warn] .wb-control-glyph{color:var(--warn)}
+.wb-control[data-tone=danger] .wb-control-glyph{color:var(--danger)}
+.wb-control[data-tone=info] .wb-control-glyph{color:var(--info)}
+.wb-control-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:var(--ink)}
+.wb-control[data-tone=ai] .wb-control-label{color:var(--violet)}
+.wb-control-detail{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink-2)}
+/* A message (an error, a popup, a wait) is a sentence the person has to read: it may take a second line, never a third. */
+.wb-control:not([data-kind=owner]) .wb-control-label{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;line-height:1.4;font-weight:500;color:var(--ink)}
+.wb-control:not([data-kind=owner]) .wb-control-line{padding:2px 0}
+.wb-control-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none;max-width:100%}
+.wb-control-toggle .wb-disclosure-chevron{transition:transform var(--wbc-med) var(--wbc-ease)}
+.wb-control-toggle[aria-expanded=true]{background:var(--sunken);color:var(--ink)}
+.wb-control-toggle[aria-expanded=true] .wb-disclosure-chevron{transform:rotate(180deg)}
+.wb-control-toggle[data-attention]{border-color:rgb(var(--warn-rgb) / .45);color:var(--warn)}
+.wb-control-toggle[data-attention]::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--warn)}
+.wb-control-toggle-count{display:none;font-variant-numeric:tabular-nums}
+@container wb-control (max-width:520px){
+ .wb-control-toggle-text{display:none}
+ .wb-control-toggle-count{display:inline}
+ .wb-control-actions{gap:6px}
+}
+
+/* My Chrome's controls until they move into the page area (H1). */
+.wb-control-source{display:flex;flex-direction:column;gap:8px;padding:8px;border-top:1px solid var(--line)}
+.wb-control-source:empty{display:none}
+.wb-control-source-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/* Messages under the bar (a refused request, a notice). */
+.wb-control-notes{display:flex;flex-direction:column}
+.workroom-browser-panel .wb-control-note,.wb-control-note{display:flex;align-items:flex-start;gap:8px;margin:0;padding:6px 8px;border-top:1px solid var(--line);font-size:12px;line-height:1.45;color:var(--ink-2)}
+.wb-control-note>svg{flex:none;margin-top:1px}
+.wb-control-note[data-tone=danger]{background:var(--danger-soft);color:var(--ink)}
+.wb-control-note[data-tone=danger]>svg{color:var(--danger)}
+.wb-control-note[data-tone=info]>svg{color:var(--info)}
+
+/* ── The AI activity drawer: in flow above the bar, so the page's bottom edge moves and nothing covers it ─────── */
+.wb-activity{display:flex;flex-direction:column;gap:6px;max-height:min(40vh,320px);overflow-y:auto;overscroll-behavior:contain;padding:6px 8px 8px;background:var(--surface);border-top:1px solid var(--line)}
+.wb-activity-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.wb-activity-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:start;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px;line-height:1.45;color:var(--ink)}
+.wb-activity-row:hover{background:var(--raised)}
+.wb-activity-icon{margin-top:1px;color:var(--ink-3)}
+.wb-activity-row[data-tone=warn]{background:var(--warn-soft);box-shadow:inset 2px 0 0 var(--warn)}
+.wb-activity-row[data-tone=warn] .wb-activity-icon{color:var(--warn)}
+.wb-activity-row[data-tone=info] .wb-activity-text{color:var(--ink-2)}
+.wb-activity-main{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.wb-activity-text{overflow-wrap:anywhere}
+.wb-activity-badge{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:9px;background:var(--ok-soft);color:var(--ok);font-size:11px;font-weight:600}
+.wb-activity-actions{display:flex;flex-wrap:wrap;gap:8px}
+.wb-activity-time{flex:none;font-size:11.5px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.workroom-browser-panel .wb-activity-empty,.wb-activity-empty{margin:0;padding:6px 8px;font-size:12px;color:var(--ink-3)}
+.wb-activity-disclosure{border-radius:6px}
+.wb-activity-disclosure>summary,.wb-recent-summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;user-select:none}
+.wb-activity-disclosure>summary::-webkit-details-marker,.wb-recent-summary::-webkit-details-marker{display:none}
+.wb-activity-disclosure>summary{min-height:28px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;color:var(--ink-2)}
+.wb-activity-disclosure>summary:hover{background:var(--raised);color:var(--ink)}
+.wb-activity-caption{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:11.5px;color:var(--ink-3)}
+.wb-disclosure-chevron{flex:none;margin-left:auto;color:var(--ink-3);transition:transform var(--wbc-med) var(--wbc-ease)}
+details[open]>summary>.wb-disclosure-chevron{transform:rotate(180deg)}
+.wb-activity .wb-activity-observation{margin:4px 0 0;max-height:240px;overflow:auto;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--sunken);color:var(--ink-2);font:12px/1.5 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-activity-technical{display:flex;flex-direction:column;gap:2px;margin:4px 0 0;padding:6px 10px;border-radius:6px;background:var(--sunken)}
+.wb-activity-technical>code{font:11.5px/1.5 var(--font-mono);color:var(--ink-3);overflow-wrap:anywhere}
+
+/* ── State cards in the page stage: start, unavailable, page error ───────────────── */
+.wb-empty{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;max-width:420px;margin:0 auto;padding:24px 16px;box-sizing:border-box}
+.wb-state-card{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;max-width:420px;margin:0 auto;text-align:center;box-sizing:border-box}
+.wb-unavailable,.wb-page-error{padding:32px 16px}
+.wb-page-error{max-width:360px}
+.wb-state-tile{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;margin-bottom:4px;border:1px solid var(--line);border-radius:10px;background:var(--raised);color:var(--ink-2)}
+.wb-state-tile[data-tone=danger]{border-color:rgb(var(--danger-rgb) / .3);background:var(--danger-soft);color:var(--danger)}
+.wb-empty-start .wb-state-tile{color:var(--accent)}
+.workroom-browser-panel .wb-state-title,.wb-state-title{margin:0;font-size:15px;font-weight:700;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
+.workroom-browser-panel .wb-state-body,.wb-state-body{margin:0;font-size:13px;line-height:1.5;color:var(--ink-2);text-wrap:pretty}
+.wb-state-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px}
+.wb-state-actions>.wb-control-btn{height:30px;padding:0 12px}
+.wb-empty-chips{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:8px 0 0;padding:0}
+.wb-empty-chip{display:inline-flex;align-items:center;gap:6px;max-width:260px;height:28px;padding:0 12px;border:1px solid var(--line-2);border-radius:14px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background-color var(--wbc-fast) var(--wbc-ease),border-color var(--wbc-fast) var(--wbc-ease)}
+.wb-empty-chip>svg{flex:none;color:var(--ink-3)}
+.wb-empty-chip>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-empty-chip:hover:not(:disabled){background:var(--raised);border-color:var(--accent-line)}
+.wb-empty-chip:disabled{opacity:.5;cursor:not-allowed}
+.wb-empty-chip[aria-pressed=true]{border-color:var(--accent-line);background:var(--accent-soft)}
+.wb-empty-chip .wb-empty-chip-meta{flex:none;font-weight:500;font-size:11.5px;color:var(--ink-3)}
+.wb-page-error-try{align-self:stretch;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--raised);text-align:left}
+.wb-page-error-try>h3{margin:0 0 4px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.wb-page-error-try>ul{margin:0;padding-left:18px;list-style:disc outside;font-size:12px;line-height:1.6;color:var(--ink-2)}
+.wb-page-error-try li::marker{color:var(--ink-3)}
+
+/* The source, as one segmented choice (the pressed pattern of workspaceDesign.css). */
+.wb-source-switch{display:inline-flex;gap:2px;height:28px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--sunken);box-sizing:border-box}
+.wb-source-switch>button{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--ink-2);font:inherit;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background-color var(--wbc-fast) var(--wbc-ease),color var(--wbc-fast) var(--wbc-ease)}
+.wb-source-switch>button:hover{color:var(--ink)}
+.wb-source-switch>button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line-2)}
+.workroom-browser-panel .wb-empty-chosen,.wb-empty-chosen{display:inline-flex;align-items:center;gap:6px;max-width:100%;margin:0;padding:4px 10px;border-radius:14px;background:var(--accent-soft);color:var(--ink);font-size:12px;font-weight:600}
+.wb-empty-chosen>svg{flex:none;color:var(--accent)}
+.wb-empty-chosen>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-empty-chosen .wb-empty-chosen-hint{font-weight:500;color:var(--ink-2)}
+
+/* ── 「최근 작업」 ───────────────────────────────────────────────────────────────── */
+.wb-recent{align-self:stretch;border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.wb-recent-summary{min-height:36px;padding:0 12px;font-size:12px;color:var(--ink-2)}
+.wb-recent-summary:hover{background:var(--raised)}
+.wb-recent-summary>svg:first-child{flex:none;color:var(--ink-3)}
+.wb-recent-heading{font-weight:700;color:var(--ink)}
+.wb-recent-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--sunken);font-size:11px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.wb-recent-more{margin-left:auto;font-weight:600}
+.wb-recent-summary>.wb-disclosure-chevron{margin-left:0}
+.wb-recent[open] .wb-recent-summary>.wb-disclosure-chevron{margin-left:auto}
+.wb-recent[open] .wb-recent-more{display:none}
+.wb-recent-list{border-top:1px solid var(--line)}
+.wb-recent-list>ul{list-style:none;margin:0;padding:4px}
+.wb-recent-card{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:56px;padding:8px;border-radius:8px;box-sizing:border-box}
+.wb-recent-card:hover{background:var(--raised)}
+.wb-recent-monogram{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--line-2);color:var(--ink-2);font-size:12px;font-weight:700}
+.wb-recent-body{display:flex;flex-direction:column;gap:2px;min-width:0;text-align:left}
+.wb-recent-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--ink)}
+.wb-recent-meta{display:flex;align-items:center;gap:6px;min-width:0;font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.wb-recent-meta>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wb-recent-chip{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:9px;background:var(--warn-soft);color:var(--warn);font-size:11px;font-weight:700}
+.workroom-browser-panel .wb-recent-note,.wb-recent-note{margin:0;padding:8px 12px 10px;font-size:11.5px;line-height:1.5;color:var(--ink-3);text-align:left}
+
+/* ── The placeholder under the native page ──────────────────────────────────────── */
+.wb-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:16px;text-align:center;pointer-events:none;color:var(--ink-3)}
+.wb-placeholder-title{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--ink-2)}
+.wb-placeholder-host{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3)}
+
+/* Korean breaks between words, not inside them; the other languages keep their own rules. */
+:lang(ko) .wb-state-title,:lang(ko) .wb-state-body,:lang(ko) .wb-activity-text,:lang(ko) .wb-control-note,:lang(ko) .wb-recent-note,:lang(ko) .wb-page-error-try,:lang(ko) .wb-control:not([data-kind=owner]) .wb-control-label{word-break:keep-all}
+
+/* ── Coarse pointers and narrow containers: 44px targets ─────────────────────────── */
+@media (max-width:640px),(pointer:coarse){
+ .wb-control-btn,.wb-control-icon,.wb-empty-chip,.wb-source-switch>button{min-height:44px}
+ .wb-control-btn[data-icon-only],.wb-control-icon{min-width:44px}
+ .wb-source-switch{height:auto}
+ .wb-activity-disclosure>summary,.wb-recent-summary{min-height:44px}
+}
+@media (prefers-reduced-motion:reduce){
+ .wb-spin{animation:none}
+ .wb-control-btn,.wb-control-icon,.wb-control-bar,.wb-control-dot,.wb-empty-chip,.wb-source-switch>button,.wb-disclosure-chevron{transition:none}
+}

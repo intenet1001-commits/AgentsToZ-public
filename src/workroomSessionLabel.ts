@@ -14,8 +14,17 @@ export interface WorkroomSessionLabelInput {
 export function workroomSessionLabels(
   sessions: readonly WorkroomSessionLabelInput[],
   projectLabel: (targetId: string) => string | undefined,
+  /**
+   * 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts): which variant a Hermes session was launched with,
+   * so two Hermes tabs of one project are told apart by what they run, not by a 「#2」. Host-only knowledge, read
+   * through the local variant view — it is never part of a session summary.
+   */
+  variantOf?: (sessionId: string) => string | null | undefined,
 ): Map<string, string> {
-  const base = (s: WorkroomSessionLabelInput) => `${projectLabel(s.targetId) ?? '프로젝트'} · ${s.agent}`;
+  const base = (s: WorkroomSessionLabelInput) => {
+    const variant = variantOf?.(s.id);
+    return `${projectLabel(s.targetId) ?? '프로젝트'} · ${s.agent}${variant ? ` · ${variant}` : ''}`;
+  };
   const groups = new Map<string, WorkroomSessionLabelInput[]>();
   for (const session of sessions) {
     const key = base(session);

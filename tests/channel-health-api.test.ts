@@ -52,7 +52,7 @@ test('channel health API reports honest states and the probe runs only list_proj
     // No profile and no controller pin: the real MCP starts and answers initialize,
     // but list_projects is refused — exactly what Claude itself would see.
     expect(body.probe.ok).toBe(false);
-    expect(body.probe.error).toContain('운영 프로필');
+    expect(body.probe.error).toContain('도구 및 설정 → 아젠투지 설정');
     expect(body.probe.serverVersion).toBe(health.appMcpVersion);
     expect(byId(body, 'mcp:claude')).toMatchObject({ state: 'configured-unresponsive', label: '설정됨 · 응답 없음' });
     // The probe result is remembered for the next read-only GET.

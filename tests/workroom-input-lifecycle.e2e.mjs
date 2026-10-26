@@ -5,6 +5,7 @@
  * Chromium CDP generates composition events; this does not replace a macOS IME check.
  */
 import assert from 'node:assert/strict';
+import {workroomBackgroundResponse} from './fixtures/workroom-runtime-background-mocks.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { chromium, webkit } from 'playwright';
@@ -89,6 +90,8 @@ async function fixture(options = {}) {
     if (url.pathname === '/__workroom-regression') return route.fulfill({ contentType: 'text/html', body: html });
     if (!url.pathname.startsWith('/api/')) return route.continue();
     const respond = body => route.fulfill({ json: body });
+    const background = workroomBackgroundResponse(url.pathname, request.method(), request.postDataJSON());
+    if (background) return respond(background);
     if (url.pathname === '/api/agent-runtime/targets') return respond({ protocolVersion: 'agentstoz-tasks-v2', complete: true, targets: projects.map(p => ({ ...p, projectTargetId: p.targetId, scope: 'main', branch: 'main', locked: false, worktreeCapable: true })) });
     if (url.pathname === '/api/agent-runtime/terminals/access') return respond({ connections: [] });
     if (url.pathname === '/api/agent-runtime/voice-settings' && request.method() === 'POST' && JSON.stringify(request.postDataJSON()) === JSON.stringify({operation:'status'})) return respond({supported:true,configured:false,model:'gemini-3.8-live',checkedAt:null,checkedModel:null});

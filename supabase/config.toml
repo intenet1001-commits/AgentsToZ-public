@@ -413,3 +413,8 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.project-memory-feed]
 verify_jwt = false
+
+[functions.screen-push]
+# AgentsToZ Screen notifications and remote stop. Every request is signed by a Mac or
+# device key and checked in the function; there is no Supabase user to put in a JWT.
+verify_jwt = false

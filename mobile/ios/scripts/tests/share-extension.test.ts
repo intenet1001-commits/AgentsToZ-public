@@ -59,7 +59,9 @@ test('the extension id and App Group follow the app bundle setting, so dev, UI-t
   }
   for(const config of configs(app.line)){
     expect(field(config,'PRODUCT_BUNDLE_IDENTIFIER')).toBe('"$(AGENTSTOZ_APP_BUNDLE_ID)"');
-    expect(field(config,'CODE_SIGN_ENTITLEMENTS')).toBe('App/AgentsToZMobile.entitlements');
+    // Through a setting only the app reads, so a build can pick the push entitlements without touching the extension.
+    expect(field(config,'CODE_SIGN_ENTITLEMENTS')).toBe('"$(AGENTSTOZ_APP_ENTITLEMENTS)"');
+    expect(field(config,'AGENTSTOZ_APP_ENTITLEMENTS')).toBe('App/AgentsToZMobile.entitlements');
   }
   for(const path of ['App/AgentsToZMobile.entitlements','ShareExtension/ShareExtension.entitlements'])
     expect(plist(path)['com.apple.security.application-groups']).toEqual(['group.$(AGENTSTOZ_APP_BUNDLE_ID)']);

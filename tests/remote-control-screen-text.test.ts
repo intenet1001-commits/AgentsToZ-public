@@ -90,6 +90,20 @@ describe('a sentence per action, one date format', () => {
     expect(isolated({ state: 'ready', pendingCount: 2, lastSavedAt: iso })).toBe(line);
     expect(opsStatusText({ state: 'ready', pendingCount: 0, lastSavedAt: 'not a date' })).toBe('운영기억 연결됨 · 저장 후보 0개');
   });
+
+  // UX audit 2026-10-25: a local-only Mac read 「운영기억 연결됨」 like a shared one. The DTO already carried backend
+  // and syncState; only this line ignored them. No DTO key is added.
+  test('the OPS line says whether the memory is this Mac only or shared', () => {
+    expect(opsStatusText({ state: 'ready', backend: 'app-data', syncState: 'not-configured', pendingCount: 1 })).toBe('운영기억 준비됨 · 이 Mac 전용 · 저장 후보 1개');
+    expect(opsStatusText({ state: 'ready', backend: 'control-folder', syncState: 'current', pendingCount: 0 })).toBe('운영기억 연결됨 · 다른 Mac과 공유 · 저장 후보 0개');
+    expect(opsStatusText({ state: 'ready', backend: 'control-folder', syncState: 'needs-attention', pendingCount: 0 })).toBe('운영기억 연결됨 · 동기화 확인 필요 · 저장 후보 0개');
+    expect(opsStatusText({ state: 'ready', backend: 'control-folder', syncState: null, pendingCount: 0 })).toBe('운영기억 연결됨 · 저장 후보 0개');
+    // Scope is only claimed for a ready memory.
+    expect(opsStatusText({ state: 'needs-attention', backend: 'app-data', syncState: 'current', pendingCount: 0 })).toBe('연결 확인 필요 · 저장 후보 0개');
+    expect(opsStatusText({ state: 'unconfigured', backend: null, syncState: null, pendingCount: 0 })).toBe('아젠투지 준비 필요 · 저장 후보 0개');
+    const isolated = new Function(`return (${opsStatusText.toString()})`)();
+    expect(isolated({ state: 'ready', backend: 'app-data', pendingCount: 1 })).toBe('운영기억 준비됨 · 이 Mac 전용 · 저장 후보 1개');
+  });
 });
 
 // Review of the 2026-10-16 copy fixes: the same-Wi‑Fi QR page still built its outcome by appending 「 완료」 to the

@@ -142,12 +142,19 @@ export function workroomSessionStateLabel(session: { state?: string; exitCode?: 
  * The OPS memory status line. An unknown state reads as 「상태 확인 필요」, never "undefined". The saved time is the
  * phone's one format (`phoneDateTime` in phoneTime.ts, written out here because the QR page embeds this alone —
  * a test keeps the two equal): `toLocaleString()` followed the device region and printed 「10/16/2026, 2:04:05 PM」.
+ * A ready memory also says whether other Macs share it, from fields the DTO already carries (`backend`, `syncState`):
+ * a local-only Mac used to read 「운영기억 연결됨」 as if it were shared (UX audit 2026-10-25).
  */
-export function opsStatusText(ops: { state?: string; pendingCount?: number; lastSavedAt?: string | null }): string {
+export function opsStatusText(ops: { state?: string; backend?: string | null; syncState?: string | null; pendingCount?: number; lastSavedAt?: string | null }): string {
   const labels: Record<string, string> = {
-    ready: '운영기억 연결됨', preparing: '준비 중', 'needs-attention': '연결 확인 필요', unconfigured: '프로필 준비 필요',
+    ready: '운영기억 연결됨', preparing: '준비 중', 'needs-attention': '연결 확인 필요', unconfigured: '아젠투지 준비 필요',
   };
-  const state = ops.state && Object.prototype.hasOwnProperty.call(labels, ops.state) ? labels[ops.state]! : '상태 확인 필요';
+  let state = ops.state && Object.prototype.hasOwnProperty.call(labels, ops.state) ? labels[ops.state]! : '상태 확인 필요';
+  if (ops.state === 'ready') {
+    if (ops.backend === 'app-data') state = '운영기억 준비됨 · 이 Mac 전용';
+    else if (ops.syncState === 'current') state += ' · 다른 Mac과 공유';
+    else if (ops.syncState === 'needs-attention') state += ' · 동기화 확인 필요';
+  }
   const at = ops.lastSavedAt ? new Date(ops.lastSavedAt) : null;
   const pad = (n: number) => String(n).padStart(2, '0');
   const saved = at && !Number.isNaN(at.getTime())

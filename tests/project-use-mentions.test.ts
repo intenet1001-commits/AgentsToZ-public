@@ -23,9 +23,15 @@ test('enabled USE appears beside its DEV in both @ and # without another project
  expect(suggestedWorkroomTargets('ShadowLoop-USE로 자료 만들어줘',projects).map(p=>p.label)).toEqual(['ShadowLoop-USE']);
  expect(suggestedWorkroomTargets('#ShadowLoop-USE 참고',projects)).toEqual([]);
 });
-test('another device supplies its own USE choices and # retains its parent grant and service identity',()=>{
- const state=communityMentionState('2호 @Shadow',12,{local:[],devices:[{deviceId:'device-two',label:'아젠투지2호',projects}]});
- expect(state?.candidates.map(p=>p.label)).toEqual(['ShadowLoop','ShadowLoop-USE']);
+test('another device offers its USE only as a # reference, and # retains its parent grant and service identity',()=>{
+ // A USE run happens on its own Mac under its own user; another Mac's @-route would always be refused there.
+ const devices=[{deviceId:'device-two',label:'아젠투지2호',projects}];
+ expect(communityMentionState('2호 @Shadow',12,{local:[],devices})?.candidates.map(p=>p.label)).toEqual(['ShadowLoop']);
+ expect(communityMentionState('2호 #Shadow',12,{local:[],devices})?.candidates.map(p=>p.label)).toEqual(['ShadowLoop','ShadowLoop-USE']);
+ // The same for a Mac driven from elsewhere: its own list arrives as `local`.
+ expect(communityMentionState('@Shadow',7,{local:projects,devices:[],localRunsUse:false})?.candidates.map(p=>p.label)).toEqual(['ShadowLoop']);
+ expect(communityMentionState('#Shadow',7,{local:projects,devices:[],localRunsUse:false})?.candidates.map(p=>p.label)).toEqual(['ShadowLoop','ShadowLoop-USE']);
+ expect(communityMentionState('@Shadow',7,{local:projects,devices:[]})?.candidates.map(p=>p.label)).toEqual(['ShadowLoop','ShadowLoop-USE']);
  const token='#아젠투지2호/ShadowLoop-USE';
  const result=communityReferencesFor([{deviceId:'device-two',targetId:projects[0]!.targetId,label:'ShadowLoop-USE',token,executionRole:'use',serviceKey:'default'}],token,'device-two');
  expect(result.references).toEqual([useReferenceId(projects[0]!.targetId)]);

@@ -15,9 +15,13 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 #[cfg(target_os = "macos")]
 mod macos_runtime_client_bridge;
 mod workroom_popout;
+mod workroom_browser;
+#[cfg(all(target_os="macos",feature="embedded-browser"))]
+thread_local! { static BROWSER_ENGINE: std::cell::RefCell<Option<agentstoz_workroom_browser::Engine>> = const { std::cell::RefCell::new(None) }; }
 mod workroom_drop;
 mod voice_popout;
 mod work_mode;
+mod screen_helper;
 mod main_window;
 mod portal_device_identity;
 #[cfg(windows)]
@@ -1075,17 +1079,20 @@ const AGENT_RUNTIME_CORRECTION_OUTCOMES_PATH: &str = "/api/agent-runtime/correct
 const AGENT_RUNTIME_CORRECTION_OUTCOMES_REQUEST_MAX_BYTES: usize = 8 * 1024;
 
 const AGENT_RUNTIME_BROWSER_CONTEXT_PATH: &str = "/api/agent-runtime/browser-context";
+const WORKROOM_BROWSER_PATH: &str = "/api/agent-runtime/workroom-browser";
 const AGENT_RUNTIME_PROJECT_STATE_PATH: &str = "/api/agent-runtime/project-state";
 const AGENT_RUNTIME_PROJECT_STATE_REQUEST_MAX_BYTES: usize = 4 * 1024;
 const AGENT_RUNTIME_PROJECT_STATE_RESPONSE_MAX_BYTES: usize = 32 * 1024;
 
 fn agent_runtime_response_max_bytes(path: &str) -> usize {
+    if path == WORKROOM_BROWSER_PATH { return 512 * 1024; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { 1024 * 1024 }
     else if path == AGENT_RUNTIME_PROJECT_STATE_PATH { AGENT_RUNTIME_PROJECT_STATE_RESPONSE_MAX_BYTES }
     else { AGENT_RUNTIME_RESPONSE_MAX_BYTES }
 }
 
 fn agent_runtime_request_max_bytes(path: &str) -> usize {
+    if path == WORKROOM_BROWSER_PATH { return 4096; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { 4096 }
     else if path == AGENT_RUNTIME_PROJECT_STATE_PATH { AGENT_RUNTIME_PROJECT_STATE_REQUEST_MAX_BYTES }
     else if path == AGENT_RUNTIME_IMAGE_PATH { AGENT_RUNTIME_IMAGE_REQUEST_MAX_BYTES }
@@ -1432,13 +1439,14 @@ fn is_agent_runtime_task_id(value: &str) -> bool {
 }
 
 fn is_allowed_agent_runtime_route(method: &str, path: &str) -> bool {
+    if path == WORKROOM_BROWSER_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_PROJECT_STATE_PATH { return method == "POST"; }
     if path == "/api/agent-runtime/voice-settings" { return method == "POST"; }
     if path == "/api/agent-runtime/tester" { return method == "POST"; }
     if path == AGENT_RUNTIME_APP_DISPATCH_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_CORRECTION_OUTCOMES_PATH { return method == "POST"; }
-    if matches!(path, "/api/agent-runtime/platform-cli" | "/api/agent-runtime/voice" | "/api/agent-runtime/terminals" | "/api/agent-runtime/terminals/access" | "/api/agent-runtime/terminals/accounts" | "/api/agent-runtime/terminals/history" | "/api/agent-runtime/terminals/memory" | "/api/agent-runtime/terminals/images" | "/api/agent-runtime/quick-labels" | "/api/agent-runtime/helpdesk" | "/api/agent-runtime/cs-duty") { return method == "POST"; }
+    if matches!(path, "/api/agent-runtime/platform-cli" | "/api/agent-runtime/voice" | "/api/agent-runtime/terminals" | "/api/agent-runtime/terminals/access" | "/api/agent-runtime/terminals/accounts" | "/api/agent-runtime/terminals/history" | "/api/agent-runtime/terminals/memory" | "/api/agent-runtime/terminals/images" | "/api/agent-runtime/quick-labels" | "/api/agent-runtime/workroom-teams" | "/api/agent-runtime/helpdesk" | "/api/agent-runtime/cs-duty") { return method == "POST"; }
     if matches!(path,
         "/api/agent-runtime/capabilities" | "/api/agent-runtime/readiness" |
         "/api/agent-runtime/targets" | "/api/agent-runtime/targets?productUses=1" | "/api/agent-runtime/tasks"
@@ -1543,6 +1551,7 @@ fn agent_runtime_http_request(
 }
 
 fn agent_runtime_response_timeout(method: &str, path: &str, body: Option<&serde_json::Value>) -> Duration {
+    if method == "POST" && path == WORKROOM_BROWSER_PATH { return Duration::from_secs(if body.and_then(|v| v.get("operation")).and_then(|v| v.as_str()) == Some("connect") { 150 } else { 35 }); }
     if method == "POST" && path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { return Duration::from_secs(20); }
     if method == "POST" && path == AGENT_RUNTIME_PROJECT_STATE_PATH { return Duration::from_secs(15); }
     if method == "POST" && path == "/api/agent-runtime/voice" { return Duration::from_secs(40); }
@@ -9549,7 +9558,7 @@ pub fn run() {
   let window_visible = Arc::new(Mutex::new(true));
   let vis_shortcut = Arc::clone(&window_visible);
   let vis_close = Arc::clone(&window_visible);
-  tauri::Builder::default()
+  let app = tauri::Builder::default()
     .manage(AppState {
         processes: Arc::new(Mutex::new(HashMap::new())),
         launching: Mutex::new(HashSet::new()),
@@ -9563,6 +9572,9 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
         work_mode::get_work_mode,
         work_mode::set_work_mode,
+        work_mode::set_closed_lid_grant,
+        screen_helper::get_screen_helper,
+        screen_helper::open_screen_helper,
         load_ports,
         save_ports,
         save_ports_merged,
@@ -9583,6 +9595,7 @@ pub fn run() {
         open_code_app,
         import_ports_from_file,
         list_browser_profiles,
+        workroom_browser::workroom_browser_native,
         open_in_chrome,
         open_preferred_browser,
         open_log,
@@ -9686,6 +9699,14 @@ pub fn run() {
         .build()
     )
     .setup(|app| {
+      #[cfg(all(target_os="macos",feature="embedded-browser"))]
+      {
+        let root=legacy_app_data_dir().map_err(std::io::Error::other)?.join("workroom-browser");
+        let engine=agentstoz_workroom_browser::initialize(&root).map_err(std::io::Error::other)?;
+        BROWSER_ENGINE.with(|slot|*slot.borrow_mut()=Some(engine));
+      }
+      work_mode::init(app.handle());
+      screen_helper::install_bundled_on_startup();
       if let (Ok(host), Ok(data)) = (bundled_api_sidecar_path(app.handle()), legacy_app_data_dir()) {
         let _ = EXTERNAL_CLI_EFFORT_HOST.set((host.to_string_lossy().into_owned(), data.to_string_lossy().into_owned()));
       }
@@ -9751,9 +9772,17 @@ pub fn run() {
       Ok(())
     })
     .build(tauri::generate_context!())
-    .expect("error while building tauri application")
-    .run(|app_handle, event| {
+    .expect("error while building tauri application");
+  let exit_code=app.run_return(|app_handle, event| {
+      #[cfg(all(target_os="macos",feature="embedded-browser"))]
+      if let tauri::RunEvent::WindowEvent{label,event:tauri::WindowEvent::CloseRequested{api,..},..}=&event {
+        if workroom_popout::is_workroom_popout_label(label)&&agentstoz_workroom_browser::window_has_browsers(label){
+          api.prevent_close();if let Some(window)=app_handle.get_webview_window(label){let _=window.hide();}
+        }
+      }
       if let tauri::RunEvent::Exit = &event {
+        #[cfg(all(target_os="macos",feature="embedded-browser"))]
+        agentstoz_workroom_browser::before_exit();
         work_mode::shutdown();
         shutdown_local_api_sidecar(app_handle);
       }
@@ -9780,6 +9809,9 @@ pub fn run() {
         let _ = (&app_handle, &event); // Windows/Linux 미사용 인자 경고 억제
       }
     });
+  #[cfg(all(target_os="macos",feature="embedded-browser"))]
+  BROWSER_ENGINE.with(|slot|{if let Some(engine)=slot.borrow_mut().take(){engine.shutdown();}});
+  std::process::exit(exit_code);
 }
 
 #[cfg(test)]
@@ -10337,6 +10369,7 @@ mod tests {
             ("POST", "/api/agent-runtime/terminals/history"),
             ("POST", "/api/agent-runtime/terminals/memory"),
             ("POST", "/api/agent-runtime/quick-labels"),
+            ("POST", "/api/agent-runtime/workroom-teams"),
             ("POST", "/api/agent-runtime/helpdesk"),
             ("POST", "/api/agent-runtime/tester"),
         ] {
@@ -10344,6 +10377,9 @@ mod tests {
         }
         for (method, path) in [
             ("POST", "/api/agent-runtime/capabilities"),
+            ("GET", "/api/agent-runtime/workroom-teams"),
+            ("POST", "/api/agent-runtime/workroom-teams?sessionId=x"),
+            ("POST", "/api/agent-runtime/workroom-teams/team_1"),
             ("GET", "/api/agent-runtime/terminals/accounts"),
             ("GET", "/api/agent-runtime/terminals/history"),
             ("POST", "/api/agent-runtime/terminals/history?path=/tmp"),

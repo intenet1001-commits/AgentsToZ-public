@@ -1,6 +1,6 @@
 import {afterEach,expect,test} from 'bun:test';
 import {createMetaMemoryRemoteRequester} from '../src/metaCommonMemoryRemoteClient';
-import {MetaCommonMemoryRemoteHost} from '../src/metaCommonMemoryRemoteHost';
+import {MetaCommonMemoryRemoteHost,META_MEMORY_REMOTE_UNEXPECTED} from '../src/metaCommonMemoryRemoteHost';
 import {MetaMemoryClientError} from '../src/metaCommonMemoryClient';
 import {createMobileWorkspaceGateway} from '../src/mobileWorkspaceGateway';
 import {parseCommonMemoryRequest,COMMON_MEMORY_REMOTE_TARGET} from '../src/commonMemoryRequest';
@@ -57,6 +57,15 @@ test('a v1 client against the new host is byte-identical: 4,000-byte frames, upl
   const g=fixture();g.before((r,phase)=>{if(phase==='release')throw Error('dropped');});await g.rpc({operation:'list'});expect(g.host.size).toBe(1);
 });
 
+// An untyped failure answers a list read too, so the phone must not be told only to confirm a save it never made.
+test('an unexpected Mac failure says to try again, and keeps the same-request check for a save',async()=>{
+  for(const rpcV2 of [false,true]){
+    const f=fixture({rpcV2,result:()=>{throw Error('unexpected');}});
+    const failure=await f.rpc({operation:'list'}).catch(e=>e);
+    expect(failure).toBeInstanceOf(MetaMemoryClientError);expect(failure.message).toBe(META_MEMORY_REMOTE_UNEXPECTED);expect(failure.code).toBe('META_MEMORY_REMOTE_FAILED');
+  }
+  expect(META_MEMORY_REMOTE_UNEXPECTED).toContain('잠시 뒤 다시 시도하세요');expect(META_MEMORY_REMOTE_UNEXPECTED).toContain('저장 중이었다면 같은 요청으로 결과를 확인하세요');
+});
 test('a small v2 request is exactly one exchange and frees itself without release',async()=>{
   const f=fixture({rpcV2:true});expect(await f.rpc({operation:'list'})).toEqual({operation:'list'});
   expect(f.phases()).toEqual(['call']);expect(f.host.size).toBe(0);

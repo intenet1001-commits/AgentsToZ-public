@@ -37,3 +37,11 @@
 .community-call-chips{display:flex;flex:1 1 220px;flex-wrap:wrap;gap:8px;min-width:0}.community-call-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;max-width:100%;border:1px solid var(--line);border-radius:20px;color:var(--accent);overflow-wrap:anywhere}.community-call-chip>button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;min-height:28px;padding:3px;border:0;background:transparent;color:inherit}.community-call-projects>select{max-width:100%;min-height:44px}.community-call-projects>small{flex-basis:100%;color:var(--ink-3);font-size:11px;line-height:1.6}
 .community-participants{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px;margin:16px 0}.community-participants>div{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px}.community-participants strong{flex:1;overflow-wrap:anywhere}.community-participants button{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;width:100%;font-size:12px}.community-reply-project{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:18px 0;font-size:12px;color:var(--ink-3)}.community-reply-project select{min-height:44px;max-width:100%}
 @container community (max-width:559px){.community-call-chip>button{min-width:44px;min-height:44px}.community-call-projects>select,.community-reply-project select{font-size:16px}}
+
+/* 팀 작전 toggle beside 「작업 AI」 (WorkroomTeamBuilder.tsx). */
+.community-team-open{display:inline-flex;align-items:center;gap:5px;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer;}
+.community-team-open[aria-expanded=true]{border-color:var(--accent);color:var(--accent);}
+.community-team-open:disabled{opacity:.5;cursor:default;}
+
+/* USE fields (ServiceUseOperationFields.tsx): no iOS zoom on focus. */
+@media (max-width:640px),(pointer:coarse){.service-use-fields input:not([type=checkbox]),.service-use-fields select{font-size:16px}}

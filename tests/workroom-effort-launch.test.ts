@@ -21,6 +21,7 @@ function fixture(options: {auto?: boolean; env?: Record<string, string>; codex?:
   cleanups.push(() => rmSync(dir, {recursive: true, force: true}));
   let auto = options.auto ?? true;
   const spawns: string[][] = [];
+  const proofs: {args: readonly string[]; launchModel?: string}[] = [];
   const children: {pid: number; exit(code: number): void}[] = [];
   let store: WorkroomConversationJournal | undefined;
   if (options.journal) { store = new WorkroomConversationJournal((mkdirSync(join(dir, 'journal'), {mode: 0o700}), join(dir, 'journal'))); cleanups.push(() => store!.close()); }
@@ -30,7 +31,7 @@ function fixture(options: {auto?: boolean; env?: Record<string, string>; codex?:
     executable: agent => `/fixture/bin/${agent}`, headlessScreen: false, activitySampler: false,
     env: {HOME: dir, PATH: '/usr/bin', ...(options.env ?? {})},
     effortAuto: {get: () => auto, set: value => (auto = value)},
-    codexEffortModel: () => options.codex ?? {ok: true, model: null, allowed: ['low', 'medium', 'high']},
+    codexEffortModel: input => { proofs.push(input); return options.codex ?? {ok: true, model: null, allowed: ['low', 'medium', 'high']}; },
     resume: async () => null,
     signalGroup: pid => children.find(child => child.pid === pid)?.exit(143),
     spawn: (args, spawnOptions: any) => {
@@ -46,7 +47,10 @@ function fixture(options: {auto?: boolean; env?: Record<string, string>; codex?:
   const start = async (agent: 'claude' | 'codex' | 'hermes' | 'agy', prompt?: string, extra: Record<string, unknown> = {}, authority?: AiTerminalAuthority) =>
     (await service.perform({operation: 'start', requestId: crypto.randomUUID(), targetId: TARGET, agent, cols: 80, rows: 24, ...(prompt !== undefined ? {prompt} : {}), ...extra}, authority)).session!;
   const record = async (sessionId: string) => (await service.performEffort({operation: 'effort', sessionIds: [sessionId]})).effort.sessions[0]!;
-  return {service, spawns, start, record, cwd: realpathSync(dir), setAuto: (value: boolean) => { auto = value; }};
+  // 팀 작전 members start through the host-only options (src/workroomTeamHost.ts).
+  const member = async (agent: 'claude' | 'codex' | 'hermes' | 'agy', prompt: string, launch: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    (await service.perform({operation: 'start', requestId: crypto.randomUUID(), targetId: TARGET, agent, cols: 80, rows: 24, prompt, ...extra}, undefined, launch)).session!;
+  return {service, spawns, proofs, start, member, record, cwd: realpathSync(dir), setAuto: (value: boolean) => { auto = value; }};
 }
 const flag = (args: string[] | undefined, name: string) => { const i = (args ?? []).indexOf(name); return i < 0 ? null : args![i + 1]; };
 
@@ -190,4 +194,53 @@ test('restart plan: the replaced launch\'s tier is kept and the CLI-side checks 
   expect(planWorkroomEffort({...base, agent: 'claude', previous: {manual: false, skipped: 'unclassified'}})).toEqual({manual: false, skipped: 'unclassified'});
   expect(planWorkroomEffort({...base, agent: 'claude', previous: {manual: false, skipped: 'off'}})).toEqual({manual: false, skipped: 'no-request'});
   expect(planWorkroomEffort({...base, agent: 'claude', previous: {manual: true, seen: 'max'}})).toEqual({manual: false, skipped: 'no-request'});
+});
+
+/** 팀 작전 (src/workroomTeam.ts): the brief's shared rules mention security, merging and conflicts for every member. */
+const BRIEF = '[AgentsToZ 팀 작전 · 팀원 m1]\n규칙: 보안 키를 유출하지 말고, 충돌은 리더가 해결합니다.';
+
+test('a team member\'s pinned effort is passed whatever the Mac setting, kept by a restart and reported as a level without a tier', async () => {
+  const f = fixture({auto: false});
+  const pinned = await f.member('claude', BRIEF, {launchEffort: {pinned: 'low'}});
+  expect(flag(f.spawns[0], '--effort')).toBe('low');
+  const record = await f.record(pinned.id);
+  expect(record).toMatchObject({level: 'low', origin: 'launch', manual: false});
+  expect(record.tier).toBeUndefined();
+  expect(Object.keys(record)).not.toContain('pinned');
+  const restarted = await f.start('claude', undefined, {resumeFrom: pinned.id});
+  expect(flag(f.spawns[1], '--effort')).toBe('low');
+  expect(await f.record(restarted.id)).toMatchObject({level: 'low', origin: 'restart'});
+  // Antigravity takes effort in its model name; nothing else may carry it, and a pin is refused off the team path.
+  await f.member('agy', BRIEF, {launchEffort: {pinned: 'high'}});
+  expect(f.spawns[2]!.includes('--effort')).toBe(false);
+  await expect(f.service.perform({operation: 'start', requestId: crypto.randomUUID(), targetId: TARGET, agent: 'claude', cols: 80, rows: 24, resumeFrom: restarted.id},
+    undefined, {launchEffort: {pinned: 'high'}})).rejects.toThrow('에포트 지정은 이 Mac의 새 워크룸 시작에만');
+});
+
+test('a team member on 「자동」 is classified by its task, not by the brief\'s shared rules', async () => {
+  const f = fixture();
+  await f.member('claude', BRIEF, {launchEffort: {requestText: 'rename the variable'}});
+  expect(flag(f.spawns[0], '--effort')).toBe('low');
+  await f.member('claude', BRIEF, {launchEffort: {requestText: 'fix the deadlock in the queue'}});
+  expect(flag(f.spawns[1], '--effort')).toBe('high');
+  // Without the task text the brief alone decides (its 보안 cue): the reason launchEffort carries the task.
+  await f.start('claude', BRIEF);
+  expect(flag(f.spawns[2], '--effort')).toBe('high');
+});
+
+test('Codex: a model the app chose is the one proven for effort; an unproven one passes no flag even when pinned', async () => {
+  const f = fixture();
+  await f.member('codex', BRIEF, {launchModel: {model: 'gpt-6.1-sol'}, launchEffort: {pinned: 'high'}});
+  expect(f.proofs.at(-1)).toMatchObject({launchModel: 'gpt-6.1-sol'});
+  expect(f.proofs.at(-1)!.args).not.toContain('-m');
+  expect(f.spawns[0]!).toContain('model_reasoning_effort="high"');
+  expect(flag(f.spawns[0], '-m')).toBe('gpt-6.1-sol');
+  const unproven = fixture({codex: {ok: false, why: 'model'}});
+  const session = await unproven.member('codex', BRIEF, {launchModel: {model: 'gpt-next-preview'}, launchEffort: {pinned: 'high'}});
+  expect(unproven.spawns[0]!.some(arg => arg.includes('model_reasoning_effort'))).toBe(false);
+  expect(await unproven.record(session.id)).toMatchObject({skipped: 'model-unknown'});
+  const env = fixture({env: {CLAUDE_CODE_EFFORT_LEVEL: 'max'}});
+  const claude = await env.member('claude', BRIEF, {launchEffort: {pinned: 'medium'}});
+  expect(env.spawns[0]!.includes('--effort')).toBe(false);
+  expect(await env.record(claude.id)).toMatchObject({skipped: 'env-override'});
 });

@@ -6,6 +6,8 @@ import { MetaMemoryError, normalizeMetaMemoryVocabulary, parseMetaMemoryRequest 
 import { META_MEMORY_REMOTE_LIMITS as limits, normalizeMetaMemoryRemoteRequest, splitMetaMemoryWireText, type MetaMemoryRemoteRequest, type MetaMemoryRemoteResponse } from './metaCommonMemoryRemoteProtocol';
 type Transfer = { owner: string; hash: string; count: number; chunks: Map<number, string>; bytes: number; expiresAt: number; result?: string[]; resultHash?: string; executing?: Promise<void>; version?: 2; served?: Set<number> };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+/** An unexpected failure on the Mac, for a read as well as a save: try again later, and confirm a save by its same request. */
+export const META_MEMORY_REMOTE_UNEXPECTED = '연결한 Mac에서 공통기억 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하세요. 저장 중이었다면 같은 요청으로 결과를 확인하세요.';
 /** Device-bound opaque references are stable across a restart, never execution authority. */
 /**
  * A v2 `call` that is refused before it runs answers with an ordinary one-frame result whose envelope is a 409 failure,
@@ -114,7 +116,7 @@ export class MetaCommonMemoryRemoteHost {
       transfer.executing = (async () => {
         let envelope: unknown;
         try { if (!active()) throw Error('공통 기억 관리 권한이 변경되었습니다.'); envelope = { ok: true, result: await this.execute(owner, request, active, kind, canAdd) }; }
-        catch (e) { envelope = { ok: false, status: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.status : 500, code: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.code : 'META_MEMORY_REMOTE_FAILED', error: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.message : '공통 기억 요청을 완료하지 못했습니다. 같은 저장 요청으로 결과를 확인하세요.' }; }
+        catch (e) { envelope = { ok: false, status: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.status : 500, code: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.code : 'META_MEMORY_REMOTE_FAILED', error: e instanceof MetaMemoryError || e instanceof CommonMemoryError || e instanceof ControlProfileError ? e.message : META_MEMORY_REMOTE_UNEXPECTED }; }
         let serialized = JSON.stringify(envelope);
         if (Buffer.byteLength(serialized) > limits.resultBytes) serialized = JSON.stringify({ ok: false, status: 500, code: 'META_MEMORY_REMOTE_RESULT_CAPACITY', error: '공통 기억 응답 범위가 큽니다. Mac에서 결과를 확인하세요.' });
         transfer.result = splitMetaMemoryWireText(serialized, chunkBytes); transfer.resultHash = digest(serialized); transfer.chunks.clear(); transfer.bytes = 0;

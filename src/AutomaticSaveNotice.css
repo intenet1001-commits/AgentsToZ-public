@@ -1,0 +1,41 @@
+/* Confirmed automatic saves — a notification stack right above 「아젠투지 호출」 (VOC 2026-10-24). Tokens only. */
+.az-notices { display: flex; flex-direction: column; align-items: stretch; gap: 6px; box-sizing: border-box; width: min(360px, calc(100vw - 32px)); pointer-events: auto; font-size: 13px; color: var(--ink); }
+/* The main window while the 「아젠투지 호출」 window is closed: above the reopen button (--voice-dock-offset). */
+.az-notices--floating { position: fixed; z-index: 999; right: max(20px, env(safe-area-inset-right)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--voice-dock-offset, 0px) + 8px); }
+.az-notices ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.az-notice { display: flex; align-items: flex-start; border: 1px solid var(--line-2); border-radius: 16px; background: rgb(var(--bg-card-rgb) / .92); -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15); box-shadow: var(--shadow); }
+.az-notice__body { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 4px 9px 12px; border: 0; border-radius: 16px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.az-notice__body:focus-visible, .az-notice__close:focus-visible, .az-notices button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.az-notice__icon { display: inline-flex; flex-shrink: 0; margin-top: 1px; color: var(--ok); }
+.az-notice[data-kind="recovery-fragment"] .az-notice__icon { color: var(--info); }
+.az-notice__text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.az-notice__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.az-notice__text strong { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-notice__head time { flex-shrink: 0; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.az-notice__text small { font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-notice__detail { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.az-notice__close { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 6px 6px 0 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); cursor: pointer; }
+.az-notice__close:hover { background: var(--sunken); color: var(--ink); }
+.az-notices__bar { display: flex; justify-content: flex-end; gap: 6px; }
+.az-notices__bar button, .az-notices__clear { align-self: flex-end; min-height: 28px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 11.5px; cursor: pointer; box-shadow: var(--shadow); }
+.az-notices__bar button:hover, .az-notices__clear:hover { color: var(--ink); border-color: var(--line-2); }
+/* Unsaved work and its save run: the one card here that asks for an action. */
+.az-notice[data-kind="unsaved"], .az-notice[data-kind="save-run"] { flex-wrap: wrap; }
+.az-notice[data-kind="unsaved"] .az-notice__icon, .az-notice[data-kind="save-run"][data-state="trouble"] .az-notice__icon { color: var(--warn); }
+.az-notice[data-kind="save-run"][data-state="running"] .az-notice__icon { color: var(--accent); }
+.az-notice__items { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; font-size: 11.5px; line-height: 1.4; color: var(--ink-2); }
+.az-notice__items span { overflow-wrap: anywhere; }
+.az-notice__items [data-status="failed"], .az-notice__items [data-status="unknown"] { color: var(--danger); }
+.az-notice__items [data-status="saved"] { color: var(--ok); }
+.az-notice__actions { flex-basis: 100%; display: flex; justify-content: flex-end; gap: 6px; padding: 0 10px 10px 38px; }
+.az-notice__primary { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 3px 12px; border: 1px solid var(--accent); border-radius: 8px; background: rgb(var(--accent-rgb) / .12); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.az-notice__primary:hover { background: rgb(var(--accent-rgb) / .2); }
+.az-notice__spin { animation: az-notice-spin .9s linear infinite; }
+@keyframes az-notice-spin { to { transform: rotate(360deg); } }
+/* Inside the voice window the dock fills the width, so the stack does too. */
+.voice-popout .az-notices { width: 100%; }
+@media (pointer: coarse) {
+  .az-notice__close { width: 44px; height: 44px; margin: 0; }
+  .az-notices__bar button, .az-notices__clear, .az-notice__primary { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .az-notices * { transition: none !important; } .az-notice__spin { animation: none; } }

@@ -103,7 +103,7 @@ export function MemoryAutomaticSettings({targetId}:{targetId:string}){
    <p className="ai-terminal-hint">이전 응답이 남아 있지 않아 저장 여부를 확정할 수 없습니다. 먼저 원래 대화·기억·키·모델과 호출 한도를 검사합니다. 검사에서는 AI를 호출하지 않습니다.</p>
    <button className="ai-terminal-btn" disabled={busy||!!statusError} onClick={()=>void act('review-recovery')}>복구 조건 검사 · AI 호출 없음</button>
    {review&&<div data-testid="memory-automatic-recovery-review">
-    <p className="ai-terminal-hint">검증한 완료 대화 {review.sourceCount}개 · 입력 {review.inputBytes.toLocaleString()} bytes · {review.model} / {review.effort}</p>
+    <p className="ai-terminal-hint">검증한 완료 대화 {review.sourceCount}개 · 입력 {review.inputBytes.toLocaleString()}바이트 · {review.model} / {review.effort}</p>
     <p className="ai-terminal-hint">이전 시도 {review.parentAttemptId.slice(0,8)}의 결과는 미확정으로 보존됩니다. 같은 대화를 새 시도에서 처리하며 AI 호출 1회가 추가됩니다. 이전 호출 비용이 중복될 수 있습니다. 검토는 5분간 유효하며 기억이나 입력이 바뀌면 다시 검사해야 합니다.</p>
     <label className="ai-terminal-hint block my-2"><input type="checkbox" checked={recoveryConsent} disabled={busy} onChange={e=>setRecoveryConsent(e.target.checked)}/> 이전 시도의 미확정 결과와 추가 AI 1회 호출을 확인하고 동의합니다.</label>
     <button className="ai-terminal-btn" disabled={busy||!recoveryConsent||Date.now()>=review.expiresAt||!!statusError} onClick={()=>void act('execute-recovery',{approvalId:review.approvalId,reviewDigest:review.reviewDigest,explicitConsent:true})}>검증한 대화 다시 정리 · AI 1회</button>
@@ -116,7 +116,7 @@ export function MemoryAutomaticSettings({targetId}:{targetId:string}){
   {!value?.enabled&&<>
    <label className="ai-terminal-hint block my-2">자동 정리 범위 <select className="max-w-full rounded border border-zinc-600 bg-transparent px-2 py-1" aria-label="자동 기억 정리 범위" value={scope} disabled={busy} onChange={e=>{setScope(e.target.value as 'project'|'all');setConsent(false);}}><option value="project">이 프로젝트만 시험</option><option value="all">이 Mac의 전체 등록 프로젝트</option></select></label>
    <label className="ai-terminal-hint block my-2">정확한 Claude 모델 ID <input className="w-full min-w-0 rounded border border-zinc-600 bg-transparent px-2 py-1" aria-label="자동 기억 정리 모델 ID" value={model} onChange={e=>{draftEdited.current=true;setModel(e.target.value);setConsent(false);}} maxLength={104} placeholder="CLI에서 사용하는 전체 모델 ID" disabled={busy}/></label>
-   <label className="ai-terminal-hint block my-2">추론 수준 <select className="max-w-full rounded border border-zinc-600 bg-transparent px-2 py-1" aria-label="자동 기억 정리 추론 수준" value={effort} onChange={e=>{draftEdited.current=true;setEffort(e.target.value);setConsent(false);}} disabled={busy}><option value="low">low</option><option value="medium">medium</option></select></label>
+   <label className="ai-terminal-hint block my-2">추론 수준 <select className="max-w-full rounded border border-zinc-600 bg-transparent px-2 py-1" aria-label="자동 기억 정리 추론 수준" value={effort} onChange={e=>{draftEdited.current=true;setEffort(e.target.value);setConsent(false);}} disabled={busy}><option value="low">낮음 (low)</option><option value="medium">보통 (medium)</option></select></label>
    <p className="ai-terminal-hint">먼저 위의 암호화 키를 준비하세요. 연결 검사는 입력한 모델로 짧은 AI 호출 1회를 사용합니다. 로그인 계정이나 CLI가 바뀌면 다시 검사해야 합니다.</p>
    <button className="ai-terminal-btn" disabled={busy||!/^claude-[a-z0-9][a-z0-9.-]{1,95}$/.test(model)} onClick={()=>void act('prepare-provider',{model,effort})}>모델 연결 검사 · AI 1회</button>
    <label className="ai-terminal-hint block my-2"><input type="checkbox" checked={consent} disabled={busy} onChange={e=>setConsent(e.target.checked)}/> 추가 AI 호출, 호출 상한, 기존 방식 전환과 암호화 임시 입력 보관에 동의합니다.</label>

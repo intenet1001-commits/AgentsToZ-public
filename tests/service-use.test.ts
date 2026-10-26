@@ -2,11 +2,14 @@ import {afterEach,expect,test} from 'bun:test';
 import {chmodSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {ServiceUseHost,type ServiceUseAdapter} from '../src/serviceUseHost';
+import {ServiceUseHost,SERVICE_USE_ENVIRONMENT_PROBLEM,serviceUseConnectProblem,serviceUseEnvironmentProblem,type ServiceUseAdapter} from '../src/serviceUseHost';
 import {normalizeServiceUseCall,parseServiceUseRequest,type ServiceUseCall,type ServiceUseOutcome} from '../src/serviceUseProtocol';
 import {ensureServiceMemory,migrateServiceMemoryToProject} from '../src/serviceMemory';
 import {WorkroomThreadStore} from '../src/workroomThreadStore';
-import {WorkroomThreadService} from '../src/workroomThreadService';
+import {USE_CHANGED_REPLY_TEXT,USE_UNKNOWN_RESULT_TEXT,WorkroomThreadService,useResultText} from '../src/workroomThreadService';
+import {localUsePhones,localUsePhonesFor,serviceUseConnectRoute} from '../src/serviceUseLocalClient';
+import {localWorkroomTransport} from '../src/aiTerminalClient';
+import {serviceUseRequestText} from '../src/ServiceUseOperationFields';
 import {normalizeWorkroomThreadResult} from '../src/workroomThreadProtocol';
 
 const roots:string[]=[];afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
@@ -118,7 +121,7 @@ test('a running app receipt completes the same USE thread without another app ex
  const pending=await f.threads.perform('workroom.threads.read',{threadId:id},f.identity.projectId,'read-pending',f.access);expect(pending.thread!.state).toBe('running');
  completed=true;const finished=await f.threads.perform('workroom.threads.read',{threadId:id},f.identity.projectId,'read-complete',f.access);
  expect(finished.thread!.state).toBe('completed');expect(finished.thread!.revision).toBeGreaterThan(pending.thread!.revision);
- expect(finished.messages!.filter(m=>m.role==='assistant')).toHaveLength(1);expect(finished.messages!.at(-1)!.text).toBe('실제 앱 작업을 마쳤습니다.');expect(executions).toBe(1);expect(lookups).toBe(2);expect(f.devStarts()).toBe(0);
+ expect(finished.messages!.filter(m=>m.role==='assistant')).toHaveLength(1);expect(finished.messages!.at(-1)!.text).toBe('실제 앱 작업을 마쳤습니다.\n자료 ID: material-one');expect(executions).toBe(1);expect(lookups).toBe(2);expect(f.devStarts()).toBe(0);
 });
 
 test('an unknown app response recovers by original receipt without replaying its operation',async()=>{
@@ -191,4 +194,85 @@ test('a late original result cannot overwrite a newer USE status after a host re
  await restarted.perform('workroom.threads.reply',{threadId:id,text:'Query the original operation',expectedRevision:(await f.store.get(id))!.revision,use:{role:'use',serviceKey:'default',tool:'operation.status',input:{operationId:'original-operation'}}},f.identity.projectId,'query-latest-status',f.access);
  await restarted.idle();release();await f.threads.idle();
  const latest=await f.store.get(id);expect(latest!.state).toBe('failed');expect(latest!.serviceExecution!.outcome!.message).toBe('Newer status: application failure');
+});
+
+test('status names the next step only for known connector failures and never echoes other error text',async()=>{
+ const f=await fixture();
+ f.adapter.scope=async()=>{throw Error('앱의 USE 연결 응답을 확인하지 못했습니다. 앱을 열고 원래 요청 ID로 결과를 확인하세요.');};
+ let status=await f.use.status(f.identity.projectId,'local');
+ expect(status.readiness).toMatchObject({tools:'verified',environmentReady:false,executionReady:false,problem:'ShadowLoop 앱이 응답하지 않습니다. 이 Mac에서 앱이 실행 중인지 확인한 뒤 다시 확인하세요.'});
+ f.adapter.scope=async()=>{throw Error('앱의 사용자·자료·동작 권한이 변경되었습니다. USE 연결을 다시 확인하세요.');};
+ expect((await f.use.status(f.identity.projectId,'local')).readiness.problem).toContain('앱에서 연결 코드를 다시 발급');
+ f.adapter.scope=async owner=>{if(owner!=='local')throw Error('이 ShadowLoop 연결은 이 Mac의 로컬 사용자 전용입니다.');return {principalId:'p',libraryId:'l',deviceId:'d',installationId:'i',grantRevision:'g'};};
+ expect((await f.use.status(f.identity.projectId,'device:host:controller')).readiness.problem).toBe('USE 실행은 지금 이 Mac에서만 할 수 있습니다. Mac의 작업 세션이나 커뮤니티에서 요청하세요.');
+ f.adapter.scope=async()=>{throw Error('EACCES: /Users/someone/Library/private/vault.sqlite');};
+ status=await f.use.status(f.identity.projectId,'local');
+ expect(status.readiness.problem).toBe(SERVICE_USE_ENVIRONMENT_PROBLEM);expect(JSON.stringify(status.readiness)).not.toContain('/Users/');
+ // The local-only text is not a reason for the local owner; it stays generic there.
+ expect(serviceUseEnvironmentProblem(Error('이 앱 USE 연결은 이 기기의 로컬 사용자 전용입니다.'),'App','local')).toBe(SERVICE_USE_ENVIRONMENT_PROBLEM);
+ const unconnected=new ServiceUseHost({appDataDir:f.root,resolve:async()=>({...(await f.resolve()),projectName:'Report Desk'})});
+ expect((await unconnected.status(f.identity.projectId,'local')).readiness).toMatchObject({tools:'unavailable',problem:expect.stringContaining('USE 준비에서 앱 연결 코드를 입력')});
+});
+test('connect failures say what to do at connection time, without request IDs',()=>{
+ expect(serviceUseConnectProblem(Error('앱의 USE 연결 응답을 확인하지 못했습니다. 앱을 열고 원래 요청 ID로 결과를 확인하세요.'),'Report Desk')).toBe('코드를 발급한 앱이 이 Mac에서 실행 중인지 확인한 뒤 다시 연결하세요.');
+ expect(serviceUseConnectProblem(Error('ShadowLoop 운영 연결·현재 프로필·원래 작업 ID를 확인하세요.'),'Family')).toBe('ShadowLoop 앱이 이 코드를 받지 않았습니다. 코드가 만료·해제됐거나 잘못 입력됐을 수 있으니 앱에서 새 코드를 발급하세요.');
+ expect(serviceUseConnectProblem(Error('이 프로젝트의 앱 USE 연결 계약을 확인하세요.'),'Report Desk')).toContain('선택한 프로젝트와 맞지 않습니다');
+ for(const message of ['앱의 USE 연결 응답을 확인하지 못했습니다. 앱을 열고 원래 요청 ID로 결과를 확인하세요.','앱의 USE 운영 권한과 원래 요청 ID를 확인하세요.'])expect(serviceUseConnectProblem(Error(message),'Report Desk')).not.toContain('요청 ID');
+ expect(serviceUseConnectProblem(Error('앱에서 발급한 USE 연결 코드를 확인하세요.'),'Report Desk')).toBe('앱에서 발급한 USE 연결 코드를 확인하세요.');
+});
+test('approved phone names are offered only on this Mac\'s own Workroom transport (OPS @USE included)',()=>{
+ expect(localUsePhonesFor(localWorkroomTransport)).toBe(localUsePhones);
+ expect(localUsePhonesFor(async()=>({}))).toBeUndefined();expect(localUsePhonesFor(undefined)).toBeUndefined();
+});
+test('the connect route follows the code prefix, not the project display name',()=>{
+ expect(serviceUseConnectRoute(' SLUSE1.a.b.c','Renamed family app')).toBe('connect-shadowloop');
+ expect(serviceUseConnectRoute('ATZUSE1.x.y','ShadowLoop')).toBe('connect-app');
+ expect(serviceUseConnectRoute('typo','ShadowLoop')).toBe('connect-shadowloop');expect(serviceUseConnectRoute('typo','Report Desk')).toBe('connect-app');
+});
+test('USE threads stay listed while the app cannot be verified, without app text, and never query or reply',async()=>{
+ const f=await fixture(),id='kept-use-thread';let lookups=0,executions=0;
+ f.adapter.receipt=async()=>{lookups++;return {state:'completed',message:'Secret app result for profile one',materialId:'material-one'};};
+ f.setExecute(async()=>{executions++;return {state:'completed',message:'Secret app result for profile one',materialId:'material-one'};});
+ await f.threads.perform('workroom.threads.create',{agent:'codex',text:'Make a greeting',use:generate},f.identity.projectId,id,f.access);await f.threads.idle();
+ const scope=f.adapter.scope;
+ f.adapter.scope=async()=>{throw Error('앱의 USE 연결 응답을 확인하지 못했습니다. 앱을 열고 원래 요청 ID로 결과를 확인하세요.');};
+ const listed=normalizeWorkroomThreadResult(await f.threads.perform('workroom.threads.list',{},f.identity.projectId,'list-app-down',f.access),'workroom.threads.list');
+ expect(listed.threads!.map(t=>t.id)).toEqual([id]);expect(listed.threads![0]).toMatchObject({state:'completed',execution:{role:'use',serviceKey:'default'}});
+ const read=normalizeWorkroomThreadResult(await f.threads.perform('workroom.threads.read',{threadId:id},f.identity.projectId,'read-app-down',f.access),'workroom.threads.read');
+ expect(JSON.stringify(read)).not.toContain('Secret app result');expect(read.messages!.map(m=>m.role)).toEqual(['user','system']);expect(read.messages!.at(-1)!.text).toContain('지금 앱 연결을 확인할 수 없어');
+ // Nothing is admitted: a refusal the composer can show, never an uncertain send it would have to re-check forever.
+ const reuse={role:'use' as const,serviceKey:'default',tool:'materials.reuse' as const,input:{materialId:'material-one'}};
+ const refused=normalizeWorkroomThreadResult(await f.threads.perform('workroom.threads.reply',{threadId:id,expectedRevision:read.thread!.revision,text:'Reuse',use:reuse},f.identity.projectId,'reply-app-down',f.access),'workroom.threads.reply');
+ expect(refused.refusal).toEqual({requestId:'reply-app-down',message:expect.stringContaining('앱이 응답하지 않습니다')});
+ expect(JSON.stringify(refused)).not.toContain('Secret app result');expect((await f.store.get(id))!.messages.some(m=>m.id==='reply-app-down')).toBe(false);
+ // A reissued code or another app user: same AgentsToZ owner, different binding. Titles and state only.
+ f.adapter.scope=scope;f.changeScope({principalId:'profile-two'});
+ const changed=await f.threads.perform('workroom.threads.read',{threadId:id},f.identity.projectId,'read-changed',f.access);
+ expect(JSON.stringify(changed)).not.toContain('Secret app result');expect(changed.messages!.at(-1)!.text).toContain('이전 연결의 앱 결과는 표시하지 않습니다');
+ const changedReply=await f.threads.perform('workroom.threads.reply',{threadId:id,expectedRevision:changed.thread!.revision,text:'Reuse',use:reuse},f.identity.projectId,'reply-changed',f.access);
+ expect(changedReply.refusal).toEqual({requestId:'reply-changed',message:USE_CHANGED_REPLY_TEXT});expect(JSON.stringify(changedReply)).not.toContain('Secret app result');
+ const closed=await f.threads.perform('workroom.threads.close',{threadId:id,expectedRevision:changed.thread!.revision,consent:true},f.identity.projectId,'close-changed',f.access);
+ expect(closed.thread!.state).toBe('closed');expect(JSON.stringify(closed)).not.toContain('Secret app result');
+ expect(lookups).toBe(0);expect(executions).toBe(1);expect(f.devStarts()).toBe(0);
+ // Another AgentsToZ owner still cannot see the row at all.
+ expect((await f.threads.perform('workroom.threads.list',{},f.identity.projectId,'list-other-owner',{...f.access,owner:'device:other:controller'})).threads).toEqual([]);
+});
+test('an unknown USE result is shown in Korean with the IDs a follow-up needs, and the app text is kept in the receipt',async()=>{
+ const f=await fixture(),id='english-unknown';
+ f.setExecute(async(_call,requestId)=>({state:'unknown',message:'Check the original request receipt; do not replay.',operationId:requestId}));
+ f.adapter.receipt=async(requestId)=>({state:'unknown',message:'Check the original request receipt; do not replay.',operationId:requestId});
+ await f.threads.perform('workroom.threads.create',{agent:'codex',text:'Generate',use:generate},f.identity.projectId,id,f.access);await f.threads.idle();
+ const read=await f.threads.perform('workroom.threads.read',{threadId:id},f.identity.projectId,'read-unknown',f.access);
+ expect(read.thread!.state).toBe('unknown');expect(read.messages!.at(-1)!.text).toBe(USE_UNKNOWN_RESULT_TEXT+'\n요청 ID: '+id);
+ expect((await f.store.get(id))!.serviceExecution!.outcome!.message).toBe('Check the original request receipt; do not replay.');
+ expect(useResultText(['app.invoke'],{state:'completed',message:'Done',materialId:'m-1',operationId:'op-1'})).toBe('Done');
+ expect(useResultText(['materials.generate','phone.deliver'],{state:'completed',message:'Done',materialId:'m-1',operationId:'op-1'})).toBe('Done\n자료 ID: m-1');
+});
+test('a USE request without a memo records the action label deterministically; generation still needs text',()=>{
+ const catalog={tools:['app.invoke' as const],actions:[{id:'report.create',label:'보고서 만들기',effect:'write' as const,fields:[]}],executionReady:true,problem:null};
+ const fields={tool:'app.invoke' as const,actionId:'report.create',arguments:{},materialId:'',operationId:'',phoneId:''};
+ expect(serviceUseRequestText(fields,'',catalog)).toBe('보고서 만들기');expect(serviceUseRequestText(fields,'  ',catalog)).toBe('보고서 만들기');
+ expect(serviceUseRequestText(fields,'주간 보고',catalog)).toBe('주간 보고');
+ expect(serviceUseRequestText({...fields,tool:'phone.deliver'},'',catalog)).toBe('승인된 폰에 전달');
+ expect(serviceUseRequestText({...fields,tool:'materials.generate'},'',catalog)).toBe('');
 });

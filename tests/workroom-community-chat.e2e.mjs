@@ -38,7 +38,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 const browser=await chromium.launch({headless:true});
 const context=await browser.newContext({viewport:{width:1100,height:1050},serviceWorkers:'block'});
 const manage=[],blocked=[];
-let messages=[{seq:1,from:'아젠투지2호 / 아젠투지(OPS)',self:false,kind:'question',text:'빌드 로그 확인했나요?',at:'2026-10-05T01:00:00Z'}];
+// The second is the kind of build receipt an AI posted (VOC 2026-10-25 「텍스트가 지저분하게 많다」).
+const RECEIPT='사용자 승인 handoff b91311bd-6ff0-4db7-921b-a14fa7516286의 최종 소스가 d284a5cb663b3187c9cd87d802fb60cfd2715ba6 / 공식 앱749.0.0로 갱신됐습니다. 1호 실제 749 설치·MCP1.35.0+build.749/84 tools/OPS ready를 확인했고 TS0, Bun6109pass/10skip/0fail, Rust73pass, quick5/5 통과했습니다. 공개snapshot f304b334f8e09a51b17b27cd9bf13830937b7b00.';
+let messages=[{seq:1,from:'아젠투지2호 / 아젠투지(OPS)',self:false,kind:'question',text:'빌드 로그 확인했나요?',at:'2026-10-05T01:00:00Z'},
+  {seq:2,from:'아젠투지2호 / 아젠투지(OPS)',self:false,kind:'build-receipt',text:RECEIPT,at:'2026-10-05T01:01:00Z'}];
 let unread=1,sendFails=false;
 await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -108,6 +111,21 @@ await check('expanding reads once and shows what the other AgentsToZ said',async
   assert.equal(reads.length,1,`One read per open, got ${reads.length}`);
   assert.equal(reads[0].afterSeq,undefined,'The first read starts from the beginning of what this Mac may see');
   assert.ok((await page.locator('[data-testid="workroom-community-log"]').innerText()).includes('아젠투지2호'),'The sender is not named');
+});
+
+await check('an AI build receipt reads as a short labelled preview, and 전체 보기 shows it verbatim',async()=>{
+  const log=page.locator('[data-testid="workroom-community-log"]');
+  await until(async()=>(await log.innerText()).includes('빌드 기록'),'The build receipt is not labelled');
+  const folded=await log.innerText();
+  assert.ok(folded.includes('b91311bd…')&&folded.includes('d284a5cb…'),'Identifiers are cut to their first 8 characters');
+  assert.ok(!folded.includes('f304b334f8e09a51b17b27cd9bf13830937b7b00')&&!folded.includes('Rust73pass'),'The preview stops after the first sentence');
+  assert.ok(folded.includes('빌드 로그 확인했나요?'),'A short message stays whole');
+  assert.equal(await page.locator('[data-testid="workroom-community-more"]').count(),1,'Only the long receipt folds');
+  await page.locator('[data-testid="workroom-community-more"]').click();
+  assert.ok((await log.innerText()).includes(RECEIPT),'전체 보기 shows the original text unchanged');
+  assert.equal(await page.locator('[data-testid="workroom-community-more"]').innerText(),'접기');
+  await page.locator('[data-testid="workroom-community-more"]').click();
+  assert.ok(!(await log.innerText()).includes('Rust73pass'),'접기 folds it again');
 });
 
 await check('sending puts the text on the manage route and shows it as this Mac',async()=>{

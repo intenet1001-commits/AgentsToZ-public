@@ -7,8 +7,9 @@ import {readFileSync} from 'node:fs';
 const start:AiTerminalRequest={operation:'start',requestId:'request-fixture',targetId:'project-fixture',agent:'codex',cols:80,rows:24};
 test('both project-card entry paths forward the same desktop permission preference',()=>{
   const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
-  expect(app).toContain('projectWorkroomLauncher.current!.open(targetId, agent, bypassPermissions)');
-  expect(app).toContain('agent, cols: 100, rows: 28, prompt, bypassPermissions}');
+  // A 「Hermes · Claude」/「Hermes · Codex」 variant may follow (src/hermesVariants.ts); the preference stays ahead of it.
+  expect(app).toContain('projectWorkroomLauncher.current!.open(targetId, agent, bypassPermissions, variant)');
+  expect(app).toContain('agent, cols: 100, rows: 28, prompt, bypassPermissions}, variant)');
   // Directory/visibility props may precede the permission preference. Check the
   // actual opening tag so a JSX prop reorder cannot masquerade as lost authority.
   const panel=app.match(/<AiTerminalPanel\b[\s\S]*?\/>/)?.[0]??'';

@@ -58,7 +58,7 @@ const aliasChanged=()=>new CommonMemoryError('COMMON_MEMORY_SOURCE_ALIAS_CHANGED
 const sourceArchived=()=>new CommonMemoryError('COMMON_MEMORY_SOURCE_ARCHIVED','보관된 원본 기억을 연결 목록에서 확인하세요.');
 export function createCommonMemoryService(client:()=>any,assertActive:()=>void=()=>{}){
   const context=new AsyncLocalStorage<any>();
-  const sb=()=>{const c=context.getStore()??client();if(!c)throw new CommonMemoryError('COMMON_MEMORY_CLOUD_REQUIRED','공통기억은 앱 설정의 클라우드 연결이 필요합니다.',503);return c;};
+  const sb=()=>{const c=context.getStore()??client();if(!c)throw new CommonMemoryError('COMMON_MEMORY_CLOUD_REQUIRED','공통기억에는 장기기억과 같은 클라우드(Supabase) 연결이 필요합니다.',503);return c;};
   const checkScope=(expected?:string)=>{if(expected&&expected!==sb().commonMemoryScope)throw new CommonMemoryError('COMMON_MEMORY_SCOPE_CHANGED','공통기억이 선택된 클라우드와 현재 연결이 다릅니다. 다시 확인하세요.');};
   const deadlineError=()=>new CommonMemoryError('COMMON_MEMORY_CLOUD_UNAVAILABLE','클라우드 공통기억 응답이 늦어 확인을 멈췄습니다. 잠시 후 다시 시도하세요.',503);
   const raw=async(query:any)=>{assertActive();const deadline=chainDeadline.getStore();if(deadline?.aborted)throw deadlineError();const r=await query.abortSignal(deadline?AbortSignal.any([AbortSignal.timeout(15_000),deadline]):AbortSignal.timeout(15_000));assertActive();if(r.error&&deadline?.aborted)throw deadlineError();return r;};
@@ -358,13 +358,23 @@ export function createCommonMemoryService(client:()=>any,assertActive:()=>void=(
     const knowledgeSourceHeads=acceptedHeads.length?[...(current.state.knowledgeSourceHeads??[]).filter(old=>!acceptedHeads.some(head=>head.memoryId===old.memoryId)),...acceptedHeads]:current.state.knowledgeSourceHeads;
     return write({...current.state,name:next.name,...(current.state.goalConfigured===false?{goal:{...current.state.goal,objective:next.description||next.name}}:{}),archived:next.archived,...(knowledgeSourceHeads?{knowledgeSourceHeads}:{}),knowledgeSummary:commonKnowledgeSummary(next),portableKnowledge:{...retained,current:next}},current.version,request.requestId,hash);
   };
+  /** Long-term memories with their current head, skipping archived, aliased or missing ones (one batched read, no throw). */
+  const liveSources=async(members:Array<{memoryId:string;name:string}>)=>{
+    const ids=[...new Set(members.map(m=>commonMemoryId(m.memoryId)))],info=await headBatch(ids);
+    return ids.filter(id=>!info.alias.has(id)&&!info.trash.has(id)&&!!info.head.get(id)).map(id=>({memoryId:id,name:members.find(m=>commonMemoryId(m.memoryId)===id)!.name||id,revisionId:info.head.get(id)!}));
+  };
   const readKnowledge=async(groupId:string)=>{const current=await get(groupId);return {memory:commonKnowledgeForState(current.state),scopeId:current.scopeId,persisted:!!current.state.portableKnowledge};};
   const workroomDraft=async(kind:'recommend'|'update',groupId?:string,projects:Array<{portId:string;name:string}>=[],scopeId?:string)=>{
     checkScope(scopeId);if(!['recommend','update'].includes(kind)||kind==='update'&&!groupId)throw new CommonMemoryError('COMMON_MEMORY_INPUT_INVALID','정리할 공통기억을 선택하세요.',400);
     const current=groupId?await get(groupId):null;if(current?.state.archived)throw new CommonMemoryError('COMMON_MEMORY_ARCHIVED','보관된 공통기억은 다시 사용한 뒤 정리하세요.');
     const state=current?.state,knowledge=state?commonKnowledgeForState(state):null;
-    const cloudCatalog=kind==='recommend'?await catalogPage(null,true):null;
-    const draft=commonMemoryWorkroomDraft({kind,scopeId:sb().commonMemoryScope,cloudSources:cloudCatalog?.sources.slice(0,16),sourceNextAfter:cloudCatalog&&cloudCatalog.sources.length>16?cloudCatalog.sources[15]!.memoryId:cloudCatalog?.nextAfter,group:state?{id:state.id,name:state.name,version:current!.version,goal:state.goal.objective,sourceMemoryIds:commonMemoryTracking(state).sourceMemoryIds,knowledgeRevision:knowledge!.revision,useProjectMemoryIds:knowledge!.members.filter(m=>m.mode==='include').map(m=>m.memoryId)}:undefined});
+    const tracked=state?commonMemoryTracking(state).sourceMemoryIds:[],linked=knowledge?knowledge.members.filter(m=>m.mode==='include'):[];
+    // An update with no tracked sources reads its linked long-term memories (up to 16, live ones only) as this draft's
+    // cloudSources; they are never written to sourceMemoryIds. With neither (or no linked one still readable), it gets one
+    // catalog page to search, as recommend does.
+    const linkedSources=kind==='update'&&!tracked.length&&linked.length?await liveSources(linked.slice(0,16)):[];
+    const cloudCatalog=kind==='recommend'||kind==='update'&&!tracked.length&&!linkedSources.length?await catalogPage(null,true):null;
+    const draft=commonMemoryWorkroomDraft({kind,scopeId:sb().commonMemoryScope,cloudSources:linkedSources.length?linkedSources:cloudCatalog?.sources.slice(0,16),sourceNextAfter:cloudCatalog&&cloudCatalog.sources.length>16?cloudCatalog.sources[15]!.memoryId:cloudCatalog?.nextAfter,group:state?{id:state.id,name:state.name,version:current!.version,goal:state.goal.objective,sourceMemoryIds:tracked,knowledgeRevision:knowledge!.revision,useProjectMemoryIds:linked.map(m=>m.memoryId)}:undefined});
     return {target:'ops' as const,requiresUserSend:true,scopeId:sb().commonMemoryScope,...draft,...(state?{groupId:state.id,version:current!.version}:{})};
   };
   const knowledgeHistory=async(groupId:string)=>{const rows=await result(sb().from('portmgr_common_memory_operations').select('created_at,result').eq('group_id',commonMemoryId(groupId)).order('created_at',{ascending:false}).limit(20));return rows.map((r:any)=>({revision:r.result.knowledgeRevision??r.result.version,operation:r.result.knowledgeOperation??'cloud-update',createdAt:r.created_at}));};

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { isTauri } from './lib/env';
 import {commonMemoryUuid,commonMemoryDigest} from './commonMemoryCrypto';
 import { Brain, Plus, RefreshCw, Search } from 'lucide-react';
 import { metaMemoryApplies, type MetaCommonMemory, type MetaMemoryAssignment, type MetaMemoryProject, type MetaMemorySummary } from './metaCommonMemoryContract';
@@ -11,12 +12,23 @@ const csv = (value: string) => [...new Set(value.split(',').map(s => s.trim()).f
 type Draft = { name: string; description: string; tags: string; categories: string };
 /** One page of the cloud long-term-memory catalog (the host's `catalog` operation). */
 export type MetaMemoryCatalogPage = { sources: Array<{ memoryId: string; name: string; githubUrl?: string | null }>; nextAfter: string | null };
-type Props = { /** Phones on a Mac with the `lean-read` capability: the group read leaves the project inventory out. */ leanRead?: boolean; visible?: boolean; request?: MetaMemoryRequester; remote?: boolean; hostName?: string; fixedMemoryId?:string; cloud?:boolean; onSaved?:(memoryId?:string)=>void; onBlockedChange?:(blocked:boolean)=>void; createOnly?:boolean;compact?:boolean;/** The cloud group's version: a new one re-reads in place (no remount). */version?:number;/** From the host's `list` result: forms this Mac understands beyond the originals. */hostCapabilities?:readonly string[];/** Cloud long-term-memory catalog pages; with the memory-members form, memories not registered here can be linked. */catalog?:(after:string|null)=>Promise<MetaMemoryCatalogPage>;/** Creation only: this long-term memory starts linked (include). */presetMemberId?:string };
+type Props = { /** Phones on a Mac with the `lean-read` capability: the group read leaves the project inventory out. */ leanRead?: boolean; visible?: boolean; request?: MetaMemoryRequester; remote?: boolean; hostName?: string; fixedMemoryId?:string; cloud?:boolean; onSaved?:(memoryId?:string)=>void; onBlockedChange?:(blocked:boolean)=>void; createOnly?:boolean;compact?:boolean;/** The cloud group's version: a new one re-reads in place (no remount). */version?:number;/** From the host's `list` result: forms this Mac understands beyond the originals. */hostCapabilities?:readonly string[];/** Cloud long-term-memory catalog pages; with the memory-members form, memories not registered here can be linked. */catalog?:(after:string|null)=>Promise<MetaMemoryCatalogPage>;/** Creation only: this long-term memory starts linked (include). */presetMemberId?:string;/** The phone's local list once its hint says new memories belong in 공통기억: creating or importing here would only be refused. */cloudTabHint?:boolean };
 /** A link target: one long-term memory, with the projects on this Mac that use it (none for a cloud-only memory). */
 type LinkRow = { memoryId: string; name: string; githubUrl?: string | null; users: MetaMemoryProject[]; lead?: MetaMemoryProject };
 const emptyDraft = (): Draft => ({ name: '', description: '', tags: '', categories: '' });
 const entryView=(body:string)=>{try{return {...readCommonTopicEvidence(body),invalid:false};}catch{return {body,evidence:null,invalid:true};}};
-export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = false, visible = true, request = metaMemoryRequest, remote = false, hostName, fixedMemoryId, cloud=false,onSaved,onBlockedChange,createOnly=false,compact=false,version,hostCapabilities,catalog,presetMemberId }: Props) {
+/** Set by the phone around the cloud panel (which passes no host name down): which Mac answers, and a report of unsaved
+ *  input, so a tab switch keeps the panel mounted instead of dropping what was typed. */
+export const CommonMemorySurfaceContext = createContext<{ hostName?: string; keepDraft?: (owner: object, unsaved: boolean) => void }>({});
+const HISTORY_LABELS: Record<string, string> = { 'cloud-update': '클라우드에서 변경', migration: '이전 기억에서 옮김', save: '이름·연결 저장', 'save-entry': '기억 항목 저장', 'propose-entry': '후보 제안', 'propose-source-entry': '후보 제안', 'review-entry': '후보 검토', 'review-entries': '후보 검토', archive: '보관·다시 사용', import: '백업 가져오기' };
+export const metaMemoryHistoryLabel = (operation: string) => HISTORY_LABELS[operation] ?? operation;
+/** A WKWebView shell drops a blob download without a word: the iOS app's navigation policy only admits the portal, and
+ *  the Mac app (also a WKWebView with message handlers) registers no download handler. The Mac app saves through its
+ *  file dialog first; any other shell shows the copy. Safari has no `webkit.messageHandlers`; only a native shell adds them. */
+export const fileDownloadsWork = (win: unknown = typeof window === 'undefined' ? undefined : window) =>
+  !(win as { webkit?: { messageHandlers?: unknown } } | undefined)?.webkit?.messageHandlers;
+export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = false, visible = true, request = metaMemoryRequest, remote = false, hostName, fixedMemoryId, cloud=false,onSaved,onBlockedChange,createOnly=false,compact=false,version,hostCapabilities,catalog,presetMemberId,cloudTabHint=false }: Props) {
+  const surface = useContext(CommonMemorySurfaceContext);
   const [memories, setMemories] = useState<MetaMemorySummary[]>([]);
   const [projects, setProjects] = useState<MetaMemoryProject[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
@@ -33,6 +45,9 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
   const [history, setHistory] = useState<Array<{ revision: number; operation: string; createdAt: string }>>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [exported, setExported] = useState<{ memoryId: string; text: string } | null>(null), [exportCopied, setExportCopied] = useState<'' | 'copied' | 'failed'>('');
+  // The link save's confirmation, repeated beside its button (the status line sits above the editor, out of view).
+  const [linksSaved, setLinksSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // A new group version re-reads in place; mark it loading in the same render so the parent never sees an idle gap.
@@ -106,12 +121,13 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
     finally { if (alive.current && ticket === readSeq.current) { setBusy(false); if (fixedMemoryId) setLoading(false); } }
   };
   const mutate = async (payload: Record<string, unknown>) => {
-    setBusy(true); setError(''); setPending(payload);
+    setBusy(true); setError(''); setPending(payload); setLinksSaved(false);
     try {
       const result = await request(payload);
       if (!alive.current) return;
       setPending(null); if (result.memory) { applyMemory(result.memory); if (fixedMemoryId) ownSaveAt.current = { from: version }; }
       if (payload.operation === 'save-entry') setEntry({ id: '', title: '', body: '' });
+      if (payload.operation === 'save') setLinksSaved(true);
       if (result.projects) setProjects(result.projects);
       setNotice(cloud||result.storage==='cloud'?'클라우드 공통기억에 저장 완료':remote ? '연결한 Mac에 저장 완료' : '로컬 저장 완료');
       // Creation hands over to the group view at once. Otherwise the saved memory is already applied: read the history
@@ -198,13 +214,24 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
     setError(''); setBusy(true);
     try {
       const result = await request({ operation: 'export', memoryId: memory!.id });
-      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
+      const text = JSON.stringify(result, null, 2);
+      if (isTauri()) {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const path = await save({ defaultPath: `meta-memory-${memory!.id}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+        if (!path) return;
+        const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+        await writeTextFile(path, text);
+        if (alive.current) setNotice('사본을 파일로 저장했습니다.');
+        return;
+      }
+      if (!fileDownloadsWork()) { if (alive.current) { setExported({ memoryId: memory!.id, text }); setExportCopied(''); } return; }
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = `meta-memory-${memory!.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { if (alive.current) setError((e as Error).message); } finally { if (alive.current) setBusy(false); }
   };
   const importMemory = async (file: File) => {
     try {
-      if (file.size > 600 * 1024) throw Error('공통 기억 백업은 600 KiB까지 가져올 수 있습니다.');
+      if (file.size > 600 * 1024) throw Error('공통기억 백업은 600 KiB까지 가져올 수 있습니다.');
       const data = JSON.parse(await file.text());
       if (data.format !== 'agentstoz-meta-common-memory' || data.schemaVersion !== 1 || !data.snapshot) throw Error('AgentsToZ 공통기억 백업을 선택하세요.');
       const hash = await commonMemoryDigest(JSON.stringify(data.snapshot));
@@ -213,39 +240,30 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
       try { expectedRevision = (await request({ operation: 'read', memoryId: data.snapshot.id })).memory.revision; }
       catch (e) { if (!(e instanceof MetaMemoryClientError) || e.code !== 'META_MEMORY_NOT_FOUND') throw e; }
       // Existing memory needs an explicit review in the editor; importing never silently overwrites it.
-      if (expectedRevision) { await read(data.snapshot.id); throw Error('이미 있는 공통 기억입니다. 현재 내용과 백업을 비교한 뒤 항목을 편집하세요.'); }
+      if (expectedRevision) { await read(data.snapshot.id); throw Error('이미 있는 공통기억입니다. 현재 내용과 백업을 비교한 뒤 항목을 편집하세요.'); }
       await mutate({ operation: 'import', requestId: commonMemoryUuid(), expectedRevision: 0, snapshot: data.snapshot });
     } catch (e) { if (alive.current) setError((e as Error).message); }
   };
   const blocked = busy || !!pending;
   const hasCategories = (memory?.categories.length ?? 0) > 0;
   // The projects are the ones of the Mac that answers: this Mac, or the named Mac a phone is connected to.
-  const here = remote && hostName ? hostName : '이 Mac';
+  const hostLabel = hostName ?? surface.hostName;
+  const here = remote && hostLabel ? hostLabel : '이 Mac';
   // Also on every version: the parent blocks when it hands a new version, and a version our own save produced changes
   // neither flag here, so the report must not depend on a flag flipping.
-  useEffect(()=>{onBlockedChange?.(blocked||loading);},[blocked,loading,onBlockedChange,version]);
+  // Creation's inventory load does not block: the parent's 「목록으로 돌아가기」 is that form's only exit (leaving aborts
+  // the load); a save in flight or with an unknown result still blocks it.
+  useEffect(()=>{onBlockedChange?.(blocked||(loading&&!createOnly));},[blocked,loading,createOnly,onBlockedChange,version]);
   useEffect(()=>()=>onBlockedChange?.(false),[onBlockedChange]);
   const metadataDirty = !!memory && (draft.name !== memory.name || draft.description !== memory.description || draft.tags !== memory.tags.join(', ') || draft.categories !== memory.categories.join(', ') || Object.keys(assignments).length > 0);
-  return <section className="m-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 text-[var(--ink)]" data-testid="meta-common-memory-panel">
-    {!fixedMemoryId&&!createOnly&&<div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 font-semibold"><Brain size={18} />공통기억</h2><p className="mt-1 text-xs text-[var(--ink-3)]">여러 장기기억이 제품·기술·업무의 공통점을 함께 기억합니다. 각 프로젝트의 장기기억은 따로 유지됩니다.</p></div>
-      <div className="flex flex-wrap gap-2"><button className={button} disabled={blocked || editing} onClick={() => { setMemory(null); setDraft(emptyDraft()); setAssignments({}); setHistory([]); setEntry({ id: '', title: '', body: '' }); setEditing(true); setNotice(''); }}><Plus size={14} className="mr-1 inline" />공통 기억 만들기</button><button className={button} disabled={blocked || editing} onClick={() => importInput.current?.click()}>백업 가져오기</button><button className={button} disabled={blocked} onClick={() => void load()} aria-label="공통 기억 목록 새로고침"><RefreshCw size={15} /></button></div>
-    </div>}
-    <p className="mt-2 text-xs text-[var(--ink-3)]">{cloud?'클라우드 공통기억 · 같은 클라우드에 연결된 기기에서 함께 관리합니다.':remote ? `${hostName ?? '연결한 Mac'}의 공통 기억 · 변경은 해당 Mac에 저장됩니다.` : '이 기기에 저장'} · 변경 이력과 이관 원본을 보존합니다.</p>
-    {fixedMemoryId&&!editing&&(loading||busy)&&<p role="status" className="mt-3 text-sm">기억 항목과 연결된 장기기억을 조회하는 중…</p>}
-    <input ref={importInput} type="file" accept="application/json,.json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importMemory(file); }} />
-    {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--warn-soft)] p-3 text-sm">{error}{memory && !pending && <button className={`${button} ml-2`} disabled={busy} onClick={() => void read(memory.id)}>최신 내용 다시 조회 · 입력 취소</button>}</div>}
-    {notice && <p role="status" className="mt-2 text-xs">{notice}</p>}
-    {pending && <div className="mt-3 rounded-lg border border-[var(--line)] p-3 text-sm">저장 결과를 확인하지 못했습니다. 같은 요청으로 확인해야 중복 저장을 막을 수 있습니다.<button className={`${button} ml-2`} disabled={busy} onClick={() => void mutate(pending)}>같은 요청 다시 확인</button></div>}
-    {!fixedMemoryId&&!createOnly&&<><form className="mt-4 flex gap-2" onSubmit={e => { e.preventDefault(); void load(); }}><input aria-label="공통 기억 검색" className={input} placeholder="이름·설명·태그 검색" value={search} onChange={e => setSearch(e.target.value)} /><button className={button} disabled={blocked} aria-label="공통 기억 검색 실행"><Search size={16} /></button></form>
-    {loading && <p className="mt-3 text-sm" role="status">공통기억과 장기기억을 조회하는 중…</p>}
-    {!loading && !error && !memories.length && <p className="mt-3 text-sm">등록된 공통 기억이 없습니다. 원본 장기기억 없이 만들 수 있습니다.</p>}
-    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{memories.map(m => <button key={m.id} className="rounded-lg border border-[var(--line)] p-3 text-left disabled:opacity-50" disabled={blocked || editing} onClick={() => void read(m.id)} data-testid="meta-memory-card"><span className="font-medium">{m.name}</span>{m.archived && <span className="ml-2 text-xs">보관됨</span>}<p className="mt-1 text-xs text-[var(--ink-3)]">{m.description}</p><p className="mt-2 text-xs">확정 {m.entryCount} · 후보 {m.candidateCount} · 수동 연결 {m.memberCount} · 리비전 {m.revision}</p><p className="mt-1 text-xs text-[var(--ink-3)]">{m.tags.join(' · ')}{m.categories.length ? ` · 자동 연결: ${m.categories.join(', ')}` : ''}</p></button>)}</div>
-    {nextOffset !== null && <button className={`${button} mt-3`} disabled={blocked} onClick={() => void load(nextOffset)}>더 보기 · {memories.length}/{total}</button>}
-    </>}
-    {editing && <div className="mt-5 rounded-xl border border-[var(--line)] p-4" data-testid="meta-memory-editor">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">{fixedMemoryId?'기억 항목·연결할 장기기억':memory ? '공통기억 관리' : '공통기억 만들기'}</h3>{!fixedMemoryId&&<button className={button} disabled={blocked} onClick={() => { if(createOnly)onSaved?.();setEditing(false); setMemory(null); setError(''); setNotice(''); }}>닫기 · 미저장 입력 취소</button>}</div>
-      {fixedMemoryId&&<p className="mt-2 text-xs text-[var(--ink-3)]">공유할 내용과 연결할 장기기억을 관리합니다. AI의 제안은 검토 후 확정합니다.</p>}
-      <details open={!compact||createOnly} onToggle={e => { if (e.currentTarget.open && !createOnly && memoryMembers && catalogNext === undefined) void loadCatalog(); if (e.currentTarget.open && projectsDeferred) void loadDeferredProjects(); }}><summary className="min-h-11 cursor-pointer text-sm">연결할 장기기억·이름·태그 수정</summary><fieldset data-testid="meta-memory-use-projects" disabled={blocked} className="mt-3 space-y-3">
+  // Typed but not saved, or a save whose result is not known yet (its 「같은 요청 다시 확인」 lives in this component).
+  const unsaved = !!pending || (createOnly
+    ? !!(draft.name.trim() || draft.description.trim() || draft.tags.trim() || draft.categories.trim() || Object.keys(assignments).some(id => id !== presetMemberId))
+    : metadataDirty || !!(entry.title.trim() || entry.body.trim()));
+  const draftOwner = useRef({});
+  useEffect(() => { surface.keepDraft?.(draftOwner.current, unsaved); }, [unsaved, surface.keepDraft]);
+  useEffect(() => () => surface.keepDraft?.(draftOwner.current, false), [surface.keepDraft]);
+  const linkFields = <fieldset data-testid="meta-memory-use-projects" disabled={blocked} className="mt-3 space-y-3">
         <label className="block text-sm">{createOnly?'공통기억 이름':'이름'}<input className={`${input} mt-1`} value={draft.name} maxLength={80} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
         <details open={!compact&&!createOnly}><summary className="min-h-11 cursor-pointer text-sm">{hasCategories ? '설명·태그·자동 적용 설정' : '설명·태그'}</summary>
         <label className="block text-sm">설명<textarea className={`${input} mt-1`} value={draft.description} maxLength={600} rows={2} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="이 공통기억의 목적과 함께 사용할 내용을 적으세요." /></label>
@@ -253,7 +271,7 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
         {/* Categories stay readable and editable for a group that already uses them; new links name long-term memories. */}
         {hasCategories && <label className="block text-sm">카테고리로 자동 적용 · 선택<input className={`${input} mt-1`} value={draft.categories} placeholder="등록된 카테고리 이름을 쉼표로 구분" onChange={e => setDraft({ ...draft, categories: e.target.value })} /><span className="mt-1 block text-xs text-[var(--ink-3)]">입력한 카테고리의 기존·새 프로젝트에 적용합니다. 체크박스의 개별 지정·제외가 우선합니다.</span><span className="mt-1 block text-xs" data-testid="meta-memory-category-notice">이 공통기억은 카테고리 자동 적용을 사용합니다. 새 연결은 아래에서 장기기억을 직접 선택하는 방식을 권장합니다.</span></label>}
         </details>
-        <div className="rounded-lg border border-[var(--line)] p-3"><h4 className="m-0 text-sm font-semibold">어느 장기기억에 연결할까요?</h4><p className="m-0 mt-1 text-sm">이 공통기억을 선택한 장기기억에 연결합니다. 그 장기기억을 쓰는 프로젝트·워크트리가 회상할 때 함께 읽습니다.</p><p className="m-0 mt-1 text-xs text-[var(--ink-3)]">공통 내용을 정리할 때 참고할 원본 장기기억은 ‘가져올 기억’에서 따로 고릅니다.</p></div>
+        <div className="rounded-lg border border-[var(--line)] p-3"><h4 className="m-0 text-sm font-semibold">어느 장기기억에 연결할까요?</h4><p className="m-0 mt-1 text-sm">이 공통기억을 선택한 장기기억에 연결합니다. 그 장기기억을 쓰는 프로젝트·워크트리가 회상할 때 함께 읽습니다.</p><p className="m-0 mt-1 text-xs text-[var(--ink-3)]">여기서 고르는 장기기억은 이 공통기억을 읽는 쪽입니다. 여러 장기기억의 공통 내용을 모으려면 공통기억 목록의 「교집합·카테고리 후보 확인」에서 시작하세요.</p></div>
         <div className="flex flex-wrap gap-2"><input className={`${input} flex-1`} aria-label="연결할 장기기억 검색" placeholder="장기기억 이름·GitHub 검색" value={projectSearch} onChange={e => setProjectSearch(e.target.value)} />{!memoryMembers && <select className={`${input} sm:w-auto`} aria-label="연결할 장기기억 카테고리" value={category} onChange={e => setCategory(e.target.value)}><option value="">모든 카테고리</option>{[...new Set(projects.map(p => p.category).filter(Boolean))].sort().map(c => <option key={c}>{c}</option>)}</select>}</div>
         <div className="flex flex-wrap items-center gap-2"><span className="text-sm">연결할 장기기억 {linkedMemoryCount}개{memoryMembers ? '' : ' · 이 기기에서 확인한 대상'}</span><button type="button" className={button} onClick={() => memoryRows.forEach(row => choose(row, 'include'))}>표시된 장기기억 선택</button><button type="button" className={button} onClick={() => memoryRows.forEach(row => choose(row, 'exclude'))}>표시된 장기기억 해제</button></div>
         <div className="max-h-64 overflow-auto rounded-lg border border-[var(--line)] p-2" data-testid="meta-memory-link-targets">{memoryRows.map(row => <div key={row.memoryId} className="flex flex-wrap items-center gap-2 py-1"><label className="flex min-h-11 min-w-0 w-full items-center gap-2 text-sm sm:w-auto sm:flex-1"><input type="checkbox" className="shrink-0" checked={rowChecked(row)} onChange={e => choose(row, e.target.checked ? 'include' : 'exclude')} /><span className="min-w-0 flex-1"><span className="block break-words">{row.name} 장기기억</span><span className="block break-words text-xs text-[var(--ink-3)]">{memoryMembers ? (row.users.length ? `${here}: ${row.users.map(p => p.name).join(' · ')}` : `${here}에 없음 · 클라우드 장기기억`) : row.users.length > 1 ? `사용 프로젝트 ${row.users.length}개: ${row.users.map(p => p.name).join(' · ')}` : row.lead?.category || '카테고리 없음'}{memoryMembers && row.githubUrl ? ` · ${row.githubUrl.replace(/^https:\/\/github\.com\//, '')}` : ''} · 기억 {row.memoryId.slice(0, 8)}</span></span></label>{hasCategories && <button type="button" className={button} onClick={() => choose(row, 'inherit')}>자동 적용 규칙 따르기</button>}</div>)}
@@ -261,19 +279,39 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
           {memoryMembers && catalogNext !== null && <button type="button" className={`${button} mt-2`} disabled={catalogLoading} onClick={() => void loadCatalog(catalogNext ?? null)} data-testid="meta-memory-catalog-more">{catalogLoading ? '클라우드 장기기억을 불러오는 중…' : catalogNext === undefined ? '클라우드의 다른 장기기억 불러오기' : `장기기억 더 보기 · ${catalogRows.length}개 불러옴`}</button>}
           {!!projectsWithoutMemory.length && <div className="mt-2 border-t border-[var(--line)] pt-2"><p className="m-0 text-xs text-[var(--ink-3)]">장기기억이 아직 없는 프로젝트 · 장기기억을 만든 뒤 연결할 수 있습니다.</p>{projectsWithoutMemory.map(p => <div key={p.id} className="flex flex-wrap items-center gap-2 py-1"><span className="min-w-0 flex-1 text-sm"><span className="block break-words">{p.name}</span><span className="block text-xs text-[var(--ink-3)]">{p.category}{p.state === 'unavailable' ? ' · 조회 불가' : ' · 장기기억 미준비'}</span></span>{p.state === 'uninitialized' && <button type="button" className={button} onClick={() => void mutate({ operation: 'prepare-project', portId: p.id })}>장기기억 준비</button>}</div>)}</div>}</div>
         {!memoryMembers && memory?.members.some(m => !projects.some(p => p.memoryId === m.memoryId)) && <p className="text-xs text-[var(--ink-3)]">이 기기에서 조회되지 않는 장기기억 연결도 보존합니다: {memory.members.filter(m => !projects.some(p => p.memoryId === m.memoryId)).map(m => `${m.name} · 기억 ${m.memoryId.slice(0,8)} · ${m.mode==='include'?'연결':'제외'}`).join(', ')}</p>}
-        <button className={`${button} bg-[var(--accent-soft)]`} disabled={!draft.name.trim()} onClick={save}>{createOnly?'공통기억 만들기':'연결·정보 저장'}</button>
-      </fieldset>
-      </details>
+        <div className="flex flex-wrap items-center gap-2"><button className={`${button} bg-[var(--accent-soft)]`} disabled={!draft.name.trim()} onClick={save}>{createOnly?'공통기억 만들기':'연결·정보 저장'}</button>{linksSaved && !metadataDirty && <span aria-hidden="true" data-testid="meta-memory-links-saved" className="text-xs">저장했습니다 · 연결된 장기기억 {linkedMemoryCount}개</span>}</div>
+      </fieldset>;
+  // Creation sits right under the parent's 「새 공통기억 만들기」 and its 「목록으로 돌아가기」: no second box, title or exit.
+  return <section className={createOnly ? 'text-[var(--ink)]' : 'm-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 text-[var(--ink)]'} data-testid="meta-common-memory-panel">
+    {!fixedMemoryId&&!createOnly&&<div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 font-semibold"><Brain size={18} />{remote ? '이전 로컬 기억' : '공통기억'}</h2><p className="mt-1 text-xs text-[var(--ink-3)]">{remote ? `${hostLabel ?? '연결한 Mac'}에만 저장된 이전 공통기억입니다. 새 공통기억은 「공통기억」에서 만듭니다.` : '여러 장기기억이 제품·기술·업무의 공통점을 함께 기억합니다. 각 프로젝트의 장기기억은 따로 유지됩니다.'}</p></div>
+      <div className="flex flex-wrap gap-2">{!cloudTabHint && <><button className={button} disabled={blocked || editing} onClick={() => { setMemory(null); setDraft(emptyDraft()); setAssignments({}); setHistory([]); setEntry({ id: '', title: '', body: '' }); setEditing(true); setNotice(''); }}><Plus size={14} className="mr-1 inline" />공통기억 만들기</button><button className={button} disabled={blocked || editing} onClick={() => importInput.current?.click()}>백업 가져오기</button></>}<button className={button} disabled={blocked} onClick={() => void load()} aria-label="공통기억 목록 새로고침"><RefreshCw size={15} /></button></div>
+    </div>}
+    {!createOnly && <p className="mt-2 text-xs text-[var(--ink-3)]">{cloud ? '클라우드 공통기억 · 같은 클라우드에 연결된 기기에서 함께 관리합니다. 원본 장기기억과 변경 이력은 보존합니다.' : `${remote ? `${hostLabel ?? '연결한 Mac'}의 공통기억 · 변경은 해당 Mac에 저장됩니다.` : '이 기기에 저장'} · 변경 이력을 보존합니다.`}</p>}
+    {fixedMemoryId&&!editing&&(loading||busy)&&<p role="status" className="mt-3 text-sm">기억 항목과 연결된 장기기억을 조회하는 중…</p>}
+    <input ref={importInput} type="file" accept="application/json,.json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importMemory(file); }} />
+    {error && <div role="alert" className="mt-3 rounded-lg bg-[var(--warn-soft)] p-3 text-sm">{error}{memory && !pending && <button className={`${button} ml-2`} disabled={busy} onClick={() => void read(memory.id)}>최신 내용 다시 조회 · 입력 취소</button>}</div>}
+    {notice && <p role="status" className="mt-2 text-xs">{notice}</p>}
+    {pending && <div className="mt-3 rounded-lg border border-[var(--line)] p-3 text-sm">저장 결과를 확인하지 못했습니다. 같은 요청으로 확인해야 중복 저장을 막을 수 있습니다.<button className={`${button} ml-2`} disabled={busy} onClick={() => void mutate(pending)}>같은 요청 다시 확인</button></div>}
+    {!fixedMemoryId&&!createOnly&&<><form className="mt-4 flex gap-2" onSubmit={e => { e.preventDefault(); void load(); }}><input aria-label={remote ? '이전 로컬 기억 검색' : '공통기억 검색'} className={input} placeholder="이름·설명·태그 검색" value={search} onChange={e => setSearch(e.target.value)} /><button className={button} disabled={blocked} aria-label={remote ? '이전 로컬 기억 검색 실행' : '공통기억 검색 실행'}><Search size={16} /></button></form>
+    {loading && <p className="mt-3 text-sm" role="status">공통기억과 장기기억을 조회하는 중…</p>}
+    {!loading && !error && !memories.length && <p className="mt-3 text-sm">{cloudTabHint ? `${here}에 남은 이전 로컬 기억이 없습니다.` : '등록된 공통기억이 없습니다. 원본 장기기억 없이 만들 수 있습니다.'}</p>}
+    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{memories.map(m => <button key={m.id} className="rounded-lg border border-[var(--line)] p-3 text-left disabled:opacity-50" disabled={blocked || editing} onClick={() => void read(m.id)} data-testid="meta-memory-card"><span className="font-medium">{m.name}</span>{m.archived && <span className="ml-2 text-xs">보관됨</span>}<p className="mt-1 text-xs text-[var(--ink-3)]">{m.description}</p><p className="mt-2 text-xs">확정 {m.entryCount} · 후보 {m.candidateCount} · 연결한 장기기억 {m.memberCount}</p><p className="mt-1 text-xs text-[var(--ink-3)]">{m.tags.join(' · ')}{m.categories.length ? ` · 자동 연결: ${m.categories.join(', ')}` : ''}</p></button>)}</div>
+    {nextOffset !== null && <button className={`${button} mt-3`} disabled={blocked} onClick={() => void load(nextOffset)}>더 보기 · {memories.length}/{total}</button>}
+    </>}
+    {editing && <div className={createOnly ? '' : 'mt-5 rounded-xl border border-[var(--line)] p-4'} data-testid="meta-memory-editor">
+      {!createOnly && <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">{fixedMemoryId?'기억 항목·연결할 장기기억':memory ? '공통기억 관리' : '공통기억 만들기'}</h3>{!fixedMemoryId&&<button className={button} disabled={blocked} onClick={() => { setEditing(false); setMemory(null); setError(''); setNotice(''); }}>닫기 · 미저장 입력 취소</button>}</div>}
+      {fixedMemoryId&&<p className="mt-2 text-xs text-[var(--ink-3)]">공유할 내용과 연결할 장기기억을 관리합니다. AI의 제안은 검토 후 확정합니다.</p>}
+      {createOnly ? linkFields : <details open={!compact} onToggle={e => { if (e.currentTarget.open && memoryMembers && catalogNext === undefined) void loadCatalog(); if (e.currentTarget.open && projectsDeferred) void loadDeferredProjects(); }}><summary className="min-h-11 cursor-pointer text-sm">연결할 장기기억·이름·태그 수정</summary>{linkFields}</details>}
       {memory && <fieldset disabled={blocked} className="mt-5 space-y-3 border-t border-[var(--line)] pt-4">
-        {metadataDirty && <p className="text-sm text-[var(--ink-3)]">이름·메타정보·연결할 장기기억 변경을 먼저 저장한 뒤 공통 항목을 수정하세요.</p>}
-        {memory.archived && <p className="text-sm">보관된 공통 기억입니다. 연결 설정과 내용은 남아 있으며 회상 적용은 중지되었습니다.</p>}
+        {metadataDirty && <p className="text-sm text-[var(--ink-3)]">이름·설명·태그·연결할 장기기억 변경을 먼저 저장한 뒤 공통 항목을 수정하세요.</p>}
+        {memory.archived && <p className="text-sm">보관된 공통기억입니다. 연결 설정과 내용은 남아 있으며 회상 적용은 중지되었습니다.</p>}
         {cloud&&memory.entries.some(e=>e.state==='candidate')&&<div data-testid="common-memory-candidate-review" className="grid gap-2 rounded-lg border border-[var(--line)] p-3"><b className="text-sm">검토 후보 · {memory.entries.filter(e=>e.state==='candidate').length}개</b><p className="m-0 text-xs">공통 규칙·적용 조건과 원본 근거를 확인하고 선택한 후보만 확정합니다. 기존 항목을 바꾸는 후보는 원본과 변경 전 내용도 다시 검사합니다.</p><div className="flex flex-wrap gap-2"><button className={button} disabled={metadataDirty||memory.archived} onClick={()=>setSelectedCandidates(memory.entries.filter(e=>e.state==='candidate'&&!entryView(e.body).invalid).slice(0,16).map(e=>e.id))}>후보 선택 · 최대 16개</button><button className={button} disabled={metadataDirty||memory.archived||!selectedCandidates.length} onClick={()=>void mutate({operation:'review-entries',...base(),entryIds:selectedCandidates,state:'active'})}>선택한 {selectedCandidates.length}개 검토 후 확정</button><button className={button} disabled={metadataDirty||!selectedCandidates.length} onClick={()=>void mutate({operation:'review-entries',...base(),entryIds:selectedCandidates,state:'superseded'})}>선택한 후보 채택하지 않고 보존</button></div></div>}
         {memory.entries.map(e => {const view=entryView(e.body),prior=view.evidence?.supersedes?memory.entries.find(entry=>entry.id===view.evidence!.supersedes!.entryId):null;return <details key={e.id} className="rounded-lg border border-[var(--line)] p-3" open={e.state === 'candidate'}>
           <summary className="flex min-h-11 cursor-pointer items-center text-sm">{e.title} · {({ active: '확정', candidate: '검토 후보', contested: '충돌 검토', superseded: '이전 항목' })[e.state]}</summary>
           {cloud&&e.state==='candidate'&&<label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" aria-label={`${e.title} 검토 선택`} disabled={metadataDirty||view.invalid||(!selectedCandidates.includes(e.id)&&selectedCandidates.length>=16)} checked={selectedCandidates.includes(e.id)} onChange={event=>setSelectedCandidates(ids=>event.target.checked?[...ids,e.id]:ids.filter(id=>id!==e.id))}/>이 후보 검토 선택</label>}
           <p className="mt-2 whitespace-pre-wrap break-words text-sm">{view.body}</p>
           {view.invalid&&<p role="alert" className="text-sm">원본 근거 형식을 확인하지 못했습니다. 후보를 다시 준비하세요.</p>}
-          {view.evidence&&<div data-testid="common-memory-candidate-evidence" className="grid gap-2 border-t border-[var(--line)] pt-3"><p className="m-0 text-xs">정리 이유: {view.evidence.reason}</p>{view.evidence.category&&<p className="m-0 text-xs">내용 분류: {view.evidence.category}</p>}<p className="m-0 text-xs">적용 조건: {view.evidence.conditions.join(' · ')||'원본과 작업 조건을 함께 확인하세요.'}</p><ul className="m-0 pl-5 text-xs">{view.evidence.sources.map(source=><li key={`${source.memoryId}:${source.entryId}`} className="break-words">{source.memoryName} · {source.title}<span className="block text-[var(--ink-3)]">기억 {source.memoryId.slice(0,8)} · 리비전 {source.revisionId.slice(0,8)}</span></li>)}</ul>{prior&&e.state==='candidate'&&<details><summary className="min-h-11 cursor-pointer text-xs">변경 전 확정 항목 · {prior.title}</summary><p className="whitespace-pre-wrap break-words text-sm">{entryView(prior.body).body}</p></details>}</div>}
+          {view.evidence&&<div data-testid="common-memory-candidate-evidence" className="grid gap-2 border-t border-[var(--line)] pt-3"><p className="m-0 text-xs">정리 이유: {view.evidence.reason}</p>{view.evidence.category&&<p className="m-0 text-xs">내용 분류: {view.evidence.category}</p>}<p className="m-0 text-xs">적용 조건: {view.evidence.conditions.join(' · ')||'원본과 작업 조건을 함께 확인하세요.'}</p><ul className="m-0 pl-5 text-xs">{view.evidence.sources.map(source=><li key={`${source.memoryId}:${source.entryId}`} className="break-words" title={`기억 ${source.memoryId} · 리비전 ${source.revisionId}`}>{source.memoryName} · {source.title}</li>)}</ul>{prior&&e.state==='candidate'&&<details><summary className="min-h-11 cursor-pointer text-xs">변경 전 확정 항목 · {prior.title}</summary><p className="whitespace-pre-wrap break-words text-sm">{entryView(prior.body).body}</p></details>}</div>}
           <div className="mt-3 flex flex-wrap gap-2"><button className={button} disabled={memory.archived || metadataDirty||view.invalid} onClick={() => setEntry({ id: e.id, title: e.title, body: view.body,...(view.evidence?{evidence:view.evidence}:{}) })}>편집</button>{e.state !== 'active' && <button className={button} disabled={metadataDirty||memory.archived||view.invalid} onClick={() => void mutate({ operation: 'review-entry', ...base(), entryId: e.id, state: 'active' })}>검토 후 확정</button>}{e.state !== 'contested' && <button className={button} disabled={metadataDirty} onClick={() => void mutate({ operation: 'review-entry', ...base(), entryId: e.id, state: 'contested' })}>충돌로 표시</button>}{e.state !== 'superseded' && <button className={button} disabled={metadataDirty} onClick={() => void mutate({ operation: 'review-entry', ...base(), entryId: e.id, state: 'superseded' })}>이전 항목으로 보존</button>}</div>{e.sourceMemoryId && <p className="mt-2 text-xs text-[var(--ink-3)]">출처 기억 {e.sourceMemoryId}</p>}
         </details>;})}
         {!memory.entries.length && <p className="text-sm">AI로 내용을 정리하거나 직접 기억 항목을 작성하세요.</p>}
@@ -282,9 +320,11 @@ export default function MetaCommonMemoryPanel({ leanRead: leanReadAllowed = fals
         <button className={button} disabled={metadataDirty || memory.archived || !entry.title.trim() || !entry.body.trim()} onClick={() => void saveEntry()}>공통 항목 저장</button>{entry.id && <button className={`${button} ml-2`} onClick={() => setEntry({ id: '', title: '', body: '' })}>항목 편집 취소</button>}
         </details>
         <details open={!compact}><summary className="min-h-11 cursor-pointer text-sm">보관·백업·이력</summary>
-        <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-[var(--ink-3)]">독립 ID {memory.id} · 리비전 {memory.revision}</span><button className={button} onClick={() => void exportMemory()}>{cloud?'사본 내보내기':'백업 내보내기'}</button><button className={button} disabled={metadataDirty} onClick={() => void mutate({ operation: 'archive', ...base(), archived: !memory.archived })}>{memory.archived ? '다시 사용' : '보관 · 적용 중지'}</button></div>
+        <div className="flex flex-wrap items-center gap-2"><button className={button} onClick={() => void exportMemory()}>{cloud?'사본 내보내기':'백업 내보내기'}</button><button className={button} disabled={metadataDirty} onClick={() => void mutate({ operation: 'archive', ...base(), archived: !memory.archived })}>{memory.archived ? '다시 사용' : '보관 · 적용 중지'}</button></div>
+        {exported?.memoryId === memory.id && <div data-testid="meta-memory-export-copy" className="mt-2 space-y-2"><p className="text-xs">이 앱 안에서는 파일로 저장할 수 없어 내용을 그대로 보여 줍니다. 복사해서 보관하세요.</p><textarea readOnly className={input} aria-label="내보낸 공통기억 내용" rows={6} value={exported.text} onFocus={e => e.currentTarget.select()} /><div className="flex flex-wrap items-center gap-2"><button className={button} onClick={() => void Promise.resolve().then(() => navigator.clipboard.writeText(exported.text)).then(() => setExportCopied('copied'), () => setExportCopied('failed'))}>내용 복사</button><button className={button} onClick={() => setExported(null)}>닫기</button>{exportCopied && <span role="status" className="text-xs">{exportCopied === 'copied' ? '복사했습니다' : '복사하지 못했습니다 · 위 칸을 길게 눌러 복사하세요'}</span>}</div></div>}
         {cloud&&<p data-testid="cloud-common-memory-export-guidance" className="text-xs">내보낸 JSON 파일은 내용 확인용 사본입니다. 클라우드 공통기억에서는 파일을 가져와 복원할 수 없습니다. 보관한 기억은 목록 관리·휴지통에서 복원하세요.</p>}
-        <details><summary className="flex min-h-11 cursor-pointer items-center text-sm">최근 변경 이력</summary><ul className="mt-2 space-y-1 text-xs">{history.map(h => <li key={h.revision}>리비전 {h.revision} · {h.operation} · {new Date(h.createdAt).toLocaleString()}</li>)}</ul></details>
+        <details><summary className="flex min-h-11 cursor-pointer items-center text-sm">최근 변경 이력</summary><ul className="mt-2 space-y-1 text-xs">{history.map(h => <li key={h.revision}>{h.revision}번째 · {metaMemoryHistoryLabel(h.operation)} · {new Date(h.createdAt).toLocaleString()}</li>)}</ul></details>
+        <details><summary className="flex min-h-11 cursor-pointer items-center text-sm">고급 정보</summary><p className="m-0 break-all text-xs text-[var(--ink-3)]">공통기억 ID {memory.id} · {memory.revision}번째 변경 · 지원 문의나 백업 대조에 씁니다.</p></details>
         </details>
       </fieldset>}
     </div>}

@@ -25,6 +25,15 @@ export async function terminalLocalRequest(path: string, body: unknown): Promise
 }
 export const localAiTerminalTransport: AiTerminalTransport = async request => normalizeAiTerminalResponse(await terminalLocalRequest(AI_TERMINAL_PREFIX,request));
 
+/**
+ * This Mac only: start a Workroom as 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts). The enum rides
+ * beside the ordinary request and the sidecar strips it before the shared DTO is normalized, so no wire key is added.
+ */
+export async function localAiTerminalStart(request: AiTerminalRequest, variant?: import('./hermesVariants').HermesVariant | null): Promise<AiTerminalResponse> {
+  const {HERMES_VARIANT_START_KEY} = await import('./hermesVariants');
+  return normalizeAiTerminalResponse(await terminalLocalRequest(AI_TERMINAL_PREFIX, variant ? {...request, [HERMES_VARIANT_START_KEY]: variant} : request));
+}
+
 export const localWorkroomTransport:import('./WorkroomSessionFooter').WorkroomTransport=async request=>{const {normalizeMobileWorkspaceResult}=await import('./mobileWorkspaceProtocol');return normalizeMobileWorkspaceResult(await terminalLocalRequest(AI_TERMINAL_PREFIX,request));};
 
 /**
@@ -46,4 +55,22 @@ export async function requestWorkroomAppDispatch(request:import('./workroomAppRo
   const response=await fetch(WORKROOM_APP_DISPATCH_PATH,{method:'POST',headers:{'Content-Type':'application/json'},body,signal:AbortSignal.timeout(80_000)}).catch(()=>null);
   if(!response)return {ok:false,code:'WORKROOM_APP_DISPATCH_UNCONFIRMED',error:unconfirmed};
   return normalizeWorkroomAppDispatchResult(response.status,await response.json().catch(()=>({})));
+}
+
+/** 팀 현황 (src/workroomTeamPanel.ts): this Mac's sidecar only — a phone or a peer has no route to it. */
+export async function requestWorkroomTeamPanel(request:import('./workroomTeamPanel').TeamPanelRequest):Promise<import('./workroomTeamPanel').TeamPanelResult> {
+  const {WORKROOM_TEAM_PANEL_PATH,normalizeTeamPanelResult}=await import('./workroomTeamPanel');
+  return normalizeTeamPanelResult(await terminalLocalRequest(WORKROOM_TEAM_PANEL_PATH,request));
+}
+
+/** Records only a person's explicit confirmation/report; the host rechecks the session is this team's leader. */
+export async function requestWorkroomTeamPanelAction(request:import('./workroomTeamPanelActions').TeamPanelAction):Promise<void> {
+  const {WORKROOM_TEAM_PANEL_PATH}=await import('./workroomTeamPanel');
+  await terminalLocalRequest(WORKROOM_TEAM_PANEL_PATH,request);
+}
+export async function requestWorkroomTeamMemberBrief(request:{sessionId:string;teamId:string;memberId:string}):Promise<string> {
+  const {WORKROOM_TEAM_PANEL_PATH}=await import('./workroomTeamPanel');
+  const result=await terminalLocalRequest(WORKROOM_TEAM_PANEL_PATH,{...request,operation:'copy-brief'});
+  if(typeof result.brief!=='string'||new TextEncoder().encode(result.brief).length>64_000)throw Error('팀원 지시문을 확인하지 못했습니다.');
+  return result.brief;
 }

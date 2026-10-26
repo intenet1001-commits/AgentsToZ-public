@@ -1,0 +1,11 @@
+{
+  "productName": "AgentsToZ Browser Experiment",
+  "version": "0.1.0",
+  "identifier": "com.agentstoz.browser-spike",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "windows": [{ "label": "main", "title": "AgentsToZ · Chromium runtime experiment", "width": 1300, "height": 840, "minWidth": 900, "minHeight": 650 }],
+    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost" }
+  },
+  "bundle": { "active": false }
+}

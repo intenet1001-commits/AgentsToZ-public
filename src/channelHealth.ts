@@ -92,7 +92,7 @@ function classifyMcp({ agent, connection, probe, now, currentBuild }: McpChannel
     return result({ ...base, state: 'not-installed', detail: `${AGENT_TITLE[agent]}가 이 컴퓨터에 설치돼 있지 않거나, 앱에 포함된 제어 도구를 찾지 못했습니다.` });
   }
   if (connection.state === 'not-configured') {
-    return result({ ...base, state: 'not-installed', detail: `${AGENT_TITLE[agent]}에 AgentsToZ 제어 도구가 아직 등록되지 않았습니다. 운영 프로필 패널에서 연결할 수 있습니다.` });
+    return result({ ...base, state: 'not-installed', detail: `${AGENT_TITLE[agent]}에 AgentsToZ 제어 도구가 아직 등록되지 않았습니다. 도구 및 설정 → 아젠투지 설정의 「AI별 MCP 사용 설정」에서 연결할 수 있습니다.` });
   }
   if (connection.state === 'needs-attention') {
     return result({ ...base, state: 'unknown', detail: `등록된 설정이 이 앱과 맞지 않거나 읽을 수 없습니다. ${connection.message}` });

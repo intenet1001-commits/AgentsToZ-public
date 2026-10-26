@@ -135,3 +135,48 @@ test('1.39.0 memory forms against an older AgentsToZ are reported as AGENTSTOZ_U
   const goal=await call(refusing,'recall_common_memory',{groupId:crypto.randomUUID(),task:'배포'});expect(goal.result.isError).toBe(true);expect(errorData(goal).code).toBe('COMMON_MEMORY_INPUT_INVALID');
  }finally{refusing.stop(true);ignoring.stop(true);}
 });
+
+/** One live stdio MCP process driven one call at a time, so a later call can use an id an earlier reply returned. */
+function stdioSession(endpoint:string){
+ const child=Bun.spawn([process.execPath,join(import.meta.dir,'../agentstoz-use-mcp-server.ts')],{stdin:'pipe',stdout:'pipe',stderr:'pipe',env:{...process.env,APP_DATA_DIR:'',AGENTSTOZ_USE_ENDPOINT:endpoint,AGENTSTOZ_CONTROLLER_PORT_ID:'fixture-controller'}});
+ const reader=child.stdout.getReader(),decoder=new TextDecoder();let buffer='',next=1;
+ const line=async():Promise<string>=>{for(;;){const at=buffer.indexOf('\n');if(at>=0){const text=buffer.slice(0,at);buffer=buffer.slice(at+1);return text;}const {value,done}=await reader.read();if(done)throw Error('the MCP server closed its output');buffer+=decoder.decode(value,{stream:true});}};
+ const call=async(name:string,args:unknown):Promise<any>=>{const id=next++;child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:{name:'agentstoz_use_'+name,arguments:args}})+'\n');await child.stdin.flush();for(;;){const reply=JSON.parse(await line());if(reply.id===id)return reply.result;}};
+ return {call,kill(){child.kill();}};
+}
+const errorText=(result:any)=>JSON.parse(result.content[0].text).error as string;
+
+// The shared-memory MCP operator's documented path (manage_common_knowledge description), not the legacy create/memoryId forms.
+test('documented current path over stdio: create and link, read, propose, recall after acceptance, and the MCP-only pointers',async()=>{
+ const h=aiHost(),s=stdioSession(h.endpoint);
+ try{
+  const knowledge=(request:Record<string,unknown>)=>s.call('manage_common_knowledge',{request});
+  const created=await knowledge({operation:'save',expectedRevision:0,requestId:'journey-create',name:'배포 공통',assignments:[{memoryId:B,mode:'include'}]});
+  expect(created.isError).toBe(false);expect(created.structuredContent.effect).toBe('common-memory-updated');
+  const groupId=created.structuredContent.memory.id;expect(created.structuredContent.memory.groupId).toBe(groupId);
+  const read=(await knowledge({operation:'read',groupId})).structuredContent.memory;
+  expect(read.members).toEqual([{memoryId:B,name:expect.any(String),mode:'include'}]);
+  const proposed=await knowledge({operation:'propose-entry',groupId,memoryId:B,expectedRevision:read.revision,requestId:'journey-propose',title:'배포 호환',body:'배포 호환 규칙은 양쪽 결과로 확인한다.'});
+  expect(proposed.isError).toBe(false);expect(proposed.structuredContent.nextStep).toContain('공통기억 탭 → 「배포 공통」 → 「검토 후보」');
+  const entries=(await knowledge({operation:'read',groupId})).structuredContent.memory.entries;
+  expect(entries).toHaveLength(1);expect(entries[0]).toMatchObject({state:'candidate',sourceMemoryId:B});
+  // A candidate is not shared knowledge yet: recall lists the group but returns no hit.
+  const before=(await s.call('recall_common_memory',{portId:'port-b',query:'배포 호환'})).structuredContent;
+  expect(before.groups.map((g:any)=>g.id)).toContain(groupId);expect(before.hits).toEqual([]);
+  // The person accepts on the host's review path; an AI connection cannot.
+  const current=(await h.d.dispatch('knowledge',{request:{operation:'read',memoryId:groupId}})).memory;
+  await h.d.dispatch('knowledge',{request:{operation:'review-entry',memoryId:groupId,expectedRevision:current.revision,requestId:crypto.randomUUID(),entryId:entries[0].id,state:'active'}});
+  const after=(await s.call('recall_common_memory',{portId:'port-b',query:'배포 호환'})).structuredContent;
+  expect(after.memoryId).toBe(B);expect(after.hits[0]).toMatchObject({groupId,groupName:'배포 공통',memoryId:groupId,memoryName:'배포 공통',title:'배포 호환'});
+  // The legacy goal form on a knowledge topic points at the read path, not at a 게시 step the app no longer shows.
+  const legacy=await s.call('recall_common_memory',{groupId,task:'배포'});
+  expect(legacy.isError).toBe(true);expect(errorText(legacy)).toContain('manage_common_knowledge {operation:"read", groupId}');expect(errorText(legacy)).not.toContain('게시한 뒤');
+  // A long-term memory sent as the group, arguments outside request, and an empty title each name what to fix.
+  const wrong=await knowledge({operation:'read',groupId:B});expect(wrong.isError).toBe(true);expect(errorText(wrong)).toContain('장기기억 memoryId가 아닌지');
+  const unwrapped=await s.call('manage_common_knowledge',{operation:'read',groupId});expect(unwrapped.isError).toBe(true);expect(errorText(unwrapped)).toContain('request:{…}');
+  const empty=await knowledge({operation:'propose-entry',groupId,expectedRevision:current.revision+1,requestId:'journey-empty',title:' ',body:'본문'});expect(empty.isError).toBe(true);expect(errorText(empty)).toContain('title(필수)');
+  // Nothing the AI sent accepted or saved knowledge directly: the one accepted entry is the person's.
+  const final=(await h.d.dispatch('knowledge',{request:{operation:'read',memoryId:groupId}})).memory;
+  expect(final.entries.map((e:any)=>e.state)).toEqual(['active']);
+ }finally{s.kill();h.dispose();}
+},30_000);

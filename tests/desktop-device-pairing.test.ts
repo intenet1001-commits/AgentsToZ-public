@@ -90,7 +90,7 @@ test("both onboarding agents teach the same host-first registration boundary", (
     expect(guide).toContain("Playwright");
   }
   expect(setup).toContain("기존 기기 ID,");
-  expect(setup).toContain("service_role 키, 로그인 토큰은 복사하지 않는다");
+  expect(setup).toContain("service_role 키, 로그인 토큰은 복사하지 않습니다");
   expect(setup).toContain("Tauri 앱은 localhost sidecar의 로컬 service_role 연결");
 });
 

@@ -28,6 +28,18 @@ const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).d
 export function publicWorkroomThread(r:StoredWorkroomThread):WorkroomThreadSummary {
  const {id,title,agent,sessionId,state,revision,createdAt,updatedAt}=r;return {id,title,agent,sessionId,state,revision,createdAt,updatedAt,...(r.group?{participants:r.group.members.map(m=>({...m}))}:{}),...(r.serviceExecution?{execution:{role:'use' as const,serviceKey:r.serviceExecution.binding.serviceKey}}:{})};
 }
+export const USE_CHANGED_REPLY_TEXT='이 업무의 앱 연결이 바뀌어 이어서 요청할 수 없습니다. 새 USE 업무로 요청하세요.';
+export const USE_UNKNOWN_RESULT_TEXT='앱에서 결과를 아직 확인하지 못했습니다. 같은 작업은 자동으로 다시 실행하지 않고, 이 업무를 여는 동안 원래 요청의 결과만 다시 확인합니다.';
+/**
+ * The stored result line. An app's own text for an unknown outcome may be English or tell the reader to replay,
+ * so the host's sentence replaces it. IDs a follow-up tool asks for are shown only when this binding allows that tool.
+ */
+export function useResultText(tools:readonly ServiceUseCall['tool'][],outcome:ServiceUseOutcome):string {
+ const lines=[outcome.state==='unknown'?USE_UNKNOWN_RESULT_TEXT:outcome.message];
+ if(outcome.materialId&&tools.some(t=>t==='materials.reuse'||t==='audio.prepare'||t==='phone.deliver'))lines.push('자료 ID: '+outcome.materialId);
+ if(outcome.operationId&&tools.some(t=>t==='operation.status'||t==='operation.cancel'))lines.push('요청 ID: '+outcome.operationId);
+ return lines.join('\n');
+}
 /** A task owns one exact Workroom. Receiving an echo or re-reading a receipt never starts or types anything. */
 export class WorkroomThreadService {
  readonly bootId=randomUUID();
@@ -82,13 +94,25 @@ export class WorkroomThreadService {
   }
   if(action==='workroom.threads.list'){
    const binding=await this.deps.resolve(targetId),rows=await this.deps.store.list(targetId,access.owner,access.readAll,input.beforeThreadId),threads:WorkroomThreadSummary[]=[];let consumed=0;
-   for(const row of rows.slice(0,20)){if(row.serviceExecution){try{await this.useAccess(row,targetId,access);}catch{consumed++;continue;}}else if(row.group){try{await this.groupAccess(row,targetId,access);}catch{consumed++;continue;}}else if(row.fingerprint!==binding.fingerprint){consumed++;continue;}const summary=publicWorkroomThread(row);if(Buffer.byteLength(JSON.stringify([...threads,summary]))>6500)break;threads.push(summary);consumed++;}
+   // A USE row whose app cannot be verified right now (closed app, changed action list, reissued code) stays listed:
+   // the summary carries only the user's title and state, never app-produced text.
+   for(const row of rows.slice(0,20)){if(row.serviceExecution){try{this.allowed(row,targetId,access);}catch{consumed++;continue;}}else if(row.group){try{await this.groupAccess(row,targetId,access);}catch{consumed++;continue;}}else if(row.fingerprint!==binding.fingerprint){consumed++;continue;}const summary=publicWorkroomThread(row);if(Buffer.byteLength(JSON.stringify([...threads,summary]))>6500)break;threads.push(summary);consumed++;}
    return {threads,nextThreadId:rows.length>consumed&&consumed>0?rows[consumed-1]!.id:null};
   }
   if(action==='workroom.threads.create')try{return input.use?await this.createUse(requestId,targetId,input,access):input.targetIds?await this.createGroup(requestId,targetId,input,access):await this.create(requestId,targetId,input,access);}catch(error){if(error instanceof WorkroomThreadAdmissionError)return {refusal:{requestId,message:error.message}};throw error;}
   const r=await this.deps.store.get(input.threadId!);this.allowed(r,targetId,access);
   if(input.projectState&&(r.group||r.groupParentId||r.serviceExecution))throw new WorkroomThreadAdmissionError('한 DEV 프로젝트의 업무에서 상태를 첨부하세요.');
-  if(r.serviceExecution){await this.useAccess(r,targetId,access);if(action==='workroom.threads.read')return this.readUse(r,access,input.beforeSeq);if(action==='workroom.threads.reply')return this.replyUse(r,input,requestId,access);}
+  if(r.serviceExecution){
+   // Receipt re-query and reply stay behind the live bind. Reading and closing do not touch the app.
+   const unverified=await this.useCheck(r,targetId,access);
+   if(action==='workroom.threads.read')return unverified?this.useUnverified(r,unverified,input.beforeSeq):this.readUse(r,access,input.beforeSeq);
+   // Nothing is admitted, so this is a refusal, not an uncertain send the composer would have to re-check forever.
+   if(action==='workroom.threads.reply'){if(unverified)return {...this.useUnverified(r,unverified),refusal:{requestId,message:unverified.changed?USE_CHANGED_REPLY_TEXT:unverified.error.message}};return this.replyUse(r,input,requestId,access);}
+   if(action==='workroom.threads.close'){
+    await this.deps.store.mutate(r.id,access.active,current=>{this.allowed(current,targetId,access);if(current.messages.some(m=>m.id===requestId))return {record:current,value:null};if(current.revision!==input.expectedRevision)throw Error('스레드가 갱신되었습니다. 다시 확인하세요.');current.state='closed';this.append(current,this.message(requestId,'system','notice','사용자가 이 업무 스레드를 종료 표시했습니다. 앱의 작업은 취소되지 않습니다.'));return {record:current,value:null};});
+    const closed=(await this.deps.store.get(r.id))!;return unverified?this.useUnverified(closed,unverified):this.page(closed);
+   }
+  }
   else if(input.use)throw Error('기존 DEV 스레드를 USE로 바꿀 수 없습니다. 새 USE 업무를 시작하세요.');
   if(r.groupParentId)throw Error('공동 업무는 공유 스레드에서 확인하세요.');
   if(r.group)return this.performGroup(action,input,r,targetId,requestId,access);
@@ -100,17 +124,31 @@ export class WorkroomThreadService {
   }
   return this.reply(r,input,requestId,access);
  }
- private async useAccess(r:StoredWorkroomThread,targetId:string,access:WorkroomThreadAccess){
-  this.allowed(r,targetId,access);if(!r.serviceExecution||!this.deps.use)throw Error('이 호스트는 USE 실행을 지원하지 않습니다.');
-  const binding=await this.deps.use.bind(targetId,access.owner,r.serviceExecution.call,access.active);
-  if(hash(binding)!==hash(r.serviceExecution.binding))throw Error('원래 USE 역할·서비스·사용자·보관함·설치·기억 또는 권한이 변경되었습니다.');
+ /** Access denial throws. A live bind that fails or differs is returned, so the stored row stays visible without its app text. */
+ private async useCheck(r:StoredWorkroomThread,targetId:string,access:WorkroomThreadAccess):Promise<{changed:boolean;error:Error}|null>{
+  this.allowed(r,targetId,access);
+  if(!r.serviceExecution||!this.deps.use)return {changed:false,error:Error('이 호스트는 USE 실행을 지원하지 않습니다.')};
+  // Reading an earlier result does not need USE turned on (「USE 끄기」 keeps every result); a new reply still does.
+  let binding;try{binding=await this.deps.use.bind(targetId,access.owner,r.serviceExecution.call,access.active,{reading:true});}catch(e){if(!access.active())throw e;return {changed:false,error:e instanceof Error?e:Error('USE 실행 준비를 확인하세요.')};}
+  if(hash(binding)!==hash(r.serviceExecution.binding))return {changed:true,error:Error('원래 USE 역할·서비스·사용자·보관함·설치·기억 또는 권한이 변경되었습니다.')};
+  return null;
+ }
+ /** Titles, state and the user's own messages only: app results may belong to another app user or library. */
+ private useUnverified(r:StoredWorkroomThread,check:{changed:boolean},before?:number){
+  const text=check.changed?'앱 연결이 새로 발급됐거나 앱의 사용자·자료가 바뀌어 이전 연결의 앱 결과는 표시하지 않습니다. 결과는 앱에서 직접 확인하고 이 업무를 종료 표시하세요. 같은 작업을 자동으로 다시 실행하지 않습니다.'
+   :'지금 앱 연결을 확인할 수 없어 앱 결과는 표시하지 않습니다. 이 Mac에서 앱이 실행 중인지, 작업 세션 → USE 준비에서 연결을 확인한 뒤 다시 여세요. 같은 작업을 자동으로 다시 실행하지 않습니다.';
+  const notice={...this.message('usecheck_'+hash(r.id).slice(0,40),'system','notice',text),seq:(r.messages.at(-1)?.seq??0)+1};
+  return this.page({...r,messages:[...r.messages.filter(m=>m.role!=='assistant'),notice]},before);
  }
  private async createUse(id:string,targetId:string,input:WorkroomThreadRequest,access:WorkroomThreadAccess){
   if(!this.deps.use)throw new WorkroomThreadAdmissionError('이 호스트는 USE 실행을 지원하지 않습니다. DEV로 대신 실행하지 않습니다.');
-  let binding;try{binding=await this.deps.use.bind(targetId,access.owner,input.use!,access.active);}catch(e){throw new WorkroomThreadAdmissionError(e instanceof Error?e.message:'USE 실행 준비를 확인하세요.');}
+  // A retry of an already-admitted request only returns its thread, so it binds like a read and still answers while USE is off.
+  const retry=!!await this.deps.store.get(id);
+  let binding;try{binding=await this.deps.use.bind(targetId,access.owner,input.use!,access.active,retry?{reading:true}:undefined);}catch(e){throw new WorkroomThreadAdmissionError(e instanceof Error?e.message:'USE 실행 준비를 확인하세요.');}
   const intentHash=hash({targetId,owner:access.owner,use:input.use,text:input.text,binding}),at=this.clock();let admitted=false;
   const record=await this.deps.store.mutate(id,access.active,prior=>{
    if(prior){this.allowed(prior,targetId,access);if(prior.intentHash!==intentHash)throw Error('같은 요청 번호의 작업 내용이 바뀌었습니다.');return {record:prior,value:prior};}
+   if(retry)throw new WorkroomThreadAdmissionError('USE 요청 기록을 다시 확인하세요. 같은 작업을 자동으로 다시 실행하지 않습니다.');
    admitted=true;const r:StoredWorkroomThread={id,targetId,owner:access.owner,fingerprint:hash(binding),bootId:this.bootId,intentHash,title:input.text!.replace(/\s+/gu,' ').slice(0,80),agent:input.agent!,sessionId:null,state:'running',revision:1,createdAt:at,updatedAt:at,messages:[{...this.message(id,'user','request',input.text!),seq:1}],serviceExecution:{binding,call:input.use!,requests:[{id,intentHash:hash({text:input.text,use:input.use})}]}};return {record:r,value:r};
   },true);
   if(admitted)this.startUse(record,input.use!,id,access);return this.page(record);
@@ -139,8 +177,9 @@ export class WorkroomThreadService {
     if(r.state!=='closed')r.state=outcome.state==='cancelled'?'completed':outcome.state;
    }
    const request=r.messages.find(m=>m.id===id);if(request)request.delivery=outcome.state==='unknown'?'unknown':'written';
-   if(existing){if(existing.text!==outcome.message||changed){existing.text=outcome.message;existing.at=this.clock();r.revision++;r.updatedAt=this.clock();}}
-   else this.append(r,this.message(resultId,'assistant','result',outcome.message));return {record:r,value:null,...(JSON.stringify(r)===original?{unchanged:true as const}:{})};
+   const text=useResultText(r.serviceExecution.binding.allowedTools,outcome);
+   if(existing){if(existing.text!==text||changed){existing.text=text;existing.at=this.clock();r.revision++;r.updatedAt=this.clock();}}
+   else this.append(r,this.message(resultId,'assistant','result',text));return {record:r,value:null,...(JSON.stringify(r)===original?{unchanged:true as const}:{})};
   });
  }
  private async readUse(record:StoredWorkroomThread,access:WorkroomThreadAccess,before?:number){
@@ -154,7 +193,11 @@ export class WorkroomThreadService {
  }
  private async replyUse(record:StoredWorkroomThread,input:WorkroomThreadRequest,id:string,access:WorkroomThreadAccess){
   if(!input.use||input.use.serviceKey!==record.serviceExecution!.binding.serviceKey)return {...this.page(record),refusal:{requestId:id,message:'USE 후속 요청에는 같은 서비스의 제한된 도구를 선택하세요. 개발 요청은 DEV 담당자에게 인계하세요.'}};
-  const binding=await this.deps.use!.bind(record.targetId,access.owner,input.use,access.active);
+  // A retry of an already-admitted reply only returns the thread (below), so it binds like a read. A new reply needs USE
+  // turned on; while it is off nothing is admitted, so the composer gets a refusal that says how to turn it back on.
+  const retry=record.messages.some(m=>m.id===id);
+  let binding;try{binding=await this.deps.use!.bind(record.targetId,access.owner,input.use,access.active,retry?{reading:true}:undefined);}
+  catch(e){if(!access.active())throw e;return {...this.page(record),refusal:{requestId:id,message:e instanceof Error?e.message:'USE 실행 준비를 확인하세요.'}};}
   if(hash(binding)!==hash(record.serviceExecution!.binding))throw Error('USE 실행 문맥이 변경되었습니다.');
   let admitted=false;
   try{await this.deps.store.mutate(record.id,access.active,r=>{
@@ -164,6 +207,7 @@ export class WorkroomThreadService {
       ??(r.messages.findLast(m=>m.role==='user')?.id===id?hash({text:prior.text,use:r.serviceExecution!.call}):null);
     if(saved!==hash({text:input.text,use:input.use}))throw Error('같은 USE 답변 번호의 입력이 다릅니다.');return {record:r,value:null};
    }
+   if(retry)throw new WorkroomThreadAdmissionError('USE 답변 기록을 다시 확인하세요. 같은 작업을 자동으로 다시 실행하지 않습니다.');
    const control=input.use!.tool==='operation.status'||input.use!.tool==='operation.cancel';
    if(r.revision!==input.expectedRevision||!(['completed','failed'].includes(r.state)||control&&['running','unknown'].includes(r.state))||this.flights.has(r.messages.findLast(m=>m.role==='user')!.id))throw new WorkroomThreadAdmissionError('USE 실행 결과와 스레드의 최신 상태를 먼저 확인하세요.');
    r.serviceExecution={binding,call:input.use!,requests:[...(r.serviceExecution!.requests??[]),{id,intentHash:hash({text:input.text,use:input.use})}]};r.state='running';r.bootId=this.bootId;this.append(r,this.message(id,'user','reply',input.text!));admitted=true;return {record:r,value:null};

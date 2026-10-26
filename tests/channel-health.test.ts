@@ -55,6 +55,13 @@ describe('MCP channel health', () => {
     expect(mcp({ ...configured, state: 'needs-attention' })).toMatchObject({ state: 'unknown', canProbe: false });
     expect(mcp(null).state).toBe('unknown');
   });
+
+  // UX audit 2026-10-25: the detail sent people to a 「운영 프로필 패널」 no screen is called.
+  test('a missing registration names the real place to connect it', () => {
+    const detail = mcp({ ...configured, state: 'not-configured' }).detail;
+    expect(detail).toContain('도구 및 설정 → 아젠투지 설정');
+    expect(detail).not.toContain('운영 프로필 패널');
+  });
 });
 
 describe('Telegram channel health', () => {

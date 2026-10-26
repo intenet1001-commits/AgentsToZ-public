@@ -1,4 +1,9 @@
 import {confirmAction} from './confirmAction';
+import {WorkroomBrowserFrame} from './WorkroomBrowserFrame';
+import {invoke} from '@tauri-apps/api/core';
+import {requestWorkroomBrowser} from './workroomBrowserClient';
+import {workroomBrowserUiCopy} from './workroomBrowserUiCopy';
+import {redactWorkroomBrowserHandoff,serializeWorkroomBrowserHandoff,workroomBrowserHandoffAfterReceipt,workroomBrowserHandoffExpired,workroomBrowserHandoffLabel,workroomBrowserLocalhostSuggestions,type WorkroomBrowserHandoff,type WorkroomBrowserWorkspaceVersion} from './workroomBrowserHandoff';
 import { workroomSessionLabels, workroomSessionStartedAt } from './workroomSessionLabel';
 import {commonMemoryUuid as requestUuid} from './commonMemoryCrypto';
 import {aiTerminalAgentLabel} from './aiTerminalAgentLabel';
@@ -19,16 +24,20 @@ import {singleFlight} from './singleFlight';
 import {AgentRuntimeClient} from '../packages/runtime-sdk/client';
 import React, {useCallback,useEffect,useId,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowLeft, AtSign, ChevronRight, ExternalLink, Hash, Maximize2, Mic, Minimize2, Plus, RotateCcw, RotateCw, Send} from 'lucide-react';
+import {ArrowLeft, AtSign, ChevronRight, ExternalLink, Hash, Maximize2, Mic, Minimize2, Plus, RotateCcw, RotateCw, Send, Users} from 'lucide-react';
 import {forgetOpenWorkroomSession,isOwnWorkroomSessionViewState,isStaleWorkroomNewTaskState,isStaleWorkroomSessionViewState,isWorkroomNewTaskState,isWorkroomSessionViewState,withWorkroomNewTask,withoutWorkroomNewTask,newWorkroomSessionViewToken,openWorkroomSessionToRestore,refreshOpenWorkroomSession,rememberOpenWorkroomSession,sessionViewEscapeCloses,sessionViewVoiceCall,visualKeyboardOpen,withWorkroomSessionView,withoutWorkroomSessionView,workroomOpenSessionStorage} from './workroomSessionView';
 import {voiceMediaClient} from './voiceMediaClient';
 import {WORKROOM_AGENT_NAMES,workroomPopoutAvailability,workroomPopoutTitle} from './workroomPopout';
+import {launchChoiceId,launchChoiceLabel,launchChoiceTarget,parseHermesVariant,WORKROOM_LAUNCH_CHOICES,type HermesVariant} from './hermesVariants';
+import {hermesVariantResolver,useHermesVariants} from './hermesVariantsClient';
+import {localAiTerminalStart} from './aiTerminalClient';
 import {openWorkroomPopout} from './workroomPopoutClient';
 import {isTauri} from './lib/env';
 import {WORKROOM_MODEL_COMMANDS,WORKROOM_SLASH_COMMANDS,cliInfoFromScreen,isWorkroomPaletteCommand,readSlashFavorites,slashCommandCandidates,toggleSlashFavorite,workroomMemoryCommand,type WorkroomCliInfo} from './workroomCliCommands';
 import {WORKROOM_FONT_DEFAULT,WORKROOM_FONT_MAX,WORKROOM_FONT_MIN,initialWorkroomFontSize,readWorkroomWide,stepWorkroomFontSize,workroomPreferenceStorage,writeWorkroomFontSize,writeWorkroomRemoteFontSize,writeWorkroomWide} from './workroomTerminalView';
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
+import {workroomReadableLayout,workroomReadableTail} from './workroomReadableScreen';
 import '@xterm/xterm/css/xterm.css';
 import './AiTerminalPanel.css';
 import {AI_TERMINAL_AGENTS, AI_TERMINAL_MAX_REFERENCES, AI_TERMINAL_PREFIX, AI_TERMINAL_UNKNOWN_REQUEST_ERROR, aiTerminalSnapshotUnsupported, type AiTerminalAgent,type AiTerminalRequest,type AiTerminalResponse,type AiTerminalSummary} from './aiTerminalProtocol';
@@ -87,6 +96,11 @@ import {applyCommunityMention,communityMentionState,communityReferencesFor,type 
 import {projectMentionChoices,projectMentionKey,SERVICE_USE_CHANGED_EVENT} from './projectUseMention';
 import {WorkroomUseConversation} from './WorkroomUseConversation';
 import {workroomSessionStateLabel} from './remoteControlScreenText';
+import {WorkroomTeamBuilder,type TeamOpenSession} from './WorkroomTeamBuilder';
+import {useTeamAccountChoices} from './teamAccountChoices';
+import {WorkroomTeamStatus} from './WorkroomTeamStatus';
+import {workroomTeamCopy} from './i18n';
+import {useAppLanguage} from './useAppLanguage';
 /** `keepDraft`: a session-only selection that leaves a draft in the new-task composer (and its target and AI) as it is. */
 export interface AiTerminalEntry {nonce:number;targetId:string;prompt?:string;title?:string;agent?:AiTerminalAgent;sessionId?:string;resumeLatest?:boolean;keepDraft?:boolean}
 function sameWorkroomTargets(a:readonly {targetId:string;label:string;projectTargetId?:string}[],b:readonly {targetId:string;label:string;projectTargetId?:string}[]):boolean {
@@ -94,13 +108,14 @@ function sameWorkroomTargets(a:readonly {targetId:string;label:string;projectTar
 }
 /** 커뮤니티 기기가 없을 때의 고정 빈 목록 — 렌더마다 새 배열을 만들면 memo가 전부 깨진다. */
 const NO_COMMUNITY_DEVICES:readonly CommunityMentionDeviceProjects[]=[];
-export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects,transport=localAiTerminalTransport,remote=false,entry,onManageProject,onWhatISaid,onRememberSession,sessionScope='local',workspaceTransport,bypassPermissions:controlledBypass,onBypassPermissionsChange,referencesSupported=true,opsTargetId,popout=false,onActiveSessionChange,onDraftStateChange,deviceName,deviceSwitch,slowPolling=false,communityMention,bypassUnavailable,effortReadOnly,sessionFullscreen=false,remoteAttach,restartBanner,listRefresh}: {
+export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects,transport=localAiTerminalTransport,remote=false,entry,onManageProject,onWhatISaid,onRememberSession,sessionScope='local',workspaceTransport,useRunsHere=true,bypassPermissions:controlledBypass,onBypassPermissionsChange,referencesSupported=true,opsTargetId,popout=false,onActiveSessionChange,onDraftStateChange,deviceName,deviceSwitch,slowPolling=false,communityMention,bypassUnavailable,effortReadOnly,sessionFullscreen=false,remoteAttach,restartBanner,listRefresh}: {
  bypassPermissions?:boolean;onBypassPermissionsChange?:(enabled:boolean)=>void;
  /** Set while driving another Mac: that Mac refuses a bypassed start from a community peer, so the panel starts
   *  without it and the toggle says why. The saved preference is untouched and returns with this Mac. */
  bypassUnavailable?:string;
  /** Set while driving another community Mac: its 「에포트 자동」 is that Mac's own setting, shown read-only (w16). */
- effortReadOnly?:string;workspaceTransport?:WorkroomTransport;visible?:boolean;projects:WorkroomMentionProject[];transport?:AiTerminalTransport;remote?:boolean;entry?:AiTerminalEntry|null;onManageProject?:(id:string)=>void;onWhatISaid?:()=>void;onRememberSession?:(id:string)=>void;sessionScope?:string;
+ effortReadOnly?:string;workspaceTransport?:WorkroomTransport;
+ /** False for another Mac driven from here: its `@<project>-USE` would run under a user it refuses, so only `#` offers it. */useRunsHere?:boolean;visible?:boolean;projects:WorkroomMentionProject[];transport?:AiTerminalTransport;remote?:boolean;entry?:AiTerminalEntry|null;onManageProject?:(id:string)=>void;onWhatISaid?:()=>void;onRememberSession?:(id:string)=>void;sessionScope?:string;
  /** The host accepts `#` references (local always; remote hosts advertise it). */
  referencesSupported?:boolean;
  onPrepareUse?:(projectId?:string)=>void;
@@ -200,7 +215,16 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  useEffect(()=>{try{sessionStorage.setItem('agentstoz-terminal-selection:'+sessionScope,selected)}catch{}},[selected,sessionScope]);
  const [target,setTarget]=useState(()=>{try{return sessionStorage.getItem('agentstoz-terminal-target:'+sessionScope)??''}catch{return ''}});
  const [agent,setAgent]=useState<AiTerminalAgent>(()=>{try{const saved=sessionStorage.getItem('agentstoz-terminal-agent:'+sessionScope);return AI_TERMINAL_AGENTS.includes(saved as AiTerminalAgent)?saved as AiTerminalAgent:'codex'}catch{return 'codex'}});
- useEffect(()=>{try{sessionStorage.setItem('agentstoz-terminal-target:'+sessionScope,target);sessionStorage.setItem('agentstoz-terminal-agent:'+sessionScope,agent)}catch{}},[target,agent,sessionScope]);
+ // 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts): remembered beside the AI, and only ever used for Hermes.
+ const [hermesVariant,setHermesVariant]=useState<HermesVariant|null>(()=>{try{return parseHermesVariant(sessionStorage.getItem('agentstoz-terminal-hermes:'+sessionScope))}catch{return null}});
+ useEffect(()=>{try{sessionStorage.setItem('agentstoz-terminal-target:'+sessionScope,target);sessionStorage.setItem('agentstoz-terminal-agent:'+sessionScope,agent);sessionStorage.setItem('agentstoz-terminal-hermes:'+sessionScope,hermesVariant??'')}catch{}},[target,agent,hermesVariant,sessionScope]);
+ const launchVariant=!remote&&agent==='hermes'?hermesVariant:null;
+ const hermesVariants=useHermesVariants(remote?null:sessions.length,!remote);
+ const launchChoice=launchChoiceId(agent,launchVariant);
+ const pickLaunchChoice=(value:string)=>{const picked=launchChoiceTarget(value);setAgent(picked.agent);setHermesVariant(picked.variant??null);};
+ // The phone keeps one Hermes item (docs/claude/remote-control.md): a variant it cannot start is never offered.
+ const launchChoiceOptions=()=>(remote?[...AI_TERMINAL_AGENTS]:[...WORKROOM_LAUNCH_CHOICES]).map(value=>{const item=hermesVariants.items.find(entry=>entry.choice===value);
+  return <option key={value} value={value} disabled={item?!item.available:false}>{launchChoiceLabel(value)}</option>;});
  const [prompt,setPrompt]=useState('');const [error,setError]=useState('');const phoneNetworkError=useRef<{text:string;kind:'offline'|'held'}|null>(null);const [connectionError,setConnectionError]=useState('');const [readError,setReadError]=useState('');const [busy,setBusy]=useState(false);
  const [terminalDraft,setTerminalDraft]=useState('');const [terminalCursor,setTerminalCursor]=useState(0);const [routeTargetId,setRouteTargetId]=useState('');
  const [composerSelection,setComposerSelection]=useState<{value:string;cursor:number;scope:string;sessionId:string|null}|null>(null);
@@ -248,6 +272,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // A remote viewer has its own readable copy of the host screen. It never changes the shared PTY size.
  const [readableMode,setReadableMode]=useState(remote);
  const [readableScreen,setReadableScreen]=useState('');
+ const [readableLayout,setReadableLayout]=useState<'flow'|'grid'>('flow');
  // Wide view hides the app sidebar, so it exists only on the Mac, not in the phone portal.
  // It applies only while a session row (and so its exit toggle) is on screen.
  const [wide,setWide]=useState(()=>!remote&&!popout&&readWorkroomWide(workroomPreferenceStorage()));
@@ -286,6 +311,48 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // w11 (S4.5): on the phone a new task is one sheet over the list — project, AI, bypass, account (only with a choice), the
  // first request and the only start button; its hints and the session composer's sit behind one 「?」 each.
  const [newTaskOpen,setNewTaskOpen]=useState(false);const [newTaskHelp,setNewTaskHelp]=useState(false);const [commandHelp,setCommandHelp]=useState(false);
+ // 팀 작전 (src/workroomTeam.ts): this session's AI leads; the builder only fills the composer. Mac only — team tools are local MCP.
+ const [teamOpen,setTeamOpen]=useState(false);const [appLang]=useAppLanguage();const teamCopy=workroomTeamCopy(appLang);
+ const browserCopy=workroomBrowserUiCopy(appLang);
+ // Local composer attachment only: neither these maps nor their grant reach storage, summaries or remote drafts.
+ // Keep separate session bindings so selecting another terminal cannot send this workspace's access there.
+ type BrowserHandoffEntry={handoff:WorkroomBrowserHandoff;expired:boolean};
+ const [browserHandoffs,setBrowserHandoffs]=useState(()=>new Map<string,BrowserHandoffEntry>());
+ const browserHandoffsLive=useRef(browserHandoffs);
+ const submittedBrowserHandoffs=useRef(new Map<string,{key:string;handoff:WorkroomBrowserHandoff}>());
+ const browserHandoffKey=sessionScope+':'+(activeSession?.id??'');
+ const changeBrowserHandoff=useCallback((key:string,change:(entry:BrowserHandoffEntry|undefined)=>BrowserHandoffEntry|undefined)=>{
+  const prior=browserHandoffsLive.current,next=change(prior.get(key));if(next===prior.get(key))return;
+  const entries=new Map(prior);if(next)entries.set(key,next);else entries.delete(key);
+  browserHandoffsLive.current=entries;setBrowserHandoffs(entries);
+ },[]);
+ const browserWorkspaceChanged=useCallback((workspace:WorkroomBrowserWorkspaceVersion|null)=>{
+  changeBrowserHandoff(browserHandoffKey,entry=>entry&&!entry.expired&&workroomBrowserHandoffExpired(entry.handoff,workspace)?{...entry,expired:true}:entry);
+ },[browserHandoffKey,changeBrowserHandoff]);
+ const receiveBrowserHandoff=useCallback((handoff:Omit<WorkroomBrowserHandoff,'createdAt'>)=>{
+  if(remote)return;
+  changeBrowserHandoff(browserHandoffKey,()=>({handoff:{...handoff,createdAt:Date.now()},expired:false}));
+  requestAnimationFrame(()=>terminalComposer.current?.focus());
+ },[remote,browserHandoffKey,changeBrowserHandoff]);
+ const browserHandoffEntry=remote?undefined:browserHandoffs.get(browserHandoffKey);
+ const browserHandoff=browserHandoffEntry?.handoff;
+ const browserHandoffExpired=browserHandoffEntry?.expired===true;
+ const confirmBrowserHandoff=(id:string)=>{
+  const submitted=submittedBrowserHandoffs.current.get(id);if(!submitted)return;
+  changeBrowserHandoff(submitted.key,entry=>entry&&workroomBrowserHandoffAfterReceipt(entry.handoff,submitted.handoff,'written')===null?undefined:entry);
+  submittedBrowserHandoffs.current.delete(id);
+ };
+ // Neither registered project DTO nor runtime targets contains a port at this baseline. Read the local registry once,
+ // retaining only ids/ports. Never fetch it from a remote/phone panel or add fields to shared DTOs.
+ const [browserRegisteredPorts,setBrowserRegisteredPorts]=useState<{id:string;port:unknown}[]>([]);
+ useEffect(()=>{
+  if(remote)return;let alive=true;const controller=new AbortController();
+  const load=async()=>{try{
+   const rows:unknown=isTauri()?await invoke('load_ports'):await fetch('/api/ports',{signal:AbortSignal.any([controller.signal,AbortSignal.timeout(5000)])}).then(r=>r.ok?r.json():[]);
+   if(alive&&Array.isArray(rows))setBrowserRegisteredPorts(rows.flatMap(row=>row&&typeof row.id==='string'?[{id:row.id,port:row.port}]:[]));
+  }catch{/* Suggestions are optional; no retry or polling. */}};
+  void load();return()=>{alive=false;controller.abort();};
+ },[remote]);
  const sheetRoot=useRef<HTMLDivElement>(null);const sheetTitleId=useId();const sheetOpener=useRef<HTMLElement|null>(null);
  // Read by the reload restore (w11 review): an open sheet or request box is the user's choice made since this panel mounted.
  const newTaskOpenRef=useRef(false);newTaskOpenRef.current=newTaskOpen;
@@ -413,8 +480,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   const el=readableRef.current;
   if(!readableScreen||!el){readableStick.current=true;readableShownText.current='';setReadablePill(false);return;}
   const changed=readableShownText.current!==readableScreen;readableShownText.current=readableScreen;
-  if(readableStick.current){el.scrollTop=el.scrollHeight;setReadablePill(false);}else if(changed)setReadablePill(true);
- },[readableScreen,readableMode,fontSize]);
+  if(readableStick.current){el.scrollTop=workroomReadableTail(el);setReadablePill(false);}else if(changed)setReadablePill(true);
+ },[readableScreen,readableMode,readableLayout,fontSize]);
  // Apply an autocomplete caret with its committed value, before the next input event.
  useLayoutEffect(()=>{
   if(!composerSelection)return;setComposerSelection(null);const field=terminalComposer.current;
@@ -432,7 +499,16 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // The same for whole-request submissions (w4 L2): unreadable storage has no record to show, and sends without a place for
  // a new record go as raw input (as the LAN page does). A readable record still shows and blocks (finding 3).
  useEffect(()=>{if(!selected){setPendingSubmission(null);return;}const storage=readableSessionStorage();if(!storage){setPendingSubmission(null);return;}try{const pending=readPendingSubmission(storage,pendingSubmissionKey(sessionScope,selected));if(pending&&pending.sessionId!==selected)throw Error('제출 대상이 변경되었습니다.');setPendingSubmission(pending);}catch{setPendingSubmission({id:'unreadable-record',sessionId:selected,receipt:null});setError('이전 제출 기록을 확인하지 못했습니다. 터미널 결과를 먼저 확인하세요.');}},[selected,sessionScope]);
- const sessionLabels=useMemo(()=>workroomSessionLabels(sessions,targetId=>projects.find(p=>p.targetId===targetId)?.label),[sessions,projects]);
+ const sessionLabels=useMemo(()=>workroomSessionLabels(sessions,targetId=>projects.find(p=>p.targetId===targetId)?.label,hermesVariantResolver(hermesVariants)),[sessions,projects,hermesVariants]);
+ // 팀 작전: the other running sessions of the leader's project (its main checkout and worktrees) may join as members.
+ // A worktree session may take work; the host re-checks everything (src/workroomTeam.ts attach) before anything starts.
+ const teamOpenSessions=useMemo<TeamOpenSession[]>(()=>{
+  if(remote||!activeSession)return [];
+  const projectOf=(targetId:string)=>{const project=projects.find(p=>p.targetId===targetId);return project?.projectTargetId??project?.targetId??targetId;};
+  const own=projectOf(activeSession.targetId);
+  return sessions.filter(s=>s.state==='running'&&s.id!==activeSession.id&&projectOf(s.targetId)===own)
+   .map(s=>({id:s.id,agent:s.agent,label:sessionLabels.get(s.id)??aiTerminalAgentLabel(s.agent),linked:projects.find(p=>p.targetId===s.targetId)?.scope==='worktree',checkout:s.targetId}));
+ },[remote,activeSession,sessions,projects,sessionLabels]);
  const sessionDevice=workroomSessionOwner('',undefined,deviceName,remote);
  const sessionOwner=(targetId:string)=>workroomSessionOwner(targetId,opsTargetId,deviceName,remote);
  const targetProject=projects.find(p=>p.targetId===target);
@@ -476,6 +552,10 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  const cursor=useRef(0);const generation=useRef(0);const applied=useRef<number|null>(null);
  const remoteClaimedSize=useRef('');
  const request=useMemo(()=>createTerminalRequester(transport,remote),[transport,remote]);
+ // 팀 작전: the leader project's account list, read (never selected) while the builder is open. A failed or unsupported read leaves
+ // that AI out, which the builder shows as 「목록 확인 불가」 (src/teamAccountChoices.ts).
+ const teamAccounts=useTeamAccountChoices(activeSession&&!remote?cli=>request({operation:'accounts',accountAction:'list',targetId:activeSession.targetId,agent:cli}).then(r=>r.accounts):undefined,
+  activeSession?.targetId??'',teamOpen&&!remote);
  // Which requester's list has answered at least once. Until it has, the remote panel cannot say 「no sessions」:
  // a first list behind an idle Mac takes seconds, and that sentence beside 「새 작업」 invited a duplicate start
  // (production audit 2026-10-16). Keyed by the requester, so switching Macs or devices starts unknown again.
@@ -625,7 +705,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   return()=>{if(revealFrame!==undefined)cancelAnimationFrame(revealFrame);sendInput.current=null;flushInput.current=null;fitScreen.current=null;flush();input.dispose();cursorListener.dispose();contextListener.dispose();cliListener?.dispose();clearTimeout(cliTimer);resize.disconnect();t.dispose();terminal.current=null;};
  },[selected,activeSession?.id,enqueue,visible,remote,canWrite,sessionShown,fullscreen]);
  useEffect(()=>{
-  cursor.current=0;remoteClaimedSize.current='';terminal.current?.reset();setReadError('');setReadableScreen('');const mine=++generation.current;
+  cursor.current=0;remoteClaimedSize.current='';terminal.current?.reset();setReadError('');setReadableScreen('');setReadableLayout('flow');const mine=++generation.current;
   // The phone's session list reads nothing: the selected session's output is read only while it is open (w7).
   if(!visible||!activeSession||!sessionShown)return;
   const reading=remote?new Terminal({cols:activeSession.cols,rows:activeSession.rows,scrollback:0,allowProposedApi:true}):null;
@@ -633,8 +713,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    if(!reading)return;
    const buffer=reading.buffer.active;
    const lines=Array.from({length:reading.rows},(_,index)=>buffer.getLine(buffer.baseY+index)?.translateToString(true)??'');
-   while(lines.length&&!lines[0]?.trim())lines.shift();
-   while(lines.length&&!lines.at(-1)?.trim())lines.pop();
+   setReadableLayout(workroomReadableLayout(lines,buffer.type==='alternate'));
    setReadableScreen(lines.join('\n'));
   };
   const cadence=createTerminalReadCadence(remote,undefined,{slow:slowPolling});
@@ -688,6 +767,12 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    }
    // Without usable storage the launch record could not be kept (w4 L2): a plain start, guarded below in this page's memory.
    let launchable=launchSupported&&!!launchText&&!!routeLaunchStorage();
+   // A receipted launch submission has no room for the host-only variant, so a 「Hermes · …」 start takes the plain
+   // path. With attachments queued (which need that path) the person is told, instead of starting plain Hermes.
+   if(launchVariant&&launchable){
+    if(attach.ids.length)throw new Error('「'+launchChoiceLabel(launchChoice)+'」로 시작할 때는 첨부를 함께 보낼 수 없습니다. 첨부를 비우거나 AI를 Hermes로 두고 보내세요.');
+    launchable=false;
+   }
    if(launchable){try{validateSubmissionText(launchText,!!attach.ids.length);}catch(error){if(attach.ids.length)throw error;launchable=false;}}
    let r:AiTerminalResponse;
    if(launchable){
@@ -749,7 +834,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
       return;
      }
     }
-    try{r=await request({operation:'start',targetId:target,agent,cols:lastSize.current.cols,rows:lastSize.current.rows,bypassPermissions,...(prompt.trim()?{prompt}: {})});}
+    try{const body={operation:'start' as const,targetId:target,agent,cols:lastSize.current.cols,rows:lastSize.current.rows,bypassPermissions,...(prompt.trim()?{prompt}: {})};
+     r=launchVariant?await localAiTerminalStart({...body,requestId:requestUuid()},launchVariant):await request(body);}
     catch(error){if(guarded&&storage)rememberFailedLegacyStart(storage,sessionScope,{...attempt,knownSessionIds:known,at:Date.now()});throw error;}
     // Only this request's own failed record is settled; a failed start of another request keeps asking on its retry.
     if(guarded&&storage)forgetFailedLegacyStart(storage,sessionScope,attempt);
@@ -827,7 +913,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
     if(old.state==='running')await request({operation:'close',sessionId:old.id});
     response=await request({operation:'start',targetId:old.targetId,agent:old.agent,...size,bypassPermissions});
    }
-   const next=response.session;if(!next)throw new Error('다시 시작한 세션을 확인하지 못했습니다. 터미널 새로고침으로 확인하세요.');
+   const next=response.session;if(!next)throw new Error('다시 시작한 세션을 확인하지 못했습니다. 작업 세션 새로고침으로 확인하세요.');
    inventoryEpoch.current++;
    sessionsRef.current=[...sessionsRef.current.filter(s=>s.id!==next.id),next];
    setSessions(list=>[...list.filter(s=>s.id!==next.id),next]);
@@ -845,7 +931,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // Capture this before the entry effect runs: its setPrompt applies on the next render. An incoming
  // nonempty draft must not briefly report clean while its own entry is still being applied.
  const incomingDraft=!!entry?.prompt?.length&&entry.nonce!==applied.current;
- useEffect(()=>{onDraftStateChange?.(!!(prompt.length||terminalDraft.length||images.length||referenceChips.length||imageBusy||incomingDraft||sessionChips.length||sheetChips.length||useDraftDirty));},[onDraftStateChange,prompt,terminalDraft,images.length,referenceChips.length,imageBusy,incomingDraft,sessionChips.length,sheetChips.length,useDraftDirty]);
+ useEffect(()=>{onDraftStateChange?.(!!(prompt.length||terminalDraft.length||images.length||referenceChips.length||imageBusy||incomingDraft||sessionChips.length||sheetChips.length||useDraftDirty||!remote&&browserHandoffs.size));},[onDraftStateChange,prompt,terminalDraft,images.length,referenceChips.length,imageBusy,incomingDraft,sessionChips.length,sheetChips.length,useDraftDirty,remote,browserHandoffs]);
  const runningSessions=sessions.filter(s=>s.state==='running'), endedSessions=sessions.filter(s=>s.state==='exited'&&!dismissed.includes(s.id));
  const visibleSessions=showEnded?sessions.filter(s=>s.state==='running'||!dismissed.includes(s.id)):runningSessions;
  useEffect(()=>{setRawInput(false);routeTo('');setRouteReceipt(null);setAppRouteReceipt(null);},[selected]);
@@ -865,6 +951,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  const toggleFavorite=(command:string)=>{if(activeSession)setSlashFavorites(toggleSlashFavorite(workroomPreferenceStorage(),activeSession.agent,command));};
  const addCustomFavorite=()=>{const value=customSlash.trim();if(!activeSession||!isWorkroomPaletteCommand(value,activeSession.agent)){setError(activeSession?.agent==='codex'?'Codex CLI 명령은 /model, 설치된 스킬은 $remember-session처럼 입력하세요.':'슬래시 명령 하나만 입력하세요. 예: /compact, /cs-ceo:goal');return;}if(!slashFavorites.includes(value))toggleFavorite(value);setError('');setCustomSlash('');setAddingSlash(false);};
  const activeProject=projects.find(p=>p.targetId===(activeSession?.targetId??target));
+ const browserSuggestions=useMemo(()=>remote?[]:workroomBrowserLocalhostSuggestions(browserRegisteredPorts,activeProject?.targetId??'',activeProject?.projectTargetId),[remote,browserRegisteredPorts,activeProject?.targetId,activeProject?.projectTargetId]);
  useEffect(()=>{onActiveSessionChange?.(activeSession?{id:activeSession.id,label:activeProject?.label??'',agent:activeSession.agent}:null);},[activeSession?.id,activeSession?.agent,activeProject?.label,onActiveSessionChange]);
  // Local requests carry a fresh request id each and the sidecar queues per session, so any
  // number of windows can drive one session. Remote pairings live in this page only.
@@ -886,8 +973,9 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   try{
    // 머리에서 고른 프로젝트·AI로 연다. 예전에는 `activeSession.agent`를 그대로 써서 같은 프로젝트를
    // **다른 AI로** 새 창에 열 방법이 없었다(VOC 2026-10-05) — 그 선택은 이미 머리에 있는데 안 읽었다.
-   const r=await request({operation:'start',targetId:target||activeSession.targetId,agent,
-    cols:lastSize.current.cols,rows:lastSize.current.rows,bypassPermissions});
+   const freshBody={operation:'start' as const,targetId:target||activeSession.targetId,agent,
+    cols:lastSize.current.cols,rows:lastSize.current.rows,bypassPermissions};
+   const r=launchVariant?await localAiTerminalStart({...freshBody,requestId:requestUuid()},launchVariant):await request(freshBody);
    if(!r.session)throw new Error('세션을 시작하지 못했습니다.');
    inventoryEpoch.current++;setSessions(list=>[...list.filter(item=>item.id!==r.session!.id),r.session!]);
    await openWorkroomPopout({sessionId:r.session.id,targetId:r.session.targetId,agent:r.session.agent,bypassPermissions},
@@ -914,8 +1002,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // ⚠️ 요청 함수는 **렌더 중에 만들지 않는다** — `createTerminalRequester`는 순서를 지키는 대기열을 들고
  // 있어서 렌더마다 새로 만들면 순서가 깨지고, 이 effect가 매 렌더 다시 돌아 `list`를 끝없이 보낸다.
  const communityMentionRef=useRef(communityMention);communityMentionRef.current=communityMention;
- const mention=useMemo(()=>communityMentionState(terminalDraft,terminalCursor,{local:projects,devices:communityDevices}),
-   [terminalDraft,terminalCursor,projects,communityDevices]);
+ const mention=useMemo(()=>communityMentionState(terminalDraft,terminalCursor,{local:projects,devices:communityDevices,localRunsUse:useRunsHere}),
+   [terminalDraft,terminalCursor,projects,communityDevices,useRunsHere]);
  // 목록은 **쓸 때** 받는다 — 커뮤니티에 있는 기기마다 미리 긁으면 쓰지도 않을 왕복이 생긴다.
  const mentionDeviceId=mention?.device?.deviceId??'';
  useEffect(()=>{if(mentionDeviceId)communityMentionRef.current?.requestProjects(mentionDeviceId);},[mentionDeviceId]);
@@ -1004,7 +1092,11 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    focusCliKeyboard();
   }};
  const completeSlash=(command:string)=>{const value=command+(command.startsWith('$')?'':' ');setTerminalDraft(value);setTerminalCursor(value.length);setComposerSelection({value,cursor:value.length,scope:sessionScope,sessionId:activeSession?.id??null});};
- const draftMessage=()=>workroomAttachmentsMessage(terminalDraft,images);
+ // Every preview, queue and route uses the default safe text. The true flag is reserved for local submission assembly.
+ const draftMessage=(includeBrowserHandoff=false)=>{
+  const text=workroomAttachmentsMessage(terminalDraft,images);
+  return includeBrowserHandoff&&!remote&&browserHandoff?serializeWorkroomBrowserHandoff(text,browserHandoff,browserCopy.handoff.promptHeader):text;
+ };
  // An uncertain `@` launch may have opened this very session with this very draft (integration review A1): checking it
  // first is the only way to know, so nothing is typed. Its own banner settles it; dismissing it there releases this too.
  const repeatsUncertainRouteLaunch=async (draft:string,session:AiTerminalSummary)=>{
@@ -1019,6 +1111,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   legacyRouteSuspectStore.clear(suspect);return false;
  };
  const sendTerminalDraft=async()=>{
+  if(browserHandoffExpired){setError(browserCopy.handoff.expired);return;}
   if(routeRole==='use'||routeTargetId&&!routeTarget){setError('선택한 호출 대상과 USE 준비 상태를 확인하세요. 현재 세션으로 전송하지 않았습니다.');return;}
   if(sendConfirming.current)return;
   if(submissionInFlight.current||pendingSubmission?.sessionId===activeSession?.id)return;
@@ -1038,15 +1131,18 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    if(usableSessionStorage()==null){setError(REMOTE_ATTACH_NO_RECORD);return;}
    if(sessionAttach.queue.requestBytes(terminalDraft)>WORKROOM_SUBMISSION_MAX_BYTES){setError(REMOTE_ATTACH_BUDGET_REFUSAL+'. 작성 내용은 유지했습니다.');return;}
   }
+  // A grant needs a whole-request receipt. Raw input only acknowledges enqueueing, so cannot confirm its delivery.
+  if(browserHandoff&&(!submissionSupported||!usableSessionStorage())){setError('브라우저 접근은 제출 결과를 확인할 수 있는 연결에서만 보낼 수 있습니다. 브라우저 접근 칩을 빼고 보내 주세요.');return;}
   // Images go with a whole-request submission only from this Mac; the host checks every path before writing.
   // No place for the pending record (w4 L2): raw input as before, never a record-less submission.
   // Raw input has no submission id to seal under: with the vault on, the composer says it was not kept (w4 review, 4a).
   if(!attach.ids.length&&(!submissionSupported||images.length&&remote||!usableSessionStorage())){if(sendBoundInput(draftMessage()+'\r',activeReferences(terminalDraft))){setTerminalDraft('');setTerminalCursor(0);setReferenceChips([]);setImages([]);if(draftVault.vault)setError(DRAFT_RAW_SEND_NOTICE);requestAnimationFrame(()=>terminalComposer.current?.focus());}return;}
   if(!activeSession||activeSession.state!=='running'||busy||!canWrite(activeSession.id)||remote&&!phoneIsOnline())return;
-  const sessionId=activeSession.id,draft=terminalDraft,text=draftMessage()+'\r',id=requestUuid(),key=pendingSubmissionKey(sessionScope,sessionId);
+  const sessionId=activeSession.id,draft=terminalDraft,vaultText=draftMessage()+'\r',text=draftMessage(true)+'\r',id=requestUuid(),key=pendingSubmissionKey(sessionScope,sessionId);
   const remember=(value:PendingWorkroomSubmission|null)=>{writePendingSubmission(sessionStorage,key,value);if(activeSessionRef.current?.id===sessionId)setPendingSubmission(value);};
   try{validateSubmissionText(text,!!attach.ids.length);remember({id,sessionId,receipt:null});}catch(error){setError(error instanceof Error?error.message:'제출 기록을 보관하지 못해 전송하지 않았습니다.');return;}
   submissionInFlight.current=true;setSubmissionBusy(true);setSendingId(id);setNotice('');flushInput.current?.();submittedDrafts.current.set(id,draft);
+  if(browserHandoff)submittedBrowserHandoffs.current.set(id,{key:browserHandoffKey,handoff:browserHandoff});
   if(attach.keys.length)submittedAttachKeys.current.set(id,attach.keys);
   // A request with attachments is not sealed into the draft vault (its ids live an hour on the Mac; a kept copy could not
   // carry them back). With the vault on, the composer says so once.
@@ -1058,9 +1154,28 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   // may only mean another receipt owner, so the queue never sends it again on its own evidence. A slow or failed seal
   // never blocks the send: it goes once anyway, before any seal, and the composer says it was not (or may not be) kept —
   // a notice about keeping only, since the submission it is shown with may still be refused (src/workroomDraftQueue.ts).
-  let sealNote='';
-  const withSealNote=(message:string)=>sealNote?message+' '+sealNote:message;
-  const sending=sendWithDraftSeal({vault,scope:draftVaultScope,sessionId,id,text,references,...(attach.ids.length?{attachments:attach.ids}:{}),request,prepared:receipt=>remember({id,sessionId,receipt}),
+  let sealNote='',handoffNotSent=false;
+  const withSealNote=(message:string)=>{const safe=browserHandoff?redactWorkroomBrowserHandoff(message,browserHandoff):message;return sealNote?safe+' '+sealNote:safe;};
+  // The seal can wait 1.5s. Check authority after that wait, immediately before single/begin, even if the browser is
+  // collapsed and its normal polling is stopped. A failure keeps the chip without sending a submission.
+  const handoffRequest:typeof request=async body=>{
+   if(browserHandoff&&(body.submission?.phase==='single'||body.submission?.phase==='begin')){
+    let current:WorkroomBrowserWorkspaceVersion|null=null;
+    try{const {workspace}=await requestWorkroomBrowser({operation:'status',workspaceId:browserHandoff.workspaceId});
+     if(workspace?.sessionId===sessionId&&workspace.targetId===activeSession.targetId&&workspace.owner==='agent'&&workspace.connection==='connected')current={workspaceId:workspace.id,epoch:workspace.epoch};
+    }catch{/* Unverified authority is not safe to send. */}
+    const entry=browserHandoffsLive.current.get(browserHandoffKey);
+    if(entry?.handoff!==browserHandoff||entry.expired||workroomBrowserHandoffExpired(browserHandoff,current)){
+     handoffNotSent=true;
+     changeBrowserHandoff(browserHandoffKey,value=>value?.handoff===browserHandoff?{...value,expired:true}:value);
+     throw Error(browserCopy.handoff.expired);
+    }
+   }
+   return request(body);
+  };
+  // Persist only the person's draft/attachments under the same attempted submission id. No grant is ever sealed.
+  const sealVault=browserHandoff&&vault?{save:(input:Parameters<typeof vault.save>[0])=>vault.save({...input,text:vaultText})}:vault;
+  const sending=sendWithDraftSeal({vault:sealVault,scope:draftVaultScope,sessionId,id,text,references,...(attach.ids.length?{attachments:attach.ids}:{}),request:browserHandoff?handoffRequest:request,prepared:receipt=>remember({id,sessionId,receipt}),
     onSealed:sealed=>{sealNote=draftSealNotice(sealed);if(sealNote)setError(sealNote);}});
   const kept=sending.stored;
   const forget=()=>{void kept.then((saved:boolean)=>saved?vault!.delete(id).catch(()=>undefined):undefined).then(draftVault.bump);};
@@ -1068,19 +1183,21 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
     if(receipt.state!=='written'){remember({id,sessionId,receipt});void kept.then(draftVault.bump);setError(withSealNote('요청 전송 결과가 미확정입니다. 터미널과 제출 결과를 확인하세요. 자동으로 다시 보내지 않습니다.'));return;}
     // Written: whether it was kept no longer matters, so a seal notice shown while sending goes away.
     if(sealNote)setError(current=>current===sealNote?'':current);
-    forget();remember(null);submittedDrafts.current.delete(id);if(activeSessionRef.current?.id===sessionId&&terminalDraftLive.current===draft){setTerminalDraft('');setTerminalCursor(0);setReferenceChips([]);setImages([]);}wakeRead.current?.();
+    forget();remember(null);submittedDrafts.current.delete(id);confirmBrowserHandoff(id);if(activeSessionRef.current?.id===sessionId&&terminalDraftLive.current===draft){setTerminalDraft('');setTerminalCursor(0);setReferenceChips([]);setImages([]);}wakeRead.current?.();
     // Written: the attachments went with it, whatever the text box holds now (a refusal notice under them goes too).
     submittedAttachKeys.current.delete(id);if(attach.keys.length)sessionAttach.settled(attach.keys);
     // A whole request may have left 「에포트 자동」 advice on the host (w16).
     refreshEffort(800);
   }).catch(error=>{
+    // The authority preflight refused before any submission request. This is a known non-send, not an uncertain send.
+    if(handoffNotSent){forget();submittedDrafts.current.delete(id);submittedBrowserHandoffs.current.delete(id);try{remember(null);}catch{/* the banner still offers a manual check */}setError(browserCopy.handoff.expired);return;}
     // The Mac refused the ids before anything was prepared or written (begin, or the lease before the write fence): the
     // chips are no longer ready, and the pending record goes — it proves nothing was written, so the kept text is
     // sendable again without a 「possible duplicate」 dismissal (review w13).
     if(attach.ids.length&&error instanceof Error&&remoteAttachIdsRefused(error.message)){submittedAttachKeys.current.delete(id);sessionAttach.queue.invalidate(attach.keys,error.message);submittedDrafts.current.delete(id);try{remember(null);}catch{/* the banner only asks to check */}setError(error.message);return;}
     // An older receiver advertised submission but refused it before anything ran: nothing was prepared or written,
     // so this transport goes back to raw input. The draft stays; the user's next click sends it the old way.
-    if(error instanceof WorkroomSubmissionUnsupportedError){forget();submittedDrafts.current.delete(id);try{remember(null);}catch{/* the banner only asks to check */}submissionCapability.current='legacy';setSubmissionSupported(false);setError(error.message);return;}
+    if(error instanceof WorkroomSubmissionUnsupportedError){forget();submittedDrafts.current.delete(id);submittedBrowserHandoffs.current.delete(id);try{remember(null);}catch{/* the banner only asks to check */}submissionCapability.current='legacy';setSubmissionSupported(false);setError(error.message);return;}
     void kept.then(draftVault.bump);setError(withSealNote(error instanceof Error?error.message:'제출 결과를 확인하지 못했습니다. 작성 내용은 유지했습니다.'));
   }).finally(()=>{submissionInFlight.current=false;setSubmissionBusy(false);setSendingId(null);});
  };
@@ -1116,6 +1233,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   }finally{submissionInFlight.current=false;setSubmissionBusy(false);setSendingId(null);}
  };
  const queueCurrentDraft=async()=>{
+  if(browserHandoff)throw Error('브라우저 접근이 담긴 요청은 보관하지 않습니다. 브라우저 접근 칩을 빼고 보관해 주세요.');
   if(routeTargetId)throw Error('호출 대상이 있는 요청은 그 대상의 대화에서 확인하세요.');
   const session=activeSessionRef.current,vault=draftVault.vault;
   if(!session||!vault)throw Error('보관할 세션이 없습니다.');
@@ -1141,6 +1259,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   if(activeSessionRef.current?.id===pending.sessionId)setPendingSubmission(value);
   if(value){if(!quiet)setError('제출 상태: '+submissionStateLabel(receipt.state)+'. 터미널 결과를 확인하세요. 자동으로 다시 보내지 않습니다.');return;}
   const outcome=draftAfterWrittenStatus(submittedDrafts.current.get(pending.id),terminalDraftLive.current);submittedDrafts.current.delete(pending.id);
+  confirmBrowserHandoff(pending.id);
   if(outcome.clear&&activeSessionRef.current?.id===pending.sessionId){setTerminalDraft('');setTerminalCursor(0);setReferenceChips([]);setImages([]);}
   // A written receipt settles its attachments too: the chips that went with it go.
   const sentAttachments=submittedAttachKeys.current.get(pending.id);submittedAttachKeys.current.delete(pending.id);if(sentAttachments)sessionAttach.settled(sentAttachments);
@@ -1236,6 +1355,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   }finally{setBusy(false);}
  };
  const deliverTerminalDraft=async()=>{
+  // Browser authority belongs to this local session. It cannot ride an @ route, USE, clipboard or another device.
+  if(browserHandoff){setError(browserHandoffExpired?browserCopy.handoff.expired:'브라우저 접근은 이 세션에만 보낼 수 있습니다. 다른 곳에 전달하려면 브라우저 접근 칩을 빼 주세요.');return;}
   if(routeRole==='use'){
    if(!routeTarget)return;
    if(images.length||sessionChips.length){setError('USE 작업에는 첨부파일을 보낼 수 없습니다. 현재 초안과 첨부는 유지했습니다.');return;}
@@ -1351,6 +1472,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // Files dropped on the phone's composers (w13: an iPad dragging from Files or Photos, a desktop browser): the session view
  // and the inline command box feed the session's queue, the sheet and the inline request box the new task's.
  const inlineCommand=useRef<HTMLDivElement>(null),inlinePrompt=useRef<HTMLDivElement>(null);
+ // The builder opens under the terminal; bring it into view, since its opener is above.
+ useEffect(()=>{if(teamOpen)requestAnimationFrame(()=>inlineCommand.current?.querySelector('[data-testid="workroom-team-builder"]')?.scrollIntoView({block:'nearest'}));},[teamOpen]);
  const sessionRunning=activeSession?.state==='running';
  const viewDrop=useRemoteAttachDrop(viewRoot,sessionAttach,remoteAttachOn&&viewShown&&sessionRunning);
  const sheetDrop=useRemoteAttachDrop(sheetRoot,sheetAttach,remoteAttachOn&&newTaskShown);
@@ -1420,21 +1543,28 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
     <button type="button" className="ai-terminal-btn ai-terminal-font-size" data-testid="workroom-font-size" aria-label={`글자 크기 ${fontSize} · 누르면 기본값`} title="누르면 기본 크기(13)로" onClick={()=>{setFontSize(WORKROOM_FONT_DEFAULT);restoreWorkroomKeyboard()}}>{fontSize}</button>
     <button type="button" className="ai-terminal-btn ai-terminal-btn--icon" data-testid="workroom-font-increase" aria-label="글자 크게" title="글자 크게" disabled={fontSize>=WORKROOM_FONT_MAX} onClick={()=>{chooseFontSize(1);restoreWorkroomKeyboard()}}>A+</button>
     {!remote&&!popout&&<button type="button" className="ai-terminal-btn" data-testid="workroom-wide-toggle" aria-pressed={wide} title={wide?'사이드바와 설정을 다시 표시':'사이드바와 설정을 숨기고 터미널을 화면 가득'} onClick={()=>{setWide(value=>!value);restoreWorkroomKeyboard()}}>{wide?<Minimize2 size={13}/>:<Maximize2 size={13}/>}{wide?'기본 보기':'넓게 보기'}</button>}
+    {/* 팀 작전 sits with the session's own controls: on the usage line under the terminal it was out of sight in a short window (2026-10-25). */}
+    {!remote&&activeSession.state==='running'&&<button type="button" className="ai-terminal-btn" data-testid="workroom-team-open" aria-expanded={teamOpen} title={teamCopy.openTitle} disabled={busy} onClick={()=>setTeamOpen(open=>!open)}><Users size={13} aria-hidden="true"/>{teamCopy.open}</button>}
     {!remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-restart" disabled={busy} title={workroomRestartTitle(activeSession.state)} onClick={()=>void restart()}><RotateCcw size={13}/>다시 시작</button>}
     {remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-readable-toggle" aria-pressed={readableMode} onClick={()=>{readableStick.current=true;setReadableMode(value=>!value);restoreWorkroomKeyboard()}}>{readableMode?'원본 터미널':'읽기 보기'}</button>}
     {!remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-popout" aria-disabled={!popoutAvailability.available} data-available={popoutAvailability.available?'true':'false'} title={popoutAvailability.reason} onClick={()=>void popOut()}><ExternalLink size={13}/>새 창으로 분리</button>}
     </div>,
+  // 팀 현황: this Mac's own sessions only — another Mac's or a phone's sessions are not in this Mac's team ledger.
+  teamStatus:<>{!remote&&!sessionScope.startsWith('community:')&&<WorkroomTeamStatus sessionId={activeSession.id} visible={visible} openable={id=>sessions.some(s=>s.id===id)} onOpen={id=>{selectionGeneration.current++;setError('');setSelected(id);}}/>}</>,
   restartLine:<>{restartNotice&&restartNotice.sessionId===activeSession.id&&<p className="ai-terminal-caption ai-terminal-route-receipt" role="status" data-testid="workroom-restart-notice"><span>{restartNotice.text}</span><button type="button" className="ai-terminal-btn ai-terminal-btn--icon" aria-label="다시 시작 알림 닫기" onClick={()=>setRestartNotice(null)}>×</button></p>}</>,
-  surface:<div className={`ai-terminal-surface${remote?' ai-terminal-surface--remote':''}`} onClick={()=>{if(!rawInput&&!readableMode)terminalComposer.current?.focus()}}><div ref={host} className="ai-terminal-screen" aria-hidden={remote&&readableMode}/>{remote&&readableMode&&<pre ref={readableRef} className="ai-terminal-readable" data-testid="workroom-readable-screen" role="region" aria-label="화면 너비에 맞춘 터미널 출력" style={{fontSize}}
-   onScroll={event=>{const el=event.currentTarget,near=el.scrollTop+el.clientHeight>=el.scrollHeight-40;readableStick.current=near;if(near)setReadablePill(false);}}>{readableScreen||'화면을 불러오는 중…'}</pre>}
-   {remote&&readableMode&&readablePill&&<button type="button" className="ai-terminal-btn ai-terminal-readable-pill" data-testid="workroom-readable-new-output" onClick={event=>{event.stopPropagation();const el=readableRef.current;readableStick.current=true;setReadablePill(false);if(el)el.scrollTop=el.scrollHeight;}}>새 출력 ↓</button>}</div>,
+  surface:<div className={`ai-terminal-surface${remote?' ai-terminal-surface--remote':''}`} onClick={()=>{if(!rawInput&&!readableMode)terminalComposer.current?.focus()}}><div ref={host} className="ai-terminal-screen" aria-hidden={remote&&readableMode}/>{remote&&readableMode&&<pre ref={readableRef} className="ai-terminal-readable" data-testid="workroom-readable-screen" data-layout={readableLayout} tabIndex={0} role="region" aria-label={readableLayout==='grid'?'행과 열을 유지한 터미널 출력 · 좌우로 이동 가능':'화면 너비에 맞춘 터미널 출력'} style={{fontSize}}
+   onScroll={event=>{const el=event.currentTarget,near=el.scrollTop>=workroomReadableTail(el)-40;readableStick.current=near;if(near)setReadablePill(false);}}>{readableScreen||'화면을 불러오는 중…'}</pre>}
+   {remote&&readableMode&&readablePill&&<button type="button" className="ai-terminal-btn ai-terminal-readable-pill" data-testid="workroom-readable-new-output" onClick={event=>{event.stopPropagation();const el=readableRef.current;readableStick.current=true;setReadablePill(false);if(el)el.scrollTop=workroomReadableTail(el);}}>새 출력 ↓</button>}</div>,
   exitedHint:<>{activeSession.state==='exited'&&<p className="ai-terminal-hint" role="status" data-testid="workroom-exited-hint">터미널이 종료되었습니다 (종료 코드 {activeSession.exitCode??'확인 중'}). 입력칸은 실행 중인 세션에만 있습니다. 마지막 화면에서 종료 이유를 확인하고, {remote?(docked?'「← 워크룸」 목록에서 새 작업을 시작할 수 있습니다':'위 설정에서 새 작업을 시작할 수 있습니다'):'위 「다시 시작」으로 같은 프로젝트·AI를 다시 열 수 있습니다(Claude Code·Codex는 이전 대화를 이어서)'}. 마지막 출력과 세션 저장 기록은 유지됩니다.</p>}</>,
   dismiss:<>{activeSession.state==='exited'&&<button data-testid="workroom-dismiss-session" className="ai-terminal-btn" onClick={()=>{setDismissed(ids=>[...ids.filter(id=>id!==selected),selected].slice(-24));setSelected('')}}>종료된 세션 목록에서 제거</button>}</>,
   exitedQueue:<>{/* No composer here: while keeping is on, the kept requests of this scope stay reachable (check, delete) instead of waiting out their 7 days. Off, nothing is kept, so nothing shows. */}
    {activeSession.state==='exited'&&submissionSupported&&draftVault.enabled&&<WorkroomDraftQueue state={draftVault} scope={draftVaultScope} sessionId={null} blocked canQueue={false} composerEmpty={false}
     onQueue={queueCurrentDraft} onSend={sendQueuedDraftItem} onTakeBack={takeBackQueuedDraft} onCheck={checkKeptDraftItem}/>}</>,
   usage:<><b>@ 호출</b> 다른 프로젝트 AI에게 맡기기 · <b># 언급</b> 참고로 보여 주기(여러 개){!!communityDevices.length&&<> · 기호 앞에 <b>기기 이름</b>을 적으면 그 아젠투지의 프로젝트</>}</>,
-  commandChips:<>{routeTarget&&<button type="button" className="ai-terminal-route-chip" data-testid="workroom-route-chip" onClick={()=>routeTo('')}>@ 호출 · {routeTarget.label} ×</button>}
+  commandChips:<>{browserHandoff&&<><button type="button" className="ai-terminal-route-chip" data-testid="workroom-browser-handoff-chip" data-state={browserHandoffExpired?'expired':'ready'}
+     title={browserHandoffExpired?browserCopy.handoff.expired:browserCopy.handoff.removeChip} aria-label={browserCopy.handoff.removeChip+': '+workroomBrowserHandoffLabel(browserCopy.handoff.chip,browserHandoff)}
+     onClick={()=>changeBrowserHandoff(browserHandoffKey,()=>undefined)}>{workroomBrowserHandoffLabel(browserCopy.handoff.chip,browserHandoff)} ×</button>
+     {browserHandoffExpired&&<span role="status" data-testid="workroom-browser-handoff-expired">{browserCopy.handoff.expired}</span>}</>}{routeTarget&&<button type="button" className="ai-terminal-route-chip" data-testid="workroom-route-chip" onClick={()=>routeTo('')}>@ 호출 · {routeTarget.label} ×</button>}
      {routeTarget&&routeChoiceValue&&<label className="ai-terminal-route-agent" title={appRoutesAvailable?'그 프로젝트의 워크룸 CLI에 보내거나, 이 Mac의 앱(Codex·Claude·Hermes·Antigravity)으로 넘깁니다':'그 프로젝트에서 이 일을 받을 AI'}><span>{appRoutesAvailable?'받는 곳':'받는 AI'}</span><select aria-label={appRoutesAvailable?'받는 곳':'받는 AI'} data-testid="workroom-route-agent" data-route-surface={routeApp?'app':'cli'} value={routeChoiceValue} disabled={busy} onChange={e=>setRouteAgentChoice(e.target.value as WorkroomRouteChoice)} className="ai-terminal-select">{appRoutesAvailable?<><optgroup label="워크룸 CLI">{AI_TERMINAL_AGENTS.map(a=><option key={a} value={a}>{WORKROOM_AGENT_NAMES[a]}</option>)}</optgroup><optgroup label="앱">{WORKROOM_APP_AGENTS.map(a=><option key={a} value={workroomAppChoice(a)}>{WORKROOM_APP_NAMES[a]}</option>)}</optgroup></>:AI_TERMINAL_AGENTS.map(a=><option key={a} value={a}>{WORKROOM_AGENT_NAMES[a]}</option>)}</select></label>}
      {referenceChips.map(chip=><button type="button" key={chip.token} className="ai-terminal-route-chip ai-terminal-reference-chip" data-testid="workroom-reference-chip" title={chip.deviceId?'다른 아젠투지의 프로젝트입니다. 그 기기로 보낼 때만 폴더까지 함께 전달됩니다.':'AI가 이 프로젝트 폴더를 읽어서 참고합니다. 수정은 현재 프로젝트에서만 합니다.'} onClick={()=>setReferenceChips(chips=>chips.filter(item=>item.token!==chip.token))}># 언급 · {chip.deviceId?`${communityDevices.find(device=>device.deviceId===chip.deviceId)?.label??'다른 기기'} · ${chip.label}`:chip.label} ×</button>)}</>,
   // An honest sending state (w11, S4.3): a submission merely in flight says so; the banner is for an unknown outcome only —
@@ -1445,7 +1575,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    {pendingSubmission?.sessionId===activeSession.id&&!sendingShown&&<div className="ai-terminal-hint" role="status" data-testid="workroom-submission-recovery"><p>{pendingSubmission.receipt?.state==='written'?'요청 전체를 전달했습니다. 터미널에서 AI의 응답을 확인하세요.':'앞서 보낸 요청의 전송 결과를 확인해야 합니다. 작성 내용은 유지하며 자동으로 다시 보내지 않습니다.'}</p><button type="button" className={fullscreen?'ai-terminal-btn':undefined} disabled={submissionBusy} onClick={()=>void inspectPendingSubmission()}>제출 결과 확인</button><button type="button" className={fullscreen?'ai-terminal-btn':undefined} disabled={submissionBusy} onClick={async ()=>{if(!(await confirmAction('터미널에서 앞선 요청의 결과를 확인하셨나요? 같은 내용을 다시 보내면 중복 실행될 수 있습니다. 작성 내용은 유지합니다.')))return;try{dismissSubmissionRecord(pendingSubmission.id);writePendingSubmission(sessionStorage,pendingSubmissionKey(sessionScope,pendingSubmission.sessionId),null);setPendingSubmission(null);}catch{setError('제출 확인 기록을 정리하지 못했습니다.');}}}>터미널 결과 확인했음</button></div>}</>,
   submissionHint:<>{submissionSupported&&<p className="ai-terminal-hint">관련된 교정·실패 기록을 함께 전달합니다. 전송 결과가 확인되지 않으면 작성 내용을 유지합니다.</p>}</>,
   draftQueue:<>{submissionSupported&&<WorkroomDraftQueue state={draftVault} scope={draftVaultScope} sessionId={activeSession.id} blocked={busy||submissionBusy||pendingSubmission?.sessionId===activeSession.id}
-     canQueue={!busy&&!routeTargetId&&!!terminalDraft.trim()&&!(images.length&&remote)&&!sessionChips.length} composerEmpty={!terminalDraft.trim()} onQueue={queueCurrentDraft} onSend={sendQueuedDraftItem} onTakeBack={takeBackQueuedDraft} onCheck={checkKeptDraftItem}/>}</>,
+     canQueue={!busy&&!browserHandoff&&!routeTargetId&&!!terminalDraft.trim()&&!(images.length&&remote)&&!sessionChips.length} composerEmpty={!terminalDraft.trim()&&!browserHandoff} onQueue={queueCurrentDraft} onSend={sendQueuedDraftItem} onTakeBack={takeBackQueuedDraft} onCheck={checkKeptDraftItem}/>}</>,
   commandField:<div className={`ai-terminal-command-field${remoteAttachOn?' ai-terminal-command-field--attach':''}`}>
      {remoteAttachOn&&<RemoteAttachMenuButton attach={sessionAttach} disabled={busy||activeSession.state!=='running'}/>}
      <textarea ref={terminalComposer} aria-label="워크룸 입력" value={terminalDraft} disabled={busy} rows={docked?1:2} maxLength={20000} placeholder={docked?(activeSession.agent==='codex'?'요청 · / 명령 · $ 스킬':'요청 · @ 호출 · # 언급'):activeSession.agent==='codex'?'요청 · CLI 명령 / · 설치된 스킬 $ · @ 호출 · # 언급':remote?'한글·명령·요청 입력 · @ 호출 · # 언급':`한글·명령·요청 입력 · @ 호출 · # 언급 · ${workroomComposerAttachCopy().placeholder}`}
@@ -1454,10 +1584,10 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
       onSelect={event=>setTerminalCursor(event.currentTarget.selectionStart??event.currentTarget.value.length)}
       onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return;
         // The CLI's keys work from here too (NHCS draftKeyToCli, src/workroomComposerKeys.ts): arrows, Tab, Enter… while the box is empty.
-        const cliKey=workroomComposerKeyToCli(event.key,{ctrl:event.ctrlKey,meta:event.metaKey,alt:event.altKey,shift:event.shiftKey},{empty:!terminalDraft.trim()&&!images.length&&!sessionChips.length&&!routeTarget,appCursor:!!terminal.current?.modes.applicationCursorKeysMode,menuOpen:!!slashCandidates.length||!!mentionCandidates.length,repeat:event.repeat});
+        const cliKey=workroomComposerKeyToCli(event.key,{ctrl:event.ctrlKey,meta:event.metaKey,alt:event.altKey,shift:event.shiftKey},{empty:!browserHandoff&&!terminalDraft.trim()&&!images.length&&!sessionChips.length&&!routeTarget,appCursor:!!terminal.current?.modes.applicationCursorKeysMode,menuOpen:!!slashCandidates.length||!!mentionCandidates.length,repeat:event.repeat});
         if(cliKey&&sendBoundInput(cliKey)){event.preventDefault();return;}
-        if(event.key==='Tab'&&slashCandidates.length){event.preventDefault();completeSlash(slashCandidates[0]!.command);return;}if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();const exact=slashCandidates.some(c=>c.command===terminalDraft.trim());if(slashCandidates.length&&!exact&&!routeTarget){runSlashCommand(slashCandidates[0]!.command);setTerminalDraft('');setTerminalCursor(0);return;}if(routeTarget)void deliverTerminalDraft();else sendTerminalDraft();}}}/>
-     <button type="button" className="ai-terminal-btn ai-terminal-start" disabled={busy||imageBusy||submissionBusy||remote&&sessionAttachMoving||!!routeTargetId&&!routeTarget||!routeTarget&&pendingSubmission?.sessionId===activeSession.id||(routeRole!=='use'&&!terminalDraft.trim()&&!images.length&&!sessionAttachReady)} onClick={()=>routeTarget?void deliverTerminalDraft():sendTerminalDraft()}><Send size={13}/>{remote&&sessionAttachMoving?sessionAttachLabel:routeTarget?(routeRole==='use'?'USE 대화 열기':routeApp?workroomAppSendLabel(routeApp,workroomDeliveryInstruction({task:draftMessage(),sourceLabel:activeProject?.label??'현재 워크룸',sourceAgentLabel:WORKROOM_AGENT_NAMES[activeSession.agent],targetLabel:routeTarget.label})):routeDeviceId?`${routeDevice?.label??'다른 아젠투지'}에 전달`:'프로젝트에 전달'):fullscreen&&sendingId?'보내는 중…':submissionBusy?'요청 전송 확인 중':'현재 세션에 전송'}</button>
+        if(event.key==='Tab'&&slashCandidates.length){event.preventDefault();completeSlash(slashCandidates[0]!.command);return;}if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();const exact=slashCandidates.some(c=>c.command===terminalDraft.trim());if(slashCandidates.length&&!exact&&!routeTarget&&!browserHandoff){runSlashCommand(slashCandidates[0]!.command);setTerminalDraft('');setTerminalCursor(0);return;}if(routeTarget)void deliverTerminalDraft();else sendTerminalDraft();}}}/>
+     <button type="button" className="ai-terminal-btn ai-terminal-start" title={browserHandoffExpired?browserCopy.handoff.expired:undefined} disabled={browserHandoffExpired||busy||imageBusy||submissionBusy||remote&&sessionAttachMoving||!!routeTargetId&&!routeTarget||!routeTarget&&pendingSubmission?.sessionId===activeSession.id||(routeRole!=='use'&&!browserHandoff&&!terminalDraft.trim()&&!images.length&&!sessionAttachReady)} onClick={()=>routeTarget?void deliverTerminalDraft():sendTerminalDraft()}><Send size={13}/>{remote&&sessionAttachMoving?sessionAttachLabel:routeTarget?(routeRole==='use'?'USE 대화 열기':routeApp?workroomAppSendLabel(routeApp,workroomDeliveryInstruction({task:draftMessage(),sourceLabel:activeProject?.label??'현재 워크룸',sourceAgentLabel:WORKROOM_AGENT_NAMES[activeSession.agent],targetLabel:routeTarget.label})):routeDeviceId?`${routeDevice?.label??'다른 아젠투지'}에 전달`:'프로젝트에 전달'):fullscreen&&sendingId?'보내는 중…':submissionBusy?'요청 전송 확인 중':'현재 세션에 전송'}</button>
     </div>,
   // The phone's chips (w13): above the field, in the dock and inline alike.
   remoteChips:<>{remoteAttachOn&&<RemoteAttachChips attach={sessionAttach} focusComposer={()=>terminalComposer.current?.focus()}/>}</>,
@@ -1481,7 +1611,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   deviceLoading:<>{!!routeDeviceId&&deviceSessions?.deviceId===routeDeviceId&&deviceSessions.loading&&<p className="ai-terminal-hint" role="status" data-testid="workroom-route-device-loading">{routeDevice?.label}의 작업 세션 목록을 받고 있습니다…</p>}</>,
   deviceError:<>{!!routeDeviceId&&deviceSessions?.deviceId===routeDeviceId&&!!deviceSessions.error&&<p className="ai-terminal-hint ai-terminal-hint--error" role="alert" data-testid="workroom-route-device-error">{deviceSessions.error}</p>}</>,
   natural:<>{!routeTarget&&!!naturalTargets.length&&<div className="ai-terminal-natural-targets"><span>전달 대상 확인</span>{naturalTargets.map(project=><button type="button" key={projectMentionKey(project)} onClick={()=>routeTo(project.targetId,'',project.executionRole,project.serviceKey)}>‘{project.label}’ 선택</button>)}</div>}</>,
-  imeHint:<p className="ai-terminal-hint">{popout?'Enter 전송 · Shift+Enter 줄바꿈 · 빈 칸의 방향키·Tab은 AI로 전달 · Esc 취소 · Ctrl+C 중단':<>이 입력창은 macOS·iPhone의 한글 IME가 조합을 끝낸 문자열만 네 AI에 전달합니다. Shift+Enter는 줄바꿈입니다. {WORKROOM_COMPOSER_KEYS_HINT}{!remote&&workroomComposerAttachCopy().composerNote}</>}</p>,
+  imeHint:<p className="ai-terminal-hint">{popout?'Enter 전송 · Shift+Enter 줄바꿈 · 빈 칸의 방향키·Tab은 AI로 전달 · Esc 취소 · Ctrl+C 중단':<>이 입력창은 macOS·iPhone의 한글 IME가 조합을 끝낸 문자열만 AI에 전달합니다. Shift+Enter는 줄바꿈입니다. {WORKROOM_COMPOSER_KEYS_HINT}{!remote&&workroomComposerAttachCopy().composerNote}</>}</p>,
   slashBar:<>{activeSession.state==='running'&&<div className="ai-terminal-slash-bar" data-testid="workroom-slash-bar" aria-label="슬래시 명령 즐겨찾기">
     {slashFavorites.map(command=><button type="button" key={command} className="ai-terminal-key ai-terminal-slash-favorite" disabled={busy} title={`${command} 실행`} onClick={()=>runSlashCommand(command)}>{command}</button>)}
     <button type="button" className="ai-terminal-key" data-testid="workroom-slash-pad-toggle" aria-expanded={slashPadOpen} onClick={()=>{setSlashPadOpen(open=>!open);restoreWorkroomKeyboard()}}>{slashPadOpen?'명령 모음 닫기':activeSession.agent==='codex'?'/ 명령 · $ 스킬':'/ 명령 모음'}</button>
@@ -1524,12 +1654,12 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
       return <><optgroup label="총괄 (OPS)"><option value={ops.targetId} data-testid="ai-terminal-project-ops">{ops.label} · {sessionOwner(ops.targetId)}</option></optgroup><optgroup label="프로젝트">{projects.filter(p=>p!==ops).map(p=><option key={p.targetId} value={p.targetId}>{p.label}</option>)}</optgroup></>;})()}</select>
    </label>;
  const agentField=<label className="ai-terminal-field"><span className="ai-terminal-label">AI</span>
-    <select aria-label="터미널 AI" value={agent} disabled={busy} onChange={e=>setAgent(e.target.value as AiTerminalAgent)} className="ai-terminal-select">{AI_TERMINAL_AGENTS.map(a=><option key={a} value={a}>{aiTerminalAgentLabel(a)}</option>)}</select>
+    <select aria-label="터미널 AI" data-testid="workroom-launch-choice" value={launchChoice} disabled={busy} onChange={e=>pickLaunchChoice(e.target.value)} className="ai-terminal-select">{launchChoiceOptions()}</select>
    </label>;
  const refreshButton=<button disabled={busy} onClick={()=>{void refresh();if(!remote){void refreshConnections();setTargetReload(value=>value+1)}}} aria-label="작업 세션 새로고침" className="ai-terminal-btn ai-terminal-btn--icon"><RotateCw size={14}/></button>;
  // In the 「새 작업」 sheet the voice dock is under the sheet (w11 review): the copy says to close it first.
  const opsHint=<>{opsTargetId&&target===opsTargetId&&<p className="ai-terminal-hint" data-testid="workroom-ops-input-hint">여기서 시작하는 작업은 OPS 워크룸의 {aiTerminalAgentLabel(agent)}에게 갑니다. 총괄과 말하려면 {newTaskShown?'이 창을 닫고 ':''}화면 아래 「아젠투지 호출」을 누르세요.</p>}</>;
- const targetErrorLine=<>{targetError&&<p className="ai-terminal-caption" role="alert">프로젝트·워크트리 목록을 갱신하지 못했습니다. 터미널 새로고침으로 다시 확인하세요.<ErrorVocActions message="프로젝트·워크트리 목록을 갱신하지 못했습니다." code="WORKROOM_TARGETS_FAILED" surface="workroom"/></p>}</>;
+ const targetErrorLine=<>{targetError&&<p className="ai-terminal-caption" role="alert">프로젝트·워크트리 목록을 갱신하지 못했습니다. 작업 세션 새로고침으로 다시 확인하세요.<ErrorVocActions message="프로젝트·워크트리 목록을 갱신하지 못했습니다." code="WORKROOM_TARGETS_FAILED" surface="workroom"/></p>}</>;
  // The launch notices sit on the overview — and in the 「새 작업」 sheet while it is open (w11 review): on the phone the only
  // start button is in the sheet, which covers the overview, and a blocked start has to say why and offer the check.
  const endedToggle=<>{!!endedSessions.length&&<button className="ai-terminal-btn ai-terminal-ended-toggle" aria-pressed={showEnded} onClick={()=>setShowEnded(value=>!value)}>{showEnded?'종료된 세션 숨기기':'종료된 세션 보기'} ({endedSessions.length})</button>}</>;
@@ -1560,9 +1690,9 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
        없었다(VOC 2026-10-05). 프로젝트까지 바꾸려면 옆의 펼치기 버튼으로 간다. */}
    {composerFoldable&&(!!activeSession&&popoutAvailability.available&&!prompt.trim()&&!composerShown
     ?<div className="ai-terminal-new-window">
-      <button className="ai-terminal-btn" data-testid="workroom-new-window" disabled={busy} title={`${(targetProject??activeProject)?.label??'이 프로젝트'}에서 ${aiTerminalAgentLabel(agent)}로 같은 프로젝트·AI로 깨끗한 작업을 새 창에 하나 더 엽니다.`} onClick={()=>void openFreshWindow()}>작업 하나 더 · 새 창</button>
+      <button className="ai-terminal-btn" data-testid="workroom-new-window" disabled={busy} title={`${(targetProject??activeProject)?.label??'이 프로젝트'}에서 ${aiTerminalAgentLabel(agent)}로 새 작업을 별도 창에 하나 더 엽니다.`} onClick={()=>void openFreshWindow()}>작업 하나 더 · 새 창</button>
       <label className="ai-terminal-new-window-agent"><span className="ai-terminal-label">AI</span>
-       <select aria-label="새 창에서 열 AI" data-testid="workroom-new-window-agent" value={agent} disabled={busy} onChange={e=>setAgent(e.target.value as AiTerminalAgent)} className="ai-terminal-select">{AI_TERMINAL_AGENTS.map(a=><option key={a} value={a}>{aiTerminalAgentLabel(a)}</option>)}</select>
+       <select aria-label="새 창에서 열 AI" data-testid="workroom-new-window-agent" value={launchChoice} disabled={busy} onChange={e=>pickLaunchChoice(e.target.value)} className="ai-terminal-select">{launchChoiceOptions()}</select>
       </label>
       <button className="ai-terminal-btn" data-testid="workroom-composer-toggle" aria-expanded={false} title="프로젝트·워크트리까지 고르고 첫 요청을 적어서 엽니다." onClick={()=>{setFocusRequest(value=>value+1);setComposerOpen(true)}}>프로젝트·요청 고르기</button>
      </div>
@@ -1591,7 +1721,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   {!viewShown&&errorLine}
   {!viewShown&&noticeLine}
   {!newTaskShown&&launchNotices}
-  {resuming&&<p className="ai-terminal-caption" role="status">{targetProject?.label??'선택한 프로젝트'}의 실행 중인 세션을 확인하고 있습니다. 연결이 지연되면 터미널 새로고침으로 다시 확인하세요.</p>}
+  {resuming&&<p className="ai-terminal-caption" role="status">{targetProject?.label??'선택한 프로젝트'}의 실행 중인 세션을 확인하고 있습니다. 연결이 지연되면 작업 세션 새로고침으로 다시 확인하세요.</p>}
   {!fullscreen&&composerShown&&<div ref={inlinePrompt} className="ai-terminal-prompt" data-testid="workroom-composer">
    <label className="ai-terminal-label" htmlFor={promptId}>{requestTitle||'어떤 작업을 할까요?'}</label>
    <textarea ref={promptField} id={promptId} aria-label="터미널에 전달할 작업" value={prompt} disabled={busy} onChange={e=>{const invalid=aiInitialPromptDraftError(e.target.value);if(invalid){setError(invalid+' 현재 초안은 유지했습니다.');return;}draftGeneration.current++;setPrompt(e.target.value)}} placeholder="작업을 적으면 선택한 AI에 전달합니다. 비워 두고 터미널만 열어도 됩니다." className="ai-terminal-textarea"/>
@@ -1615,15 +1745,20 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    {activeSession&&part?<>
     <div className="ai-terminal-current"><span className="ai-terminal-tab-owner">{sessionOwner(activeSession.targetId)}</span><span className="ai-terminal-current-label">{sessionLabels.get(activeSession.id)}</span>{part.viewControls}</div>
     {part.restartLine}
-    {part.surface}
+    {part.teamStatus}
+    {/* The browser's split view stands beside this whole stack (terminal, composer, keys), not the terminal alone. */}
+    <WorkroomBrowserFrame key={remote?undefined:activeSession.id} off={remote} sessionId={activeSession.id} targetId={activeSession.targetId} visible={visible} onDraft={text=>setTerminalDraft(prior=>prior?prior+'\n\n'+text:text)} {...(!remote?{onHandoff:receiveBrowserHandoff,onWorkspaceChange:browserWorkspaceChanged,suggestions:browserSuggestions}:{})}>{part.surface}
     {part.exitedHint}
     {part.dismiss}
     {part.exitedQueue}
     {activeSession.state==='running'&&<div ref={inlineCommand} className="ai-terminal-command" data-testid="workroom-command-composer">
      <div className="ai-terminal-command-head"><span><AtSign size={13}/><span>{part.usage}</span></span>{part.commandChips}</div>
+     {!remote&&teamOpen&&<WorkroomTeamBuilder leader={activeSession.agent} initialGoal={terminalDraft} disabled={busy} openSessions={teamOpenSessions} leaderCheckout={activeSession.targetId} accounts={teamAccounts.accounts} accountsLoading={teamAccounts.loading} onClose={()=>{setTeamOpen(false);terminalComposer.current?.focus();}}
+      onCompose={text=>{setTerminalDraft(text);setTerminalCursor(text.length);setTeamOpen(false);requestAnimationFrame(()=>terminalComposer.current?.focus());}}/>}
      {part.recovery}{part.submissionHint}{part.draftQueue}{part.remoteChips}{part.commandField}{part.images}{part.voiceReceipt}{part.appPlan}{part.appReceipt}{part.routePlan}{part.routeReceipt}{part.mentionMenu}{part.slashMenu}{part.refsUnsupported}{part.crossDevice}{part.deviceLoading}{part.deviceError}{part.natural}{part.imeHint}
     </div>}
     {part.slashBar}{part.slashPad}{part.keys}{part.shell}{part.footer}
+    </WorkroomBrowserFrame>
    </>:<p className="ai-terminal-hint">{runningSessions.length?'작업 세션을 선택하면 이어서 입력할 수 있습니다.':'실행 중인 세션이 없습니다. 종료된 세션은 기록만 확인할 수 있습니다.'}</p>}
   </div>}
   </div>}
@@ -1685,6 +1820,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
    {activeSession&&part?<div className="ai-terminal-session-view-body">
     <div className="ai-terminal-session-view-scroll" data-testid="workroom-session-view-scroll">
      {part.restartLine}
+     {part.teamStatus}
      {part.surface}
      {activeSession.state==='running'&&<div className="ai-terminal-session-view-more" data-testid="workroom-command-more">
       {/* The composer's @/# and IME notes sit behind one 「?」 (w11, S4.5). */}

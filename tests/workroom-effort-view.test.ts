@@ -45,6 +45,10 @@ test('the badge says what the session was started with, and why', () => {
     [{skipped: 'history-resume'}, '에포트 자동 · 기록에서 이어 열어 CLI 기본값'],
     [{tier: 'high', reason: 'security', skipped: 'env-override'}, '에포트 자동 · CLAUDE_CODE_EFFORT_LEVEL 설정이 우선'],
     [{agent: 'codex', tier: 'high', reason: 'security', skipped: 'model-unknown'}, '에포트 자동 · 모델을 확인하지 못해 CLI 기본값'],
+    // A level without a tier was pinned by the person (팀 작전 member); the Mac's mode does not apply to it.
+    [{level: 'high', origin: 'launch'}, '에포트 고정 · 높음'],
+    [{level: 'low', origin: 'restart', mode: 'off'}, '에포트 고정 · 낮음'],
+    [{level: 'medium', origin: 'launch', manual: true}, '에포트 직접 설정'],
     // A session with no decision at all says nothing.
     [{}, null],
   ];

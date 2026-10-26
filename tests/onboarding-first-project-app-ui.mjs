@@ -6,7 +6,8 @@ const dist=process.argv[2];if(!dist)throw new Error('Pass an isolated Vite build
 const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:req=>{const path=new URL(req.url).pathname;return new Response(Bun.file(join(dist,path==='/'?'index.html':path)));}});
 let browser, savedPorts=[];
 let profile={state:'unprepared',profileId:null,memoryId:null,displayName:'AgentsToZ',aliases:['agentstoz','아젠투지','에이전츠투지'],projectId:null,revision:null,lastSavedAt:null,problem:null,pendingCount:0,backend:null,coordinationPolicy:'agentstoz'};
-let proposals=[], profileStatusUnavailable=false, navigation=null;
+let proposals=[], profileStatusUnavailable=false, navigation=null, entryBodyFailures=1;
+const savedEntry={entryId:'a1'.repeat(12),section:'AgentsToZ 운영 결정',title:'프로젝트 별칭 규칙'};
 // The OPS memory ID sits in the collapsed 「고급 정보」 since the 2026-09 glossary pass.
 const openAdvanced=async panel=>{const d=panel.locator('details').filter({has:panel.page().getByText('고급 정보',{exact:true})}).first();if(await d.count()&&!(await d.evaluate(e=>e.open)))await d.locator('summary').click();};
 try{
@@ -19,6 +20,13 @@ try{
    if(u.pathname.startsWith('/api/control-profile/')){
     const action=u.pathname.split('/').at(-1);
     if(action==='status'&&profileStatusUnavailable)return route.fulfill({status:503,json:{success:false,error:'fixture profile unavailable'}});
+    if(action==='entries'){
+     const entryId=u.searchParams.get('entryId');
+     // The first body read fails like a dropped request; the second press must read it again, not fold it away.
+     if(entryId===savedEntry.entryId&&entryBodyFailures>0){entryBodyFailures--;return route.fulfill({status:503,json:{success:false,error:'fixture body unavailable'}});}
+     if(entryId)return route.fulfill({json:entryId===savedEntry.entryId?{success:true,entry:{...savedEntry,revision:profile.revision,body:'song-app은 노래 앱 프로젝트를 가리킨다.',truncated:false}}:{success:false,error:'운영 기억이 바뀌었습니다.'},status:entryId===savedEntry.entryId?200:404});
+     return route.fulfill({json:{success:true,memory:profile.state==='ready'?{ready:true,revision:profile.revision,total:1,entries:[savedEntry]}:{ready:false,problem:'먼저 준비하세요.',total:0,entries:[]}}});
+    }
     if(action==='prepare')profile={...profile,state:'ready',profileId:'11111111-1111-4111-8111-111111111111',memoryId:'22222222-2222-4222-8222-222222222222',revision:'revision-1',backend:'app-data'};
     if(action==='policy')profile={...profile,coordinationPolicy:JSON.parse(req.postData()).policy};
     if(action==='review'){proposals=[];profile={...profile,pendingCount:0,lastSavedAt:'2026-09-14T00:00:00Z',revision:'revision-2'};}
@@ -80,12 +88,22 @@ try{
  const profilePanel=page.getByTestId('control-profile-panel');await profilePanel.waitFor();
  await profilePanel.getByRole('heading',{name:'아젠투지 설정',exact:true}).waitFor();
  assert.equal(calls.some(c=>c.path==='/api/control-profile/prepare'),false,'Opening OPS must remain read-only');
+ // UX audit 2026-10-25: opened from 도구 및 설정, focus stayed on the button outside, so Escape closed the popover behind
+ // the panel and left the panel open. Now the panel takes focus, Escape closes it, and focus goes back to the opener.
+ await page.waitForFunction(()=>document.querySelector('[data-testid="control-profile-panel"]')?.contains(document.activeElement),null,{timeout:5000}).catch(()=>{throw new Error('The panel takes focus when it opens');});
+ await page.keyboard.press('Escape');
+ await profilePanel.waitFor({state:'hidden'});
+ await page.waitForFunction(()=>document.activeElement?.getAttribute('data-testid')==='control-profile-open',null,{timeout:5000}).catch(()=>{throw new Error('Escape returns focus to 아젠투지 설정');});
+ await page.keyboard.press('Escape');
+ assert.equal(await profileEntry.isVisible(),false,'The next Escape closes the tools popover, one layer at a time');
+ await page.getByText('도구 및 설정',{exact:true}).click();
+ await profileEntry.click();await profilePanel.waitFor();
  await profilePanel.getByRole('button',{name:'아젠투지 설정 닫기',exact:true}).click();
  await profilePanel.waitFor({state:'hidden'});
  await page.getByText('도구 및 설정',{exact:true}).click();
  const shortcut=page.getByTestId('control-center-project-shortcut');
  await shortcut.locator('summary').click();
- await shortcut.getByRole('button',{name:'다른 Mac의 AgentsToZ OPS 복원',exact:true}).click();
+ await shortcut.getByRole('button',{name:'다른 Mac의 아젠투지 복원',exact:true}).click();
  await dialog.waitFor();
  assert.equal(await dialog.getByRole('checkbox',{name:/처음부터 프로젝트 장기기억/}).isChecked(),true);
  assert.equal(await dialog.getByRole('checkbox',{name:/Supabase 백업/}).isChecked(),true);
@@ -105,13 +123,26 @@ try{
  assert.equal(calls.some(c=>/agent-runtime.*(?:start|turn)/.test(c.path)),false);
  savedPorts=[];await page.reload();
  await page.getByTestId('onboarding-control-center').locator('summary').click();
- assert.equal(await page.getByTestId('onboarding-create-control').innerText(),'내 AgentsToZ OPS 준비');
+ assert.equal(await page.getByTestId('onboarding-create-control').innerText(),'내 아젠투지 준비');
  await page.getByTestId('onboarding-create-control').click();
  await profilePanel.waitFor();
  await profilePanel.getByRole('heading',{name:'아젠투지 설정',exact:true}).waitFor();
  assert.equal(calls.some(c=>c.path==='/api/control-center/create'),false);
  await profilePanel.getByRole('button',{name:'아젠투지 준비·연결 다시 확인',exact:true}).click();
- await profilePanel.getByText('운영 기억 연결됨',{exact:true}).waitFor();assert.equal(savedPorts.length,0,'Global profile must not create a project');
+ // An app-data profile lives on this Mac only; the headline no longer reads like a shared memory (UX audit 2026-10-25).
+ await profilePanel.getByText('운영 기억 준비됨 · 이 Mac 전용',{exact:true}).waitFor();assert.equal(savedPorts.length,0,'Global profile must not create a project');
+ // What 아젠투지 already remembers is listed read-only: titles first, the body only when opened.
+ const saved=profilePanel.getByTestId('control-profile-saved-memory');
+ await saved.getByRole('heading',{name:'저장된 운영 기억 · 1',exact:true}).waitFor();
+ assert.equal(await saved.getByText('song-app은 노래 앱 프로젝트를 가리킨다.',{exact:true}).count(),0,'Bodies are not loaded with the list');
+ await saved.getByRole('button',{name:/프로젝트 별칭 규칙/}).click();
+ // Review 2026-10-25: the failure line said 「다시 눌러 보세요」 but the next press folded the item away instead of reading again.
+ await saved.getByRole('alert').filter({hasText:'내용을 읽지 못했습니다. 다시 눌러 보세요.'}).waitFor();
+ await saved.getByRole('button',{name:/프로젝트 별칭 규칙/}).click();
+ await saved.getByText('song-app은 노래 앱 프로젝트를 가리킨다.',{exact:true}).waitFor();
+ assert.equal(await saved.getByRole('button',{name:/프로젝트 별칭 규칙/}).getAttribute('aria-expanded'),'true');
+ assert.deepEqual(calls.filter(c=>c.path==='/api/control-profile/entries').map(c=>c.method),['GET','GET','GET'],'The saved memory list only reads');
+ assert.equal(await saved.getByText(/고치려면|후보로 남겨/).count(),0,'No correction promise: saving a candidate only appends');
  const prepare=calls.filter(c=>c.path==='/api/control-profile/prepare');
  assert.equal(prepare.length,1);assert.deepEqual(JSON.parse(prepare[0].body),{});
  await openAdvanced(profilePanel);await profilePanel.getByText(profile.memoryId,{exact:true}).waitFor();
@@ -126,6 +157,13 @@ try{
  await profilePanel.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
  await profilePanel.getByText('프로젝트 운영 결정',{exact:true}).waitFor();
  assert.equal(calls.some(c=>c.path==='/api/control-profile/review'),false,'A visible candidate is not a saved memory');
+ // The one item waiting for the user sits under the status, before the launch options and the saved list (UX audit 2026-10-25).
+ const layout=await profilePanel.evaluate(panel=>{panel.scrollTop=0;const pending=panel.querySelector('[data-testid="control-profile-pending"]');
+  const after=[panel.querySelector('fieldset'),panel.querySelector('[data-testid="control-profile-saved-memory"]'),panel.querySelector('[data-testid="device-operating-memory"]')];
+  return {first:after.every(node=>node&&(pending.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING)),visible:pending.querySelector('h3').getBoundingClientRect().bottom<=panel.getBoundingClientRect().bottom,heading:pending.querySelector('h3').textContent};});
+ assert.deepEqual(layout,{first:true,visible:true,heading:'운영 기억 저장 후보 · 1'});
+ // A candidate that is waiting keeps the instruction to save it here, even on a local-only memory.
+ assert.match(await profilePanel.getByTestId('control-profile-pending').innerText(),/여기서 저장합니다/);
  await profilePanel.getByRole('button',{name:'운영 기억에 저장',exact:true}).click();
  await profilePanel.getByText('운영 기억은 로컬에 저장했습니다. 원격 백업 상태는 별도 확인이 필요합니다.',{exact:true}).waitFor();
  assert.equal(calls.filter(c=>c.path==='/api/control-profile/review').length,1);
@@ -154,7 +192,7 @@ try{
  await page.locator('[data-top-level-tab="what-i-said"]').press('Home');
  assert.equal(await page.locator('[data-top-level-tab="ports"]').getAttribute('aria-selected'),'true');
  await page.locator('[data-top-level-tab="memory"]').click();
- await page.getByRole('button',{name:'AgentsToZ OPS · 운영 기억 확인',exact:true}).click();
+ await page.getByRole('button',{name:'아젠투지 설정 열기',exact:true}).click();
  await profilePanel.getByRole('heading',{name:'아젠투지 설정',exact:true}).waitFor();
  await openAdvanced(profilePanel);await profilePanel.getByText(profile.memoryId,{exact:true}).waitFor();
  assert.equal(calls.filter(c=>c.path==='/api/control-profile/prepare').length,1,'Reopening OPS must not prepare a replacement profile');
@@ -222,9 +260,14 @@ try{
  await selectRow('ops-bound');
  await page.locator('[data-testid="project-memory-role"][data-project-role="unknown"]').waitFor();
  assert.equal(calls.slice(offlineCalls).some(c=>c.path.startsWith('/api/project-memory/')&&c.body?.includes(opsFolder)),false);
- profileStatusUnavailable=false;
+ // A status read that fails is said as such — it used to show 「프로필 준비 필요」 like an unprepared profile (UX audit 2026-10-25).
  await page.getByTestId('project-memory-open-ops').click();
  await profilePanel.getByRole('heading',{name:'아젠투지 설정',exact:true}).waitFor();
+ await profilePanel.getByRole('status').filter({hasText:'아젠투지 상태를 읽지 못했습니다. 잠시 뒤 「상태 다시 확인」을 누르세요.'}).waitFor();
+ assert.equal(await profilePanel.getByText(/준비 필요/).count(),0,'A failed read is not an unprepared profile');
+ profileStatusUnavailable=false;
+ await profilePanel.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
+ await profilePanel.getByText('운영 기억 연결됨',{exact:true}).waitFor();
  await profilePanel.getByRole('button',{name:'아젠투지 설정 닫기',exact:true}).click();
  // The recovered OPS row no longer belongs to the previously selected managed filter.
  await page.getByTestId('project-role-filter-ops').click();

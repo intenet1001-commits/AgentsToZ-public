@@ -13,7 +13,7 @@ import { AiTerminalScreen } from './aiTerminalScreen';
 import { stripViewerTerminalReplies, type ViewerReplyFilterState } from './aiTerminalReplyFilter';
 import { dropPartialTerminalPrefix, incompleteEscapeSuffix, keepTailUtf8, renderTerminalPlainText, TERMINAL_TAIL_MAX_BYTES } from './terminalPlainText';
 import { WORKROOM_SESSION_ENV, WORKROOM_TARGET_ENV } from './workroomCaller';
-import { aiTerminalLaunchArgs, type AiTerminalLaunchProfile } from './aiTerminalLaunchArgs';
+import { aiTerminalLaunchArgs, launchModelError, type AiTerminalLaunchModel, type AiTerminalLaunchProfile } from './aiTerminalLaunchArgs';
 import { codexHooksAreAgentsToZOnly, codexSupportsHookTrustFlag } from './codexHookTrust';
 import { processGroupOpenFiles, resolveAiTerminalResume, type AiTerminalResume, type AiTerminalResumeSource } from './aiTerminalResume';
 import { aiTerminalSubmitSteps } from './aiTerminalSubmit';
@@ -31,7 +31,8 @@ import {WORKROOM_ACTIVITY_SAMPLE_MS,WorkroomActivityBoard,normalizeWorkroomActiv
 import {WORKROOM_TRANSCRIPT_TICK_BYTES,type WorkroomTurnSignals} from './aiTerminalActivityTranscript';
 import {codexEffortModel as readCodexEffortModel,type CodexEffortModel} from './codexEffortModel';
 import {normalizeWorkroomEffortRequest,type WorkroomEffortSettingStore} from './workroomEffortSetting';
-import {noteWorkroomEffortRequest,observeWorkroomEffortScreen,planWorkroomEffort,workroomEffortInputIsManual,workroomEffortRecord,type WorkroomEffortRecord,type WorkroomEffortState} from './workroomEffortSession';
+import {hermesVariantOf,type HermesVariant} from './hermesVariants';
+import {noteWorkroomEffortRequest,observeWorkroomEffortScreen,planWorkroomEffort,workroomEffortInputIsManual,workroomEffortRecord,type WorkroomEffortRecord,type WorkroomEffortState,type WorkroomLaunchEffort} from './workroomEffortSession';
 import {workroomEffortView,type WorkroomEffortView} from './workroomEffortView';
 
 /**
@@ -192,7 +193,7 @@ export interface AiTerminalDependencies {
   effortRuntime?: typeof changeWorkroomEffort;
   effortRuntimeSupport?: typeof workroomEffortRuntimeSupport;
   /** Tests: the Codex model proof (default: src/codexEffortModel.ts reading the config files, read-only). */
-  codexEffortModel?: (input:{env:Record<string,string|undefined>;cwd:string;args:readonly string[]})=>CodexEffortModel;
+  codexEffortModel?: (input:{env:Record<string,string|undefined>;cwd:string;args:readonly string[];launchModel?:string})=>CodexEffortModel;
 }
 interface Session {
   historyEnv?: Record<string,string|undefined>;
@@ -219,6 +220,8 @@ interface Session {
   /** Host-only: the permission mode it was launched with, kept by a restart. */
   bypass: boolean;
   launchProfile?: AiTerminalLaunchProfile;
+  /** Host-only model chosen at launch (team members); a restart keeps it. */
+  launchModel?: AiTerminalLaunchModel;
   /** Host-only: the CLI conversation it runs when known (Claude's `--session-id`, or what it resumed). */
   conversationId?: string;
   exitedAt?: string;
@@ -303,6 +306,8 @@ async function waitForTerminalExit(child:Child, timeoutMs:number, required=false
 export class AiTerminalService {
   #sessions = new Map<string, Session>();
   #retired = new Map<string, RetiredSession>();
+  /** 「다시 시작」 lineage, host-only: a session id → the session its `resumeFrom` start opened. Bounded like #retired. */
+  #continuedBy = new Map<string, string>();
   /** Running CLI pid (each leads its own process group) → session id. Host-only caller hint, never authority. */
   #sessionByPid = new Map<number, string>();
   #requests = new Map<string, {fingerprint: string; promise: Promise<AiTerminalResponse>}>();
@@ -407,6 +412,17 @@ export class AiTerminalService {
     }
     return null;
   }
+  /**
+   * Host-only: which 「Hermes · Claude」/「Hermes · Codex」 variant each live session was launched with
+   * (src/hermesVariants.ts). Kept off `AiTerminalSummary` on purpose — a phone normalizer rejects unknown keys —
+   * so this Mac's panels read it through their own local path.
+   */
+  hermesVariantSessions():Array<{sessionId:string;variant:HermesVariant}> {
+    return [...this.#sessions.values()].flatMap(session => {
+      const variant = session.summary.agent==='hermes' ? hermesVariantOf(session.launchModel) : null;
+      return variant ? [{sessionId:session.summary.id,variant}] : [];
+    });
+  }
   /** Host-only: the session while it is running, else null (exited, pruned or unknown). */
   runningSession(id:string):AiTerminalSummary|null {
     const session=this.#sessions.get(id);
@@ -421,6 +437,8 @@ export class AiTerminalService {
     const retired=this.#retired.get(id);
     return retired?{...retired.summary}:null;
   }
+  /** Host-only: the session a 「다시 시작」 of `id` opened (its exact `resumeFrom` lineage, one step), else null. */
+  continuationOf(id:string):string|null { return this.#continuedBy.get(id) ?? null; }
   /** Live or retired output source; both check the target like a live lookup does. */
   #outputSource(id:string,targetId:string):Session|RetiredSession {
     const live=this.#sessions.get(id);
@@ -537,7 +555,8 @@ export class AiTerminalService {
   #effortMode(): WorkroomEffortMode { try { return this.dependencies.effortAuto?.getMode?.() ?? (this.dependencies.effortAuto?.get() ? 'auto' : 'off'); } catch { return 'off'; } }
   async #adjustEffort(session: Session, text: string, active: () => boolean) {
     const state=session.effort;
-    if(!state||!this.dependencies.effortAuto?.getMode||session.launchProfile)return;
+    // A level the person pinned for this session (a team member) is never changed by auto.
+    if(!state||state.pinned||!this.dependencies.effortAuto?.getMode||session.launchProfile)return;
     const mode=this.#effortMode();
     if(mode==='off'){state.advice=undefined;state.runtimeStatus=undefined;return;}
     const decision=classifyWorkroomEffort(workroomEffortRequestText(text));if(!decision)return;
@@ -688,7 +707,7 @@ export class AiTerminalService {
    *  authority it names another community device driving this Workroom; with one it is the transport's stable principal
    *  (a LAN controller survives a restore that rotates `authority.owner`). It is a lookup key only — every grant, target
    *  and execution decision below reads `authority`, never this. */
-  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>} = {}): Promise<AiTerminalResponse> {
+  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; launchModel?: AiTerminalLaunchModel; launchEffort?: WorkroomLaunchEffort; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>} = {}): Promise<AiTerminalResponse> {
     const request = normalizeAiTerminalRequest(value);
     if (options.receiptOwner !== undefined && (options.receiptOwner === 'local' || (authority
       ? typeof options.receiptOwner !== 'string' || options.receiptOwner.length < 3 || options.receiptOwner.length > 300 || /[\x00-\x1f\x7f]/.test(options.receiptOwner) || /^community(?::|$)/.test(options.receiptOwner)
@@ -703,6 +722,11 @@ export class AiTerminalService {
     if ((request.operation === 'start' || request.operation === 'accounts') && authority && !authority.targets.has(request.targetId!)) throw new Error('이 원격 연결에 등록된 프로젝트가 아닙니다.');
     if (authority && (request.operation === 'accounts' || request.accountId !== undefined) && !authority.accountSelectionAllowed?.()) throw new Error('Mac에서 이 기기의 계정 선택 권한을 별도로 허용하세요.');
     if (options.launchProfile && (authority || request.operation !== 'start' || request.agent !== 'claude' || request.resumeFrom)) throw new Error('제한 실행은 이 Mac의 새 Claude 세션에만 쓸 수 있습니다.');
+    if (options.launchModel) {
+      if (authority || request.operation !== 'start' || request.resumeFrom || options.launchProfile) throw new Error('모델 지정은 이 Mac의 새 워크룸 시작에만 쓸 수 있습니다.');
+      const modelError = launchModelError(request.agent!, options.launchModel); if (modelError) throw new Error(modelError);
+    }
+    if (options.launchEffort && (authority || request.operation !== 'start' || request.resumeFrom || options.launchProfile || options.historyResume)) throw new Error('에포트 지정은 이 Mac의 새 워크룸 시작에만 쓸 수 있습니다.');
     if (options.historyResume && (authority || request.operation !== 'start' || request.resumeFrom || request.prompt !== undefined
       || request.references !== undefined || request.bypassPermissions !== undefined || options.launchProfile
       || request.agent !== options.historyResume.resume.agent || request.accountId !== options.historyResume.accountId)) throw new Error('대화 기록 재개는 로컬의 확인된 요청만 허용합니다.');
@@ -745,7 +769,12 @@ export class AiTerminalService {
       // into the session still moves a finished turn on.
       if (request.snapshot && session!.screen) {
         const page = await session!.screen.snapshotPage(request.after!,session!.chunks,session!.next).catch(()=>null);
-        if (page) return {session: this.#summary(session!), ...page};
+        if (page) {
+          // A cached continuation describes the grid at serialization, even if another viewer resized the PTY
+          // between its pages. Keep terminal-v1's strict wire keys; ordinary reads/list still report the live size.
+          const {cols,rows,chunks,nextCursor,hasMore,truncated}=page;
+          return {session:{...this.#summary(session!),cols,rows},chunks,nextCursor,hasMore,truncated};
+        }
       }
       return {session: this.#summary(session!), ...terminalOutputPage(session!.chunks,request.after!)};
     }
@@ -754,8 +783,10 @@ export class AiTerminalService {
     // A host-local history start carries a resume intent outside terminal-v1. It must not reuse the
     // result of an ordinary start (or a different logical conversation) with the same wire request ID.
     const historyIntent=options.historyResume;
-    const replayIntent=historyIntent?{request,historyResume:{logicalConversationId:historyIntent.logicalConversationId,
-      resume:historyIntent.resume,accountId:historyIntent.accountId,cwd:historyIntent.cwd}}:request;
+    const historyReplay=historyIntent?{historyResume:{logicalConversationId:historyIntent.logicalConversationId,
+      resume:historyIntent.resume,accountId:historyIntent.accountId,cwd:historyIntent.cwd}}:{};
+    const replayIntent=options.launchModel?{request,...historyReplay,launchModel:{model:options.launchModel.model,...(options.launchModel.provider?{provider:options.launchModel.provider}:{})}}
+      :historyIntent?{request,...historyReplay}:request;
     const fingerprint = createHash('sha256').update(JSON.stringify(replayIntent)).digest('hex');
     const previous = this.#requests.get(key);
     if (previous) {
@@ -778,7 +809,7 @@ export class AiTerminalService {
     // Stop does not wait for a stalled checkout proof or queued keystrokes.
     // The mutation fence below prevents those writes after close is requested.
     const effortInterrupt=!!session?.effort?.automaticPending&&request.operation==='input'&&request.data==='\x1b';
-    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard));
+    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard,options.launchModel,options.launchEffort));
     if (!closing&&!effortInterrupt) this.#queues.set(queueKey,promise);
     if (closing) session!.closing = promise;
     else {
@@ -799,7 +830,7 @@ export class AiTerminalService {
     return !!authority && (!(authority.deviceConsentActive ? authority.deviceConsentActive() : this.remoteAllowed(authority.owner)) || authority.isActive?.()===false || this.#grantEpoch.get(authority.owner) !== epoch);
   }
   /** `remoteAttachmentIds` is host-only: the ids of an admitted submission (never read from a wire `input`). */
-  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>): Promise<AiTerminalResponse> {
+  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>,launchModel?:AiTerminalLaunchModel,launchEffort?:WorkroomLaunchEffort): Promise<AiTerminalResponse> {
     if (this.#authorityLost(authority, epoch)) throw new Error('원격 터미널 권한이 해제되었습니다.');
     if (authority && (r.operation === 'accounts' || r.accountId !== undefined) && !authority.accountSelectionAllowed?.()) throw new Error('계정 선택 권한이 해제되었습니다.');
     if(this.#closed)throw new Error('터미널 서버가 종료 중입니다.');
@@ -904,11 +935,13 @@ export class AiTerminalService {
       const bypass = previous ? previous.bypass : !!r.bypassPermissions;
       // A restart keeps the restriction of the session it replaces; it never gains or loses it.
       const profile = previous ? previous.launchProfile : launchProfile;
+      const model = previous ? previous.launchModel : launchModel;
       // 「에포트 자동」 (w16): decided from the person's first request (before `#` references), or kept from the session a
-      // restart replaces. Read-only; a level a model may reject is never passed (codexEffortModel.ts).
+      // restart replaces. A team member brings a pinned level or the task text to classify (launchEffort). Read-only; a
+      // level a model may reject is never passed (codexEffortModel.ts) — a model we chose is proven against the catalog.
       const effort = planWorkroomEffort({agent:r.agent!,...(r.prompt!==undefined?{prompt:r.prompt}:{}),auto:this.#effortAuto(),mode:this.#effortMode(),restricted:!!profile,historyResume:!!historyResume,
-        ...(previous?{previous:previous.effort??{manual:false}}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,
-        codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[]});return proof.ok?proof.allowed:null;}catch{return null;}}});
+        ...(previous?{previous:previous.effort??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,
+        codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[],...(model?{launchModel:model.model}:{})});return proof.ok?proof.allowed:null;}catch{return null;}}});
       // A restricted (duty) session talks to outsiders: its transcript is not the user's work, so it never
       // feeds session memory or 「내가 한 말」 capture.
       if (launchStart && this.#sessions.has(launchStart.sessionId)) throw new Error('이미 시작된 세션입니다. 자동으로 다시 시작하지 않습니다.');
@@ -916,7 +949,7 @@ export class AiTerminalService {
       // Lets an AI in this Workroom tell agentstoz_use which session is its own (a hint, see workroomCaller.ts).
       Object.assign(env,{[WORKROOM_SESSION_ENV]:summary.id,[WORKROOM_TARGET_ENV]:targetId});
       const record = {summary,cwd,inputRevision:0,chunks:[],next:0,buffered:0,decoder:new TextDecoder(),requestKeys:new Set<string>(),revalidate:target.revalidate,lastOutputAt:null,
-        bypass,launchProfile:profile,accountLaunch,historyEnv:env,conversationId:resume?.conversationId ?? (r.agent==='claude'?summary.id:undefined),firstRequest:prompt!==undefined,effort} as unknown as Session;
+        bypass,launchProfile:profile,launchModel:model,accountLaunch,historyEnv:env,conversationId:resume?.conversationId ?? (r.agent==='claude'?summary.id:undefined),firstRequest:prompt!==undefined,effort} as unknown as Session;
       // The headless copy also answers «what terminal are you» (DA) and cursor-position (CPR) queries — agy waits for DA,
       // Codex stops reading keys until CPR is answered (aiTerminalScreen.ts).
       try {record.screen=this.dependencies.headlessScreen===false?undefined:new AiTerminalScreen(r.cols!,r.rows!,undefined,data=>{try{if(record.summary.state!=='running')return;if(record.ptyInViewerPaste){const held=record.heldReplies??=[];held.push(data);if(held.length>8)held.shift();return;}record.child?.terminal?.write(data);}catch{}});} catch {record.screen=undefined;}
@@ -937,7 +970,7 @@ export class AiTerminalService {
         ?? (process.platform === 'win32'
           ? ((args,options) => spawnWindowsPty(args as string[],options as any) as any)
           : ((args,options) => (Bun.spawn as any)(args,options)));
-      const args = [executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null)];
+      const args = [executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null, model)];
       // Only the account feature introduced an authentication await here. Legacy adapters without
       // account management keep their original checkout proof and admission timing.
       if (accountLaunch) {
@@ -972,6 +1005,8 @@ export class AiTerminalService {
       launchStart?.started();
       record.child = spawn(args,{cwd,env,detached:true,terminal:{cols:r.cols,rows:r.rows,exit:()=>eof(),data:(_pty:Pty,data:Uint8Array)=>append(record.decoder.decode(data,{stream:true}))}});
       this.#sessions.set(summary.id,record);
+      // Only a start that replaced a validated `previous` (same target, AI and folder) records a continuation.
+      if(previous){this.#continuedBy.set(previous.summary.id,summary.id);while(this.#continuedBy.size>AI_TERMINAL_MAX_RETIRED_SESSIONS*4)this.#continuedBy.delete(this.#continuedBy.keys().next().value!);}
       record.activitySample={startedAt:this.#now()};
       this.#board.track(summary.id,{targetId,agent:r.agent!,turn:0,lastOutputAt:()=>record.lastOutputAt});
       // A first request travels with the spawn: the CLI is working on it from the start.

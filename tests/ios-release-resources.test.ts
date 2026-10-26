@@ -27,6 +27,9 @@ test('iOS release family follows the shared build and includes privacy and prove
   expect(info).toContain('<key>ITSAppUsesNonExemptEncryption</key>');
   expect(info).toContain('<key>AgentsToZSourceCommit</key>');
   expect(info).toContain('<key>AgentsToZRemoteProtocolVersion</key>');
+  // The Mac screen viewer tells an iPad mouse from a finger (touch.type == .indirectPointer) and takes its secondary
+  // button as a right click (buttonMaskRequired). Without this opt-in UIKit reports both as plain touches.
+  expect(info).toMatch(/<key>UIApplicationSupportsIndirectInputEvents<\/key>\s*<true\/>/);
 });
 
 test('USB development signing derives the team from the certificate subject, not its display suffix', () => {

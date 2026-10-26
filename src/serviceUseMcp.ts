@@ -14,7 +14,7 @@ const inputFields:Record<ServiceUseTool,Record<string,unknown>>={
 };
 export const SERVICE_USE_MCP_TOOL={
   name:'agentstoz_use_service_operation',
-  description:SERVICE_USE_NATURAL_LANGUAGE_GUIDANCE+' status reports activation, memory, verified tools and environment separately. For a connected generic app read status.actions and use app.invoke with the exact actionId and declared arguments; never assume ShadowLoop tools apply to other projects. A draft is not executable. Never grant this whole OPS MCP server to an ordinary app USE agent.',
+  description:SERVICE_USE_NATURAL_LANGUAGE_GUIDANCE+' status reports activation, memory, verified tools and environment separately. For a connected generic app read status.actions and use app.invoke with the exact actionId and declared arguments; never assume ShadowLoop tools apply to other projects. A draft is not executable. If status shows no connected app, ask the user to open AgentsToZ 작업 세션 → USE 준비 → 워크룸에서 USE 연결 준비; the *_sdk_project tools are a different feature. Never grant this whole OPS MCP server to an ordinary app USE agent.',
   inputSchema:{type:'object',properties:{portId:{type:'string',minLength:1},serviceUse:{oneOf:[
     {type:'object',properties:{operation:{const:'status'},serviceKey},required:['operation'],additionalProperties:false},
     {type:'object',properties:{operation:{const:'receipt'},requestId},required:['operation','requestId'],additionalProperties:false},

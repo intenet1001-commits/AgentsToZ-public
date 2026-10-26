@@ -135,7 +135,7 @@ export function WorkroomDraftQueue({state,scope,sessionId,blocked,canQueue,compo
     <button type="button" className="ai-terminal-btn" data-testid="workroom-draft-queue-delete" disabled={working} onClick={()=>void remove(item)}>지우기</button>
    </div>;})}
    {!!earlier.length&&<div role="group" aria-label="다른 세션에 보관한 요청" data-testid="workroom-draft-queue-earlier">
-    <p className="ai-terminal-hint">다른 세션(끝났거나 지금 고르지 않은 세션)에 보관한 요청 {earlier.length}개 · 그 세션으로 다시 보내지 않습니다. 결과를 확인하고, 실행되지 않은 요청만 입력칸으로 꺼내 새 요청으로 보낼 수 있습니다.{sessionId===null?' 입력칸으로 꺼내려면 실행 중인 세션을 여세요.':''}</p>
+    <p className="ai-terminal-hint">끝났거나 선택하지 않은 다른 세션에 보관된 요청 {earlier.length}개 · 이전 세션으로 다시 보내지 않습니다. 결과를 확인한 뒤, 실행되지 않은 요청만 입력칸으로 꺼내 새 요청으로 보낼 수 있습니다.{sessionId===null?' 입력칸으로 꺼내려면 실행 중인 세션을 여세요.':''}</p>
     {earlier.map(item=>{const note=notes[item.submissionId];const risk:KeptDraftTakeBack|null=note?note.takeBack:item.attempted?null:'never-sent';
      return <div key={item.submissionId} className="ai-terminal-hint" data-testid="workroom-draft-queue-earlier-item" data-state={item.state}>
       <span>{preview(item.text)}</span> <span>· 다른 세션에 보관됨</span>{note&&<span data-testid="workroom-draft-queue-note"> · {note.text}</span>}

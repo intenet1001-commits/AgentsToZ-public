@@ -1,4 +1,9 @@
 import { BrowserContextHost } from './src/browserContextHost';
+import { WorkroomBrowserHost } from './src/workroomBrowserHost';
+import {assertMacosBrowserUpgrade} from './src/macosBrowserUpgrade';
+import { WorkroomBrowserRecovery } from './src/workroomBrowserRecovery';
+import { WORKROOM_BROWSER_PATH, WORKROOM_BROWSER_AGENT_PATH } from './src/workroomBrowserProtocol';
+import { handleWorkroomBrowser } from './src/workroomBrowserApi';
 import { BROWSER_CONTEXT_PATH, BrowserContextError, readBrowserContextRequest } from './src/browserContextPolicy';
 import {ProjectStateBundleHost} from './src/projectStateBundleHost';
 import {ProjectStateError,type TargetBinding as ProjectStateTargetBinding} from './src/projectStateBundle';
@@ -15,7 +20,7 @@ import {workroomThreadProjectFingerprint} from './src/workroomThreadIdentity';
 import {externalCliEffortCommand,externalCliEffortLauncher} from './src/externalCliEffortCommand';
 import {WorkroomThreadStore} from './src/workroomThreadStore';
 import {WorkroomThreadService} from './src/workroomThreadService';
-import {ServiceUseHost,publicServiceUseStatus} from './src/serviceUseHost';
+import {ServiceUseHost,publicServiceUseStatus,serviceUseConnectProblem} from './src/serviceUseHost';
 import {ShadowLoopUseConnector} from './src/shadowLoopUseAdapter';
 import {AppUseConnector} from './src/appUseConnector';
 import {prepareServiceUseWorkroom} from './src/serviceUsePreparation';
@@ -78,6 +83,7 @@ import {sdkFolderRequest,SdkFolderError} from './src/sdkProjectFolderContract';
 import {CommonMemoryError,commonMemoryHash,commonMemoryText,commonMemoryId} from './src/commonMemory';
 import {CONTROL_PROFILE_HEADER, CONTROL_PROFILE_CONTROLLER, ControlProfileError} from './src/controlProfileContract';
 import {readControlProfileAccess} from './src/controlProfileStore';
+import {listControlMemoryEntries, readControlMemoryEntry} from './src/controlMemoryEntries';
 import {resolveOpsSurfaceProject} from './src/controlProfileSurface';
 import {shouldUseOrcaFloatingTerminal} from './src/orcaFloatingTerminal';
 import {claudeWorkroomContext,workroomAutomaticSaves,withWorkroomAutomaticSaveMessage} from './src/workroomSessionStatus';
@@ -129,6 +135,8 @@ import { WhatISaidAutoCapture, resolveWhatISaidCaptureHint } from "./src/whatISa
 import { CONTROL_CENTER_PROJECT_NAME, controlCenterTemplateFiles, findExistingOpsProject } from "./src/controlCenterProject";
 import { PromptGuideStore } from './src/promptGuideStore';
 import { handlePromptGuideRequest } from './src/promptGuideHttp';
+import { UserProfileHost, USER_PROFILE_PATH, USER_PROFILE_POLICY, handleUserProfileRequest, userProfilePublicError, type UserProfileRegisteredProject } from './src/userProfileHost';
+import { UserProfileError } from './src/userProfileContract';
 import { readWhatISaidCloudScopes, type WhatISaidCloudScope } from './src/whatISaidCloudScope';
 import { MetaCommonMemoryStore } from './src/metaCommonMemoryStore';
 import { MetaCommonMemoryService } from './src/metaCommonMemoryService';
@@ -342,6 +350,10 @@ import {
 } from "./src/worktreeDiscoveryPageCache";
 import { buildCodeAppDeepLink, type CodeAppAgent } from "./code-app-links";
 import { checkOpenCodeAppRequest, planCodeAppTask, type CodeAppTaskPlan } from "./src/codeAppTask";
+import { WORKROOM_TEAM_PANEL_PATH, parseTeamPanelRequest, teamsForSession } from './src/workroomTeamPanel';
+import {teamPanelActionRequest} from './src/workroomTeamPanelActions';
+import { HERMES_VARIANTS_PATH, hermesVariantItems, hermesVariantModel, splitHermesVariantStart } from './src/hermesVariants';
+import { HermesProviderCredentials } from './src/hermesProviderCredentials';
 import { WORKROOM_APP_DISPATCH_MAX_REQUEST_BYTES, WORKROOM_APP_DISPATCH_PATH, WorkroomAppDispatchRequestError, normalizeWorkroomAppDispatchRequest, workroomAppDispatchPublicBody, workroomAppOpenCodeAppBody, type WorkroomAppDispatchRequest } from './src/workroomAppRoute';
 import { ANTIGRAVITY_APP_LAUNCH_DEADLINE_MS, ANTIGRAVITY_APP_MDFIND_TIMEOUT_MS, ANTIGRAVITY_APP_PROJECT_NOTE, antigravityLaunchCommand, antigravityLaunchEnv, antigravityMdfindCommand, classifyAntigravityLaunch, createAntigravityAppLocator, type AntigravityLaunchOutcome } from "./src/antigravityAppLaunch";
 import {
@@ -831,6 +843,14 @@ import {
   type AgentRuntimeRegisteredTargetInput,
 } from "./src/agentRuntimeTargetInventory";
 import { LOCAL_API_SHUTDOWN_HARD_CEILING_MS, settleLocalApiShutdown } from "./src/localApiShutdown";
+import { WorkroomTeamError, WorkroomTeamService, WorkroomTeamStore, parseWorkroomTeamRequest, teamMemberBrief } from "./src/workroomTeam";
+import { createWorkroomTeamHost } from "./src/workroomTeamHost";
+import {createTeamExternalFileJournal,createTeamExternalHostRuntime} from './src/teamExternalHost';
+import {createTeamRuntimeBridge} from './src/teamRuntimeBridge';
+import {createTeamProjectLauncher} from './src/teamProjectLauncher';
+import {createTeamCmuxManualLauncher} from './src/teamCmuxManualLauncher';
+import {runTeamMemberOperation} from './src/workroomTeamMemberOperation';
+import {createTeamOrcaCheckout,createTeamOrcaCheckoutJournal,type TeamOrcaCheckoutGit} from './src/teamOrcaCheckout';
 import {
   RemoteControlLanServer,
   isPrivateRemoteControlIpv4,
@@ -1043,6 +1063,16 @@ shift 4
 exec >>"$log_path" 2>&1
 echo "[$(/bin/date '+%Y-%m-%d %H:%M:%S')] AgentsToZ install helper started"
 
+preserve_browser_runtime() {
+  if { [ -f "$destination_path/Contents/Resources/workroom-browser.json" ] || [ -f "$destination_path/Contents/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework" ]; } &&
+     { [ ! -f "$staged_path/Contents/Resources/workroom-browser.json" ] || [ ! -f "$staged_path/Contents/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework" ]; }; then
+    echo "Install aborted: the update would remove the installed Workroom Chromium runtime."
+    return 1
+  fi
+  return 0
+}
+preserve_browser_runtime || exit 21
+
 # Let the HTTP/Tauri caller receive the scheduled result before its app exits.
 /bin/sleep 1
 /usr/bin/osascript -e 'tell application id "com.intenet.agentstozbycs" to quit' >/dev/null 2>&1 || true
@@ -1081,6 +1111,7 @@ if [ "$still_running" -ne 0 ]; then
   exit 20
 fi
 
+preserve_browser_runtime || { /usr/bin/open -n "$destination_path" || true; exit 21; }
 had_destination=0
 if [ -e "$destination_path" ]; then
   if ! /bin/mv "$destination_path" "$backup_path"; then
@@ -1136,6 +1167,7 @@ async function stageMacosAppInstall(): Promise<StagedMacosAppInstall> {
   if (!existsSync(sourcePath) || !statSync(sourcePath).isDirectory()) {
     throw new Error(`빌드된 앱을 찾을 수 없습니다: ${sourcePath}`);
   }
+  assertMacosBrowserUpgrade(sourcePath, destinationPath);
 
   const token = `${Date.now()}-${process.pid}`;
   const stagedPath = join('/Applications', `.AgentsToZ_byCS-installing-${token}.app`);
@@ -1167,6 +1199,8 @@ async function stageMacosAppInstall(): Promise<StagedMacosAppInstall> {
     rmSync(stagedPath, { recursive: true, force: true });
     throw new Error(`설치 준비된 앱의 서명 검증에 실패했습니다: ${verified.output || `exit ${verified.exitCode}`}`);
   }
+  try { assertMacosBrowserUpgrade(stagedPath, destinationPath); }
+  catch (error) { rmSync(stagedPath, {recursive:true,force:true});throw error; }
 
   return { sourcePath, destinationPath, stagedPath, backupPath, logPath };
 }
@@ -1696,10 +1730,11 @@ async function nodeCmuxRunAsync(
   cli: string,
   args: string[],
   timeoutMs = 8000,
+  cwd?: '/',
 ): Promise<{ ok: boolean; stderr: string; stdout: string }> {
   const escape = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const shellEscape = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-  const shellCmd = `${shellEscape(cli)} ${args.map(shellEscape).join(' ')}`;
+  const shellCmd = `${cwd?'cd / && ':''}${shellEscape(cli)} ${args.map(shellEscape).join(' ')}`;
   const appleScript = `do shell script "${escape(shellCmd)}"`;
   const cleanEnv: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -1850,6 +1885,7 @@ async function nodeOrcaRun(
   cli: string,
   args: string[],
   timeoutMs = 40000,
+  cwd?: '/',
 ): Promise<{ ok: boolean; stderr: string; stdout: string }> {
   // Windows: 직접 실행
   if (IS_WIN) {
@@ -1868,7 +1904,7 @@ async function nodeOrcaRun(
       nodeExecFile(
         cli,
         args,
-        { encoding: 'utf8', timeout: timeoutMs, env: cleanEnv, maxBuffer: 4 * 1024 * 1024 },
+        { encoding: 'utf8', timeout: timeoutMs, env: cleanEnv, maxBuffer: 4 * 1024 * 1024, ...(cwd?{cwd}:{}) },
         (error: any, stdout: string, stderr: string) => {
           const timedOut = !!error && (error.killed === true || error.code === 'ETIMEDOUT');
           resolveRun({
@@ -1885,7 +1921,7 @@ async function nodeOrcaRun(
   // macOS: osascript 우회
   const escape = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const shellEscape = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-  const shellCmd = `${shellEscape(cli)} ${args.map(shellEscape).join(' ')} 2>&1; exit 0`;
+  const shellCmd = `${cwd?'cd / && ':''}${shellEscape(cli)} ${args.map(shellEscape).join(' ')} 2>&1; exit 0`;
   const appleScript = `do shell script "${escape(shellCmd)}"`;
   const cleanEnv: Record<string, string> = {
     HOME: homedir(),
@@ -4656,6 +4692,8 @@ const memorySaveDispatcher = new MemorySaveDispatcher();
 const memorySessionStore = new MemorySessionStore(join(APP_DATA_DIR, "memory-session-recovery.sqlite"));
 const whatISaidPromptOrigins = new WhatISaidPromptOriginRegistry(APP_DATA_DIR);
 const promptGuideStore = new PromptGuideStore({ appDataDir: APP_DATA_DIR });
+const userProfileHost = new UserProfileHost({ appDataDir: APP_DATA_DIR,
+  registeredProjects: userProfileRegisteredProjects, resolveProject: userProfileResolveProject });
 const orchestrationMissionTestKeyProvider = ORCHESTRATION_MISSION_TEST_KEY_HEX === undefined
   ? undefined
   : {
@@ -6087,6 +6125,62 @@ async function metaCommonMemoryProjects(fresh = false): Promise<MetaMemoryProjec
     })));
   }
   return results;
+}
+/** Fresh bounded identity listing (identity detection can inspect Git); no profile/body/key reads. */
+async function userProfileRegisteredProjects(): Promise<UserProfileRegisteredProject[]> {
+  const authority = agentRuntimeRegistrationAuthoritySignature(), opsId = boundOpsProjectId();
+  const rows = await readPortsFileStrict() as Array<PortRecord & { name: string; folderPath?: string; worktreePath?: string }>;
+  if (rows.length > 1_000 || new Set(rows.map(row => row.id)).size !== rows.length) throw new UserProfileError('USER_PROFILE_PROJECTS_UNAVAILABLE');
+  const roles = resolveProjectRoles(rows, { opsProjectId: opsId });
+  const resolve = createRegisteredProjectMemoryResolver(rows, undefined, { requireInitialized: false });
+  const allowed: UserProfileRegisteredProject[] = [], opsMemoryIds = new Set<string>();
+  for (let offset = 0; offset < rows.length; offset += 8) {
+    await Promise.all(rows.slice(offset, offset + 8).map(async row => {
+      const role = roles.get(row.id);
+      if (!['ops', 'dev', 'managed'].includes(role ?? '')) return;
+      const resolved = resolve(row.id);
+      if (!resolved.ok) return;
+      const identity = await detectProjectMemoryIdentity(resolved.canonicalPath);
+      const memoryId = identity.exists && identity.config?.memoryId;
+      if (!memoryId || !RUNTIME_UUID_RE.test(memoryId)) return;
+      if (role === 'ops' || roles.get(resolved.id) === 'ops' || controlProfileHost.store.protectsSharedRoot(resolved.canonicalPath)) opsMemoryIds.add(memoryId.toLowerCase());
+      else allowed.push({ projectId: row.id, memoryId: memoryId.toLowerCase(), name: row.name || resolved.name });
+    }));
+  }
+  if (authority !== agentRuntimeRegistrationAuthoritySignature() || opsId !== boundOpsProjectId()) throw new UserProfileError('USER_PROFILE_PROJECTS_UNAVAILABLE');
+  return allowed.filter(row => !opsMemoryIds.has(row.memoryId)).sort((a, b) => a.projectId.localeCompare(b.projectId));
+}
+/** MCP admission checks the selected identity and OPS identities, not every registered DEV checkout. */
+async function userProfileResolveProject(projectId: string): Promise<UserProfileRegisteredProject | null> {
+  const authority = agentRuntimeRegistrationAuthoritySignature(), opsId = boundOpsProjectId();
+  const rows = await readPortsFileStrict() as Array<PortRecord & { name: string; folderPath?: string; worktreePath?: string }>;
+  if (rows.length > 1_000 || new Set(rows.map(row => row.id)).size !== rows.length) throw new UserProfileError('USER_PROFILE_PROJECTS_UNAVAILABLE');
+  const row = rows.find(candidate => candidate.id === projectId);
+  const roles = resolveProjectRoles(rows, { opsProjectId: opsId });
+  if (!row || !['dev', 'managed'].includes(roles.get(projectId) ?? '') || projectId === opsId) return null;
+  const selected = resolveRegisteredProjectMemory(projectId, [row], undefined, { requireInitialized: false });
+  if (!selected.ok || roles.get(selected.id) === 'ops' || controlProfileHost.store.protectsSharedRoot(selected.canonicalPath)) return null;
+  const identity = await detectProjectMemoryIdentity(selected.canonicalPath);
+  const memoryId = identity.exists && identity.config?.memoryId;
+  if (!memoryId || !RUNTIME_UUID_RE.test(memoryId) || controlProfileHost.store.protectsSharedRoot(identity.projectRoot)) return null;
+  // A separate clone can carry the same memoryId. Match the full picker/save admission by identity as well as path;
+  // checking only the selected path would let a managed alias expose an OPS memory which the picker excludes.
+  const protectedRoots = rows.flatMap(candidate => {
+    const resolved = resolveRegisteredProjectMemory(candidate.id, [candidate], undefined, { requireInitialized: false });
+    return resolved.ok && (roles.get(candidate.id) === 'ops' || roles.get(resolved.id) === 'ops'
+      || controlProfileHost.store.protectsSharedRoot(resolved.canonicalPath)) ? [resolved.canonicalPath] : [];
+  });
+  let protectedIdentity = false;
+  for (let offset = 0; offset < protectedRoots.length; offset += 8) {
+    await Promise.all(protectedRoots.slice(offset, offset + 8).map(async root => {
+      if (root === selected.canonicalPath) { protectedIdentity = true; return; }
+      const ops = await detectProjectMemoryIdentity(root);
+      if (ops.exists && ops.config?.memoryId?.toLowerCase() === memoryId.toLowerCase()) protectedIdentity = true;
+    }));
+  }
+  if (authority !== agentRuntimeRegistrationAuthoritySignature() || opsId !== boundOpsProjectId()) throw new UserProfileError('USER_PROFILE_PROJECTS_UNAVAILABLE');
+  if (protectedIdentity) return null;
+  return { projectId, memoryId: memoryId.toLowerCase(), name: row.name || selected.name };
 }
 async function prepareMetaCommonMemoryProject(portId: string, assertActive = () => {}) {
     assertActive();
@@ -9256,6 +9350,10 @@ const workroomSharedShell = new WorkroomSharedShell({
   resolveTarget: resolveAiTerminalRegisteredTarget,
   runningSession: id => aiTerminalService.runningSession(id),
 });
+const workroomBrowserRecovery=new WorkroomBrowserRecovery(join(APP_DATA_DIR,'workroom-browser-recovery.sqlite'));
+const workroomBrowserHost=new WorkroomBrowserHost({runningSession:id=>aiTerminalService.runningSession(id),recovery:workroomBrowserRecovery});
+const workroomBrowserReaper=setInterval(()=>workroomBrowserHost.reap(),60000);workroomBrowserReaper.unref();
+process.once('exit',()=>{clearInterval(workroomBrowserReaper);workroomBrowserHost.dispose();workroomBrowserRecovery.close();});
 /** One screen read for an orchestrating AI; a wide 300×150 screen of CJK text would be larger. */
 const AGENTSTOZ_USE_WORKROOM_SCREEN_MAX_BYTES = 16_000;
 /** An input ID derived from the caller's request ID, so each part of one agentstoz_use call is typed exactly once. */
@@ -9292,6 +9390,221 @@ function agentsToZUseRequestIdConflict(): AgentsToZUseControlError {
  * others (src/workroomCaller.ts). Process ancestry first, then the Workroom environment it passed on.
  * A hint for excluding and refusing only — never an authorization.
  */
+// ── Terminal/tmux helper (Windows: wt.exe or cmd, macOS: iTerm) ─────────
+/** 터미널 실행 결과. `verified:false`는 실패가 아니라 "아직 확인되지 않음"이다. */
+type TerminalLaunchOutcome = { verified: boolean; warning?: string };
+
+/** iTerm/Terminal이 멈춰 있으면(main run loop wedge) `create window`/`do script`
+ *  AppleEvent가 수십 초 이상 반환되지 않는다. 실측(2026-08-02): 같은 앱이
+ *  `get version`은 0.05s에 답하면서 `count windows`/`create window`는 25s+ 무응답.
+ *  대기 전체를 요청 처리에 묶으면 사용자는 창도 못 보고 15초 뒤 500 에러만 받는다 —
+ *  이전의 fire-and-forget 가짜 성공보다 오히려 나쁘다.
+ *
+ *  1) 짧은 deadline 안에 종료 → exit code로 정직하게 판정 (권한 거부 -1743 등은 즉시 종료).
+ *  2) deadline 초과 → **죽이지 않는다.** 전달 중인 AppleEvent가 창을 열 수도 있으므로
+ *     프로세스는 백그라운드에 두고 `verified:false` + 경고만 반환한다.
+ *  3) backstop까지 살아 있으면 그때 SIGKILL — 좀비 osascript 누적만 방지. */
+async function runAppleScriptChecked(
+  script: string,
+  opts: { deadlineMs?: number; backstopMs?: number } = {},
+): Promise<TerminalLaunchOutcome> {
+  const deadlineMs = opts.deadlineMs ?? 4_000;
+  const backstopMs = opts.backstopMs ?? 120_000;
+  const proc = Bun.spawn({ cmd: ['osascript', '-e', script], stdout: 'pipe', stderr: 'pipe' });
+  const settled = await Promise.race([
+    proc.exited.then(() => true),
+    Bun.sleep(deadlineMs).then(() => false),
+  ]);
+  if (settled) {
+    const stderr = (await new Response(proc.stderr).text()).trim();
+    if (proc.exitCode !== 0) {
+      throw new Error(stderr || `터미널 자동화 실패 (exit ${proc.exitCode})`);
+    }
+    return { verified: true };
+  }
+  void (async () => {
+    const backstop = setTimeout(() => { try { proc.kill(9); } catch {} }, backstopMs);
+    try {
+      // stderr를 계속 비워둬야 파이프가 차서 osascript가 멈추는 일이 없다.
+      await Promise.all([proc.exited, new Response(proc.stderr).text().catch(() => '')]);
+    } catch {
+      /* 백그라운드 정리 실패는 무시 */
+    } finally {
+      clearTimeout(backstop);
+    }
+  })();
+  return {
+    verified: false,
+    warning: `터미널이 ${Math.round(deadlineMs / 1000)}초 안에 응답하지 않아 실행 여부를 확인하지 못했습니다. 창이 열리지 않으면 iTerm/Terminal을 재시작한 뒤 다시 시도해주세요.`,
+  };
+}
+
+/** 확인되지 않은 실행에는 경고를 붙여 정직한 응답을 만든다. */
+function launchPayload(message: string, outcome: TerminalLaunchOutcome, extra: Record<string, unknown> = {}) {
+  return outcome.verified
+    ? { success: true, verified: true, message, ...extra }
+    : { success: true, verified: false, warning: outcome.warning, message: `${message} — ${outcome.warning}`, ...extra };
+}
+
+async function spawnWindowsTerminalChecked(
+  command: string[],
+  env: Record<string, string> = {},
+  detached = false,
+): Promise<TerminalLaunchOutcome> {
+  const child = spawn({
+    cmd: command,
+    env: { ...process.env, ...env },
+    stdout: 'ignore',
+    stderr: 'pipe',
+    detached,
+  });
+  const stderrPromise = new Response(child.stderr).text().catch(() => '');
+  const exitCode = await Promise.race([
+    child.exited,
+    Bun.sleep(4_000).then(() => null),
+  ]);
+  if (exitCode === null) {
+    child.unref();
+    void Promise.all([child.exited, stderrPromise]).catch(() => undefined);
+    return {
+      verified: false,
+      warning: 'Windows 터미널 실행 handoff가 4초 안에 끝나지 않아 창 생성 여부를 확인하지 못했습니다.',
+    };
+  }
+  const stderr = (await stderrPromise).trim();
+  if (exitCode !== 0) {
+    throw new Error(stderr || `Windows 터미널 실행 실패 (exit ${exitCode})`);
+  }
+  return { verified: true };
+}
+
+async function openTerminalWithCmd(shellCmd: string, folderPath: string | null, title: string, terminalApp: 'iterm' | 'terminal' = 'iterm'): Promise<TerminalLaunchOutcome> {
+  if (IS_WIN) {
+    const plan = buildWindowsTerminalLaunch({
+      windowsTerminalPath: windowsTerminalPath(),
+      shellCommand: shellCmd,
+      folderPath,
+      title,
+    });
+    return await spawnWindowsTerminalChecked(plan.cmd, plan.env, plan.detached);
+  }
+  // 임시 스크립트 파일 방식: write text 클립보드 오염 없이 명령 실행
+  const fullCmd = folderPath
+    ? `cd '${escapeSq(folderPath)}' && ${shellCmd}`
+    : shellCmd;
+  const scriptPath = `/tmp/portmanager_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.sh`;
+  await Bun.write(scriptPath, `#!/bin/zsh -l\nrm -f "$0"\n${fullCmd}\n`);
+  Bun.spawnSync(['chmod', '+x', scriptPath]);
+  // 스크립트는 실행되면 스스로 지우지만(`rm -f "$0"`), 터미널이 끝내 뜨지 않으면
+  // /tmp에 남는다. 넉넉한 지연 후 한 번 더 지워 누수를 막는다.
+  const sweep = setTimeout(() => { rmSync(scriptPath, { force: true }); }, 10 * 60_000);
+  (sweep as any).unref?.();
+  const sqPath = scriptPath.replace(/'/g, "'\\''");
+  const launchCommand = `/bin/zsh -l '${sqPath}'`;
+  const script = terminalApp === 'terminal'
+    ? `tell application "Terminal"\n  activate\n  do script "${launchCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\nend tell`
+    : `tell application "iTerm"\n  activate\n  create window with default profile command "${launchCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\nend tell`;
+  try {
+    return await runAppleScriptChecked(script);
+  } catch (error) {
+    clearTimeout(sweep);
+    rmSync(scriptPath, { force: true });
+    throw error;
+  }
+}
+
+
+let workroomTeamService: WorkroomTeamService | null = null;
+let workroomTeamBridge: ReturnType<typeof createTeamRuntimeBridge> | null = null;
+// A sidecar restart keeps old receipts and worktrees; it never silently claims another process's live ownership.
+const teamHostInstanceId=crypto.randomUUID();
+async function inspectTeamOrcaGit(primary:string,checkout:string):Promise<TeamOrcaCheckoutGit>{
+  const gitRead=(cwd:string,args:string[])=>new Promise<string>((resolveRead,reject)=>nodeExecFile(GIT_PATH,args,{cwd,timeout:15_000,maxBuffer:1024*1024,env:{...process.env,GIT_TERMINAL_PROMPT:'0'}},(error:Error|null,stdout:string)=>error?reject(Error('Orca 팀 워크트리의 Git 상태를 확인하지 못했습니다.')):resolveRead(String(stdout).trim())));
+  const [primaryCommon,checkoutCommon,head,branch,inventory,branches,checkoutRoot]=await Promise.all([
+    gitRead(primary,['rev-parse','--git-common-dir']),gitRead(checkout,['rev-parse','--git-common-dir']),gitRead(checkout,['rev-parse','HEAD']),
+    gitRead(checkout,['symbolic-ref','--quiet','--short','HEAD']).catch(()=>''),gitRead(primary,['worktree','list','--porcelain']),
+    gitRead(primary,['for-each-ref','--format=%(refname:short)','refs/heads']),gitRead(checkout,['rev-parse','--show-toplevel']),
+  ]);
+  const worktrees=inventory.split('\n\n').flatMap(block=>{const path=/^worktree (.+)$/m.exec(block)?.[1];return path?[{path:realpathSync(path),branch:/^branch refs\/heads\/(.+)$/m.exec(block)?.[1]??null}]:[];});
+  return {primaryPath:realpathSync(primary),checkoutPath:realpathSync(checkoutRoot),primaryCommonDir:realpathSync(resolve(primary,primaryCommon)),
+    checkoutCommonDir:realpathSync(resolve(checkout,checkoutCommon)),head,branch:branch||null,worktrees,branches:branches?branches.split('\n'):[]};
+}
+/** 팀 작전 ledger and host, created on first use (after the terminal service exists). */
+/**
+ * Which providers this Mac's Hermes has credentials for, for the 「Hermes · Claude」/「Hermes · Codex」 items. Reads
+ * `hermes auth list` and keeps only the provider **names** its header lines claim (src/hermesProviderCredentials.ts):
+ * `~/.hermes/auth.json` is never opened and no token, key or credential label is read, kept or returned. stderr is
+ * dropped, the call is bounded, and a CLI that cannot be asked answers 「unknown」 — then every item stays offered.
+ */
+const hermesProviderCredentials = new HermesProviderCredentials(async () => {
+  const executable = IS_WIN ? resolveAgentBin('hermes' as AgentName)
+    : resolveLocalExecutable('hermes', [join(homedir(), '.local/bin/hermes'), '/opt/homebrew/bin/hermes', '/usr/local/bin/hermes']);
+  if (!executable) throw new Error('Hermes CLI를 찾지 못했습니다.');
+  const child = Bun.spawn([executable, 'auth', 'list'], {stdout: 'pipe', stderr: 'ignore', stdin: 'ignore',
+    env: {...process.env, NO_COLOR: '1', HERMES_NO_UPDATE_CHECK: '1'}});
+  const timer = setTimeout(() => { try { child.kill(); } catch {} }, 8_000);
+  try {
+    const stdout = await new Response(child.stdout).text();
+    await child.exited;
+    return stdout.slice(0, 64_000);
+  } finally { clearTimeout(timer); }
+});
+
+function workroomTeams(): WorkroomTeamService {
+  if(workroomTeamService)return workroomTeamService;
+  const store=new WorkroomTeamStore(join(APP_DATA_DIR,'workroom-teams.v1.json'));
+  const journal=createTeamExternalFileJournal(join(APP_DATA_DIR,'workroom-team-executions.v1.json'));
+  const binding=(teamId:string,memberId:string)=>{
+    const team=store.get(teamId),member=team?.members.find(m=>m.id===memberId);
+    if(!team||!member||!member.targetId||!member.surface||member.surface==='internal')return null;
+    try{if(realpathSync(member.worktreePath)!==member.worktreePath)return null;}catch{return null;}
+    return {targetId:member.targetId,cwd:member.worktreePath,agent:member.agent,surface:member.surface,generation:Date.parse(team.createdAt),active:team.state==='active'};
+  };
+  const isCurrent=(scope:import('./src/teamExternalRuntime').TeamExternalScope)=>workroomTeamBridge?.isCurrent(scope)??false;
+  const runOrca:import('./src/teamExternalHost').TeamExternalOrcaRunner=async(cli,args,options)=>{
+    const r=await nodeOrcaRun(cli,[...args],options.timeoutMs,options.cwd),parsed=r.ok?parseCliJsonOutput(r.stdout):null;
+    if(!parsed||parsed.ok===false)throw Error('Orca 실행 결과를 확인하지 못했습니다. 자동으로 다시 보내지 않습니다.');
+    return parsed;
+  };
+  let orcaCheckout:ReturnType<typeof createTeamOrcaCheckout>|null=null;
+  const createExternalWorktree:NonNullable<import('./src/workroomTeamHost').WorkroomTeamHostDependencies['createExternalWorktree']>=async input=>{
+    const matches=store.all().flatMap(team=>team.state==='active'&&team.primaryPath===input.primaryPath&&team.baseCommit===input.base
+      ?team.members.filter(member=>member.surface==='orca-worktree'&&member.worktreePath===input.path&&member.branch===input.branch).map(member=>({team,member})):[]);
+    if(matches.length!==1)throw Error('Orca 팀원 생성 요청을 정확히 확인하지 못했습니다.');
+    const {team,member}=matches[0]!;
+    orcaCheckout??=createTeamOrcaCheckout({journal:createTeamOrcaCheckoutJournal(join(APP_DATA_DIR,'workroom-team-orca-checkouts.v1.sqlite')),
+      resolveOrcaCli,runOrca,inspectGit:inspectTeamOrcaGit,isCurrent:scope=>{const current=store.get(scope.teamId);return current?.state==='active'&&current.members.some(m=>m.id===scope.memberId&&m.state==='starting'&&m.surface==='orca-worktree')===true;}});
+    return withManagedWorkspaceLease(input.primaryPath,'Team Orca managed checkout',()=>orcaCheckout!({requestId:`checkout-${team.id}-${member.id}`,teamId:team.id,memberId:member.id,primaryPath:input.primaryPath,baseCommit:input.base}));
+  };
+  const cmux=createTeamCmuxManualLauncher({isCurrent,resolveCmuxCli,
+    run:async(cli,args,options)=>{const result=await nodeCmuxRunAsync(cli,[...args],options.timeoutMs,options.cwd);return {exitCode:result.ok?0:null,stdout:result.stdout};},
+  });
+  const launcher=createTeamProjectLauncher({platform:process.platform,isCurrent,runOrca,resolveOrcaCli,openTerminalWithCmd,openCmuxTerminal:cmux.openCmuxTerminal});
+  const runtime=createTeamExternalHostRuntime({journal,isCurrent,currentHostInstanceId:()=>teamHostInstanceId,
+    resolveAgentExecutable:agent=>{const path=resolveAgentBin(agent);return isAbsolute(path)&&existsSync(path)?path:resolveLocalExecutable(agent,[]);},
+    resolveOrcaCli,runOrca,openTerminal:launcher.openTerminal,supportsManualLaunch:launcher.supportsManualLaunch,
+    cmuxConnection:cmux.connected,
+    async openCodeApp(plan){
+      const target=await resolveAiTerminalRegisteredTarget(plan.scope.targetId);
+      if(realpathSync(target.cwd)!==plan.scope.cwd||!isCurrent(plan.scope))throw Error('팀원 실행 대상이 바뀌었습니다.');
+      const response=await openCodeAppResponse({agent:plan.agent,folderPath:plan.scope.cwd,...(plan.mode?{mode:plan.mode}:{}),...(plan.task?{task:plan.task}:{}),bypass:plan.requested.bypassPermissions===true},{});
+      const result=await response.json();
+      if(!response.ok||result.success!==true)throw Error('선택한 앱을 열지 못했습니다. 팀원 작업 폴더는 보존했습니다.');
+      // The app reports a prefill request, never proof it submitted or even displayed the text.
+      return {opened:true,surface:plan.scope.surface,taskApplied:false};
+    },
+  });
+  workroomTeamBridge=createTeamRuntimeBridge({journal,runtime,hostInstanceId:teamHostInstanceId,binding});
+  return workroomTeamService = new WorkroomTeamService(createWorkroomTeamHost({
+    gitPath: GIT_PATH, terminal: aiTerminalService,
+    resolveProject: async portId => { const project = await resolveRegisteredUseProject(portId); return {projectId: project.projectId, projectName: project.projectName, canonicalPath: project.canonicalPath}; },
+    targetCwd: async targetId => { try { return (await resolveAiTerminalRegisteredTarget(targetId)).cwd; } catch { return null; } },
+    ensureExclude: ensureLocalWorktreeExclude, seedConfig: seedWorktreeLocalConfig,
+    withLease: (path, label, work) => withManagedWorkspaceLease(path, label, () => work()),
+    externalRuntime:workroomTeamBridge,
+    createExternalWorktree,
+  }), store);
+}
 function agentsToZUseCallerSession(hint: WorkroomCallerHint): AiTerminalSummary | null {
   const byProcess = aiTerminalService.sessionForProcesses(hint.processes);
   if (byProcess) return byProcess;
@@ -10465,6 +10778,7 @@ process.once('exit',()=>{void browserContextHost.dispose();});
 const AGENT_RUNTIME_TASK_ID_PATH_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
 function isAllowedAgentRuntimeManagementRoute(method: string, url: URL): boolean {
+  if(url.pathname===WORKROOM_BROWSER_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===BROWSER_CONTEXT_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===PROJECT_STATE_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===PLATFORM_CLI_PATH)return method==='POST'&&url.search==='';
@@ -10473,7 +10787,7 @@ function isAllowedAgentRuntimeManagementRoute(method: string, url: URL): boolean
   if(url.pathname===WORKROOM_APP_DISPATCH_PATH)return method==='POST'&&url.search==='';
   if(url.pathname===WORKROOM_HISTORY_PATH)return method==='POST'&&url.search==='';
   if(url.pathname===CORRECTION_OUTCOMES_PATH)return method==='POST'&&url.search==='';
-  if (url.pathname === GEMINI_VOICE_SETTINGS_PATH || url.pathname === AI_TERMINAL_PREFIX || url.pathname === AI_TERMINAL_PREFIX+'/access' || url.pathname === AI_TERMINAL_PREFIX+'/accounts' || url.pathname === AI_TERMINAL_PREFIX+'/memory' || url.pathname === AI_TERMINAL_PREFIX+WORKROOM_IMAGE_ENDPOINT_SUFFIX || url.pathname === '/api/agent-runtime/helpdesk' || url.pathname === '/api/agent-runtime/quick-labels' || url.pathname === '/api/agent-runtime/cs-duty') return method === 'POST' && url.search === '';
+  if (url.pathname === GEMINI_VOICE_SETTINGS_PATH || url.pathname === AI_TERMINAL_PREFIX || url.pathname === AI_TERMINAL_PREFIX+'/access' || url.pathname === AI_TERMINAL_PREFIX+'/accounts' || url.pathname === AI_TERMINAL_PREFIX+'/memory' || url.pathname === AI_TERMINAL_PREFIX+WORKROOM_IMAGE_ENDPOINT_SUFFIX || url.pathname === '/api/agent-runtime/helpdesk' || url.pathname === '/api/agent-runtime/quick-labels' || url.pathname === WORKROOM_TEAM_PANEL_PATH || url.pathname === HERMES_VARIANTS_PATH || url.pathname === '/api/agent-runtime/cs-duty') return method === 'POST' && url.search === '';
   if (url.pathname === `${AGENT_RUNTIME_HTTP_PREFIX}/targets`) {
     return method === 'GET' && (url.search === '' || url.search === '?productUses=1');
   }
@@ -16085,6 +16399,11 @@ const server = Bun.serve({
       });
     }
 
+    if(url.pathname===WORKROOM_BROWSER_AGENT_PATH){
+      // A separate high-entropy, session/page/epoch-bound grant. No UI management capability is accepted here.
+      return handleWorkroomBrowser(req,workroomBrowserHost,true);
+    }
+
     if ((url.pathname === AGENT_RUNTIME_HTTP_PREFIX
       || url.pathname.startsWith(`${AGENT_RUNTIME_HTTP_PREFIX}/`))
       && !(req.method === 'OPTIONS'
@@ -16141,6 +16460,16 @@ const server = Bun.serve({
     if (req.method === "OPTIONS") {
       return new Response(null, { headers });
     }
+
+    if (url.pathname === USER_PROFILE_PATH || url.pathname.startsWith(USER_PROFILE_PATH + '/')) {
+      // Personal profile management is local UI only. It shares no OPS identity,
+      // remote DTO, generic CLI admission, or unrelated management capability.
+      return handleUserProfileRequest(req, userProfileHost, {
+        authorize: request => isLocalSupabaseProxyOrigin(localWebRequestOrigin(request.headers, requestOrigin)), headers,
+      });
+    }
+
+    if(url.pathname===WORKROOM_BROWSER_PATH)return handleWorkroomBrowser(req,workroomBrowserHost);
 
     if(url.pathname===BROWSER_CONTEXT_PATH&&req.method==='POST'){
       const noStore={...headers,'Cache-Control':'private, no-store'};
@@ -16226,6 +16555,44 @@ const server = Bun.serve({
         await helpdeskHost.recoverInterrupted();
         return Response.json(await helpdeskHost.handle(body),{headers:{...headers,'Cache-Control':'no-store'}});
       }catch(error){return Response.json({error:error instanceof SyntaxError?'지원 기록 형식을 확인하지 못했습니다. 기존 기록을 보존했습니다.':error instanceof Error?error.message:'지원 요청을 확인하지 못했습니다.'},{status:409,headers:{...headers,'Cache-Control':'no-store'}});}
+    }
+
+    // This Mac's capability-protected team strip: path-free reads and explicit human confirmations/reports.
+    if (url.pathname === WORKROOM_TEAM_PANEL_PATH) {
+      const noStore={...headers,'Cache-Control':'no-store'};
+      let request;
+      try{
+        const body=await req.json();
+        if(body&&typeof body==='object'&&Object.hasOwn(body,'operation')){
+          const action=teamPanelActionRequest(body);
+          const session=aiTerminalService.runningSession(action.sessionId);
+          if(!session)throw new WorkroomTeamError('실행 중인 리더 워크룸에서 확인하세요.','WORKROOM_TEAM_LEADER_REQUIRED',403);
+          const caller={sessionId:session.id,agent:session.agent,targetId:session.targetId};
+          if(action.request.op==='brief'){
+            const briefRequest=action.request,team=workroomTeams().store.get(briefRequest.teamId),member=team?.members.find(m=>m.id===briefRequest.memberId);
+            if(!team||!workroomTeams().leads(team,session.id)||!member)throw new WorkroomTeamError('이 팀의 리더 워크룸에서 확인하세요.','WORKROOM_TEAM_LEADER_REQUIRED',403);
+            return Response.json({brief:teamMemberBrief(team,member)},{headers:noStore});
+          }
+          const team=parseWorkroomTeamRequest(action.request);
+          if(team.op==='confirm')await workroomTeams().confirm(team,caller);
+          else if(team.op==='report')await workroomTeams().report(team,caller);
+          else throw new WorkroomTeamError('허용되지 않은 팀 확인 요청입니다.','WORKROOM_TEAM_REQUEST_INVALID');
+          return Response.json({ok:true},{headers:noStore});
+        }
+        request=parseTeamPanelRequest(body);
+      }
+      catch(error){if(error instanceof WorkroomTeamError)return Response.json({error:error.message,code:error.code},{status:error.status,headers:noStore});
+        return Response.json({error:error instanceof SyntaxError?'팀 현황 요청 형식이 올바르지 않습니다.':error instanceof Error?error.message:'팀 현황 요청 형식이 올바르지 않습니다.'},{status:400,headers:noStore});}
+      try{return Response.json(await teamsForSession(workroomTeams(),request),{headers:noStore});}
+      catch(error){return Response.json({error:error instanceof Error?error.message:'팀 현황을 읽지 못했습니다.'},{status:500,headers:noStore});}
+    }
+
+    // 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts): this Mac's own launch items. A separate local path,
+    // so the Workroom DTO and AiTerminalSummary stay exactly as a phone normalizer knows them.
+    if (url.pathname === HERMES_VARIANTS_PATH) {
+      const noStore={...headers,'Cache-Control':'no-store'};
+      const providers=await hermesProviderCredentials.providers();
+      return Response.json({items:hermesVariantItems(providers),sessions:aiTerminalService.hermesVariantSessions(),checked:providers!==null},{headers:noStore});
     }
 
     if (url.pathname === '/api/agent-runtime/quick-labels') {
@@ -16403,7 +16770,10 @@ const server = Bun.serve({
           if(process.platform!=='darwin'||remoteControlApiShutdown)throw new Error('공용 터미널은 이 Mac의 워크룸에서만 사용할 수 있습니다.');
           return Response.json(await workroomSharedShell.perform(body),{headers:{...headers,'Cache-Control':'no-store'}});
         }
-        return Response.json(await aiTerminalService.perform(body),{headers:{...headers,'Cache-Control':'no-store'}});
+        // This Mac's panels may name a Hermes variant; the host turns that enum into the host-only model and provider
+        // (src/hermesVariants.ts). The key never reaches normalizeAiTerminalRequest, and no remote path can send it.
+        const {request:terminalRequest,variant:hermesVariant}=splitHermesVariantStart(body);
+        return Response.json(await aiTerminalService.perform(terminalRequest,undefined,hermesVariant?{launchModel:hermesVariantModel(hermesVariant)}:{}),{headers:{...headers,'Cache-Control':'no-store'}});
       } catch(error) { return Response.json({error:error instanceof Error?error.message:'터미널 요청 실패'},{status:400,headers}); }
     }
 
@@ -18323,6 +18693,14 @@ const server = Bun.serve({
         if (req.method === 'GET' && action === 'controls') return Response.json({success:true,controls:await controlProfileHost.store.availableControls()},{headers});
         if (req.method === 'GET' && action === 'connections') return Response.json({success:true,connections:await controlProfileConnections().list()},{headers});
         if (req.method === 'GET' && action === 'pending') return Response.json({success:true,proposals:controlProfileHost.store.pending()}, {headers:{...headers,'Cache-Control':'no-store'}});
+        if (req.method === 'GET' && action === 'entries') {
+          // 아젠투지 설정's read-only list of saved operating memory: titles, or one body by entryId. Mac panel only —
+          // ops.status and every phone/relay DTO stay as they are.
+          const keys=[...url.searchParams.keys()];
+          if(keys.length>1||keys.some(key=>key!=='entryId'))throw new ControlProfileError('CONTROL_PROFILE_INPUT_INVALID','운영 기억 목록 요청을 확인하세요.',400);
+          const entryId=url.searchParams.get('entryId');
+          return Response.json({success:true,...(entryId===null?{memory:listControlMemoryEntries(controlProfileHost.store)}:{entry:readControlMemoryEntry(controlProfileHost.store,entryId)})},{headers:{...headers,'Cache-Control':'no-store'}});
+        }
         if (req.method === 'GET' && action === 'launch-preference') return Response.json({success:true,preference:readOpsLaunchPreference(APP_DATA_DIR)}, {headers:{...headers,'Cache-Control':'no-store'}});
         if (req.method !== 'POST') return Response.json({success:false,error:'지원하지 않는 요청입니다.'},{status:405,headers});
         const body = await req.json() as any;
@@ -18540,7 +18918,7 @@ const server = Bun.serve({
         const request = parseAgentsToZUseActionRequest(body);
         const profileToken = req.headers.get(CONTROL_PROFILE_HEADER);
         const profileAuthorized = controlProfileHost.store.authorize(profileToken);
-        if ((request.action === 'recall-user-memory' || request.action === 'read-reference') && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED', 'AgentsToZ 프로필 연결을 확인하세요.', 403);
+        if ((request.action === 'recall-user-memory' || request.action === 'recall-user-profile' || request.action === 'read-reference') && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED', 'AgentsToZ 프로필 연결을 확인하세요.', 403);
         if (profileToken && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','이 사용자의 프로필 연결을 다시 확인하세요.',403);
         if (request.target === 'ops' && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','OPS 열기는 이 사용자의 프로필 연결이 필요합니다.',403);
         const controller = profileAuthorized
@@ -18565,6 +18943,30 @@ const server = Bun.serve({
             };
           }
           return Response.json({success: true, performed: true, action: request.action, effect: 'read-only', reference}, {headers: {...headers, 'Cache-Control': 'no-store'}});
+        }
+        if (request.action === 'workroom-team') {
+          // 팀 작전 (src/workroomTeam.ts). Local MCP only; the calling Workroom is a hint for leader/member identity, never authority.
+          if (requestOrigin !== null) throw new AgentsToZUseControlError('팀 작전은 이 Mac의 로컬 AI 연결에서만 씁니다.', 'WORKROOM_TEAM_LOCAL_ONLY', 403);
+          const callerSession = agentsToZUseCallerSession(callerHint);
+          const teamCaller = callerSession ? {sessionId: callerSession.id, agent: callerSession.agent, targetId: callerSession.targetId} : null;
+          const team = request.team!;
+          try {
+            const result = team.op === 'create' ? await workroomTeams().create(team, teamCaller)
+              : team.op === 'read' ? await workroomTeams().read(team)
+              : team.op === 'wait' ? await workroomTeams().wait(team)
+              : team.op === 'report' ? await workroomTeams().report(team, teamCaller)
+              : team.op === 'member' ? await runTeamMemberOperation({service:workroomTeams(),external:workroomTeamBridge!,readWorkroom:(sessionId,targetId,cursor)=>aiTerminalService.outputTail(sessionId,targetId,cursor)},team,teamCaller)
+              // The leader's manual confirmation for a surface the host cannot read, through the same core.
+              : team.op === 'confirm' ? await workroomTeams().confirm(team, teamCaller)
+              : await workroomTeams().close(team, teamCaller);
+            const created = team.op === 'create' && !(result as {replayed?: boolean}).replayed;
+            return Response.json({success: true, performed: true, action: request.action, op: team.op,
+              effect: team.op === 'read' || team.op === 'wait' || team.op === 'member'&&team.operation==='read' ? 'read-only' : `team-${team.op}`, ...result},
+              {status: created ? 201 : 200, headers: {...headers, 'Cache-Control': 'no-store'}});
+          } catch (error) {
+            if (error instanceof WorkroomTeamError) throw new AgentsToZUseControlError(error.message, error.code, error.status, error.details ?? {});
+            throw error;
+          }
         }
         if(request.action==='platform-cli'){
           try{
@@ -18621,6 +19023,15 @@ const server = Bun.serve({
           if(!profileAuthorized)throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','AgentsToZ 프로필 연결을 확인하세요.',403);
           return Response.json({success:true,performed:true,action:'tester',tester:await getTesterAgentHost().perform(request.tester)},{headers:{...headers,'Cache-Control':'no-store'}});
         }
+        if (request.action === 'recall-user-profile') {
+          try {
+            const userProfile = await userProfileHost.recallForProject(request.portId!, request.controlQuery);
+            return Response.json({ success: true, performed: true, action: request.action, effect: 'read-only', userProfile, userProfilePolicy: USER_PROFILE_POLICY }, { headers: { ...headers, 'Cache-Control': 'private, no-store' } });
+          } catch (error) {
+            const detail = userProfilePublicError(error);
+            throw new AgentsToZUseControlError(detail.error, detail.code, detail.status);
+          }
+        }
         if (request.action === 'recall-user-memory') {
           const project = await resolveRegisteredUseProject(request.portId);
           if (!project.memoryId) throw new AgentsToZUseControlError('이 프로젝트의 장기기억을 먼저 연결하세요.', 'USER_MEMORY_PROJECT_REQUIRED');
@@ -18630,7 +19041,7 @@ const server = Bun.serve({
         if (request.action === 'get-control-profile' || request.action === 'recall-control-context' || request.action === 'list-control-memory-candidates' || request.action === 'propose-control-memory') {
           if (!profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','AgentsToZ 프로필을 준비한 뒤 MCP 연결을 새로고침하세요.',403);
           if(request.action==='get-control-profile')await controlProfileHost.store.synchronize();
-          const payload = request.action === 'get-control-profile' ? {profile:controlProfileHost.store.context()}
+          const payload = request.action === 'get-control-profile' ? controlProfileHost.profile()
             : request.action === 'recall-control-context' ? controlProfileHost.recall(request.controlQuery!)
             : request.action === 'list-control-memory-candidates' ? {profile:controlProfileHost.store.status(),proposals:controlProfileHost.store.pending()}
             : {proposal:await controlProfileHost.store.propose(request.controlProposal!)};
@@ -18965,7 +19376,7 @@ const server = Bun.serve({
           const requestId = request.requestId!;
           let session: AiTerminalSummary | undefined;
           let instructionVia: 'launch-prompt' | 'input' | null = null;
-          const fingerprint = JSON.stringify([project.projectId, request.agent, request.instruction ?? null, request.accountId ?? null]);
+          const fingerprint = JSON.stringify([project.projectId, request.agent, request.instruction ?? null, request.accountId ?? null, request.hermesVariant??null]);
           // A requestId that sent an instruction to a running session never starts or continues another one.
           if (agentsToZUseSendLedger.get(requestId)) throw agentsToZUseRequestIdConflict();
           let recorded = agentsToZUseReuseLedger.get(requestId);
@@ -18976,8 +19387,10 @@ const server = Bun.serve({
             // Claimed before any await, so a duplicate arriving meanwhile follows the same choice.
             const choice = (async () => {
               const listed = await aiTerminalService.perform({ operation: 'list', requestId: crypto.randomUUID() });
+              const variants=new Map(aiTerminalService.hermesVariantSessions().map(item=>[item.sessionId,item.variant]));
               const candidate = (listed.sessions ?? [])
                 .filter(item => item.targetId === project.projectId && item.agent === request.agent && item.state === 'running' && item.id !== caller?.id
+                  && (request.agent!=='hermes'||(variants.get(item.id)??'default')===(request.hermesVariant??'default'))
                   && (item.accountId??HOST_CLI_ACCOUNT_ID)===(request.accountId??aiTerminalService.selectedAccount(project.projectId,request.agent!)))
                 .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
               return candidate ? {sessionId: candidate.id, targetId: candidate.targetId} : null;
@@ -19028,7 +19441,7 @@ const server = Bun.serve({
               rows: 28,
               ...(request.instruction ? { prompt: request.instruction } : {}),
               ...(request.accountId ? {accountId:request.accountId} : {}),
-            });
+            },undefined,request.hermesVariant&&request.hermesVariant!=='default'?{launchModel:hermesVariantModel(request.hermesVariant)}:{});
             session = started.session!;
             if (request.instruction) instructionVia = 'launch-prompt';
           }
@@ -19068,6 +19481,7 @@ const server = Bun.serve({
             projectName: project.projectName,
             session,
             reused,
+            ...(request.agent==='hermes'?{hermesVariant:aiTerminalService.hermesVariantSessions().find(item=>item.sessionId===session.id)?.variant??'default'}:{}),
             foreground: request.foreground !== false,
             openedWorkroom: request.foreground !== false && navigationWarning === null,
             navigationWarning,
@@ -19374,10 +19788,10 @@ const server = Bun.serve({
       }
     }
 
-    if (["/api/service-memory/use-status", "/api/service-memory/prepare-workroom", "/api/service-memory/connect-app", "/api/service-memory/prepare-use-memory", "/api/service-memory/enable-use", "/api/service-memory/connect-shadowloop", "/api/service-memory/execute", "/api/service-memory/receipt"].includes(url.pathname) && req.method === "POST") {
+    if (["/api/service-memory/use-status", "/api/service-memory/prepare-workroom", "/api/service-memory/connect-app", "/api/service-memory/prepare-use-memory", "/api/service-memory/enable-use", "/api/service-memory/disable-use", "/api/service-memory/connect-shadowloop", "/api/service-memory/execute", "/api/service-memory/receipt"].includes(url.pathname) && req.method === "POST") {
       try {
         const body=await req.json() as Record<string,unknown>;
-        const fields=url.pathname.endsWith('/prepare-workroom')?['portId','goal']:url.pathname.endsWith('/connect-app')?['portId','serviceKey','connectionCode','consent']:url.pathname.endsWith('/connect-shadowloop')?['portId','connectionCode','consent']:url.pathname.endsWith('/enable-use')||url.pathname.endsWith('/prepare-use-memory')?['portId','serviceKey','consent']:url.pathname.endsWith('/execute')?['portId','requestId','call']:url.pathname.endsWith('/receipt')?['portId','requestId']:['portId','serviceKey'];
+        const fields=url.pathname.endsWith('/prepare-workroom')?['portId','goal']:url.pathname.endsWith('/connect-app')?['portId','serviceKey','connectionCode','consent']:url.pathname.endsWith('/connect-shadowloop')?['portId','connectionCode','consent']:url.pathname.endsWith('/enable-use')||url.pathname.endsWith('/disable-use')||url.pathname.endsWith('/prepare-use-memory')?['portId','serviceKey','consent']:url.pathname.endsWith('/execute')?['portId','requestId','call']:url.pathname.endsWith('/receipt')?['portId','requestId']:['portId','serviceKey'];
         if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||typeof body.portId!=='string'
           ||body.serviceKey!==undefined&&(typeof body.serviceKey!=='string'||!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(body.serviceKey)))throw Error('USE 요청 형식을 확인하세요.');
         if(url.pathname.endsWith('/prepare-workroom')){
@@ -19393,12 +19807,13 @@ const server = Bun.serve({
         if(url.pathname.endsWith('/connect-app')){
           if(body.consent!==true||typeof body.connectionCode!=='string')throw Error('앱 USE 연결 코드와 등록 동의를 확인하세요.');
           if(await shadowLoopUseConnector.adapter(project.projectId,(body.serviceKey as string|undefined)??'default'))throw Error('기존 ShadowLoop 운영 연결을 유지합니다. 같은 서비스에 중복 연결할 수 없습니다.');
-          await appUseConnector.connect(project.projectId,(body.serviceKey as string|undefined)??'default',body.connectionCode,true);
+          try{await appUseConnector.connect(project.projectId,(body.serviceKey as string|undefined)??'default',body.connectionCode,true);}catch(error){throw Error(serviceUseConnectProblem(error,project.projectName));}
         }
+        // Routed by the code's SLUSE1. prefix (ServiceUseSetupDialog), not by the project's display name.
         if(url.pathname.endsWith('/connect-shadowloop')){
-          if(project.projectName.toLowerCase()!=='shadowloop'||body.consent!==true||typeof body.connectionCode!=='string')throw Error('ShadowLoop 프로젝트와 운영 연결 등록 동의를 확인하세요.');
+          if(body.consent!==true||typeof body.connectionCode!=='string')throw Error('ShadowLoop 운영 연결 코드와 등록 동의를 확인하세요.');
           if(await appUseConnector.adapter(project.projectId,'default'))throw Error('기존 앱 USE 연결을 먼저 확인하세요. 같은 서비스에 중복 연결할 수 없습니다.');
-          await shadowLoopUseConnector.connect(project.projectId,body.connectionCode,true);
+          try{await shadowLoopUseConnector.connect(project.projectId,body.connectionCode,true);}catch(error){throw Error(serviceUseConnectProblem(error,project.projectName));}
         }
         if(url.pathname.endsWith('/prepare-use-memory')){
           if(body.consent!==true)throw Error('프로젝트 USE 기억 준비·구경로 호환 전환 동의가 필요합니다.');
@@ -19409,6 +19824,11 @@ const server = Bun.serve({
         if(url.pathname.endsWith('/enable-use')){
           if(body.consent!==true)throw Error('USE 활성화 동의가 필요합니다.');
           await serviceUseHost.enable(project.projectId,body.serviceKey as string|undefined);
+        }
+        // 「USE 끄기」 only turns the activation flag off. Memory, app connection and receipts stay; enable-use turns it back on.
+        if(url.pathname.endsWith('/disable-use')){
+          if(body.consent!==true)throw Error('USE 끄기 동의가 필요합니다.');
+          await serviceUseHost.disable(project.projectId,body.serviceKey as string|undefined);
         }
         if(url.pathname.endsWith('/execute')||url.pathname.endsWith('/receipt')){
           if(typeof body.requestId!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(body.requestId))throw Error('USE 요청 ID를 확인하세요.');
@@ -22761,129 +23181,6 @@ end try`);
         return new Response(JSON.stringify({ success: true }), { headers });
       } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message || String(error) }), { status: 500, headers });
-      }
-    }
-
-    // ── Terminal/tmux helper (Windows: wt.exe or cmd, macOS: iTerm) ─────────
-    /** 터미널 실행 결과. `verified:false`는 실패가 아니라 "아직 확인되지 않음"이다. */
-    type TerminalLaunchOutcome = { verified: boolean; warning?: string };
-
-    /** iTerm/Terminal이 멈춰 있으면(main run loop wedge) `create window`/`do script`
-     *  AppleEvent가 수십 초 이상 반환되지 않는다. 실측(2026-08-02): 같은 앱이
-     *  `get version`은 0.05s에 답하면서 `count windows`/`create window`는 25s+ 무응답.
-     *  대기 전체를 요청 처리에 묶으면 사용자는 창도 못 보고 15초 뒤 500 에러만 받는다 —
-     *  이전의 fire-and-forget 가짜 성공보다 오히려 나쁘다.
-     *
-     *  1) 짧은 deadline 안에 종료 → exit code로 정직하게 판정 (권한 거부 -1743 등은 즉시 종료).
-     *  2) deadline 초과 → **죽이지 않는다.** 전달 중인 AppleEvent가 창을 열 수도 있으므로
-     *     프로세스는 백그라운드에 두고 `verified:false` + 경고만 반환한다.
-     *  3) backstop까지 살아 있으면 그때 SIGKILL — 좀비 osascript 누적만 방지. */
-    async function runAppleScriptChecked(
-      script: string,
-      opts: { deadlineMs?: number; backstopMs?: number } = {},
-    ): Promise<TerminalLaunchOutcome> {
-      const deadlineMs = opts.deadlineMs ?? 4_000;
-      const backstopMs = opts.backstopMs ?? 120_000;
-      const proc = Bun.spawn({ cmd: ['osascript', '-e', script], stdout: 'pipe', stderr: 'pipe' });
-      const settled = await Promise.race([
-        proc.exited.then(() => true),
-        Bun.sleep(deadlineMs).then(() => false),
-      ]);
-      if (settled) {
-        const stderr = (await new Response(proc.stderr).text()).trim();
-        if (proc.exitCode !== 0) {
-          throw new Error(stderr || `터미널 자동화 실패 (exit ${proc.exitCode})`);
-        }
-        return { verified: true };
-      }
-      void (async () => {
-        const backstop = setTimeout(() => { try { proc.kill(9); } catch {} }, backstopMs);
-        try {
-          // stderr를 계속 비워둬야 파이프가 차서 osascript가 멈추는 일이 없다.
-          await Promise.all([proc.exited, new Response(proc.stderr).text().catch(() => '')]);
-        } catch {
-          /* 백그라운드 정리 실패는 무시 */
-        } finally {
-          clearTimeout(backstop);
-        }
-      })();
-      return {
-        verified: false,
-        warning: `터미널이 ${Math.round(deadlineMs / 1000)}초 안에 응답하지 않아 실행 여부를 확인하지 못했습니다. 창이 열리지 않으면 iTerm/Terminal을 재시작한 뒤 다시 시도해주세요.`,
-      };
-    }
-
-    /** 확인되지 않은 실행에는 경고를 붙여 정직한 응답을 만든다. */
-    function launchPayload(message: string, outcome: TerminalLaunchOutcome, extra: Record<string, unknown> = {}) {
-      return outcome.verified
-        ? { success: true, verified: true, message, ...extra }
-        : { success: true, verified: false, warning: outcome.warning, message: `${message} — ${outcome.warning}`, ...extra };
-    }
-
-    async function spawnWindowsTerminalChecked(
-      command: string[],
-      env: Record<string, string> = {},
-      detached = false,
-    ): Promise<TerminalLaunchOutcome> {
-      const child = spawn({
-        cmd: command,
-        env: { ...process.env, ...env },
-        stdout: 'ignore',
-        stderr: 'pipe',
-        detached,
-      });
-      const stderrPromise = new Response(child.stderr).text().catch(() => '');
-      const exitCode = await Promise.race([
-        child.exited,
-        Bun.sleep(4_000).then(() => null),
-      ]);
-      if (exitCode === null) {
-        child.unref();
-        void Promise.all([child.exited, stderrPromise]).catch(() => undefined);
-        return {
-          verified: false,
-          warning: 'Windows 터미널 실행 handoff가 4초 안에 끝나지 않아 창 생성 여부를 확인하지 못했습니다.',
-        };
-      }
-      const stderr = (await stderrPromise).trim();
-      if (exitCode !== 0) {
-        throw new Error(stderr || `Windows 터미널 실행 실패 (exit ${exitCode})`);
-      }
-      return { verified: true };
-    }
-
-    async function openTerminalWithCmd(shellCmd: string, folderPath: string | null, title: string, terminalApp: 'iterm' | 'terminal' = 'iterm'): Promise<TerminalLaunchOutcome> {
-      if (IS_WIN) {
-        const plan = buildWindowsTerminalLaunch({
-          windowsTerminalPath: windowsTerminalPath(),
-          shellCommand: shellCmd,
-          folderPath,
-          title,
-        });
-        return await spawnWindowsTerminalChecked(plan.cmd, plan.env, plan.detached);
-      }
-      // 임시 스크립트 파일 방식: write text 클립보드 오염 없이 명령 실행
-      const fullCmd = folderPath
-        ? `cd '${escapeSq(folderPath)}' && ${shellCmd}`
-        : shellCmd;
-      const scriptPath = `/tmp/portmanager_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.sh`;
-      await Bun.write(scriptPath, `#!/bin/zsh -l\nrm -f "$0"\n${fullCmd}\n`);
-      Bun.spawnSync(['chmod', '+x', scriptPath]);
-      // 스크립트는 실행되면 스스로 지우지만(`rm -f "$0"`), 터미널이 끝내 뜨지 않으면
-      // /tmp에 남는다. 넉넉한 지연 후 한 번 더 지워 누수를 막는다.
-      const sweep = setTimeout(() => { rmSync(scriptPath, { force: true }); }, 10 * 60_000);
-      (sweep as any).unref?.();
-      const sqPath = scriptPath.replace(/'/g, "'\\''");
-      const launchCommand = `/bin/zsh -l '${sqPath}'`;
-      const script = terminalApp === 'terminal'
-        ? `tell application "Terminal"\n  activate\n  do script "${launchCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\nend tell`
-        : `tell application "iTerm"\n  activate\n  create window with default profile command "${launchCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\nend tell`;
-      try {
-        return await runAppleScriptChecked(script);
-      } catch (error) {
-        clearTimeout(sweep);
-        rmSync(scriptPath, { force: true });
-        throw error;
       }
     }
 

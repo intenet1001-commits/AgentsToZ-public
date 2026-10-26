@@ -1,6 +1,11 @@
 /* Workroom pop-out window shell (「새 창으로 분리」). Tokens only — see src/index.css. */
 html:has(.workroom-popout), body:has(.workroom-popout) { background: var(--bg); }
 .workroom-popout { box-sizing: border-box; display: flex; flex-direction: column; height: 100dvh; min-height: 0; padding: 8px; overflow: auto; background: var(--bg); color: var(--ink); }
+/* The standalone window mounts DeviceSwitch, whose content wrapper sits between this shell and the panel.
+   Carry the bounded height through that wrapper: an intrinsic-height block collapses the browser to its 200px
+   floor and never grows when the window grows. Keep hidden device/community branches out of the flex layout. */
+.workroom-popout > .workroom-device-content:not([hidden]) { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; min-height: 0; }
+.workroom-popout > .workroom-device-content > .ai-terminal-panel { flex: 1 1 0; min-height: 0; overflow: auto; }
 .workroom-popout-state { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 24px; color: var(--ink-2); font-size: 13px; }
 .workroom-popout-state button { min-height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
 @media (max-width: 640px) { .workroom-popout { padding: 0; } .workroom-popout-state button { min-height: 44px; } }

@@ -7,9 +7,9 @@ export async function metaMemoryRequest<T = any>(body: Record<string, unknown>, 
   const response = await fetch(`${isTauri() ? 'http://127.0.0.1:3001' : ''}/api/meta-common-memory`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
-  }).catch(() => { throw new MetaMemoryClientError('공통 기억 서비스의 응답을 확인하지 못했습니다. 입력과 요청을 보존했습니다.', undefined, true); });
-  const result = await response.json().catch(() => { throw new MetaMemoryClientError('공통 기억 응답을 읽지 못했습니다.', undefined, true); });
-  if (!response.ok) throw new MetaMemoryClientError(response.status === 404 && !result.code ? '현재 실행 중인 앱 서비스에는 메타 공통 기억 기능이 없습니다. 최신 개발 서비스를 실행하거나 앱을 업데이트하세요.' : result.error ?? '공통 기억 요청을 완료하지 못했습니다.', result.code, response.status >= 500);
+  }).catch(() => { throw new MetaMemoryClientError('공통기억 서비스의 응답을 확인하지 못했습니다. 입력과 요청을 보존했습니다.', undefined, true); });
+  const result = await response.json().catch(() => { throw new MetaMemoryClientError('공통기억 응답을 읽지 못했습니다.', undefined, true); });
+  if (!response.ok) throw new MetaMemoryClientError(response.status === 404 && !result.code ? '현재 실행 중인 앱 서비스에는 공통기억 기능이 없습니다. 최신 개발 서비스를 실행하거나 앱을 업데이트하세요.' : result.error ?? '공통기억 요청을 완료하지 못했습니다.', result.code, response.status >= 500);
   return result as T;
 }
 
@@ -24,7 +24,7 @@ export async function connectProjectMetaMemories(portId: string, expectedMemoryI
   for (const memoryId of [...new Set(memoryIds)]) {
     try {
       const { memory, memberForm } = await request({ operation: 'read', memoryId });
-      if (memory.archived) throw new Error('보관된 공통 기억입니다.');
+      if (memory.archived) throw new Error('보관된 공통기억입니다.');
       if (!memory.members.some((m: any) => m.memoryId === expectedMemoryId && m.mode === 'include')) {
         const save = (form: 'memory' | 'port') => request({ operation: 'save', memoryId, expectedRevision: memory.revision, requestId: options.requestIdFor?.(memoryId, form) ?? commonMemoryUuid(), name: memory.name, description: memory.description, tags: memory.tags, categories: memory.categories, assignments: [assignment(form)] });
         const form = (options.form ?? 'memory') === 'memory' && memberForm === 'memory' ? 'memory' : 'port';

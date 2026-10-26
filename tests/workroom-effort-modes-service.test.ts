@@ -74,3 +74,17 @@ test('runtime checkout failure preserves the request without exposing paths or f
  for(const privateText of ['private-project-missing','ENOENT',tmpdir()])expect(message).not.toContain(privateText);
  expect(f.writes.some(t=>t.includes('보안 검토')||t.startsWith('native-effort:'))).toBe(false);
 });
+
+test('auto never changes a level the person pinned for a team member', async () => {
+ const f = fixture();
+ const r = await f.service.perform({operation: 'start', requestId: crypto.randomUUID(), targetId: 'project-effort-001', agent: 'codex', prompt: '[AgentsToZ 팀 작전 · 팀원 m1]', cols: 100, rows: 28},
+  undefined, {launchModel: {model: 'gpt-6.1-sol'}, launchEffort: {pinned: 'medium'}});
+ await new Promise(resolve => setTimeout(resolve, 10));
+ expect(f.launches[0]!).toContain('model_reasoning_effort="medium"');
+ await f.send(r.session!.id, '보안 설계를 검토해 주세요');
+ expect(f.controls).toEqual([]);
+ const session = f.service.workspaceEffort({targetId: r.session!.targetId, sessionId: r.session!.id, effortModes: true}).session!;
+ expect(session).toMatchObject({level: 'medium', origin: 'launch'});
+ expect(session.advice).toBeUndefined();
+ expect(session.tier).toBeUndefined();
+});

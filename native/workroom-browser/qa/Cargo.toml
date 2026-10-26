@@ -1,0 +1,21 @@
+[package]
+name = "agentstoz-workroom-browser-qa"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["embedded-browser"]
+embedded-browser = []
+
+[dependencies]
+agentstoz-workroom-browser = { path = "..", features = ["fixtures"] }
+tauri = { version = "=2.10.3", features = ["custom-protocol"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = "2.5.3"
+
+[[bin]]
+name = "app"
+path = "main.rs"

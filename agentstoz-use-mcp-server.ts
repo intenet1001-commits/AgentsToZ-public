@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 import {userMemoryQuery} from './src/userMemoryRecall';
+import {agentstozMcpAgentChoice,prepareMcpAgentLaunch,AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from './src/agentstozMcpAgentChoice';
+import {hermesVariantModel} from './src/hermesVariants';
+import {parseTeamMemberSelection} from './src/teamLaunchOptions';
+import {WORKROOM_BROWSER_MCP_TOOL,callWorkroomBrowserAgent,workroomBrowserMcpResult} from './src/workroomBrowserMcp';
 
 import { AGENTSTOZ_USE_CONTROL_ENDPOINT, parseAgentsToZUseCommonMemory, parseAgentsToZUseLaunchOptions, parseAgentsToZUseSurfaceTarget } from "./src/agentstozUseControl";
 import {randomBytes} from 'node:crypto';
@@ -48,25 +52,29 @@ const PROTOCOL_VERSION = "2025-06-18";
  * must know therefore comes right after the invocation rule; tests pin it before character 2,000.
  */
 const WORKROOM_ORCHESTRATION_BRIEF = [
-  "Workrooms work with any model: Any connected agent (codex, claude, hermes or agy) may start and drive a Workroom of any agent, in OPS (target=ops) or any registered project; the project does not need long-term memory.",
-  "Loop: start → wait → read (view=tail) → send → wait → read → close (the agentstoz_use_*_workroom_session tools).",
-  "Answer a trust, approval or login screen (read view=screen) with agentstoz_use_send_workroom_keys; never approve an elevated permission the user did not ask for.",
+  "Any connected agent (codex, claude, hermes or agy) may start and drive a Workroom of any agent in OPS (target=ops) or a registered project; it does not need long-term memory.",
+  "start → wait → read (view=tail) → send → wait → read → close.",
+  "Trust/login screen: read view=screen, answer with agentstoz_use_send_workroom_keys; no unrequested elevation.",
   "‘<프로젝트> 열어’ → agentstoz_use_open_dashboard with that portId (navigation only). ‘<프로젝트> 담당자 불러’ → agentstoz_use_start_workroom_session with reuse=true.",
-  "Dispatch: ‘<프로젝트>를 <CLI>로 워크룸에서 시작’ → start_workroom_session(portId, agent, instruction); ‘<프로젝트>를 <앱>에서 열어’ → open_code_app(portId, agent, surface=app, task); only Codex takes task (prefill requested, unsent).",
-  "On a resolve_target miss, map the spoken name to a candidate (바이브2 can mean vibe2) and confirm with the user; never pick silently.",
-  "Your own session is listed self:true: never instruct, key or close it. A worker reports back with agentstoz_use_send_workroom_instruction (target=ops and the sessionId it was given).",
+  "Dispatch: ‘<프로젝트>를 <CLI>로 워크룸에서 시작’ → start_workroom_session(portId, agent, surface=internal, instruction); ‘<프로젝트>를 <앱>에서 열어’ → open_code_app(portId, agent, surface=app, task); only Codex takes task (prefill requested, unsent).",
+  "Resolve miss (바이브2 can mean vibe2): confirm with the user; never pick silently.",
+  "self:true: never instruct, key or close. Workers report via agentstoz_use_send_workroom_instruction (target=ops, assigned sessionId). 아젠투지오피에스=OPS.",
 ].join(" ");
 
 const COMMON_MEMORY_BRIEF = "Common memory = knowledge linked to long-term memories by memoryId: recall_common_memory(memoryId, query) before substantial work; link with manage_common_knowledge. Goal/publication tools are legacy.";
+/** 팀 작전 (src/workroomTeam.ts), inside the ~2,000 characters Claude Code keeps; the agentstoz-team skill has the rest. */
+const TEAM_BRIEF = "팀 작전: create_team → wait_team → merge → close_team.";
 
 export const AGENTSTOZ_USE_MCP_INSTRUCTIONS = [
   // Claude Code keeps only about the first 2,000 characters of these instructions (measured ~2,095):
   // the invocation rule, target resolution, IDs and the orchestration brief must come first.
-  "This server is the conversational control surface for AgentsToZ. When a user explicitly addresses ‘AgentsToZ’, ‘에이전츠투지’, or ‘아젠투지’ in text or Voice, treat the remaining words as an AgentsToZ request and use these tools; a quotation or mere mention is not a request. First call agentstoz_use_get_control_profile.",
-  "Call agentstoz_use_resolve_target with the spoken or typed target before acting, and use only IDs returned by these tools: never guess a local path, project ID, workspace-root ID, session ID, or mission ID.",
-  WORKROOM_ORCHESTRATION_BRIEF,
+  "When addressed as AgentsToZ/에이전츠투지/아젠투지 in text or Voice, treat the remaining words as an AgentsToZ request; quotations/mentions are not calls. First call agentstoz_use_get_control_profile.",
+  "Call agentstoz_use_resolve_target with the spoken or typed target before acting; use only IDs returned by these tools, never guessed paths or IDs.",
+  AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE,
   // Within Claude Code's ~2,000 characters too: the one common-memory model (tests pin it there).
   COMMON_MEMORY_BRIEF,
+  TEAM_BRIEF,
+  WORKROOM_ORCHESTRATION_BRIEF,
   AGENTSTOZ_TARGET_ALIAS_GUIDANCE+" An alias alone does not prove that a Workroom instruction was delivered or remembered.",
   SERVICE_USE_NATURAL_LANGUAGE_GUIDANCE,
   AGENTSTOZ_MENTION_GUIDANCE,
@@ -119,12 +127,12 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
     {name:'get_common_memory_request_status',description:'Read the durable cloud mutation receipt after an unknown response, without retrying execution. Supply saved scope/group/request/hash.',properties:{groupId:{type:'string',format:'uuid'},requestId:{type:'string'},requestHash:{type:'string',pattern:'^[a-f0-9]{64}$'},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['groupId','requestId','requestHash']},
     {name:'get_common_memory_project_add_status',description:'Read the device durable clone/registration receipt without executing another clone.',properties:{requestId:{type:'string',format:'uuid'}},required:['requestId']},
     {name:'inspect_project_memory_links',description:'Read a long-term memory\'s shared name/ID and the common memories it is linked to, with goals and review states. Pass the project\'s memoryId, or a registered portId (resolved on this Mac). Device folders remain independent.',properties:{memoryId:{type:'string',format:'uuid'},portId:{type:'string',minLength:1,maxLength:200}},required:[],oneOf:[{required:['memoryId'],not:{required:['portId']}},{required:['portId'],not:{required:['memoryId']}}]},
-    {name:'manage_common_knowledge',description:'The current common-memory tool: knowledge groups linked to project long-term memories by memoryId. Names: groupId is always the common memory, memoryId always a long-term memory (the original form that named the group memoryId at the top level still works). request.operation: list {query?, offset?}; read or history {groupId}; save {groupId (omit to create, with expectedRevision 0), expectedRevision, requestId, name, description?, tags?, categories?, assignments:[{memoryId, mode:"include"|"exclude"}]} links or unlinks long-term memories under explicit user instructions (the legacy {portId, expectedMemoryId, mode} member is still accepted); recall {memoryId, query}; propose-source-entry {groupId, expectedRevision, requestId, title, body, reason, category?, conditions?, evidence:[{memoryId, revisionId, entryId, contentHash}], supersedesEntryId?} prepares an evidence-backed candidate (supersedesEntryId replaces without overwriting accepted knowledge); propose-entry {groupId, memoryId (its source long-term memory), expectedRevision, requestId, title, body} for a manually sourced lesson; archive {groupId, expectedRevision, requestId, archived}. People accept candidates in the review surface. Read the current revision first and retain requestId after an uncertain response.',properties:{request:{type:'object',properties:{operation:{type:'string',enum:['list','read','history','save','archive','recall','propose-entry','propose-source-entry','export']},groupId:{type:'string',format:'uuid',description:'The common memory (knowledge group).'},memoryId:{type:'string',format:'uuid',description:'A project long-term memory: recall target, or the source of propose-entry.'},expectedRevision:{type:'integer',minimum:0},requestId:{type:'string',minLength:1,maxLength:200},assignments:{type:'array',maxItems:16,items:{type:'object',properties:{memoryId:{type:'string',format:'uuid'},mode:{type:'string',enum:['include','exclude']}},required:['memoryId','mode']}},query:{type:'string',maxLength:2000}},required:['operation']},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['request']},
-    {name:'list_common_memories',description:'List paginated cloud common memories: knowledge groups linked to long-term memories by memoryId, and legacy goal groups. These are independent N:N groups; never merge source memory IDs. Use the returned groupId with manage_common_knowledge or inspect_common_memory.',properties:{offset:{type:'integer',minimum:0,maximum:2000}},required:[]},
+    {name:'manage_common_knowledge',description:'공통기억 만들기·장기기억 연결·정리(후보 제안)·읽기. The current common-memory tool: knowledge groups linked to project long-term memories by memoryId. Names: groupId is always the common memory, memoryId always a long-term memory (the original form that named the group memoryId at the top level still works). request.operation: list {query?, offset?}; read or history {groupId}; save {groupId (omit to create, with expectedRevision 0), expectedRevision, requestId, name, description?, tags?, categories?, assignments:[{memoryId, mode:"include"|"exclude"}]} links or unlinks long-term memories under explicit user instructions (the legacy {portId, expectedMemoryId, mode} member is still accepted); recall {memoryId, query}; propose-source-entry {groupId, expectedRevision, requestId, title, body, reason, category?, conditions?, evidence:[{memoryId, revisionId, entryId, contentHash}], supersedesEntryId?} prepares an evidence-backed candidate (supersedesEntryId replaces without overwriting accepted knowledge); propose-entry {groupId, memoryId (its source long-term memory), expectedRevision, requestId, title, body} for a manually sourced lesson; archive {groupId, expectedRevision, requestId, archived}. People accept candidates in the review surface; the result of a proposal carries nextStep, the place to tell the person. Results add groupId beside each group id. Read the current revision first and retain requestId after an uncertain response.',properties:{request:{type:'object',properties:{operation:{type:'string',enum:['list','read','history','save','archive','recall','propose-entry','propose-source-entry','export']},groupId:{type:'string',format:'uuid',description:'The common memory (knowledge group).'},memoryId:{type:'string',format:'uuid',description:'A project long-term memory: recall target, or the source of propose-entry.'},expectedRevision:{type:'integer',minimum:0},requestId:{type:'string',minLength:1,maxLength:200},assignments:{type:'array',maxItems:16,items:{type:'object',properties:{memoryId:{type:'string',format:'uuid'},mode:{type:'string',enum:['include','exclude']}},required:['memoryId','mode']}},query:{type:'string',maxLength:2000},offset:{type:'integer',minimum:0},name:{type:'string'},description:{type:'string'},tags:{type:'array',items:{type:'string'}},categories:{type:'array',items:{type:'string'}},title:{type:'string'},body:{type:'string'},reason:{type:'string'},category:{type:'string'},conditions:{type:'array',items:{type:'string'}},evidence:{type:'array',items:{type:'object',properties:{memoryId:{type:'string',format:'uuid'},revisionId:{type:'string',format:'uuid'},entryId:{type:'string'},contentHash:{type:'string'}}}},supersedesEntryId:{type:'string'},archived:{type:'boolean'}},required:['operation']},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['request']},
+    {name:'list_common_memories',description:'공통기억 목록. List paginated cloud common memories: knowledge groups linked to long-term memories by memoryId, and legacy goal groups. These are independent N:N groups; never merge source memory IDs. Use the returned groupId with manage_common_knowledge or inspect_common_memory.',properties:{offset:{type:'integer',minimum:0,maximum:2000}},required:[]},
     {name:'inspect_common_memory',description:'Inspect one common memory: paginated entries, linked long-term memories and review status; a legacy goal group also shows its goal, publication and application evidence. analysis=true also reads explicitly included use-project memories for candidate analysis; it does not change reference selection, publishing or membership. Excerpts may be shortened; check excerptTruncated.',properties:{groupId:{type:'string',format:'uuid'},analysis:{type:'boolean'},offset:{type:'integer',minimum:0,maximum:2000}},required:['groupId']},
     {name:'common_memory_history',description:'Legacy goal model (이전 방식); current common memory is knowledge linked by memoryId (recall_common_memory, manage_common_knowledge). For a knowledge group use manage_common_knowledge {operation:"history", groupId}. Read the latest 20 immutable publication summaries. Restoring a publication creates a draft for review against the current goal; historical rules are never silently made current.',properties:{groupId:{type:'string',format:'uuid'}},required:['groupId']},
     {name:'recommend_common_memories',description:'Legacy goal model (이전 방식); current common memory is knowledge linked by memoryId (recall_common_memory, manage_common_knowledge). Only when the user asks for goal recommendations. Find candidates for a stated project goal. Explain goal and conditions in conversation, then ask which candidates to use. No selection or project creation happens.',properties:{projectGoal:{type:'string',minLength:1,maxLength:4000}},required:['projectGoal']},
-    {name:'recall_common_memory',description:'Before substantial work, recall the shared knowledge linked to a project\'s long-term memory: pass its memoryId (or a registered portId) and query. Legacy goal form: groupId and task (revisionId keeps a task pinned). Returns bounded hits with provenance; recall does not prove application or test success.',properties:{memoryId:{type:'string',format:'uuid'},portId:{type:'string',minLength:1,maxLength:200},query:{type:'string',minLength:1,maxLength:2000},groupId:{type:'string',format:'uuid'},task:{type:'string',minLength:1,maxLength:4000},revisionId:{type:'string',format:'uuid'},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:[],oneOf:[{required:['memoryId','query'],not:{anyOf:[{required:['portId']},{required:['groupId']},{required:['task']},{required:['revisionId']}]}},{required:['portId','query'],not:{anyOf:[{required:['memoryId']},{required:['groupId']},{required:['task']},{required:['revisionId']}]}},{required:['groupId','task'],not:{anyOf:[{required:['memoryId']},{required:['portId']},{required:['query']}]}}]},
+    {name:'recall_common_memory',description:'공통기억 불러오기. Before substantial work, recall the shared knowledge linked to a project\'s long-term memory: pass its memoryId (or a registered portId) and query. Each hit names its common memory as groupId/groupName (a hit\'s memoryId/memoryName are that same group, kept for older callers); the top-level memoryId is the long-term memory. To read one whole common memory, use manage_common_knowledge {operation:"read", groupId}. Legacy goal form, published goal groups only: groupId and task (revisionId keeps a task pinned). Returns bounded hits with provenance; candidates appear only after a person accepts them; recall does not prove application or test success.',properties:{memoryId:{type:'string',format:'uuid'},portId:{type:'string',minLength:1,maxLength:200},query:{type:'string',minLength:1,maxLength:2000},groupId:{type:'string',format:'uuid'},task:{type:'string',minLength:1,maxLength:4000},revisionId:{type:'string',format:'uuid'},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:[],oneOf:[{required:['memoryId','query'],not:{anyOf:[{required:['portId']},{required:['groupId']},{required:['task']},{required:['revisionId']}]}},{required:['portId','query'],not:{anyOf:[{required:['memoryId']},{required:['groupId']},{required:['task']},{required:['revisionId']}]}},{required:['groupId','task'],not:{anyOf:[{required:['memoryId']},{required:['portId']},{required:['query']}]}}]},
     {name:'manage_common_memory',description:'Legacy goal model (이전 방식); current common memory is knowledge linked by memoryId (recall_common_memory, manage_common_knowledge). Create or manage a legacy goal group under explicit user instructions. Inspect version and evidence first. Relevance needs reason and conditions; goal changes require reviewed publication. Never writes source memories.',properties:{request:{type:'object',properties:{scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'},operation:{type:'string',enum:['create','configure','refresh','review','remove-item','publish','archive','unarchive','restore-draft']},requestId:{type:'string',minLength:1,maxLength:200},groupId:{type:'string',format:'uuid'},expectedVersion:{type:'integer',minimum:0},name:{type:'string'},goal:{type:'object'},sourceMemoryIds:{type:'array',maxItems:16,items:{type:'string',format:'uuid'}},evidence:{type:'array',maxItems:16,items:{type:'object'}},title:{type:'string'},rule:{type:'string'},reason:{type:'string'},conditions:{type:'array',items:{type:'string'}},itemId:{type:'string'},revisionId:{type:'string',format:'uuid'}},required:['operation','requestId','groupId'],additionalProperties:false}},required:['request']},
     {name:'record_common_memory_application',description:'Legacy goal model (이전 방식); current common memory is knowledge linked by memoryId (recall_common_memory, manage_common_knowledge). Record actual application/test evidence against exact published rules. Reported evidence is separate from validation. A passed result requires a real check identifier.',properties:{groupId:{type:'string',format:'uuid'},application:{type:'object'},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['groupId','application']},
     {name:'bind_project_common_memory',description:'Legacy goal model (이전 방식); current common memory is knowledge linked by memoryId (recall_common_memory, manage_common_knowledge). To give a project shared knowledge now, link its long-term memory with manage_common_knowledge instead. Explicitly update a registered project goal and selected current common-memory publications. Empty groupIds clears previous pins. Preserves original project memory. List project and groups first; never silently refresh a running task.',properties:{portId:{type:'string',minLength:1,maxLength:200},projectGoal:{type:'string',minLength:1,maxLength:4000},groupIds:{type:'array',maxItems:8,items:{type:'string',format:'uuid'}},expectedSelections:{type:'array',maxItems:8,items:{type:'object',properties:{groupId:{type:'string',format:'uuid'},revisionId:{type:'string',format:'uuid'},goalVersion:{type:'integer',minimum:1},scopeId:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['groupId','revisionId','goalVersion'],additionalProperties:false}}},required:['portId','projectGoal','groupIds']},
@@ -132,12 +140,14 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
   ...AGENT_DIALOGUE_MCP_TOOLS,
   ...OPS_REQUEST_MCP_TOOLS,
   WORKROOM_THREAD_MCP_TOOL,
+  WORKROOM_BROWSER_MCP_TOOL,
   WORKROOM_THREAD_READ_MCP_TOOL,
   ...TESTER_MCP_TOOLS,
   {name:'agentstoz_use_read_ai_label_job',description:'Read one page (20 projects) of an AgentsToZ naming job the app handed to this OPS Workroom: registered projects with empty nickname (aiName), category or search aliases. Read-only. Follow the returned rules and needs; you may open each folderPath to decide, but never change files there.',inputSchema:{type:'object',properties:{jobId:{type:'string',pattern:'^[0-9a-f-]{36}$'},page:{type:'integer',minimum:0,maximum:1000}},required:['jobId'],additionalProperties:false}},
   {name:'agentstoz_use_submit_ai_labels',description:'Submit names for projects of that naming job: up to 50 rows of {id, aiName?, category?, searchAliases?}. Only empty fields are filled; existing values are never replaced. The app applies submissions as they arrive. Stop if the job reports cancelled.',inputSchema:{type:'object',properties:{jobId:{type:'string',pattern:'^[0-9a-f-]{36}$'},results:{type:'array',minItems:1,maxItems:50,items:{type:'object',properties:{id:{type:'string',minLength:1,maxLength:200},aiName:{type:'string',maxLength:60},category:{type:'string',maxLength:30},searchAliases:{type:'array',maxItems:8,items:{type:'string',maxLength:40}}},required:['id'],additionalProperties:false}}},required:['jobId','results'],additionalProperties:false}},
   {name:'agentstoz_use_list_tester_results',description:'Read one bounded page of this Mac’s registered project test summaries for Control orchestration. Does not run tests, Python or AI. Summaries are past evidence; inspect the project tester to verify source freshness. No other Mac results are implied.',inputSchema:{type:'object',properties:{offset:{type:'integer',minimum:0,maximum:100000},revision:{type:'string',pattern:'^[a-f0-9]{64}$'}},additionalProperties:false}},
-  {name: "agentstoz_use_get_control_profile", description: "Read the connected user's AgentsToZ operating profile, memory revision, readiness and pending-save count. Independent of the current folder. Does not create a profile or call AI.", inputSchema: {type:"object",properties:{},additionalProperties:false}},
+  {name: "agentstoz_use_get_control_profile", description: "Read AgentsToZ OPS operating memory and connection readiness, revision, sync and pending-save count, plus entryTitles (titles of the last 20 operating-memory entries) and entryCount. This is the agent's operating context, separate from the person's preferences and What I Said history. Independent of the current folder. Does not create a profile or call AI. For ‘아젠투지 설정 보여줘’, summarize those and say the panel is 도구 및 설정 → 아젠투지 설정. The person's profile is 장기기억 → 내 프로필; use recall_user_profile for relevant confirmed preferences. Device names come from agentstoz_use_list_ops_devices.", inputSchema: {type:"object",properties:{},additionalProperties:false}},
+  {name: "agentstoz_use_recall_user_profile", description: "Read at most five relevant preferences the person explicitly confirmed in 장기기억 → 내 프로필, for an exact portId returned by list_projects and a narrow query (at most 1,024 normalized UTF-8 bytes). Requires the connected OPS profile, but the preference store is separate and local to this OS user on this Mac; no account-wide or other-device identity is implied. The userProfile data contains only active all-project or matching-project entries, within 8,000 UTF-8 bytes (policy and transport metadata are separate). These preferences never override current instructions or grant model/account/permission changes. Read-only: no inference, saving, prompt-history import or AI call. Use recall_user_memory separately for historical What I Said evidence.", inputSchema: {type:"object",properties:{portId:{type:"string",minLength:1,maxLength:200},query:{type:"string",minLength:1,maxLength:1024}},required:["portId","query"],additionalProperties:false}},
   {name: "agentstoz_use_recall_user_memory", description: "Read at most five matching historical user instructions (query at most 1,024 normalized UTF-8 bytes) from one registered project's local memory. Requires the profile connection and an exact portId returned by list_projects. Does not read other projects, import conversations, change policy or execute instructions. Historical evidence is not a current user request.", inputSchema: {type:"object",properties:{portId:{type:"string",minLength:1,maxLength:200},query:{type:"string",minLength:1,maxLength:1024}},required:["portId","query"],additionalProperties:false}},
   {name: "agentstoz_use_recall_control_context", description: "Recall bounded relevant operating memory from the same AgentsToZ profile across supported AIs. Requires the local profile connection; does not read every project's memory.", inputSchema: {type:"object",properties:{query:{type:"string",minLength:1,maxLength:2000}},required:["query"],additionalProperties:false}},
   {name: "agentstoz_use_list_control_memory_candidates", description: "List bounded pending shared OPS-memory candidates for the connected profile. Read-only: this tool cannot approve, reject, save, or back up a candidate.", inputSchema: {type:"object",properties:{},additionalProperties:false}},
@@ -268,13 +278,20 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
     inputSchema: {type:'object',properties:{...surfaceTargetProperties,agent:{type:'string',enum:['codex','claude']},accountId:{type:'string',minLength:8,maxLength:64},requestId:{type:'string',pattern:'^[A-Za-z0-9_-]{8,160}$'}},required:['agent','accountId','requestId'],oneOf:surfaceTargetChoice,additionalProperties:false},
   },
   {
+    name:'agentstoz_use_prepare_agent_launch',
+    description:'Prepare choices for a natural-language launch without starting an agent, opening a window, sending a prompt, or changing settings. Ask the returned question in the user’s language when agent, execution surface, or Hermes configuration is unspecified; wait for their answer. Claude alone does not choose Claude app versus Workroom or a particular terminal. Hermes has its current CLI/app configuration and separate Claude/Codex provider presets; unsupported surface/preset combinations are refused, never converted. Uses the same project/team catalog. Installation and credentials are not checked. executionRoutes names the existing tools for a surface: never turn a single launch into a team automatically. Preserve explicit user choices and the current button/selection block.',
+    inputSchema:{type:'object',properties:{agent:{type:'string',enum:['codex','claude','hermes','agy']},surface:{type:'string',enum:['internal','orca-floating','orca-worktree','cmux','iterm','terminal','powershell','wsl','app']},hermesVariant:{type:'string',enum:['default','claude','codex']}},additionalProperties:false},
+  },
+  {
     name: "agentstoz_use_start_workroom_session",
-    description: "Start a Codex, Claude, Hermes, or agy Workroom session in the registered project's main workspace (or target=ops). Any agent may start any agent. instruction (optional, up to 24,000 UTF-8 bytes) is passed as the CLI's launch prompt (instruction.via=launch-prompt), or typed once into a reused session (via=input, up to 4,000 bytes); delivered means AgentsToZ handed it to the CLI, not that the CLI accepted it, so wait and read the session. A leading ! is refused because some CLIs run it as a shell command; a leading / runs that CLI's slash command, so use one only when the user asked. foreground=false does not bring the app forward. reuse=true returns the newest running session of the same agent in that project other than your own (reused=true) instead of starting one. Keep a requestId only to retry the same call: a retry returns to the session it first used and never delivers twice; if that session has ended the outcome is unknown (AGENTSTOZ_USE_WORKROOM_REUSE_OUTCOME_UNKNOWN), so check it instead of retrying. A setup, trust, profile, or login screen may appear first: wait, read view=screen and answer it with send_workroom_keys.",
+    description: "Only after the user has chosen Workroom, start a Codex, Claude, Hermes, or agy session in the registered project's main workspace (or target=ops). Any agent may start any agent. instruction (optional, up to 24,000 UTF-8 bytes) is passed as the CLI's launch prompt (instruction.via=launch-prompt), or typed once into a reused session (via=input, up to 4,000 bytes); delivered means AgentsToZ handed it to the CLI, not that the CLI accepted it, so wait and read the session. A leading ! is refused because some CLIs run it as a shell command; a leading / runs that CLI's slash command, so use one only when the user asked. foreground=false does not bring the app forward. reuse=true returns the newest running session of the same agent in that project other than your own (reused=true) instead of starting one. Keep a requestId only to retry the same call: a retry returns to the session it first used and never delivers twice; if that session has ended the outcome is unknown (AGENTSTOZ_USE_WORKROOM_REUSE_OUTCOME_UNKNOWN), so check it instead of retrying. A setup, trust, profile, or login screen may appear first: wait, read view=screen and answer it with send_workroom_keys.",
     inputSchema: {
       type: "object",
       properties: {
         ...surfaceTargetProperties,
         agent: { type: "string", enum: ["codex", "claude", "hermes", "agy"] },
+        surface:{type:'string',enum:['internal'],description:'Explicitly selected Workroom. Omit an undecided location to receive a nonexecuting surface question; the tool name alone is not a selection.'},
+        hermesVariant:{type:'string',enum:['default','claude','codex'],description:'Hermes only: choose the current CLI configuration (default), Hermes/Claude, or Hermes/Codex. When undecided omit it to receive a nonexecuting question. Reuse must match this exact configuration.'},
         accountId: {type:'string',minLength:8,maxLength:64,description:'Codex/Claude only: opaque ID from list_workroom_accounts; omission uses the project selected account.'},
         requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{8,160}$" },
         missionId: { type: "string", minLength: 8, maxLength: 200 },
@@ -282,7 +299,7 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
         foreground: { type: "boolean", description: "Default true: bring AgentsToZ forward on the new Workroom." },
         reuse: { type: "boolean", description: "Continue the newest running session of this agent in the project instead of starting." },
       },
-      required: ["agent", "requestId"],
+      required: ["requestId"],
       oneOf: surfaceTargetChoice,
       additionalProperties: false,
     },
@@ -345,6 +362,73 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
       oneOf: surfaceTargetChoice,
       additionalProperties: false,
     },
+  },
+  {
+    name: 'agentstoz_use_create_team',
+    description: "팀 작전: lead a joint operation from any Workroom. Starts 1-6 members, each another Codex, Claude, Hermes or agy Workroom in its own new git worktree and branch (team/<id>/<member>) cut from the HEAD of the checkout you lead from (your own linked worktree when that is where your Workroom runs, else the primary), with a host-written brief (goal, its task, the other members, rules: stay in its worktree, commit on its branch, never merge or push, report with agentstoz_use_report_team_task). model picks that CLI's model (Claude --model, Codex -m, Hermes -m with optional provider such as anthropic or openai-codex, agy --model); omit it for the CLI default. effort pins that member's reasoning effort (low, medium or high) for its whole session; omit it for 자동, where this Mac's 에포트 자동 decides from the member's task as for any Workroom (agy takes none: its effort is part of the model name, e.g. gemini-4-argon-high). Commit your own changes first: tracked uncommitted changes refuse the team (WORKROOM_TEAM_SOURCE_DIRTY). Give members disjoint files. You stay the leader: wait, review each branch diff, merge into your checkout, verify, then close. A retry with the same requestId returns the same team and never starts members again; a member that failed to start stays failed. A requestId whose team the ledger has already dropped is refused (WORKROOM_TEAM_REQUEST_ID_RETIRED) rather than starting a second team.",
+    inputSchema: {type: 'object', properties: {
+      portId: {type: 'string', minLength: 1, maxLength: 128},
+      requestId: {type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$'},
+      title: {type: 'string', minLength: 1, maxLength: 240},
+      goal: {type: 'string', minLength: 1, maxLength: 6000, description: 'The whole objective, shared with every member.'},
+      members: {type: 'array', minItems: 1, maxItems: 6, items: {type: 'object', properties: {
+        agent: {type: 'string', enum: ['codex', 'claude', 'hermes', 'agy']},
+        hermesVariant:{type:'string',enum:['default','claude','codex'],description:'Fresh Hermes only: explicitly choose its current settings (default), or the shared Hermes Claude/Codex provider preset. Presets require an internal Workroom. Do not combine with model/provider or sessionId. An explicit model, with an optional Hermes provider, also settles the configuration.'},
+        task: {type: 'string', minLength: 1, maxLength: 4000, description: 'This member\'s own task: what to change, which files are its own, how to verify.'},
+        name: {type: 'string', pattern: '^[a-z][a-z0-9-]{0,23}$', description: 'Optional short slug for the branch; default m<n>-<agent>.'},
+        model: {type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,79}$'},
+        provider: {type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,79}$', description: 'Hermes only, with model.'},
+        effort: {type: 'string', enum: ['low', 'medium', 'high'], description: 'Pin this member\'s effort; omit for 자동. Not for agy.'},
+        role: {type: 'string', enum: ['worker', 'reviewer'], description: 'reviewer = read-only: it waits for the workers\' reports, reads each branch diff (with no workers, the scope its task names in your checkout\'s history) and reports findings; it never edits or commits. Default worker. Put the review scope and criteria in its task.'},
+        accountId: {type: 'string', pattern: '^(host-default|acct_[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$', description: 'Codex or Claude only: start this member with one of this Mac\'s registered CLI accounts, as listed by agentstoz_use_list_workroom_accounts. It selects that profile for this launch alone and changes no global login or project binding. Omit it for the account the host already uses. Not with sessionId (an open session keeps its own).'},
+        bypassPermissions: {type: 'boolean', description: 'true starts this member\'s CLI without its approval prompts (Claude --permission-mode bypassPermissions, Codex --dangerously-bypass-approvals-and-sandbox, Hermes --yolo, agy --dangerously-skip-permissions). Omit it, or false, for the ordinary approval mode; only an explicit true turns it on. This Mac\'s own request only. Not with sessionId.'},
+        surface: {type: 'string', enum: ['internal', 'orca-floating', 'orca-worktree', 'cmux', 'iterm', 'terminal', 'powershell', 'wsl', 'app'], description: 'Explicitly selected location for each fresh member, using the project-opening catalog. internal means Workroom. Omission returns a question before anything starts. Another surface is started through this Mac\'s own launcher and is never replaced by a Workroom: missing connections wait as awaiting-connection; unobservable launches report awaiting-manual-join or awaiting-ack. Not with sessionId.'},
+        launchOptions: {type: 'object', description: 'Options of the selected surface, checked by the same strict catalog as the team builder. Claude bgMode and tmuxMode cannot both be true. Explicit false is retained. reuse-or-new is accepted only when that surface/mode can reuse the same member checkout. appMode is agent-specific (Codex new/reopen; Hermes open/reopen). An unsupported option is refused, never dropped. A launch may still require manual confirmation when no verified control adapter exists.',
+          properties: {bgMode: {type: 'boolean'}, tmuxMode: {type: 'boolean'}, reuse: {type: 'string', enum: ['new', 'reuse-or-new']}, appMode: {type: 'string', enum: ['new', 'reopen', 'open']}}, additionalProperties: false},
+        sessionId: {type: 'string', pattern: '^[A-Za-z0-9_-]{8,160}$', description: 'An open Workroom on this Mac joins instead of a new one (no new worktree; its brief is typed into that session once). agent must match it; no model, effort, accountId, bypassPermissions, surface or launchOptions (it keeps its own). Judged by that session\'s checkout root, not the folder it was registered in: a worker must run in its own linked worktree of this repository and works on that branch, while a session in the primary or your checkout joins only as a reviewer. One checkout holds one worker, no two members share a branch, and a session still on an open team must have that team closed first. Ask from the Workroom that leads — without it this Mac cannot tell your own session from a member\'s. Close never ends, removes or deletes its session, checkout or branch. Refused before anything starts: WORKROOM_TEAM_ATTACH_REFUSED.'},
+      }, required: ['task'], additionalProperties: false}},
+    }, required: ['portId', 'requestId', 'title', 'goal'], additionalProperties: false},
+  },
+  {
+    name: 'agentstoz_use_read_team',
+    description: "Read one team (teamId) or a project's recent teams (portId): each member's state (starting, working, reported, blocked, failed, exited = its Workroom ended without reporting, unknown = it belongs to an earlier run of the app and cannot be observed any more, closed), live Workroom session (running/exited/missing), report, branch, worktree path and Git summary against the base commit (commits, files, insertions, deletions, and merged = already in the HEAD of the checkout the team was cut from, which is where you merge). Read-only. Read member output through agentstoz_use_team_member with teamId/memberId; a Workroom member may also use read_workroom_session with its sessionId. External waiting/manual states are not verified work.",
+    inputSchema: {type: 'object', properties: {teamId: {type: 'string', pattern: '^team_[0-9a-f]{12}$'}, portId: {type: 'string', minLength: 1, maxLength: 128}},
+      oneOf: [{required: ['teamId']}, {required: ['portId']}], additionalProperties: false},
+  },
+  {
+    name: 'agentstoz_use_wait_team',
+    description: "Wait up to timeoutMs (1000-50000, default 45000) for a new settle event (until=any, default) or for every member to settle (until=all). Settled = reported done, blocked, failed, closed, unknown, or its Workroom exited. Pass the settledCursor returned by your last team view as afterCursor: it belongs to that view and other readers cannot move it. A cursor from another host run returns the current view immediately. The legacy afterSettled count remains supported but cannot distinguish different readers with the same count; prefer afterCursor. Without either cursor it waits from now. Returns the team view (with settled and settledCursor) and timedOut. A settled member is not verified work: read its report, its branch diff and its session.",
+    inputSchema: {type: 'object', properties: {teamId: {type: 'string', pattern: '^team_[0-9a-f]{12}$'}, timeoutMs: {type: 'integer', minimum: 1000, maximum: 50000}, until: {type: 'string', enum: ['any', 'all']}, afterSettled: {type: 'integer', minimum: 0, maximum: 6}, afterCursor: {type: 'string', pattern: '^[0-9a-f]{8}\\.(0|[1-9][0-9]{0,8})$', maxLength: 18}},
+      required: ['teamId'], additionalProperties: false},
+  },
+  {
+    name:'agentstoz_use_team_member',
+    description:'Read, send one explicit follow-up instruction to, or reveal a member of a team, through its actual selected surface. Names teamId/memberId, never a native handle. read returns bounded output, an opaque cursor to pass back unchanged, and agentVerified evidence; reading an unverified agent does not verify its identity or completion. A Workroom cursor is bound to its session: an exact resumeFrom continuation starts reading the new output from its beginning; an unrelated session cursor is refused. Legacy numeric cursors count in the current session only. send requires a fresh requestId for a new instruction; retry the identical requestId/text after uncertainty, never generate a new ID to replay it. Uncertain earlier delivery, missing connection or manual-only app refuses automatic input. reveal opens only the bound member. A Workroom result may return its sessionId for the UI to open. Use the same operation from any locally connected MCP client; remote permissions do not expand.',
+    inputSchema:{type:'object',properties:{teamId:{type:'string',pattern:'^team_[0-9a-f]{12}$'},memberId:{type:'string',pattern:'^m[1-6]$'},
+      operation:{type:'string',enum:['read','send','reveal']},requestId:{type:'string',minLength:8,maxLength:128},
+      cursor:{type:'string',maxLength:512},limit:{type:'integer',minimum:1,maximum:8000},text:{type:'string',minLength:1,maxLength:20000}},
+      required:['teamId','memberId','operation'],additionalProperties:false},
+  },
+  {
+    name: 'agentstoz_use_report_team_task',
+    description: "Team member only: report your task to the leader once, from your own member Workroom. status done with a summary of what changed, your commits, the checks you ran and their real results, and remaining risks; or blocked with the question the leader must answer. Never type into the leader's Workroom instead. A later report replaces an earlier one. A member running on an external surface (Orca, cmux, a terminal, a desktop app) has no Workroom the host can recognise, so its report is refused unless the leader sends manual: true, which records it as the leader's own transcription — never as that AI's verified report.",
+    inputSchema: {type: 'object', properties: {teamId: {type: 'string', pattern: '^team_[0-9a-f]{12}$'}, memberId: {type: 'string', pattern: '^m[1-6]$'},
+      status: {type: 'string', enum: ['done', 'blocked']}, summary: {type: 'string', minLength: 1, maxLength: 8000},
+      manual: {type: 'boolean', enum: [true], description: 'Leader only, for an external-surface member: what you read on that screen, recorded with a manual provenance. Never use it for a Workroom member or to speak for an AI you did not read.'}},
+      required: ['teamId', 'memberId', 'status', 'summary'], additionalProperties: false},
+  },
+  {
+    name: 'agentstoz_use_confirm_team_member',
+    description: "Leader only, for a member on an external surface this Mac cannot read back (awaiting-manual-join, awaiting-ack): record only what you actually observed on that member’s bound screen. started = you saw that member running in its own window; delivered = you saw its brief arrive there. It records a manual provenance and leaves the member working; it is not a report and claims nothing about the work — a result still needs agentstoz_use_report_team_task with manual: true. A Workroom member is refused, because the host observes those itself.",
+    inputSchema: {type: 'object', properties: {teamId: {type: 'string', pattern: '^team_[0-9a-f]{12}$'}, memberId: {type: 'string', pattern: '^m[1-6]$'},
+      confirm: {type: 'string', enum: ['started', 'delivered']}},
+      required: ['teamId', 'memberId', 'confirm'], additionalProperties: false},
+  },
+  {
+    name: 'agentstoz_use_close_team',
+    description: "Leader only, after merging: end only the team's recorded member Workrooms or their verified resumeFrom continuations, remove each clean internal member worktree, and (default) delete with git branch -d the member branches already merged into the HEAD of the checkout the team was cut from — the one you merge in, your own linked worktree included. Another Workroom still running in a member checkout keeps that session, checkout and branch, and leaves the team active until it is closed by its owner. A dirty worktree and an unmerged branch are kept and reported, never forced; nothing is pushed. Every member is tried: failed cleanup reports kept-error and its own error, and closing again can finish it. A member that joined from an open session (sessionId) is reported kept: its session, checkout and branch were never the team's.",
+    inputSchema: {type: 'object', properties: {teamId: {type: 'string', pattern: '^team_[0-9a-f]{12}$'}, deleteMergedBranches: {type: 'boolean'}},
+      required: ['teamId'], additionalProperties: false},
   },
   {
     name: "agentstoz_use_close_workroom_session",
@@ -421,18 +505,19 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
   },
   {
     name: "agentstoz_use_open_code_app",
-    description: "Open a registered project in the Codex, Claude, or Hermes desktop app, or launch the Antigravity app (agy: launch only, it cannot open the project — projectApplied=false). Default Codex behavior reopens an existing conversation without sending a message; mode=new opens a new Codex conversation. task (optional, natural language up to 24,000 UTF-8 bytes, no leading !) hands a request to the app surface: Codex is asked to open a new conversation with it prefilled but NOT sent (taskApplied=prefilled — Codex does not confirm it, so the user checks it and presses send); a task too long for the Codex link (about 900 Korean characters) is not prefilled (taskApplied=false, taskReason=too-large); Claude, Hermes and Antigravity apps cannot receive it (taskApplied=false with taskNote), so tell the user or use a Workroom instead. Orca surfaces refuse task, and task cannot be combined with mode=prepare or mode=reopen. For an explicitly requested first Codex conversation, use mode=prepare: it reopens an existing project conversation, or creates one and sends a fixed no-tools connection-test message. This is not a Workroom session. Codex requires a verified registration of the existing folder on this host; projectApplied=true also requires chat membership and runtime cwd proof. A selected unsent draft may return projectApplied=false with projectRegistered=true. Report registration/preparation errors as incomplete; never create a projectless fallback chat to claim success.",
+    description: "Open a registered project in the Codex, Claude, or Hermes desktop app, or launch the Antigravity app (agy: launch only, it cannot open the project — projectApplied=false). Default Codex behavior reopens an existing conversation without sending a message; mode=new opens a new Codex conversation. task (optional, natural language up to 24,000 UTF-8 bytes, no leading !) hands a request to the app surface: Codex is asked to open a new conversation with it prefilled but NOT sent (taskApplied=prefilled — Codex does not confirm it, so the user checks it and presses send); a task too long for the Codex link (about 900 Korean characters) is not prefilled (taskApplied=false, taskReason=too-large); Claude, Hermes and Antigravity apps cannot receive it (taskApplied=false with taskNote), so report that the task was not delivered. Changing to a Workroom requires the user to choose that location. Orca surfaces refuse task, and task cannot be combined with mode=prepare or mode=reopen. For an explicitly requested first Codex conversation, use mode=prepare: it reopens an existing project conversation, or creates one and sends a fixed no-tools connection-test message. This is not a Workroom session. Codex requires a verified registration of the existing folder on this host; projectApplied=true also requires chat membership and runtime cwd proof. A selected unsent draft may return projectApplied=false with projectRegistered=true. Report registration/preparation errors as incomplete; never create a projectless fallback chat to claim success.",
     inputSchema: {
       type: "object",
       properties: {
         ...surfaceTargetProperties,
         agent: { type: "string", enum: ["codex", "claude", "hermes", "agy"], description: "agy with surface=app only launches Antigravity.app; it cannot open the project (projectApplied=false). Use an Orca surface to run agy in the project." },
-        surface: {type: 'string', enum: ['app', 'orca-floating', 'orca-worktree'], description: 'Defaults to the desktop app. Orca reuses the existing terminal launcher and may fall back to floating.'},
+        surface: {type: 'string', enum: ['app', 'orca-floating', 'orca-worktree'], description: 'Explicitly selected desktop app or Orca location. Omission returns a nonexecuting question. Report any Orca fallback warning without claiming an exact launch.'},
+        hermesVariant:{type:'string',enum:['default'],description:'Hermes only: explicit confirmation to use this CLI/app\'s current settings. This route cannot pin Claude/Codex presets; it never substitutes another location.'},
         bypass: {type: 'boolean', description: 'Only after an explicit user request. Not supported by Codex/Hermes/Antigravity desktop apps; warnings are returned.'},
         mode: { type: "string", enum: ["reopen", "prepare", "new"], description: "Codex only. reopen (default without task) reopens the latest project conversation; new opens a new one (default with task); prepare may send the fixed first connection-test message, use only when requested." },
         task: { type: "string", description: "Optional request for the desktop app, up to 24,000 UTF-8 bytes, no control characters, no leading !. Codex: asked to prefill a new conversation, not sent and not confirmed (too long for the link → taskApplied=false, too-large). Other apps: not delivered (taskApplied=false). Not allowed with an Orca surface." },
       },
-      required: ["agent"],
+      required: [],
       oneOf: surfaceTargetChoice,
       additionalProperties: false,
     },
@@ -501,11 +586,55 @@ export function resolveAgentsToZUseMcpEndpoint(env: Record<string, string | unde
   return url.toString();
 }
 
+/** Some clients do not enforce additionalProperties:false. Never drop a requested launch option or hide it behind a question. */
+function assertMcpLaunchKeys(toolName: unknown, raw: unknown): void {
+  if (!['agentstoz_use_start_workroom_session','agentstoz_use_open_code_app','agentstoz_use_create_team'].includes(String(toolName))) return;
+  const definition=AGENTSTOZ_USE_MCP_TOOLS.find(tool=>tool.name===toolName)!;
+  const check=(value:unknown,properties:Record<string,unknown>)=>{
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('실행 선택은 객체여야 합니다.');
+    const unknown=Object.keys(value).filter(key=>!Object.hasOwn(properties,key));
+    if(unknown.length) throw new Error(`이 실행 경로에서 지원하지 않는 필드입니다: ${unknown.slice(0,8).join(', ')}. 선택을 바꾸거나 버리지 않았습니다.`);
+  };
+  const properties=definition.inputSchema.properties as Record<string,unknown>;
+  if(raw===undefined)return;
+  check(raw,properties);
+  const members=(raw as Record<string,unknown>).members;
+  if(toolName==='agentstoz_use_create_team'&&Array.isArray(members)){
+    const memberProperties=(properties.members as {items:{properties:Record<string,unknown>}}).items.properties;
+    for(const member of members)check(member,memberProperties);
+  }
+}
+
+/** MCP aliases resolve through the same presets as the buttons; the host receives only its canonical member DTO. */
+function mcpTeamMembers(raw: unknown): unknown {
+  if (!Array.isArray(raw)) return raw;
+  return raw.map((member,index) => {
+    let canonical = member;
+    if (member && typeof member === 'object' && !Array.isArray(member)
+      && Object.prototype.hasOwnProperty.call(member, 'hermesVariant')) {
+      const {hermesVariant, ...fields} = member;
+      if (member.agent !== 'hermes' || Object.prototype.hasOwnProperty.call(member, 'sessionId')
+        || Object.prototype.hasOwnProperty.call(member, 'model') || Object.prototype.hasOwnProperty.call(member, 'provider')) {
+        throw new Error('hermesVariant는 새 Hermes 팀원의 model/provider 또는 sessionId 없이만 지정할 수 있습니다.');
+      }
+      if (hermesVariant !== 'default' && hermesVariant !== 'claude' && hermesVariant !== 'codex') {
+        throw new Error('Hermes 실행 구성은 default, claude, codex 중에서 골라 주세요.');
+      }
+      canonical = hermesVariant === 'default' ? fields : {...fields, ...hermesVariantModel(hermesVariant)};
+    }
+    // The omission preflight leaves malformed explicit choices to validation. Use the host/UI parser before
+    // touching the host, but preserve the explicit DTO markers and false options rather than applying defaults.
+    parseTeamMemberSelection(canonical,index);
+    return canonical;
+  });
+}
+
 export function agentsToZUseMcpActionForTool(
   toolName: unknown,
   rawArguments: unknown,
   controllerPortId: unknown,
 ): Record<string, unknown> {
+  assertMcpLaunchKeys(toolName,rawArguments);
   const controller = requiredId(controllerPortId, "AGENTSTOZ_CONTROLLER_PORT_ID");
   const args = rawArguments && typeof rawArguments === "object" && !Array.isArray(rawArguments)
     ? rawArguments as Record<string, unknown>
@@ -518,15 +647,19 @@ export function agentsToZUseMcpActionForTool(
   if (args.projectId !== undefined && args.portId === undefined) {
     throw new Error('Use the registered project ID as portId; projectId is not a supported argument.');
   }
+  const teamOps:Record<string,string>={agentstoz_use_create_team:'create',agentstoz_use_read_team:'read',agentstoz_use_wait_team:'wait',agentstoz_use_team_member:'member',agentstoz_use_report_team_task:'report',agentstoz_use_confirm_team_member:'confirm',agentstoz_use_close_team:'close'};
+  // 팀 작전 (src/workroomTeam.ts): the host parser checks every field again; unknown arguments are refused, not dropped.
+  if(typeof toolName==='string'&&teamOps[toolName])return {action:'workroom-team',controllerPortId:controller,team:{...args,
+    ...(teamOps[toolName]==='create'&&args.members!==undefined?{members:mcpTeamMembers(args.members)}:{}),op:teamOps[toolName]}};
   const sdkOps:Record<string,string>={agentstoz_use_status_sdk_project:'status',agentstoz_use_prepare_sdk_project:'prepare',agentstoz_use_recommend_sdk_project:'recommend'};
   if(typeof toolName==='string'&&sdkOps[toolName]){const definition=AGENTSTOZ_USE_MCP_TOOLS.find(t=>t.name===toolName)!;const properties=definition.inputSchema.properties as Record<string,unknown>;if(Object.keys(args).some(key=>!(key in properties)))throw Error('Use only the documented SDK arguments.');return {action:'sdk-project',controllerPortId:controller,portId:args.portId,sdkProject:{op:sdkOps[toolName],...(args.projectGoal?{projectGoal:args.projectGoal}:{})}};}
   const commonOps:Record<string,string>={agentstoz_use_read_cloud_common_memory_source:'read-cloud-source',agentstoz_use_recommend_common_memory_topics:'topic-candidates',agentstoz_use_list_common_memory_updates:'updates',agentstoz_use_prepare_common_memory_workroom:'prepare-workroom',agentstoz_use_inspect_project_memory_links:'project-links',agentstoz_use_manage_common_knowledge:'knowledge',agentstoz_use_preview_common_memory_migration:'migration-preview',agentstoz_use_execute_common_memory_migration:'migration-execute',agentstoz_use_status_common_memory_projects:'projects-status',agentstoz_use_list_common_memory_sources:'catalog',agentstoz_use_read_common_memory_source:'read-source',agentstoz_use_plan_common_memory_projects:'projects-plan',agentstoz_use_add_common_memory_project:'projects-add',agentstoz_use_get_common_memory_request_status:'operation-status',agentstoz_use_get_common_memory_project_add_status:'project-add-status',agentstoz_use_bind_project_common_memory:'bind-project',agentstoz_use_common_memory_history:'history',agentstoz_use_list_common_memories:'list',agentstoz_use_inspect_common_memory:'inspect',agentstoz_use_recommend_common_memories:'recommend',agentstoz_use_recall_common_memory:'recall',agentstoz_use_manage_common_memory:'manage',agentstoz_use_record_common_memory_application:'report'};
   const commonOp=typeof toolName==='string'?commonOps[toolName]:undefined;
-  if(commonOp){if(commonOp==='knowledge'&&['review-entry','review-entries','save-entry','import','prepare-project'].includes(String((args.request as any)?.operation)))throw new Error('AI changes must use propose-entry; accepting a common-knowledge candidate requires the user review surface.');const definition=[...AGENTSTOZ_USE_MCP_TOOLS,...LEGACY_COMMON_MEMORY_TOOLS].find(t=>t.name===toolName)!;const properties=definition.inputSchema.properties as Record<string,unknown>;if(Object.keys(args).some(key=>!(key in properties)))throw new Error('Use only the documented common memory arguments.');const commonMemory:Record<string,unknown>={...args,op:commonOp};const parsedCommon=parseAgentsToZUseCommonMemory(commonMemory);if(typeof parsedCommon.memoryId==='string')commonMemory.memoryId=parsedCommon.memoryId;return {action:'common-memory',controllerPortId:controller,...(commonOp==='bind-project'?{portId:args.portId}:{}),commonMemory};}
+  if(commonOp){if(commonOp==='knowledge'&&['review-entry','review-entries','save-entry','import','prepare-project'].includes(String((args.request as any)?.operation)))throw new Error('AI changes must use propose-entry; accepting a common-knowledge candidate requires the user review surface.');const definition=[...AGENTSTOZ_USE_MCP_TOOLS,...LEGACY_COMMON_MEMORY_TOOLS].find(t=>t.name===toolName)!;const properties=definition.inputSchema.properties as Record<string,unknown>;const unknown=Object.keys(args).filter(key=>!(key in properties));if(unknown.length)throw new Error(`Use only the documented common memory arguments (not ${unknown.slice(0,8).join(', ')}).${'request' in properties?' Put the operation and its fields inside request:{…}, e.g. {request:{operation:"read", groupId}}.':''}`);if(commonOp==='recall'&&args.groupId!==undefined&&args.task===undefined&&args.memoryId===undefined&&args.portId===undefined)throw new Error('recall by groupId is only the legacy goal form {groupId, task}. To load one common memory, call manage_common_knowledge with {request:{operation:"read", groupId}}; to recall what applies to a project, pass its memoryId or portId with query.');const commonMemory:Record<string,unknown>={...args,op:commonOp};const parsedCommon=parseAgentsToZUseCommonMemory(commonMemory);if(typeof parsedCommon.memoryId==='string')commonMemory.memoryId=parsedCommon.memoryId;return {action:'common-memory',controllerPortId:controller,...(commonOp==='bind-project'?{portId:args.portId}:{}),commonMemory};}
   if (args.target !== undefined) surfaceTarget(); // Never silently drop an unsupported target.
   // `task` too: a model that passes it to start_workroom_session instead of `instruction` would otherwise
   // start an empty session and report success.
-  if (surfaceAction !== 'open-code-app' && (args.surface !== undefined || args.mode !== undefined || args.bypass !== undefined || args.task !== undefined)) {
+  if (surfaceAction !== 'open-code-app' && (args.surface !== undefined && !(surfaceAction === 'start-workroom-session' && args.surface === 'internal') || args.mode !== undefined || args.bypass !== undefined || args.task !== undefined)) {
     throw new Error('App launch options are not supported by this action.');
   }
   if(toolName==='agentstoz_use_read_ai_label_job')return {action:'read-ai-label-job',controllerPortId:controller,aiLabelJob:{jobId:requiredId(args.jobId,'jobId'),...(args.page===undefined?{}:{page:args.page})}};
@@ -537,9 +670,9 @@ export function agentsToZUseMcpActionForTool(
   const metaMemoryAction = metaCommonMemoryMcpAction(toolName, args, controller);
   if (metaMemoryAction) return metaMemoryAction;
   if (toolName === "agentstoz_use_get_control_profile") return {action:"get-control-profile",controllerPortId:controller};
-  if (toolName === "agentstoz_use_recall_user_memory") {
+  if (toolName === "agentstoz_use_recall_user_memory" || toolName === "agentstoz_use_recall_user_profile") {
     if (Object.keys(args).some(key => !['portId', 'query'].includes(key))) throw new Error('Use only portId and query for user-memory recall.');
-    return { action: "recall-user-memory", controllerPortId: controller, portId: requiredId(args.portId, 'portId'), query: userMemoryQuery(args.query) };
+    return { action: toolName === "agentstoz_use_recall_user_profile" ? "recall-user-profile" : "recall-user-memory", controllerPortId: controller, portId: requiredId(args.portId, 'portId'), query: userMemoryQuery(args.query) };
   }
   if (toolName === "agentstoz_use_recall_control_context") return {action:"recall-control-context",controllerPortId:controller,query:controlProfileText(args.query,2000)};
   if (toolName === "agentstoz_use_list_control_memory_candidates") return {action:"list-control-memory-candidates",controllerPortId:controller};
@@ -641,17 +774,18 @@ export function agentsToZUseMcpActionForTool(
   if(toolName==='agentstoz_use_read_shared_shell')return {action:'read-shared-shell',controllerPortId:controller,...surfaceTarget(),sessionId:requiredId(args.sessionId,'sessionId'),...(args.after===undefined?{}:{after:args.after})};
   if(toolName==='agentstoz_use_send_shared_shell_command')return {action:'send-shared-shell-command',controllerPortId:controller,...surfaceTarget(),sessionId:requiredId(args.sessionId,'sessionId'),requestId:requiredId(args.requestId,'requestId'),command:args.command};
   if (toolName === "agentstoz_use_start_workroom_session") {
-    const agent = oneLine(args.agent);
+    const agent = args.agent;
     if (agent !== "codex" && agent !== "claude" && agent !== "hermes" && agent !== "agy") throw new Error("agent must be codex, claude, hermes, or agy.");
     return {
       action: "start-workroom-session", controllerPortId: controller,
       ...surfaceTarget(), agent,
       requestId: requiredId(args.requestId, "requestId"),
+      ...(args.hermesVariant!==undefined?{hermesVariant:args.hermesVariant}:{}),
       ...(args.instruction !== undefined ? { instruction: workroomInstructionText(args.instruction) } : {}),
       ...optionalFlag(args, "foreground"),
       ...optionalFlag(args, "reuse"),
       ...(args.accountId !== undefined ? {accountId:requiredId(args.accountId,'accountId')} : {}),
-      ...(oneLine(args.missionId) ? { missionId: requiredId(args.missionId, "missionId") } : {}),
+      ...(args.missionId !== undefined ? { missionId: requiredId(args.missionId, "missionId") } : {}),
     };
   }
   if (toolName === "agentstoz_use_send_workroom_keys") {
@@ -715,13 +849,18 @@ export function agentsToZUseMcpActionForTool(
     return { action: "open-dashboard", controllerPortId: controller, ...surfaceTarget() };
   }
   if (toolName === "agentstoz_use_open_code_app") {
-    const agent = oneLine(args.agent);
+    const agent = args.agent;
+    if (typeof agent !== 'string' || !['codex','claude','hermes','agy'].includes(agent)) throw new Error('실행할 AI를 codex, claude, hermes, agy 중에서 골라 주세요.');
+    if (Object.prototype.hasOwnProperty.call(args,'hermesVariant') && (agent !== 'hermes' || args.hermesVariant !== 'default')) {
+      throw new Error('이 앱·Orca 경로는 Hermes의 현재 설정(default)만 지원합니다. 실행 위치를 바꾸지 않습니다.');
+    }
+    const {hermesVariant: _variant, ...launchArgs} = args;
     return {
       action: "open-code-app",
       controllerPortId: controller,
       ...surfaceTarget(),
       agent,
-      ...parseAgentsToZUseLaunchOptions({...args, agent}),
+      ...parseAgentsToZUseLaunchOptions({...launchArgs, agent}),
     };
   }
   if (toolName === "agentstoz_use_open_buzz_dev") {
@@ -768,6 +907,7 @@ export function agentsToZUseUnconfirmedOptions(action: Record<string, unknown>, 
     if (action.instruction !== undefined && instruction?.delivered !== true) unconfirmed.push("instruction");
     if (action.reuse !== undefined && typeof result.reused !== "boolean") unconfirmed.push("reuse");
     if (action.foreground !== undefined && result.foreground !== action.foreground) unconfirmed.push("foreground");
+    if (action.hermesVariant !== undefined && result.hermesVariant !== action.hermesVariant) unconfirmed.push('hermesVariant');
   }
   if (action.action === "read-workroom-session" && action.view !== undefined && result.view !== action.view
     && !(action.view === "screen" && result.screenUnavailable === true)) unconfirmed.push("view");
@@ -838,6 +978,12 @@ async function callLocalControl(
     error: "AgentsToZ returned a non-JSON response.",
   })) as Record<string, unknown>;
   if (!response.ok || result.success !== true || result.performed !== true) {
+    // 팀 작전 needs a host that knows the workroom-team action; an older app refuses it as an unknown action.
+    if (action.action === 'workroom-team' && result.code === 'AGENTSTOZ_USE_ACTION_NOT_ALLOWED') {
+      const error = new Error('The running AgentsToZ app is older than this MCP server and has no 팀 작전 (team) support. Update AgentsToZ; do not improvise worktrees with the shell.');
+      (error as Error & { data?: unknown }).data = { success: false, code: 'AGENTSTOZ_USE_HOST_OUTDATED', unconfirmed: ['workroom-team'], hostResult: result };
+      throw error;
+    }
     if (agentsToZUseHostRefusedNewForm(action, result)) {
       const error = new Error(`The running AgentsToZ app is older than this MCP server and does not accept ${String((action.commonMemory as Record<string, unknown>).op)} by long-term memory. Restart or update AgentsToZ; meanwhile use the groupId form.`);
       (error as Error & { data?: unknown }).data = { success: false, code: "AGENTSTOZ_USE_HOST_OUTDATED", unconfirmed: ["memoryId"], hostResult: result };
@@ -916,6 +1062,18 @@ export function agentsToZUseMcpTimeoutMs(action: Record<string, unknown>): numbe
   if (action.action === "wait-workroom-session") {
     return (typeof action.timeoutMs === "number" ? action.timeoutMs : WORKROOM_WAIT_LIMITS.timeoutMs.default) + WORKROOM_WAIT_CLIENT_MARGIN_MS;
   }
+  if (action.action === 'workroom-team') {
+    const team = action.team as {op?: string; timeoutMs?: unknown} | undefined;
+    // create starts up to six worktrees and Workrooms one after another; wait may take its whole bound.
+    if (team?.op === 'create') return 180_000;
+    if (team?.op === 'wait') return (typeof team.timeoutMs === 'number' ? team.timeoutMs : 45_000) + WORKROOM_WAIT_CLIENT_MARGIN_MS;
+    if (team?.op === 'close') return 120_000;
+    // A member's report is its only way to reach the leader; give it room even while the host is busy.
+    if (team?.op === 'report') return 60_000;
+    // A manual confirmation only writes the ledger; it never waits on a surface.
+    if (team?.op === 'confirm') return 30_000;
+    if (team?.op === 'member') return 60_000;
+  }
   if (action.action === "open-code-app" && action.agent === "codex" && action.mode === "prepare") return 150_000;
   if (action.action === 'open-code-app') return 120_000;
   if(action.action==='common-memory'&&(action.commonMemory as any)?.op==='projects-add')return 150_000;
@@ -966,6 +1124,14 @@ export async function handleAgentsToZUseMcpRequest(
       ? request.params as Record<string, unknown>
       : {};
     try {
+      assertMcpLaunchKeys(params.name,params.arguments);
+      if(params.name==='agentstoz_use_prepare_agent_launch'){
+        const result=prepareMcpAgentLaunch(params.arguments===undefined?{}:params.arguments,process.platform==='win32');
+        return rpcResult(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:false});
+      }
+      const choice=agentstozMcpAgentChoice(typeof params.name==='string'?params.name:'',params.arguments,process.platform==='win32');
+      if(choice)return rpcResult(id,{content:[{type:'text',text:JSON.stringify(choice)}],structuredContent:choice,isError:false});
+      if(params.name===WORKROOM_BROWSER_MCP_TOOL.name){const result=await callWorkroomBrowserAgent(params.arguments);return rpcResult(id,workroomBrowserMcpResult(result));}
       if(params.name===WORKROOM_THREAD_MCP_TOOL.name){const result=await callLocalWorkroomThread(params.arguments,env);return rpcResult(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:false});}
       if(params.name===WORKROOM_THREAD_READ_MCP_TOOL.name){const result=await callLocalWorkroomThread(params.arguments,env,true);return rpcResult(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:false});}
       if(isOpsRequestMcpTool(params.name)){
@@ -1016,6 +1182,7 @@ const MCP_CONCURRENT_READ_TOOLS = new Set([
   'agentstoz_use_list_projects', 'agentstoz_use_resolve_target', 'agentstoz_use_list_workspace_roots',
   'agentstoz_use_list_workroom_sessions', 'agentstoz_use_read_workroom_session',
   'agentstoz_use_wait_workroom_session', 'agentstoz_use_read_shared_shell',
+  'agentstoz_use_read_team', 'agentstoz_use_wait_team',
 ]);
 
 function isConcurrentMcpRead(request: JsonRpcRequest): boolean {

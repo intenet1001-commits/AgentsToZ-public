@@ -30,6 +30,8 @@
 	<string>$(AGENTSTOZ_TASK_PROTOCOL_VERSION)</string>
 	<key>AgentsToZAppGroup</key>
 	<string>group.$(AGENTSTOZ_APP_BUNDLE_ID)</string>
+	<key>AgentsToZScreenPushURL</key>
+	<string>$(AGENTSTOZ_SCREEN_PUSH_URL)</string>
 	<key>CFBundleURLTypes</key>
 	<array><dict><key>CFBundleURLSchemes</key><array><string>agentstoz-mobile</string></array><key>CFBundleURLName</key><string>AgentsToZ PKCE callback</string></dict><dict><key>CFBundleURLSchemes</key><array><string>agentstoz</string></array><key>CFBundleURLName</key><string>AgentsToZ phone connect link</string></dict></array>
 	<key>LSRequiresIPhoneOS</key>
@@ -45,6 +47,8 @@
 	<string>선택한 AgentsToZ OPS·워크룸에서 음성 입력과 실시간 대화에 마이크를 사용합니다.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Mac 앱의 연결 QR을 스캔합니다. 촬영한 영상을 저장하거나 전송하지 않습니다.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Mac 화면에 연결할 때마다 Face ID로 이번 연결을 승인합니다.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>선택한 Mac의 AgentsToZ와 같은 Wi-Fi에서 연결합니다.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -52,6 +56,8 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

@@ -18,6 +18,10 @@ export const GUIDE_CONTENT: Record<string, GuideEntry> = {
     title: '장기기억',
     body: 'AI가 프로젝트에서 한 작업과 결정을 적어 두는 노트예요. 다른 기기에서도 이어서 볼 수 있어요.',
   },
+  'tab-common-memory': {
+    title: '공통기억',
+    body: '여러 프로젝트가 함께 쓸 규칙·노하우를 주제별로 모아요. 장기기억에 연결하면 그 장기기억을 쓰는 프로젝트의 AI가 작업 전에 함께 읽어요.',
+  },
   'tab-what-i-said': {
     title: '내가 한 말',
     body: '내가 Claude·Codex에게 보낸 요청만 모아 둔 곳이에요. AI의 답변은 저장하지 않아요.',
@@ -74,11 +78,11 @@ export const GUIDE_CONTENT: Record<string, GuideEntry> = {
     body: '강제 재실행, 로그 보기, tmux/Claude 옵션 등 추가 액션이 들어 있어요.',
   },
   'btn-portal-push': {
-    title: '포털 Push',
+    title: '포털 올리기 (Push)',
     body: '내 북마크/폴더 즐겨찾기를 Supabase에 올려요.',
   },
   'btn-portal-pull': {
-    title: '포털 Pull',
+    title: '포털 받기 (Pull)',
     body: 'Supabase에서 내려받아 다른 기기와 동기화해요.',
   },
   'btn-portal-export': {
@@ -87,11 +91,11 @@ export const GUIDE_CONTENT: Record<string, GuideEntry> = {
   },
   'btn-export-ports': {
     title: '프로젝트 내보내기',
-    body: '내 포트 목록 전체를 JSON 파일로 저장해요. Supabase 없이 백업/복원 가능.',
+    body: '내 프로젝트 목록 전체를 JSON 파일로 저장해요. Supabase 없이 백업/복원 가능해요.',
   },
   'btn-import-ports': {
     title: '프로젝트 불러오기',
-    body: 'JSON 파일에서 포트 목록을 복원해요.',
+    body: 'JSON 파일에서 프로젝트 목록을 복원해요.',
   },
   'btn-portal-import': {
     title: '북마크 불러오기',
@@ -102,28 +106,28 @@ export const GUIDE_CONTENT: Record<string, GuideEntry> = {
     body: 'Supabase 연결 정보, 기기 이름, 동기화 옵션을 설정해요.',
   },
   'btn-supabase-push': {
-    title: '프로젝트 Push',
-    body: '내 포트 목록을 Supabase에 백업해요.',
+    title: '프로젝트 올리기 (Push)',
+    body: '내 프로젝트 목록을 Supabase에 백업해요.',
     tip: '저장 전에 자동으로 스냅샷이 만들어지니 안전해요.',
   },
   'btn-supabase-pull': {
-    title: '프로젝트 Pull',
-    body: '다른 기기에서 백업한 포트 목록을 가져와요.',
+    title: '프로젝트 받기 (Pull)',
+    body: '다른 기기에서 백업한 프로젝트 목록을 가져와요.',
   },
   'btn-history': {
     title: '히스토리',
-    body: '과거 Push 시점의 스냅샷으로 되돌릴 수 있어요.',
+    body: '과거 올리기(Push) 시점의 스냅샷으로 되돌릴 수 있어요.',
   },
   'btn-settings': {
     title: '설정',
     body: '기기 이름, Supabase 연결 정보, 동기화 옵션을 설정해요.',
   },
   'btn-bypass': {
-    title: 'Bypass 권한 토글',
+    title: '승인 없이 실행 (권한 우회)',
     body: 'Claude Code 자동 승인 모드를 켜고 끕니다. 켜면 매번 묻지 않아요.',
   },
   'btn-setup-wizard': {
-    title: '세팅 마법사',
+    title: '초기 설정 마법사',
     body: '처음 쓸 때 한 번만 — Supabase URL/Key를 안내에 따라 설정해요.',
   },
   'btn-copy-log': {
@@ -430,7 +434,7 @@ export function getGuideEntry(key: string): GuideEntry {
   return (
     GUIDE_CONTENT[key] ?? {
       title: '아직 설명이 준비되지 않았어요',
-      body: '이 요소에 대한 가이드는 아직 준비 중입니다.',
+      body: '이 요소에 대한 가이드는 아직 준비하고 있어요.',
     }
   );
 }

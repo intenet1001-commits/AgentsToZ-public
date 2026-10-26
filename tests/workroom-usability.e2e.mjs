@@ -4,6 +4,7 @@
  * is accessed. These Chromium checks do not claim native macOS verification.
  */
 import assert from 'node:assert/strict';
+import {workroomBackgroundResponse} from './fixtures/workroom-runtime-background-mocks.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 const origin=process.env.WORKROOM_USABILITY_ORIGIN||'http://127.0.0.1:9000';
@@ -67,6 +68,8 @@ async function fixture(options={}){
     if(!url.pathname.startsWith('/api/'))return route.continue();
     const body=request.postDataJSON();state.requests.push({path:url.pathname,...body});
     const respond=async(json,status=200)=>{try{return await route.fulfill({json,status});}catch(error){if(String(error).includes('object has been collected'))return;throw error;}};
+    const background=workroomBackgroundResponse(url.pathname,request.method(),body);
+    if(background)return respond(background);
     if(url.pathname==='/api/agent-runtime/targets')return respond({protocolVersion:'agentstoz-tasks-v2',targets:projects,complete:true});
     // The Codex footer reads the weekly allowance from the Mac's account endpoint.
     if(url.pathname==='/api/ai-usage/codex')return respond({rateLimits:{primary:{used_percent:40,window_minutes:10080,resets_at:1790813143},secondary:null},source:'live-app-server'});
@@ -1330,7 +1333,8 @@ try{
     await until(async()=>/이 앱에서는 완료 대화 상태를 확인할 수 없습니다/.test(await completion.innerText()),'Older host must be identified as unsupported');
     state.completion={targetId:'foreign-target',completedTurns:999};
     await panel.getByLabel('터미널 프로젝트').selectOption(B);
-    await until(()=>state.requests.some(r=>r.observationTargetId===B),'Changed scope must be requested');await sleep(150);
+    await until(()=>state.requests.some(r=>r.observationTargetId===B),'Changed scope must be requested');
+    await until(async()=>/이 앱에서는 완료 대화 상태를 확인할 수 없습니다/.test(await completion.innerText()),'Invalid completion status must settle as unsupported in the changed scope');
     assert.match(await completion.innerText(),/이 앱에서는 완료 대화 상태를 확인할 수 없습니다/);
     assert.doesNotMatch(await completion.innerText(),/999/);
   },{jobs:[]});

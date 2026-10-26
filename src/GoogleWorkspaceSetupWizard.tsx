@@ -11,7 +11,7 @@ export function GoogleWorkspaceSetupWizard({projectId='',onClose}:{projectId?:st
   const [error,setError]=useState('');
   useEffect(()=>{dialog.current?.showModal();},[]);
   const titles=['쓸 Google 프로젝트 고르기','자주 쓰는 API 준비하기','Google 동의 화면 준비하기','데스크톱 앱 JSON 받기','앱으로 돌아와 연결 확인'];
-  const link=(path:string,label:string)=>{const url=googleSetupConsoleUrl(path,project);return url?<a className="helpdesk-button" href={url} target="_blank" rel="noreferrer" onClick={e=>{e.preventDefault();void openPreferredBrowser(url).catch(()=>setError('Google 공식 화면을 열지 못했습니다.'));}}>{label}</a>:<span>{label} · 프로젝트 ID를 확인하세요</span>;};
+  const link=(path:string,label:string)=>{const url=googleSetupConsoleUrl(path,project);return url?<a className="helpdesk-button" href={url} target="_blank" rel="noreferrer" onClick={e=>{e.preventDefault();void openPreferredBrowser(url).catch(()=>setError('Google 공식 화면을 열지 못했습니다. 기본 브라우저 설정을 확인하거나 아래 단계에서 다시 열어 주세요.'));}}>{label}</a>:<span>{label} · 프로젝트 ID를 확인하세요</span>;};
   return <dialog ref={dialog} aria-label="Google 설정 따라하기" onCancel={onClose} style={{width:'min(900px,95vw)',maxHeight:'90vh',overflow:'auto',background:'var(--bg)',color:'var(--text-primary)',border:'1px solid var(--line)',borderRadius:16,padding:24}}>
     <div className="flex items-center justify-between gap-3"><h2>Google 설정 따라하기</h2><button type="button" className="helpdesk-button" onClick={onClose}>앱으로 돌아가기</button></div>
     <p>같은 Google 계정과 프로젝트를 계속 사용하세요. 이미 준비한 것은 그대로 이용합니다.</p>

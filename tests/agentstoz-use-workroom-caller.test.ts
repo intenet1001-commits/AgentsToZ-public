@@ -52,7 +52,11 @@ async function fixture() {
   const prepared = await fetch(`${baseUrl}/api/control-profile/prepare`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).then(r => r.json()) as any;
   expect(prepared.profile).toMatchObject({state: 'ready', backend: 'control-folder'});
   const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const r = await handleAgentsToZUseMcpRequest({id: 1, method: 'tools/call', params: {name: `agentstoz_use_${name}`, arguments: args}}, {...env, AGENTSTOZ_USE_ENDPOINT: `${baseUrl}/api/agentstoz-use/action`}) as any;
+    // These journeys explicitly choose a Workroom or desktop app; undecided-choice gates are tested separately.
+    const chosen = name === 'start_workroom_session' || name === 'open_code_app'
+      ? {surface: name === 'start_workroom_session' ? 'internal' : 'app', ...(args.agent === 'hermes' ? {hermesVariant: 'default'} : {}), ...args}
+      : args;
+    const r = await handleAgentsToZUseMcpRequest({id: 1, method: 'tools/call', params: {name: `agentstoz_use_${name}`, arguments: chosen}}, {...env, AGENTSTOZ_USE_ENDPOINT: `${baseUrl}/api/agentstoz-use/action`}) as any;
     if (r.result.structuredContent) return r.result.structuredContent as any;
     const error = JSON.parse(r.result.content[0].text);
     return error.data ?? error;
@@ -88,7 +92,7 @@ test('B2: an agy OPS orchestrator never reuses, keys, instructs or closes its ow
   await f.until(self, 'READY:agy');
   const results = await f.runInside(self, 'self-check', [
     {name: 'list_workroom_sessions', args: {target: 'ops'}},
-    {name: 'start_workroom_session', args: {target: 'ops', agent: 'agy', reuse: true, requestId: 'caller_reuse_1234', instruction: 'SELF-CHECK', foreground: false}},
+    {name: 'start_workroom_session', args: {target: 'ops', agent: 'agy', surface: 'internal', reuse: true, requestId: 'caller_reuse_1234', instruction: 'SELF-CHECK', foreground: false}},
     {name: 'read_workroom_session', args: {target: 'ops', sessionId: self}},
     {name: 'send_workroom_keys', args: {target: 'ops', sessionId: self, requestId: 'caller_keys_1234', keys: ['enter']}},
     {name: 'send_workroom_instruction', args: {target: 'ops', sessionId: self, requestId: 'caller_send_1234', instruction: 'SELF-SEND'}},

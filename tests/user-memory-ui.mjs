@@ -17,13 +17,13 @@ for(const [name,engine] of [['chromium',chromium],['webkit',webkit]]){
  try{
  for(const language of ['ko','en']){
   const context=await browser.newContext({viewport:{width:1100,height:950},serviceWorkers:'block'});
-  const unexpected=[],errors=[],calls=[];let outcomeMode='complete',outcomeCalls=0,releaseLate;
+  const unexpected=[],errors=[],calls=[];let outcomeMode='complete',outcomeCalls=0,releaseLate,entriesBroken=false;
   try{
    const html=`<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module">
 import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;
 import React from ${JSON.stringify(react)};import ReactDOM from ${JSON.stringify(reactDom)};import '/src/index.css';
 const {WhatISaidPanel}=await import('/src/WhatISaidPanel.tsx');const {ControlProfilePanel}=await import('/src/ControlProfilePanel.tsx');
-function App(){const [visible,setVisible]=React.useState(false),[ops,setOps]=React.useState(false);return React.createElement(React.Fragment,null,React.createElement('button',{onClick:()=>setVisible(v=>!v)},'Toggle history'),React.createElement('button',{onClick:()=>setOps(true)},'Open OPS'),React.createElement(WhatISaidPanel,{projects:[${JSON.stringify(project)}],language:${JSON.stringify(language)},visible}),ops&&React.createElement(ControlProfilePanel,{onClose:()=>setOps(false),onOpenWork:()=>{},onOpenProject:()=>{},onOpenUserMemory:()=>{setOps(false);setVisible(true);}}));}
+function App(){const [visible,setVisible]=React.useState(false),[ops,setOps]=React.useState(false);return React.createElement(React.Fragment,null,React.createElement('button',{onClick:()=>setVisible(v=>!v)},'Toggle history'),React.createElement('button',{onClick:()=>setOps(true)},'Open OPS'),React.createElement(WhatISaidPanel,{projects:[${JSON.stringify(project)}],language:${JSON.stringify(language)},visible}),ops&&React.createElement(React.StrictMode,null,React.createElement(ControlProfilePanel,{onClose:()=>setOps(false),onOpenWork:()=>{},onOpenProject:()=>{},onOpenUserMemory:()=>{setOps(false);setVisible(true);}})));}
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));</script>`;
    await context.route('**/*',async route=>{
     const req=route.request(),url=new URL(req.url());
@@ -41,6 +41,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
      if(op==='launch-preference')return respond({success:true,preference:null});
      if(op==='tester-results')return respond({success:true,overview:{entries:[],complete:true,hostName:'시험 Mac',checkedAt:at(0),total:0,nextOffset:null}});
      if(op==='device-memory')return respond({success:true,devices:[],entries:[]});
+     if(op==='entries'){if(entriesBroken)return route.fulfill({status:503,json:{success:false,error:'fixture entries unavailable'}});return respond({success:true,memory:{ready:true,revision:null,total:0,entries:[]}});}
     }
     const path=url.pathname.replace('/api/what-i-said/','');
     if(path==='global-status')return respond({configured:true,enabled:true,retentionDays:90,analysisAllowed:false,updatedAt:at(0)});
@@ -82,11 +83,30 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
    if(releaseLate){releaseLate();await page.waitForTimeout(50);}
    assert.ok(!(await page.content()).includes('STALE RESULT'));
    if(language==='ko'){
-    await page.getByRole('button',{name:'Open OPS',exact:true}).click();
-    const panel=page.getByTestId('control-profile-panel');await panel.getByText('운영 기억 연결됨',{exact:true}).waitFor();
+    // The panel runs under StrictMode here as in main.tsx, so its mount effects run twice (review 2026-10-25).
+    const openOps=page.getByRole('button',{name:'Open OPS',exact:true});
+    await openOps.focus();await openOps.press('Enter');
+    const panel=page.getByTestId('control-profile-panel');await panel.waitFor();
+    // Escape closes it and focus returns to the opener — the second StrictMode run must not record the panel itself.
+    await page.waitForFunction(()=>document.querySelector('[data-testid="control-profile-panel"]')?.contains(document.activeElement));
+    await page.keyboard.press('Escape');await panel.waitFor({state:'hidden'});
+    await page.waitForFunction(()=>document.activeElement?.textContent==='Open OPS',null,{timeout:5000}).catch(()=>{throw new Error('Escape returns focus to the opener under StrictMode');});
+    // A failed saved-memory read says to press 「상태 다시 확인」, and that press really reads the list again.
+    entriesBroken=true;await openOps.click();
+    // A local-only (app-data) memory is not shared with other Macs, so the headline does not say 연결됨 (UX audit 2026-10-25).
+    await panel.getByText('운영 기억 준비됨 · 이 Mac 전용',{exact:true}).waitFor();
+    const savedMemory=panel.getByTestId('control-profile-saved-memory');
+    await savedMemory.getByRole('alert').filter({hasText:'저장된 운영 기억을 읽지 못했습니다. 「상태 다시 확인」을 누르세요.'}).waitFor();
     assert.ok((await panel.innerText()).includes('내 지시는 「내가 한 말」에서'));
-    await panel.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
+    entriesBroken=false;await panel.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
     await panel.getByRole('button',{name:'상태 다시 확인',exact:true}).waitFor({state:'visible'});
+    await savedMemory.getByText('아직 저장된 운영 기억이 없습니다.',{exact:false}).waitFor();
+    assert.equal(await savedMemory.getByRole('alert').count(),0);
+    // A local-only memory saves an AI's memory request at once, so nothing under the status tells the user to save a
+    // candidate here (review 2026-10-25: that hint moved to the top of the panel with the candidates block).
+    assert.match(await panel.getByTestId('control-profile-pending').innerText(),/후보 없이 바로 저장합니다/);
+    assert.doesNotMatch(await panel.getByTestId('control-profile-pending').innerText(),/여기서 저장합니다/);
+    assert.match(await savedMemory.innerText(),/기억해”라고 요청하면 여기에 보입니다/);
     assert.ok(!(await panel.innerText()).includes('TypeError'));
     await panel.getByTestId('control-profile-memory-map').getByText('내 지시',{exact:true}).waitFor();
     await panel.getByRole('button',{name:'내 지시·결과 기록 보기',exact:true}).click();
@@ -102,3 +122,5 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
  }
  }finally{await browser.close();}
 }
+// The same normal/persona user-memory check also covers the separate, user-confirmed profile panel.
+await import('./user-profile-panel.e2e.mjs');

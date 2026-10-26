@@ -1,0 +1,72 @@
+.workroom-browser-frame{min-width:0;min-height:0;color:var(--ink);font-size:13px}
+.workroom-browser-tabs{display:inline-flex;align-self:flex-start;flex:none;gap:2px;padding:3px;background:var(--sunken);border:1px solid var(--line);border-radius:8px;margin:4px 0 6px;max-width:100%;min-width:0}
+.workroom-browser-tabs>.ai-terminal-btn{flex-shrink:0;border-color:transparent;background:transparent;color:var(--ink-2);padding:4px 10px;border-radius:5px;font-size:12px;line-height:18px}
+.workroom-browser-preserved{align-self:center;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px;color:var(--ink-2);font-size:12px;line-height:18px}
+.workroom-browser-tabs>.ai-terminal-btn[aria-pressed=true]{background:var(--raised);border-color:var(--line);color:var(--ink);box-shadow:0 1px 2px rgb(var(--surface-shade-rgb) / .08)}
+.workroom-browser-tabs>.ai-terminal-btn:focus-visible,.workroom-browser-panel :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.workroom-browser-panes{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0;min-height:0}
+.workroom-browser-frame[data-layout=split] .workroom-browser-panes{grid-template-columns:minmax(min(160px,25%),var(--workroom-browser-split,50%)) 8px minmax(min(220px,30%),1fr);grid-template-rows:minmax(0,1fr);gap:0 4px}
+.workroom-browser-terminal{min-width:0;min-height:0}
+.workroom-browser-frame[data-layout=split] .workroom-browser-terminal{grid-column:1;grid-row:1}
+.workroom-browser-frame[data-layout=split] .workroom-browser-divider{grid-column:2;grid-row:1}
+.workroom-browser-frame[data-layout=split] .workroom-browser-column{grid-column:3;grid-row:1}
+.workroom-browser-column{display:flex;flex-direction:column;min-width:0;min-height:calc(var(--workroom-browser-min-height,200px) + 8px)}
+.workroom-browser-column>.workroom-browser-panel{flex:1 1 0;min-height:var(--workroom-browser-min-height,200px)}
+.workroom-browser-frame[data-layout=split] .workroom-browser-column[data-height-custom]{align-self:start;height:calc(var(--workroom-browser-height) + 8px)}
+.workroom-browser-panel{min-width:0;min-height:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.workroom-browser-panel[hidden]{display:none}
+.workroom-browser-panel p{overflow-wrap:anywhere}
+.workroom-browser-panel pre{white-space:pre-wrap;overflow-wrap:anywhere}
+/* The terminal stays mounted and its own stack owns all available height. */
+.workroom-browser-frame[data-layout=terminal],.workroom-browser-frame[data-layout=terminal] .workroom-browser-panes,.workroom-browser-frame[data-layout=terminal] .workroom-browser-terminal{display:contents}
+/* The 50px view switcher and the 8px parent gap share the terminal-only laptop height budget. */
+:is(.workroom-popout,.workroom-session-dialog-content) .workroom-browser-frame[data-layout=terminal] .ai-terminal-surface{--workroom-terminal-floor:clamp(220px,calc(36dvh - 58px),328px)}
+:is(.workroom-popout,.workroom-session-dialog-content) .workroom-browser-terminal>*{flex-shrink:0}
+.workroom-browser-frame:not([data-layout=terminal]){display:flex;flex-direction:column;flex:1 0 auto;min-height:var(--workroom-browser-min-frame-height,0px)}
+.workroom-browser-frame:not([data-layout=terminal]) .workroom-browser-panes{flex:1 0 auto;height:clamp(400px,70dvh,1000px);min-height:calc(var(--workroom-browser-min-height,200px) + 8px)}
+:is(.workroom-popout,.workroom-session-dialog-content) :is(.ai-terminal-workspace,.ai-terminal-body):has(.workroom-browser-frame:not([data-layout=terminal])){flex:1 1 0;min-height:0}
+:is(.workroom-popout,.workroom-session-dialog-content) .workroom-browser-frame:not([data-layout=terminal]){flex:1 1 0}
+:is(.workroom-popout,.workroom-session-dialog-content) .workroom-browser-frame:not([data-layout=terminal]) .workroom-browser-panes{flex:1 1 0;height:auto}
+.workroom-browser-frame:not([data-layout=terminal]) .workroom-browser-terminal{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.workroom-browser-frame[data-layout=split] .workroom-browser-terminal{overflow-y:auto;overscroll-behavior:contain}
+.ai-terminal-panel .workroom-browser-frame[data-layout=split] .workroom-browser-terminal .ai-terminal-surface{flex:1 1 0;height:auto;min-height:160px}
+/* A full page keeps the composer close, without allowing it to displace the native view. */
+.workroom-browser-frame[data-layout=browser] .workroom-browser-panes{display:flex;flex-direction:column;gap:6px}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-panes{min-height:calc(var(--workroom-browser-min-height,200px) + 134px)}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-column{order:-1;flex:1 1 0}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-column[data-height-custom]{flex:0 0 calc(var(--workroom-browser-height) + 8px)}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-panes:has(.workroom-browser-column[data-height-custom])>.workroom-browser-terminal{flex:1 1 0;max-height:none}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-terminal{position:relative;flex:0 1 auto;max-height:min(30%,200px);overflow:hidden auto}
+.ai-terminal-panel .workroom-browser-frame[data-layout=browser] .workroom-browser-terminal .ai-terminal-surface{position:absolute;inset:0;min-height:0;height:auto;visibility:hidden;pointer-events:none}
+.workroom-browser-frame[data-layout=browser] .workroom-browser-terminal>:is(.ai-terminal-slash-bar,.ai-terminal-slash-pad,.ai-terminal-keys,.workroom-shared-shell,.workroom-session-footer){display:none}
+.owned-workroom-browser{display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0}
+.workroom-browser-tab-row{flex:none;height:32px;min-width:0;background:var(--bg)}
+.workroom-browser-stage{position:relative;flex:1 1 0;min-height:0;min-width:0;padding:2px;background:var(--sunken);border-top:1px solid var(--line-2);outline:2px solid transparent;outline-offset:-2px;transition:outline-color 160ms ease}
+.workroom-browser-stage[data-ai]{outline-color:var(--violet)}
+.owned-workroom-browser-slot{position:relative;width:100%;height:100%;min-width:0;min-height:0;margin:0;overflow:hidden;background:var(--sunken);border:0;border-radius:0}
+.owned-workroom-browser-slot>.wb-empty{height:100%;overflow:auto;overscroll-behavior:contain;padding:16px}
+.owned-workroom-browser-slot>:is(.wb-state-card,.wb-page-error){height:100%;max-height:100%;overflow:auto}
+.workroom-browser-page-message{flex:none;min-height:24px;height:24px;display:flex;align-items:center;gap:6px;min-width:0;padding:0 8px;background:var(--raised);border-top:1px solid var(--line);color:var(--ink-2);font-size:12px}
+.workroom-browser-page-message>span,.workroom-browser-page-message>div{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.workroom-browser-page-message[data-connected]{height:0;min-height:0;padding:0;border:0;overflow:hidden}
+.workroom-browser-page-message [role=alert]{color:var(--danger)}
+.workroom-browser-bottom{flex:none;min-height:0;max-height:48%;overflow:visible}
+.workroom-browser-bottom:empty{display:none}
+.workroom-browser-bottom>.wb-empty{overflow:auto;max-height:160px;padding:12px}
+.workroom-browser-panel[data-source=chrome]>.workroom-browser-bottom{flex:1 1 0;max-height:none;overflow:auto}
+.workroom-browser-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+/* The native page hides while this shield owns a split drag; its cached placeholder stays underneath. */
+.workroom-browser-divider{position:relative;min-height:0;border-radius:4px;cursor:col-resize;touch-action:none}
+.workroom-browser-divider::after{content:'';position:absolute;top:50%;left:50%;width:2px;height:48px;border-radius:2px;background:var(--line-2);transform:translate(-50%,-50%)}
+.workroom-browser-divider:hover::after,.workroom-browser-divider:focus-visible::after{background:var(--accent)}
+.workroom-browser-divider:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.workroom-browser-height-divider{position:relative;flex:none;height:8px;min-height:8px;cursor:row-resize;touch-action:none;border-radius:4px}
+.workroom-browser-height-divider::after{content:'';position:absolute;top:50%;left:50%;width:48px;height:2px;border-radius:2px;background:var(--line-2);transform:translate(-50%,-50%)}
+.workroom-browser-height-divider:hover::after,.workroom-browser-height-divider:focus-visible::after{background:var(--accent)}
+.workroom-browser-height-divider:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.workroom-browser-height-divider[aria-disabled=true]{cursor:default}
+.workroom-browser-drag-shield{position:fixed;inset:0;z-index:2147483646;cursor:col-resize}
+.workroom-browser-drag-shield[data-axis=y]{cursor:row-resize}
+@media(max-width:640px){.workroom-browser-frame[data-layout=split] .workroom-browser-panes{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(100px,.4fr) minmax(0,1fr);gap:6px}.workroom-browser-divider{display:none}.workroom-browser-frame[data-layout=split] .workroom-browser-column{grid-column:1;grid-row:2}}
+@media(max-width:640px),(pointer:coarse){.workroom-browser-panel input{font-size:16px}.workroom-browser-panel button{min-height:44px}.workroom-browser-page-message{height:auto;min-height:44px}.workroom-browser-tab-row{height:44px}}
+@media(prefers-reduced-motion:reduce){.workroom-browser-stage{transition:none}}

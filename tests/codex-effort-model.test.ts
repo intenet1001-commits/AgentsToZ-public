@@ -111,3 +111,14 @@ test('a config walk that exhausts its bound cannot prove the selected model', ()
   expect(codexEffortModel({env: {HOME}, cwd}, files)).toEqual({ok: false, why: 'unreadable'});
   expect(files.reads.length).toBeLessThanOrEqual(34);
 });
+
+test('a model the app passes with -m (a team member) is the one proven; config models no longer count, other config checks still do', () => {
+  const user = `${CODEX_HOME}/config.toml`;
+  const chosen = (files: Record<string, string>, launchModel: string, args: string[] = []) =>
+    codexEffortModel({env: {HOME}, cwd: CWD, args, launchModel, managedConfigPath: '/fixture/etc/managed_config.toml'}, memory(files));
+  expect(chosen({[user]: 'model = "my-local-llama"\n'}, 'gpt-6.1-sol')).toEqual({ok: true, model: 'gpt-6.1-sol', allowed: ['low', 'medium', 'high']});
+  expect(chosen({}, 'gpt-next-preview')).toEqual({ok: false, why: 'model'});
+  expect(chosen({[user]: 'model_provider = "ollama"\n'}, 'gpt-6.1-sol')).toEqual({ok: false, why: 'provider'});
+  expect(chosen({[user]: 'profile = "work"\n'}, 'gpt-6.1-sol')).toEqual({ok: false, why: 'profile'});
+  expect(chosen({}, 'gpt-6.1-sol', ['-m', 'gpt-5.5'])).toEqual({ok: false, why: 'launch-args'});
+});

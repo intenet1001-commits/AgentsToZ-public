@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { MACOS_BASE_APP_ENTITLEMENTS, MACOS_BASE_API_SIDECAR_ENTITLEMENTS, MACOS_BASE_CODE, MACOS_BASE_EMPTY_ENTITLEMENTS, MACOS_BASE_REQUIRED_FILES, inspectMacOSBaseBundle, planMacOSBaseAppSigning, signMacOSBaseApp, verifyMacOSBaseSignatureInspection } from '../src/macOSBaseAppSigning';
+import { MACOS_BASE_APP_ENTITLEMENTS, MACOS_BASE_API_SIDECAR_ENTITLEMENTS, MACOS_BASE_CODE, MACOS_BASE_EMPTY_ENTITLEMENTS, MACOS_BASE_REQUIRED_FILES, MACOS_BASE_SCREEN_HELPER, inspectMacOSBaseBundle, planMacOSBaseAppSigning, signMacOSBaseApp, verifyMacOSBaseSignatureInspection, type MacOSBaseSigningCommand } from '../src/macOSBaseAppSigning';
 import { executeMacOSBaseAppPipelineForTest, macOSBaseBuildEnvironment, planMacOSBaseBuild, type MacOSBasePipelineDependencies } from '../src/macOSBaseAppPipeline';
 import type { MacOSRuntimeProductionBuildIdentityResolution } from '../src/macOSRuntimeProductionCanary';
 import { planSidecarBuild } from '../build-sidecar';
@@ -19,22 +19,29 @@ function fixture() {
   for (const path of MACOS_BASE_REQUIRED_FILES) { mkdirSync(dirname(join(app, path)), { recursive: true }); writeFileSync(join(app, path), 'fixture'); }
   const header = Buffer.alloc(8); header.writeUInt32LE(0xfeedfacf); header.writeUInt32LE(0x0100000c, 4);
   for (const code of MACOS_BASE_CODE) writeFileSync(join(app, code.path), header);
+  writeFileSync(join(app, MACOS_BASE_SCREEN_HELPER.executablePath), header);
   const entitlements = { app: join(root, 'app.plist'), apiSidecar: join(root, 'api.plist'), empty: join(root, 'empty.plist') };
   writeFileSync(entitlements.app, MACOS_BASE_APP_ENTITLEMENTS);
   writeFileSync(entitlements.apiSidecar, MACOS_BASE_API_SIDECAR_ENTITLEMENTS);
   writeFileSync(entitlements.empty, MACOS_BASE_EMPTY_ENTITLEMENTS);
   return { root, app, entitlements };
 }
-function inspection(app: string, code: typeof MACOS_BASE_CODE[number]) {
-  const entitlements = code.path.endsWith('/agentstoz-api-sidecar')
+function inspection(app: string, code: MacOSBaseSigningCommand['code']) {
+  const screen = code.path === MACOS_BASE_SCREEN_HELPER.path;
+  const team = screen ? MACOS_BASE_SCREEN_HELPER.teamIdentifier : identity().identity!.teamIdentifier;
+  const entitlements = screen ? `<plist version="1.0"><dict>
+    <key>com.apple.application-identifier</key><string>${team}.${code.identifier}</string>
+    <key>com.apple.developer.team-identifier</key><string>${team}</string>
+    <key>keychain-access-groups</key><array><string>${team}.${code.identifier}</string></array>
+    </dict></plist>` : code.path.endsWith('/agentstoz-api-sidecar')
     ? '<plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>'
     : code.path === 'Contents/MacOS/app' ? MACOS_BASE_APP_ENTITLEMENTS : '<plist version="1.0"><dict/></plist>';
-  return [`Executable=${join(app, code.path)}`, `Identifier=${code.identifier}`,
-    `Format=${code.path === 'Contents/MacOS/app' ? 'app bundle with ' : ''}Mach-O thin (arm64)`,
+  return [`Executable=${join(app, screen ? MACOS_BASE_SCREEN_HELPER.executablePath : code.path)}`, `Identifier=${code.identifier}`,
+    `Format=${screen || code.path === 'Contents/MacOS/app' ? 'app bundle with ' : ''}Mach-O thin (arm64)`,
     'CodeDirectory v=20500 size=800 flags=0x10000(runtime) hashes=1+7 location=embedded',
     'Hash type=sha256 size=32', 'CandidateCDHashFull sha256=' + 'a'.repeat(64), 'Signature size=9000',
-    'Authority=' + identity().identity!.commonName, 'Authority=Developer ID Certification Authority', 'Authority=Apple Root CA',
-    'TeamIdentifier=Q1W2E3R4T5', 'Timestamp=Sep 7, 2026 at 12:00:00', entitlements].join('\n');
+    'Authority=' + (screen ? `Developer ID Application: Example (${team})` : identity().identity!.commonName), 'Authority=Developer ID Certification Authority', 'Authority=Apple Root CA',
+    `TeamIdentifier=${team}`, 'Timestamp=Sep 7, 2026 at 12:00:00', entitlements].join('\n');
 }
 
 test('base build cannot inherit production pins, signing secrets or auto-loaded local settings', () => {
@@ -58,8 +65,8 @@ test('base build cannot inherit production pins, signing secrets or auto-loaded 
   expect(() => planSidecarBuild({ kind: 'macos-developer-id-base' }, { platform: 'darwin', arch: 'x64' })).toThrow();
 });
 
-test('base bundle inventory rejects helpers, unexpected resources, symlinks, missing code and wrong architecture', () => {
-  for (const invalid of ['helper', 'secret', 'symlink', 'missing', 'architecture']) {
+test('base bundle inventory accepts only the fixed Screen helper and rejects unexpected code or unsafe files', () => {
+  for (const invalid of ['helper', 'screen-extra-code', 'screen-missing', 'screen-architecture', 'secret', 'symlink', 'missing', 'architecture']) {
     const { app, root } = fixture();
     expect(inspectMacOSBaseBundle(app)).toHaveLength(MACOS_BASE_REQUIRED_FILES.length);
     if (invalid === 'helper') { mkdirSync(join(app, 'Contents/Library')); writeFileSync(join(app, 'Contents/Library/runtime-broker'), 'bad'); }
@@ -68,6 +75,9 @@ test('base bundle inventory rejects helpers, unexpected resources, symlinks, mis
     if (invalid === 'symlink') { unlinkSync(code); symlinkSync(join(root, 'empty.plist'), code); }
     if (invalid === 'missing') unlinkSync(code);
     if (invalid === 'architecture') writeFileSync(code, Buffer.alloc(8));
+    if (invalid === 'screen-extra-code') writeFileSync(join(app, MACOS_BASE_SCREEN_HELPER.path, 'Contents/MacOS/extra'), 'bad');
+    if (invalid === 'screen-missing') unlinkSync(join(app, MACOS_BASE_SCREEN_HELPER.path, 'Contents/embedded.provisionprofile'));
+    if (invalid === 'screen-architecture') writeFileSync(join(app, MACOS_BASE_SCREEN_HELPER.executablePath), Buffer.alloc(8));
     expect(() => inspectMacOSBaseBundle(app)).toThrow();
   }
 });
@@ -79,12 +89,31 @@ test('base signing is inside-out, never ad-hoc, and requires actual canary evide
     .toEqual([...MACOS_BASE_CODE.slice(0, -1).map(c => join(app, c.path)), app]);
   for (const c of plan.filter(c => c.operation === 'sign')) { expect(c.args).not.toContain('--deep'); expect(c.args).toContain('--timestamp'); }
   const signs = plan.filter(c => c.operation === 'sign');
+  expect(plan.filter(c => c.code.path === MACOS_BASE_SCREEN_HELPER.path).map(c => c.operation)).toEqual(['verify', 'inspect']);
+  expect(plan.findIndex(c => c.code.path === MACOS_BASE_SCREEN_HELPER.path)).toBeLessThan(plan.findIndex(c => c.operation === 'sign' && c.code.path === 'Contents/MacOS/app'));
+  expect(signs.some(c => c.entitlements === 'preservedScreen')).toBeFalse();
   expect(signs.filter(c => c.entitlements === 'apiSidecar')).toHaveLength(1);
   expect(signs.find(c => c.entitlements === 'apiSidecar')!.args).toContain(entitlements.apiSidecar);
   expect(signs.filter(c => c.entitlements === 'empty').every(c => c.args.includes(entitlements.empty))).toBeTrue();
   expect(() => planMacOSBaseAppSigning({ ...identity(), identity: null }, app, entitlements)).toThrow();
   expect(() => planMacOSBaseAppSigning(identity(), app, { ...entitlements, empty: join(app, 'entitlements') })).toThrow();
   expect(() => planMacOSBaseAppSigning(identity(), app + '/../AgentsToZ_byCS.app', entitlements)).toThrow();
+});
+
+test('Screen signature inspection preserves only the exact Developer ID identity and keychain grants', () => {
+  const { app } = fixture();
+  const valid = inspection(app, MACOS_BASE_SCREEN_HELPER);
+  expect(() => verifyMacOSBaseSignatureInspection(valid, app, MACOS_BASE_SCREEN_HELPER, identity())).not.toThrow();
+  for (const invalid of [
+    valid.replace('Identifier=com.intenet.agentstozbycs.screen', 'Identifier=com.intenet.other'),
+    valid.replaceAll('DA8QKAQ2C9', 'Q1W2E3R4T5'),
+    valid.replace('Timestamp=Sep 7, 2026 at 12:00:00', 'Timestamp=none'),
+    valid.replace('<key>keychain-access-groups</key>', '<key>foreign-keychain-access-groups</key>'),
+    valid.replace('</array>', '<string>DA8QKAQ2C9.other</string></array>'),
+    valid.replace('</dict>', '<key>com.apple.security.get-task-allow</key><true/></dict>'),
+    valid.replace('</dict>', '<key>com.apple.developer.team-identifier</key><string>DA8QKAQ2C9</string></dict>'),
+    valid.replace('0x10000(runtime)', '0x2(adhoc)'),
+  ]) expect(() => verifyMacOSBaseSignatureInspection(invalid, app, MACOS_BASE_SCREEN_HELPER, identity())).toThrow();
 });
 
 test('inspection requires API-sidecar JIT, GUI audio input, and empty entitlements on other helpers', () => {
@@ -127,12 +156,30 @@ test('verified signing creates a digest and remains explicitly unnotarized and u
     const command = plan[index++]!;
     return { exitCode: 0, stdout: command.operation === 'inspect' ? inspection(app, command.code) : '', stderr: '', timedOut: false, outputTruncated: false };
   } });
-  expect(result).toMatchObject({ mode: 'developer-id-base', nestedCodeSigned: 5, enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false });
+  expect(result).toMatchObject({ mode: 'developer-id-base', nestedCodeSigned: 5, screenHelperPreserved: true, enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false });
   expect(result.bundleDigest).toMatch(/^[0-9a-f]{64}$/);
 });
 
+test('the base receipt digest covers every file in the preserved Screen helper', async () => {
+  const { app, entitlements } = fixture();
+  const sign = async () => {
+    const plan = planMacOSBaseAppSigning(identity(), app, entitlements); let index = 0;
+    return signMacOSBaseApp(identity(), app, entitlements, { runCodesign: async () => {
+      const command = plan[index++]!;
+      return { exitCode: 0, stdout: command.operation === 'inspect' ? inspection(app, command.code) : '', stderr: '', timedOut: false, outputTruncated: false };
+    } });
+  };
+  let prior = (await sign()).bundleDigest;
+  for (const path of MACOS_BASE_REQUIRED_FILES.filter(path => path.startsWith(MACOS_BASE_SCREEN_HELPER.path + '/'))) {
+    const full = join(app, path);
+    writeFileSync(full, Buffer.concat([readFileSync(full), Buffer.from('changed fixture bytes')]));
+    const next = (await sign()).bundleDigest;
+    expect(next).not.toBe(prior); prior = next;
+  }
+});
+
 test('base pipeline rejects unpublished/private/moving sources before issuing a release receipt', async () => {
-  for (const fault of ['unpublished', 'private', 'changed-before-sign', 'changed-after-sign', 'sign-failed', 'stale-app', 'canary', 'icons-failed', 'none']) {
+  for (const fault of ['unpublished', 'private', 'changed-before-sign', 'changed-after-sign', 'sign-failed', 'stale-app', 'canary', 'icons-failed', 'screen-failed', 'invalid-version', 'none']) {
     const { root } = fixture(); let sourceChecks = 0; let signCalls = 0; let commands = 0;
     const source = { headSha: 'a'.repeat(40), remoteHeadSha: 'a'.repeat(40), currentBranch: 'main', remote: 'origin', remoteUrl: 'https://github.com/intenet1001-commits/AgentsToZ-public.git', defaultBranch: 'main', unpublishedOverride: false };
     const dependencies: MacOSBasePipelineDependencies = {
@@ -142,7 +189,9 @@ test('base pipeline rejects unpublished/private/moving sources before issuing a 
       }; },
       resolveIdentity: async () => fault === 'canary' ? { ...identity(), identity: null } : identity(), createTarget: () => root,
       buildSidecars: async () => {}, stageIcons: async () => { if (fault === 'icons-failed') throw Error('icon staging failed'); }, run: async () => { commands++; }, assertFresh: () => { if (fault === 'stale-app') throw Error('stale'); }, now: () => 100,
-      sign: async () => { signCalls++; if (fault === 'sign-failed') throw Error('sign failed'); return { schemaVersion: 1, mode: 'developer-id-base', result: 'signed-awaiting-notarization', appSigned: true, nestedCodeSigned: 5, bundleDigest: 'a'.repeat(64), enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false }; },
+      readVersion: () => fault === 'invalid-version' ? '../unsafe' : '1516.0.0',
+      stageScreenHelper: async (app, version, resolved) => { expect(commands).toBe(2); expect(app).toBe(join(root, 'release/bundle/macos/AgentsToZ_byCS.app')); expect(version).toBe('1516.0.0'); expect(resolved).toEqual(identity()); if (fault === 'screen-failed') throw Error('Screen staging failed'); },
+      sign: async () => { signCalls++; if (fault === 'sign-failed') throw Error('sign failed'); return { schemaVersion: 1, mode: 'developer-id-base', result: 'signed-awaiting-notarization', appSigned: true, nestedCodeSigned: 5, screenHelperPreserved: true, bundleDigest: 'a'.repeat(64), enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false }; },
     };
     if (fault === 'none') {
       const receipt = await executeMacOSBaseAppPipelineForTest(root, dependencies);
@@ -153,7 +202,7 @@ test('base pipeline rejects unpublished/private/moving sources before issuing a 
       await expect(executeMacOSBaseAppPipelineForTest(root, dependencies)).rejects.toThrow();
       expect(() => readFileSync(join(root, 'developer-id-base.receipt.json'))).toThrow();
       if (['unpublished', 'private', 'canary', 'icons-failed'].includes(fault)) expect(commands).toBe(0);
-      if (fault === 'changed-before-sign' || fault === 'stale-app') expect(signCalls).toBe(0);
+      if (['changed-before-sign', 'stale-app', 'screen-failed', 'invalid-version'].includes(fault)) expect(signCalls).toBe(0);
     }
   }
 });

@@ -18,6 +18,7 @@ import {NativeVoiceLauncher} from './NativeVoiceLauncher';
 import {OPEN_VOICE_DOCK_EVENT} from './voiceDockWindowState';
 import {localVoiceTransport} from './voiceSessionClient';
 import {ControlProfilePanel, requestControlProfile} from './ControlProfilePanel';
+import {requestUserProfile} from './userProfileClient';
 import {CommonMemoryProjectsPanel} from './CommonMemoryProjectsPanel';
 import {CommonMemoryPanel} from './CommonMemoryPanel';
 import {opsWorkroomAgentFrom} from './opsWorkroomAgent';
@@ -65,7 +66,8 @@ import { startPortLogPolling } from './portLogPolling';
 import { useDocumentVisible } from './useDocumentVisible';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import {projectFocusSection, startAgentsToZUseNavigationPolling} from './agentstozUseNavigation';
-import {localAiTerminalTransport} from './aiTerminalClient';
+import {localAiTerminalStart, localAiTerminalTransport} from './aiTerminalClient';
+import type {HermesVariant} from './hermesVariants';
 import {openWorkroomPopout} from './workroomPopoutClient';
 import {advanceAiLabelBaselines, aiLabelPatchesFrom, cancelAiLabelJob, createAiLabelJob, readAiLabelJobUpdates, startAiLabelOpsSession} from './aiLabelJobClient';
 import {workroomPopoutTitle} from './workroomPopout';
@@ -115,6 +117,7 @@ const whatISaidModule = preloadableModule(() => import('./WhatISaidPanel'));
 const PortalManager = lazy(portalManagerModule.factory);
 const PortalMemoryDirectory = lazy(memoryDirectoryModule.factory);
 const WhatISaidPanel = lazy(whatISaidModule.factory);
+const UserProfilePanel = lazy(() => import('./UserProfilePanel').then(module=>({default:module.UserProfilePanel})));
 const IDLE_PRELOADED_TABS = [portalManagerModule.preload, workroomModule.preload, memoryDirectoryModule.preload, whatISaidModule.preload];
 const AiUsagePanel = lazy(() => import('./components/AiUsagePanel').then(({ AiUsagePanel }) => ({ default: AiUsagePanel })));
 const WorkspaceLeaseRecoveryDialog = lazy(() => import('./components/WorkspaceLeaseRecoveryDialog').then(({ WorkspaceLeaseRecoveryDialog }) => ({ default: WorkspaceLeaseRecoveryDialog })));
@@ -602,7 +605,7 @@ const API = {
     if (isTauri()) {
       return invoke<PortInfo[]>('import_ports_from_file', { filePath });
     } else {
-      throw new Error('파일 불러오기는 Tauri 앱에서만 사용 가능합니다');
+      throw new Error('파일 불러오기는 데스크톱 앱에서만 사용할 수 있습니다');
     }
   },
 
@@ -2624,15 +2627,19 @@ function App() {
   const activeTabRef = useRef<TopLevelTab>(activeTab);
   // A jump from a long-term memory opens the common memory tab on its group; any other tab change drops it.
   const [commonMemoryFocusMemoryId, setCommonMemoryFocusMemoryId] = useState<string | undefined>();
+  const [commonMemoryFocusGroupId, setCommonMemoryFocusGroupId] = useState<string | undefined>();
   const setActiveTab = useCallback((nextTab: TopLevelTab) => {
     activeTabRef.current = nextTab;
     if (nextTab === 'terminal') setSessionDirectoryVisited(true);
     setCommonMemoryFocusMemoryId(undefined);
+    setCommonMemoryFocusGroupId(undefined);
     setActiveTabState(nextTab);
   }, []);
-  const openCommonMemory = useCallback((memoryId?: string) => {
+  const openCommonMemory = useCallback((memoryId?: string, groupId?: string) => {
     setActiveTab('common-memory');
     setCommonMemoryFocusMemoryId(typeof memoryId === 'string' && memoryId ? memoryId : undefined);
+    // A group picked on the project card opens exactly that group; the panel prefers it over the memory.
+    setCommonMemoryFocusGroupId(typeof groupId === 'string' && groupId ? groupId : undefined);
   }, [setActiveTab]);
   const lastUseWorkroomNavigation = useRef('');
   useEffect(() => {
@@ -3592,6 +3599,7 @@ function App() {
   const [newProjectKind, setNewProjectKind] = useState<'project' | 'control-center'>('project');
   const [controlCenterSetupBusy, setControlCenterSetupBusy] = useState(false);
   const [showControlProfile, setShowControlProfile] = useState(false);
+  const [showPersonalProfile,setShowPersonalProfile] = useState(false);
   const [showAgentDialogue,setShowAgentDialogue]=useState(false);
   const [opsBinding, setOpsBinding] = useState<{loaded: boolean; projectId: string | null}>({loaded:false, projectId:null});
   /**
@@ -10427,7 +10435,9 @@ function App() {
     if(!direct)showToast('인계문을 복사했습니다. CLI 준비 상태를 확인한 뒤 워크룸에 붙여넣으세요.','success');
   };
 
-  const openProjectTerminal = async (project: PortInfo, agent: AiTerminalAgent, worktree?: Pick<WorktreeInfo, 'path' | 'is_main'>, prompt?: string, propagateError = false) => {
+  // `variant`: 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts). Only this Mac's panels pass it, and it
+  // reaches the sidecar beside the request — never inside the Workroom DTO.
+  const openProjectTerminal = async (project: PortInfo, agent: AiTerminalAgent, worktree?: Pick<WorktreeInfo, 'path' | 'is_main'>, prompt?: string, propagateError = false, variant?: HermesVariant) => {
     try {
       const inventory = await new AgentRuntimeClient().targets();
       const registered = worktree && ports.find(p => (p.worktreePath || p.folderPath) === worktree.path);
@@ -10446,8 +10456,8 @@ function App() {
       if (candidates.length !== 1) throw new Error('실행할 프로젝트·워크트리를 확인하지 못했습니다. 원격 새로고침 후 다시 시도하세요.');
       const targetId = candidates[0]!.targetId;
       const session = prompt
-        ? (await localAiTerminalTransport({operation: 'start', requestId: crypto.randomUUID(), targetId, agent, cols: 100, rows: 28, prompt, bypassPermissions})).session
-        : await projectWorkroomLauncher.current!.open(targetId, agent, bypassPermissions);
+        ? (await localAiTerminalStart({operation: 'start', requestId: crypto.randomUUID(), targetId, agent, cols: 100, rows: 28, prompt, bypassPermissions}, variant)).session
+        : await projectWorkroomLauncher.current!.open(targetId, agent, bypassPermissions, variant);
       if (!session) throw new Error('터미널 실행 결과를 확인하지 못했습니다. 워크룸에서 세션 목록을 확인하세요.');
       try {
         await openWorkroomPopout({sessionId: session.id, targetId, agent, bypassPermissions},
@@ -11816,7 +11826,7 @@ function App() {
                 <div className="worktree-action-group" data-testid="worktree-internal-ai">
                   <span className="worktree-action-label">앱 내부 AI</span>
                   <ProjectLaunchActions key={portItem.id + wt.path} projectKey={portItem.id + wt.path} testId="worktree-project-launch"
-                    onWorkroom={agent => openProjectTerminal(portItem, agent, wt, undefined, true)}
+                    onWorkroom={(agent, variant) => openProjectTerminal(portItem, agent, wt, undefined, true, variant)}
                     loadCodex={() => loadProjectCodexConnection(portItem, wt.path)} onCodex={() => prepareProjectCodexConnection(portItem, wt.path)}/>
                   {(conflictedFiles>0||diverged)&&<ProjectTerminalLauncher testId="worktree-conflict-terminal-launcher" agents={['codex','claude']} label="워크룸에서 충돌 검토"
                     onOpen={agent=>openProjectTerminal(portItem,agent,wt,[
@@ -12646,7 +12656,7 @@ function App() {
               {sel.folderPath && (
                 <MetaEditableRow
                   testId="meta-row-folder"
-                  label="folder"
+                  label="폴더"
                   value={sel.folderPath}
                   onEdit={() => startEdit(sel)}
                   action={(
@@ -12657,7 +12667,7 @@ function App() {
               {sel.commandPath && (
                 <MetaEditableRow
                   testId="meta-row-command"
-                  label="command"
+                  label="실행 파일"
                   value={sel.commandPath}
                   onEdit={() => startEdit(sel)}
                 />
@@ -12665,7 +12675,7 @@ function App() {
               {sel.terminalCommand && (
                 <MetaEditableRow
                   testId="meta-row-terminal"
-                  label="terminal"
+                  label="터미널 명령"
                   value={sel.terminalCommand}
                   onEdit={() => startEdit(sel)}
                 />
@@ -12673,7 +12683,7 @@ function App() {
               {sel.manualPath && (
                 <MetaEditableRow
                   testId="meta-row-manual"
-                  label="manual"
+                  label="매뉴얼"
                   value={sel.manualPath}
                   onEdit={() => startEdit(sel)}
                 action={<button type="button" data-testid="meta-open-manual" onClick={event => { event.stopPropagation(); API.openFolder(sel.manualPath!).catch(e=>showToast(`매뉴얼 열기 실패: ${e.message}`, 'error')); }} style={{padding:'2px 7px',background:'rgb(var(--violet-rgb) / 0.05)',border:'1px solid rgb(var(--violet-rgb) / 0.18)',borderRadius:4,color:'var(--ink-d8b4fe)',cursor:'pointer',fontSize:10,fontFamily:'inherit',display:'flex',alignItems:'center',gap:3,whiteSpace:'nowrap',flexShrink:0}}><BookOpen style={{width:10,height:10}}/>매뉴얼 열기</button>}
@@ -12682,13 +12692,13 @@ function App() {
               {sel.logFilePath && (
                 <MetaEditableRow
                   testId="meta-row-log-file"
-                  label="log file"
+                  label="로그 파일"
                   value={sel.logFilePath}
                   onEdit={() => startEdit(sel)}
                 action={<button type="button" data-testid="meta-open-log-manager" onClick={event => { event.stopPropagation(); API.openFolder(sel.logFilePath!).catch(e=>showToast(`로그 관리 파일 열기 실패: ${e.message}`, 'error')); }} style={{padding:'2px 7px',background:'rgb(var(--warn-rgb) / 0.05)',border:'1px solid rgb(var(--warn-rgb) / 0.18)',borderRadius:4,color:'var(--ink-fbbf24)',cursor:'pointer',fontSize:10,fontFamily:'inherit',display:'flex',alignItems:'center',gap:3,whiteSpace:'nowrap',flexShrink:0}}><FileText style={{width:10,height:10}}/>로그 관리 열기</button>}
                 />
               )}
-              <InlineUrlRow label="deploy" value={sel.deployUrl} onSave={(v) => saveInlineUrl(sel.id, 'deployUrl', v)} placeholder="배포 주소 입력" mobile={isMobile} actionLabel="배포 열기" actionIcon={<Globe style={{width:10,height:10}}/>} actionTestId="meta-open-deploy" onAction={() => { void openDeploymentWithDiagnostics(sel); }} />
+              <InlineUrlRow label="배포 주소" value={sel.deployUrl} onSave={(v) => saveInlineUrl(sel.id, 'deployUrl', v)} placeholder="배포 주소 입력" mobile={isMobile} actionLabel="배포 열기" actionIcon={<Globe style={{width:10,height:10}}/>} actionTestId="meta-open-deploy" onAction={() => { void openDeploymentWithDiagnostics(sel); }} />
               <GitHubUrlsRow
                 value={githubRepositoryUrlsText(sel)}
                 onSave={value => saveGitHubUrls(sel.id, value)}
@@ -12779,7 +12789,7 @@ function App() {
 
             <ProjectLaunchActions key={sel.id + (sel.worktreePath || sel.folderPath || '')}
               projectKey={sel.id + (sel.worktreePath || sel.folderPath || '')} testId="detail-project-launch"
-              onWorkroom={agent => openProjectTerminal(sel, agent, undefined, undefined, true)}
+              onWorkroom={(agent, variant) => openProjectTerminal(sel, agent, undefined, undefined, true, variant)}
               loadCodex={() => loadProjectCodexConnection(sel)} onCodex={() => prepareProjectCodexConnection(sel)}/>
             {/* 터미널 에이전트 실행 — 헤더 터미널 컨트롤 기반 */}
             <details data-testid="terminal-agent-panel" style={{marginBottom:8,padding:'8px 10px',borderRadius:7,background:'rgb(var(--surface-highlight-rgb) / 0.018)',border:'1px solid rgb(var(--surface-highlight-rgb) / 0.06)'}}>
@@ -12832,14 +12842,14 @@ function App() {
             </details>
 
             <details data-testid="detail-provider-apps" className="project-provider-apps">
-              <summary style={{fontSize:12,color:'var(--text-muted)',marginBottom:6}}>다른 앱·새 대화 열기{bypassPermissions && <span data-testid="detail-provider-apps-bypass" title="실행 옵션의 권한 우회가 켜져 있습니다 — Claude 앱 대화에 적용되고, Codex·Hermes·Antigravity 앱은 각 앱의 승인 설정을 따릅니다" style={{marginLeft:6,color:'var(--ink-c4b5fd)'}}>· 권한 우회 ON</span>}</summary>
+              <summary style={{fontSize:12,color:'var(--text-muted)',marginBottom:6}}>다른 앱·새 대화 열기{bypassPermissions && <span data-testid="detail-provider-apps-bypass" title="실행 옵션의 권한 우회가 켜져 있습니다 — Claude 앱 대화에 적용되고, Codex·Hermes·Antigravity 앱은 각 앱의 승인 설정을 따릅니다" style={{marginLeft:6,color:'var(--ink-c4b5fd)'}}>· 승인 없이 실행 (권한 우회)</span>}</summary>
               <div style={{display:'flex',gap:6,flexWrap:'wrap' as const}}>
                 {agentShown('claude') && (
                   <button
                     data-testid="detail-claude-code-app"
                     onClick={() => void openProjectCodeApp('claude', sel)}
                     style={{...rowBtn,color:'var(--ink-d8b4fe)',borderColor:'rgb(var(--violet-rgb) / 0.28)',background:'rgb(var(--violet-rgb) / 0.08)'}}
-                    title={`이 프로젝트의 Claude Code 대화를 시작하거나 기존 대화를 다시 열기${bypassPermissions ? ' · 권한 우회 ON' : ''}`}
+                    title={`이 프로젝트의 Claude Code 대화를 시작하거나 기존 대화를 다시 열기${bypassPermissions ? ' · 승인 없이 실행 (권한 우회)' : ''}`}
                   >
                     <Monitor style={{width:11,height:11}}/>Claude 앱에서 열기
                   </button>
@@ -13590,7 +13600,7 @@ function App() {
                     }}
                     className="px-3 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-400 text-sm rounded-lg border border-red-500/30 transition-colors"
                   >
-                    Abort Merge
+                    머지 취소 (Abort)
                   </button>
                 </>
               )}
@@ -13985,7 +13995,7 @@ function App() {
                 <Brain className="w-3.5 h-3.5" />
                 {t(lang, 'tabMemory')}
               </button>
-              <button id="tab-common-memory" data-testid="top-level-common-memory-tab" data-top-level-tab="common-memory" role="tab" aria-selected={activeTab==='common-memory'} aria-controls="top-level-common-memory-panel" tabIndex={activeTab==='common-memory'?0:-1} onKeyDown={handleTopLevelTabKeyDown} onClick={()=>setActiveTab('common-memory')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium" style={{background:activeTab==='common-memory'?'var(--bg-hover)':'transparent',color:activeTab==='common-memory'?'var(--text-primary)':'var(--text-secondary)'}}><Cloud className="w-3.5 h-3.5"/>{t(lang,'tabCommonMemory')}</button>
+              <button id="tab-common-memory" data-help-key="tab-common-memory" data-testid="top-level-common-memory-tab" data-top-level-tab="common-memory" role="tab" aria-selected={activeTab==='common-memory'} aria-controls="top-level-common-memory-panel" tabIndex={activeTab==='common-memory'?0:-1} onKeyDown={handleTopLevelTabKeyDown} onClick={()=>setActiveTab('common-memory')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium" style={{background:activeTab==='common-memory'?'var(--bg-hover)':'transparent',color:activeTab==='common-memory'?'var(--text-primary)':'var(--text-secondary)'}}><Cloud className="w-3.5 h-3.5"/>{t(lang,'tabCommonMemory')}</button>
               <button
                 id="tab-what-i-said"
                 data-help-key="tab-what-i-said"
@@ -14079,7 +14089,7 @@ function App() {
                    자동으로 붙이지 않는 이유는 기기별 격리 때문이다 — 어느 것을
                    이을지는 사용자가 고른다. */
                 <div className="mt-2 rounded-lg border border-[var(--accent-line)] bg-[var(--accent-soft)] p-2">
-                  <p className="font-semibold">다른 Mac에서 사용 중인 AgentsToZ OPS를 찾았습니다</p>
+                  <p className="font-semibold">다른 Mac에서 사용 중인 아젠투지(OPS)를 찾았습니다</p>
                   <ul className="mt-1 space-y-1">
                     {opsRemoteCandidates.map(candidate => (
                       <li key={candidate.id} data-testid="control-center-remote-candidate" className="leading-relaxed">
@@ -14093,8 +14103,8 @@ function App() {
                 </div>
               )}
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => void handleOnboardingControlCenter('restore')}>다른 Mac의 AgentsToZ OPS 복원</button>
-                <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => void handleOnboardingControlCenter('create')}>처음 사용 · AgentsToZ OPS 준비</button>
+                <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => void handleOnboardingControlCenter('restore')}>다른 Mac의 아젠투지 복원</button>
+                <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => void handleOnboardingControlCenter('create')}>처음 사용 · 아젠투지 준비</button>
               </div>
             </details>}
 
@@ -14631,10 +14641,13 @@ function App() {
                 <div><button type="button" data-testid="top-level-memory-open-common" onClick={()=>setActiveTab('common-memory')}>공통기억 관리로 이동</button></div>
               </div>
             </header>
+            {!isDeployedWeb()&&<section className="m-3 max-w-4xl rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="personal-profile-entry">
+              {showPersonalProfile?<Suspense fallback={<p>{lang==='ko'?'내 프로필을 불러오는 중…':'Loading my profile…'}</p>}><UserProfilePanel language={lang==='ko'?'ko':'en'} request={requestUserProfile} onOpenUserMemory={()=>setActiveTab('what-i-said')}/></Suspense>:<><p>{lang==='ko'?'내 프로필 · 직접 확인한 선호와 적용 프로젝트를 관리합니다.':'My profile · Manage confirmed preferences and the projects they apply to.'}</p><button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={()=>setShowPersonalProfile(true)}>{lang==='ko'?'내 프로필 열기':'Open my profile'}</button></>}
+            </section>}
             <MemoryTesterUpgrade projects={ports.filter(p=>p.folderPath&&(!p.sourceDeviceId||p.sourceDeviceId===portalDeviceId)).map(p=>({id:p.id,name:p.name}))}/>
             <div className="m-3 rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="memory-role-boundaries">
-              <p>AgentsToZ OPS 운영 기억 · AgentsToZ DEV 개발 기억 · 관리 프로젝트별 기억은 각각 별도입니다. 각 프로젝트의 USE/DEV 봇 구분은 바꾸지 않습니다.</p>
-              <button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => setShowControlProfile(true)}>AgentsToZ OPS · 운영 기억 확인</button>
+              <p>{lang==='ko'?'내 프로필은 직접 확인한 나의 선호, 「내가 한 말」은 지시 원문과 결과 기록입니다. 아젠투지의 운영 방식은 OPS 기억에서, 설계·수정·검증 경험은 각 프로젝트 기억에서 관리합니다.':'My profile holds preferences I have confirmed. What I Said keeps original instructions and outcomes. OPS memory holds how AgentsToZ operates; each project’s memory holds its design, fixes and verification experience.'}</p>
+              <button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => setShowControlProfile(true)}>{lang==='ko'?'아젠투지 설정 열기':'Open AgentsToZ settings'}</button>
             </div>
             <Suspense fallback={<div className="text-xs text-zinc-500">장기기억 현황판을 불러오는 중…</div>}>
               {memoryPortalCredentialsLoading ? (
@@ -14670,9 +14683,9 @@ function App() {
         )}
 
         {useSetupProject!==null&&<Suspense fallback={<p>USE 준비 화면을 불러오는 중…</p>}><ServiceUseSetupDialog initialProjectId={useSetupProject} projects={ports.filter(p=>p.folderPath&&!p.worktreeParentId&&p.role!=='ops'&&(!p.sourceDeviceId||p.sourceDeviceId===portalDeviceId))} onWorkroom={openWorkroomDraft} onClose={()=>setUseSetupProject(null)}/></Suspense>}
-        {!isLoading&&!isDeployedWeb()&&<AutomaticSaveNotice/>}
+        {/* Confirmed automatic saves float above 「아젠투지 호출」 now (VOC 2026-10-24), not as a banner over every page. */}
         {!isLoading&&!isDeployedWeb()&&<CommonMemoryFollowupNotice hidden={activeTab==='common-memory'} onOpen={()=>setActiveTab('common-memory')}/>}
-        {activeTab==='common-memory'&&<div id="top-level-common-memory-panel" role="tabpanel" aria-labelledby="tab-common-memory" data-testid="top-level-common-memory-view" className="flex-1 min-h-0 overflow-auto flex flex-col"><header className="workspace-screen-header" data-testid="top-level-common-memory-header"><h1>{t(lang,'tabCommonMemory')}</h1></header><div className="px-6 py-4 space-y-4"><CommonMemoryPanel initiallyOpen focusMemoryId={commonMemoryFocusMemoryId} workroom={commonMemoryWorkroom} activeProjects={ports.filter(p=>!p.worktreeParentId&&p.role!=='ops').map(p=>({portId:p.id,name:p.aiName||p.name,lastUsedAt:lastActivityFor(p.id),favorite:p.favorite}))} onProjectsChanged={()=>{void API.loadPorts().then(data=>{skipNextSave.current=true;otherPlatformPortsRef.current=data.filter(p=>!isCurrentPlatformPath(p));setPorts(data.filter(isCurrentPlatformPath).map(p=>({...p,isRunning:runningStateAfterReload(p)})));}).catch(()=>showToast('추가한 프로젝트 목록을 다시 확인하세요.','error'));}}/></div></div>}
+        {activeTab==='common-memory'&&<div id="top-level-common-memory-panel" role="tabpanel" aria-labelledby="tab-common-memory" data-testid="top-level-common-memory-view" className="flex-1 min-h-0 overflow-auto flex flex-col"><header className="workspace-screen-header" data-testid="top-level-common-memory-header"><h1>{t(lang,'tabCommonMemory')}</h1></header><div className="px-6 py-4 space-y-4"><CommonMemoryPanel initiallyOpen focusGroupId={commonMemoryFocusGroupId} focusMemoryId={commonMemoryFocusMemoryId} workroom={commonMemoryWorkroom} onOpenOps={()=>setShowControlProfile(true)} onOpenCloudSettings={()=>setOpenPortalSettings(true)} activeProjects={ports.filter(p=>!p.worktreeParentId&&p.role!=='ops').map(p=>({portId:p.id,name:p.aiName||p.name,lastUsedAt:lastActivityFor(p.id),favorite:p.favorite}))} onProjectsChanged={()=>{void API.loadPorts().then(data=>{skipNextSave.current=true;otherPlatformPortsRef.current=data.filter(p=>!isCurrentPlatformPath(p));setPorts(data.filter(isCurrentPlatformPath).map(p=>({...p,isRunning:runningStateAfterReload(p)})));}).catch(()=>showToast('추가한 프로젝트 목록을 다시 확인하세요.','error'));}}/></div></div>}
 
         {activeTab === 'what-i-said' && (
           <div
@@ -14683,7 +14696,7 @@ function App() {
             className="flex-1 min-h-0 overflow-auto"
           >
             <Suspense fallback={<div className="px-6 py-5 text-xs text-zinc-500">{t(lang,'loadingWhatISaid')}</div>}>
-              <WhatISaidPanel projects={ports} language={lang==='ko'?'ko':'en'} visible />
+              <WhatISaidPanel projects={ports} language={lang==='ko'?'ko':'en'} visible onOpenUserProfile={isDeployedWeb()?undefined:()=>{setShowPersonalProfile(true);setActiveTab('memory');}} />
             </Suspense>
           </div>
         )}
@@ -15294,7 +15307,8 @@ function App() {
         <VoiceButton target={{kind:'ops'}} label="아젠투지" hideTrigger openOnEvent/>
         {/* 「아젠투지 호출」 — on screen on every tab and page; a tap starts voice (VOC 2026-09-29). */}
         <AgentsToZVoiceDock transport={localVoiceTransport} deviceName={portalDeviceName} onOpenOpsWorkroom={controlCenterProject?openOpsWorkroom:undefined}
-          opsDevices={communityDockDevices} onOpenDeviceWorkroom={communityDockDevices.length?openDeviceWorkroom:undefined}/></>}
+          opsDevices={communityDockDevices} onOpenDeviceWorkroom={communityDockDevices.length?openDeviceWorkroom:undefined}
+          notifications={!isLoading&&!isDeployedWeb()?<AutomaticSaveNotice placement="dock"/>:undefined} localSessions={!isDeployedWeb()}/></>}
 
         {showAiUsage && (
           <Suspense fallback={null}>
@@ -15575,7 +15589,7 @@ function App() {
              않는 이유는 기기별 격리 때문이다 — 복원은 사용자가 고른다. */
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={()=>setShowOpsRemoteFound(false)}>
             <div className="max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 text-sm" onClick={e=>e.stopPropagation()}>
-              <h2 className="text-base font-bold">다른 Mac에서 사용 중인 AgentsToZ OPS</h2>
+              <h2 className="text-base font-bold">다른 Mac에서 사용 중인 아젠투지(OPS)</h2>
               <p className="mt-2 leading-relaxed text-[var(--ink-2)]">이 Mac에는 운영 폴더가 없지만, 같은 계정의 다른 Mac에 등록되어 있습니다. 새로 만들면 기억 계보가 갈라지니 복원해서 이어가세요.</p>
               <ul className="mt-3 space-y-2">
                 {opsRemoteCandidates.map(candidate => (
@@ -15588,7 +15602,7 @@ function App() {
               <div className="mt-4 flex flex-wrap justify-end gap-2">
                 <button type="button" className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={()=>setShowOpsRemoteFound(false)}>닫기</button>
                 <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--accent-line)] bg-[var(--accent-soft)] px-3 font-semibold text-[var(--accent)]"
-                  onClick={()=>{setShowOpsRemoteFound(false);void handleOnboardingControlCenter('restore');}}>이 OPS 복원하기</button>
+                  onClick={()=>{setShowOpsRemoteFound(false);void handleOnboardingControlCenter('restore');}}>이 아젠투지 복원하기</button>
               </div>
             </div>
           </div>
@@ -15597,7 +15611,7 @@ function App() {
         <AgentDialogueApprovalNotice paused={showAgentDialogue} onOpen={()=>setShowAgentDialogue(true)}/>
         {showAgentDialogue && <AgentDialoguePanel projects={ports.filter(port=>Boolean(port.folderPath||port.worktreePath)).map(port=>({id:port.id,name:port.name}))} opsProjectId={controlCenterProject?.id} deviceName={portalDeviceName} deviceId={portalDeviceId} onRenameDevice={renameThisDeviceFromMemoryTab} onClose={()=>setShowAgentDialogue(false)}/>}
         {showBrowserContext&&<BrowserContextPanel lang={lang} request={localBrowserContextRequest} projects={promptWorkroomProjects} defaultProjectId={v4SelectedId??promptWorkroom.defaultProjectId} onClose={()=>setShowBrowserContext(false)} onAttach={(targetId,text)=>{openWorkroomDraft(targetId,browserContextText(lang).title,text);setShowBrowserContext(false);}}/>}
-        {showControlProfile && <ControlProfilePanel onOpenUserMemory={()=>{setShowControlProfile(false);setActiveTab('what-i-said');}} onOpenProject={id=>{const p=ports.find(p=>p.id===id);if(!p){showToast('프로젝트 목록을 새로고침하세요.','warning');return;}setShowControlProfile(false);setActiveTab('ports');setSearchQuery('');setSidebarSection('all');setV4SelectedId(id);setTesterOpenPort(id);setTesterRevealKey(v=>v+1);}} onClose={()=>setShowControlProfile(false)} onOpenWork={()=>{setShowControlProfile(false);openOpsWorkroom();}} onOpened={result=>{
+        {showControlProfile && <ControlProfilePanel onOpenUserProfile={isDeployedWeb()?undefined:()=>{setShowControlProfile(false);setShowPersonalProfile(true);setActiveTab('memory');}} onRestoreOps={controlCenterProject?undefined:()=>{setShowControlProfile(false);void handleOnboardingControlCenter('restore');}} restoreFrom={controlCenterProject?undefined:(opsRemoteCandidates.find(candidate=>candidate.memoryId)??opsRemoteCandidates[0])?.deviceName} onOpenUserMemory={()=>{setShowControlProfile(false);setActiveTab('what-i-said');}} onOpenProject={id=>{const p=ports.find(p=>p.id===id);if(!p){showToast('프로젝트 목록을 새로고침하세요.','warning');return;}setShowControlProfile(false);setActiveTab('ports');setSearchQuery('');setSidebarSection('all');setV4SelectedId(id);setTesterOpenPort(id);setTesterRevealKey(v=>v+1);}} onClose={()=>setShowControlProfile(false)} onOpenWork={()=>{setShowControlProfile(false);openOpsWorkroom();}} onOpened={result=>{
           showToast([result.message,...result.warnings].join('\n'),result.warnings.length?'warning':'success');
           if(result.session){setShowControlProfile(false);setTerminalEntry({nonce:++runtimeEntryNonceRef.current,targetId:result.session.targetId,agent:result.session.agent,sessionId:result.session.id});setActiveTab('terminal');}
         }} />}

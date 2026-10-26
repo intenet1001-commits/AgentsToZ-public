@@ -830,6 +830,8 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
     expect(description("send_workroom_keys")).toContain("trust");
     expect(description("close_workroom_session")).toContain("saveMemory");
     expect(description("start_workroom_session")).toContain("reuse");
+    // People read the 단톡방 too (VOC 2026-10-25: a build receipt was a wall of hashes).
+    expect(description("send_dialogue_message")).toContain("plain sentences");
   });
 
   test("exposes only the bounded tools and maps IDs server-side", async () => {
@@ -878,6 +880,7 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_wait_ops_request",
       "agentstoz_use_complete_ops_request",
       "agentstoz_use_publish_workroom_thread",
+      "agentstoz_use_workroom_browser",
       "agentstoz_use_read_workroom_thread",
       "agentstoz_use_get_tester_sets",
       "agentstoz_use_get_tester",
@@ -901,6 +904,7 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_submit_ai_labels",
       "agentstoz_use_list_tester_results",
       "agentstoz_use_get_control_profile",
+      "agentstoz_use_recall_user_profile",
       "agentstoz_use_recall_user_memory",
       "agentstoz_use_recall_control_context",
       "agentstoz_use_list_control_memory_candidates",
@@ -921,12 +925,20 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_read_workroom_session",
       "agentstoz_use_list_workroom_accounts",
       "agentstoz_use_select_workroom_account",
+      "agentstoz_use_prepare_agent_launch",
       "agentstoz_use_start_workroom_session",
       "agentstoz_use_send_workroom_instruction",
       "agentstoz_use_send_shared_shell_command",
       "agentstoz_use_read_shared_shell",
       "agentstoz_use_send_workroom_keys",
       "agentstoz_use_wait_workroom_session",
+      "agentstoz_use_create_team",
+      "agentstoz_use_read_team",
+      "agentstoz_use_wait_team",
+      "agentstoz_use_team_member",
+      "agentstoz_use_report_team_task",
+      "agentstoz_use_confirm_team_member",
+      "agentstoz_use_close_team",
       "agentstoz_use_close_workroom_session",
       "agentstoz_use_list_missions",
       "agentstoz_use_create_mission",
@@ -941,14 +953,20 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
     expect(agentsToZUseMcpActionForTool("agentstoz_use_open_code_app", {
       portId: "study-id",
       agent: "codex",
-      folderPath: "/tmp/ignored",
-      command: "whoami",
+      surface: "app",
     }, "controller-id")).toEqual({
       action: "open-code-app",
       controllerPortId: "controller-id",
       portId: "study-id",
       agent: "codex",
+      surface: "app",
     });
+    // A launch must refuse unsupported intent rather than discard it and run with defaults.
+    for (const unsupported of [{folderPath: "/tmp/ignored"}, {command: "whoami"}]) {
+      expect(() => agentsToZUseMcpActionForTool("agentstoz_use_open_code_app", {
+        portId: "study-id", agent: "codex", surface: "app", ...unsupported,
+      }, "controller-id")).toThrow("지원하지 않는 필드");
+    }
     expect(agentsToZUseMcpActionForTool("agentstoz_use_list_workroom_sessions", {
       portId: "study-id",
       folderPath: "/tmp/ignored",
@@ -971,15 +989,15 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       after: 12,
     });
     expect(agentsToZUseMcpActionForTool("agentstoz_use_start_workroom_session", {
-      portId: "study-id", agent: "codex", requestId: "request_12345678", missionId: "mission_12345678",
+      portId: "study-id", agent: "codex", surface: "internal", requestId: "request_12345678", missionId: "mission_12345678",
     }, "controller-id")).toEqual({
       action: "start-workroom-session", controllerPortId: "controller-id", portId: "study-id",
       agent: "codex", requestId: "request_12345678", missionId: "mission_12345678",
     });
     for (const agent of ["hermes", "agy"]) {
       expect(agentsToZUseMcpActionForTool("agentstoz_use_start_workroom_session", {
-        portId: "study-id", agent, requestId: `request_${agent}_start`,
-      }, "controller-id")).toMatchObject({ action: "start-workroom-session", agent });
+        portId: "study-id", agent, surface: "internal", requestId: `request_${agent}_start`, ...(agent === "hermes" ? {hermesVariant: "default"} : {}),
+      }, "controller-id")).toMatchObject({ action: "start-workroom-session", agent, ...(agent === "hermes" ? {hermesVariant: "default"} : {}) });
     }
     expect((AGENTSTOZ_USE_MCP_TOOLS.find(tool => tool.name === "agentstoz_use_start_workroom_session")!
       .inputSchema.properties as any).agent.enum).toEqual(["codex", "claude", "hermes", "agy"]);
@@ -989,7 +1007,7 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
     expect(openCodeAppProperties.mode.enum).toEqual(["reopen", "prepare", "new"]);
     expect(openCodeAppProperties.task.type).toBe("string");
     expect(agentsToZUseMcpActionForTool("agentstoz_use_open_code_app", {
-      portId: "study-id", agent: "agy", surface: "app", task: "로그인 화면 확인", folderPath: "/tmp/ignored",
+      portId: "study-id", agent: "agy", surface: "app", task: "로그인 화면 확인",
     }, "controller-id")).toEqual({
       action: "open-code-app", controllerPortId: "controller-id", portId: "study-id", agent: "agy", surface: "app", task: "로그인 화면 확인",
     });

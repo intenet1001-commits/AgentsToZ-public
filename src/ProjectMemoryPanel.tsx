@@ -330,7 +330,7 @@ interface Props {
   /** 환경 단위 설치·연결이 모인 장기기억 탭으로 보낸다. 없으면 안내 문구만 보인다. */
   onOpenMemoryTab?: () => void;
   /** Opens the common memory tab; with a memoryId it opens on the group that links this long-term memory. */
-  onOpenCommonMemory?:(memoryId?:string)=>void;
+  onOpenCommonMemory?:(memoryId?:string,groupId?:string)=>void;
   onRunConflictReview?: (agent: AiTerminalAgent, prompt: string) => Promise<unknown>;
 }
 
@@ -378,10 +378,10 @@ export function ProjectMemoryPanel(props: Props) {
     <section data-testid="project-memory-role" data-project-role={role} className="rounded-xl border border-[var(--line)] p-3 text-sm">
       <strong>{PROJECT_ROLE_LABELS[role]} · {role === 'ops' ? '운영 기억' : '기억 편집 보류'}</strong>
       <p className="my-2">{role === 'ops'
-        ? '운영 기억은 기존 OPS 프로필에서 후보를 검토하고 저장합니다. 프로젝트 DEV 기억으로 초기화하지 않습니다.'
-        : '운영 프로필 연결과 프로젝트 역할을 확인한 뒤 기억을 편집하세요. 기존 데이터는 변경하지 않았습니다.'}</p>
+        ? '운영 기억은 「아젠투지 설정」에서 후보를 검토하고 저장합니다. 프로젝트 DEV 기억으로 초기화하지 않습니다.'
+        : '「아젠투지 설정」의 연결 상태와 프로젝트 역할을 확인한 뒤 기억을 편집하세요. 기존 데이터는 변경하지 않았습니다.'}</p>
       {props.onOpenOps && <button type="button" data-testid="project-memory-open-ops" onClick={props.onOpenOps}
-        className="min-h-11 rounded-lg border border-[var(--line)] px-3">AgentsToZ OPS · 운영 기억 확인</button>}
+        className="min-h-11 rounded-lg border border-[var(--line)] px-3">아젠투지 설정 열기</button>}
     </section>
   );
   return <section data-testid="project-memory-role" data-project-role={role}>
@@ -980,7 +980,7 @@ function ProjectMemoryEditor({
     'upgrade-agent',
     () => projectMemoryApi.upgradeAgent({ folderPath: folderPath! }),
     result => result.entryIdsStabilized
-      ? `장기기억 에이전트를 v${result.memoryAgent.currentVersion}로 업데이트하고 항목 ID를 안정화했습니다. 로컬 기억이 변경되어 Supabase Push가 필요합니다.`
+      ? `장기기억 에이전트를 v${result.memoryAgent.currentVersion}로 업데이트하고 항목 ID를 안정화했습니다. 로컬 기억이 변경되어 Supabase 올리기(Push)가 필요합니다.`
       : `장기기억 에이전트를 v${result.memoryAgent.currentVersion}로 업데이트했습니다.`,
   );
 

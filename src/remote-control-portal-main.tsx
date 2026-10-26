@@ -8,6 +8,7 @@ import type {WorkroomThreadSummary} from './workroomThreadProtocol';
 import {commonMemoryUuid} from './commonMemoryCrypto';
 import {portalLocalCommonVisible,type PortalCloudListState} from './commonMemoryEntrypoints';
 import {RemoteCommonMemoryPanel} from './RemoteCommonMemoryPanel';
+import type {CommonMemoryWorkroomBridge} from './commonMemoryFollowup';
 import {COMMON_MEMORY_REMOTE_FEATURE} from './commonMemoryRequest';
 import {RemoteMetaCommonMemoryPanel} from './RemoteMetaCommonMemoryPanel';
 import {COMMON_MEMORY_RPC_V2_FEATURE,META_MEMORY_REMOTE_FEATURE} from './metaCommonMemoryRemoteProtocol';
@@ -700,6 +701,9 @@ function RemoteControlPortalApp() {
   const [lang]=useAppLanguage();
   const [recordMode,setRecordMode]=useState<'said'|'memories'|'common'|'device'|'local-common'>(()=>new URLSearchParams(window.location.search).get('tab')==='memories'?'memories':'said');
   const [managementTarget,setManagementTarget]=useState('');
+  // A memory row's 「공통기억」 (phone audit 2026-10-25): the common-memory chip opens on the group linking that memory.
+  const [commonFocusMemoryId,setCommonFocusMemoryId]=useState<string|undefined>();
+  useEffect(()=>{if(recordMode!=='common'||workspaceTab!=='records')setCommonFocusMemoryId(undefined);},[recordMode,workspaceTab]);
   const [showScanner, setShowScanner] = useState(() => new URLSearchParams(window.location.search).get('scan') === 'remote');
   const workspaceScroll=useRef(new Map<WorkspaceTab,number>());
   const workspaceTabRef=useRef(workspaceTab);workspaceTabRef.current=workspaceTab;
@@ -1081,6 +1085,15 @@ function RemoteControlPortalApp() {
   const [communityProjectsError,setCommunityProjectsError]=useState('');
   const [communityProjectsLoading,setCommunityProjectsLoading]=useState(false);
   const opsControlId=status.projects.find(p=>p.kind==='main'&&p.role==='ops')?.controlId;
+  // 공통기억 「AI로 정리」 on a phone: like VOC, the entry only fills this Mac's OPS composer (AiTerminalPanel sets the
+  // draft and starts nothing); the person picks the AI and sends. The Mac's own panel leaves another community device first.
+  const openCommonMemoryWorkroom=(targetId:string,title:string,prompt:string)=>{
+    communityDeviceRefNow.current='';setCommunityDevice(null);setCommunityProjects(null);setCommunityOpsWanted(0);
+    setTerminalEntry({nonce:++workroomNavigationNonce.current,targetId,title,prompt});
+    setRemotePane('workroom');setTerminalOpen(true);navigateWorkspace('workroom');
+  };
+  const openCommonMemoryWorkroomRef=useRef(openCommonMemoryWorkroom);openCommonMemoryWorkroomRef.current=openCommonMemoryWorkroom;
+  const commonMemoryWorkroom=useMemo<CommonMemoryWorkroomBridge|undefined>(()=>opsControlId?{targetId:opsControlId,open:(targetId,title,prompt)=>openCommonMemoryWorkroomRef.current(targetId,title,prompt)}:undefined,[opsControlId]);
   const workspaceFeatureReady=(status.supportedFeatures??[]).includes(MOBILE_WORKSPACE_FEATURE);
   // ⚠️ 전달 요청은 **동시 2개까지**만 보낸다(`createCommunityForwardGate`). 넘치면 쌓지 않고 거절해,
   // 답하지 않는 Mac 하나가 릴레이 대기열(32개)을 채워 「대기 중인 원격 입력이 많습니다」로 원인을
@@ -3155,8 +3168,9 @@ function RemoteControlPortalApp() {
 
   const communityChannels=useMemo<CommunityWorkspaceChannel[]>(()=>{
     const host=selectedHostId??'unconnected';
-    return [{id:host,label:status.hostName??'연결한 기기',projectRevision:JSON.stringify(hostMentionProjects),projects:async()=>hostMentionProjects,transport:workroomTransport},
-      ...communityDevices.map(device=>({id:device.ref,label:communityDeviceLabel(device.name),
+    // USE runs only for the Mac's local owner; a phone request would always be refused (CommunityWorkspaceChannel.productUse).
+    return [{id:host,label:status.hostName??'연결한 기기',projectRevision:JSON.stringify(hostMentionProjects),projects:async()=>hostMentionProjects,transport:workroomTransport,productUse:false},
+      ...communityDevices.map(device=>({id:device.ref,label:communityDeviceLabel(device.name),productUse:false,
         projects:async()=>{
           if(!opsControlId)throw Error('이 연결에 OPS 프로젝트가 허용되지 않았습니다.');
           const rows:WorkroomMentionProject[]=[];
@@ -3311,9 +3325,9 @@ function RemoteControlPortalApp() {
       {workspaceTab==='workroom'&&!sessionFullscreen&&paneButtons}
       {workspaceTab==='workroom'&&sessionFullscreen&&remotePane!=='workroom'&&moreGroup}
       {workspaceTab==='records'&&<div className="workspace-project-source" role="group" aria-label="기록 종류"><button aria-pressed={recordMode==='said'} onClick={()=>setRecordMode('said')}>{t(lang,'tabWhatISaid')}</button><button aria-pressed={recordMode==='memories'} onClick={()=>{setRecordMode('memories');setCatalogVisited(true);}}>{t(lang,'tabMemory')}</button><button aria-pressed={recordMode==='common'} onClick={()=>setRecordMode('common')}>{t(lang,'tabCommonMemory')}</button><button aria-pressed={recordMode==='device'} onClick={()=>setRecordMode('device')}>{t(lang,'deviceMemory')}</button>{localCommonVisible&&<button aria-pressed={recordMode==='local-common'} onClick={()=>setRecordMode('local-common')}>이전 로컬 기억</button>}</div>}
-      <RemoteCommonMemoryPanel key={'cloud-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='common'} available={status.supportedFeatures?.includes(COMMON_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2} cacheKey={workspaceConnectionKey} onProjectsChanged={syncHosts} onCloudList={reportCloudList}/>
+      <RemoteCommonMemoryPanel key={'cloud-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='common'} available={status.supportedFeatures?.includes(COMMON_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2} cacheKey={workspaceConnectionKey} onProjectsChanged={syncHosts} onCloudList={reportCloudList} workroom={commonMemoryWorkroom} focusMemoryId={commonFocusMemoryId} onFocusHandled={()=>setCommonFocusMemoryId(undefined)}/>
       <RemoteDeviceMemoryPanel key={'device-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='device'} available={status.supportedFeatures?.includes(DEVICE_MEMORY_FEATURE)??false} online={status.state==='online'} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
-      <RemoteMetaCommonMemoryPanel key={workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='local-common'} available={status.supportedFeatures?.includes(META_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
+      <RemoteMetaCommonMemoryPanel key={workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='local-common'} available={status.supportedFeatures?.includes(META_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
       {(['records','manage','duty'] as const).map(mode=>{
         // 「프로젝트 작업 마무리」 is not what 원격 작업 opens on: it appears only when a project was chosen
         // for it (its card's 「기억·정리·테스트」, or the workroom's 「세션 기억하기」) and closes again.
@@ -3321,7 +3335,7 @@ function RemoteControlPortalApp() {
         return <div key={mode} hidden={!visible}><MobileWorkspacePanel key={workspaceConnectionKey} testerAvailable={status.supportedFeatures?.includes('tester-v1')??false} mode={mode} visible={visible} projects={status.projects} available={status.supportedFeatures?.includes(MOBILE_WORKSPACE_FEATURE)??false} online={status.state==='online'} initialTarget={mode==='records'?undefined:managementTarget} onClose={mode==='manage'?()=>setManagementTarget(''):undefined} transport={(request:MobileWorkspaceRequest)=>{if(!selectedController)throw new Error('기기에 연결하세요.');return selectedController.sendTerminal(request)}} onDraft={(targetId,prompt)=>{setTerminalEntry({nonce:Date.now(),targetId,prompt});setRemotePane('workroom');navigateWorkspace('workroom');}} /></div>;
       })}
       {catalogVisited && <section hidden={!catalogVisible} className="workspace-catalog">
-        <PortalCatalog tab={catalogTab} visible={catalogVisible} onRemoteWork={project=>{setRemotePane('projects');navigateWorkspace('workroom');setNotice(project?`${project.name}에서 작업하려면 작업 기기와 해당 프로젝트를 선택하세요.`:'작업할 기기와 프로젝트를 선택하세요.')}} />
+        <PortalCatalog tab={catalogTab} visible={catalogVisible} onOpenCommonMemory={memoryId=>{setCommonFocusMemoryId(memoryId);setRecordMode('common');navigateWorkspace('records');}} onRemoteWork={project=>{setRemotePane('projects');navigateWorkspace('workroom');setNotice(project?`${project.name}에서 작업하려면 작업 기기와 해당 프로젝트를 선택하세요.`:'작업할 기기와 프로젝트를 선택하세요.')}} />
       </section>}
       <div hidden={workspaceTab!=='workroom'} className="workspace-host-content">
       {!sessionFullscreen&&connectionDetails}
@@ -3506,7 +3520,7 @@ function RemoteControlPortalApp() {
           <p className="remote-eyebrow">Mac 승인 필요</p>
           <h2>Mac에서 같은 6자리인지 확인하세요</h2>
           <div className="remote-sas" aria-label={`연결 확인 코드 ${status.sasCode}`}>{status.sasCode}</div>
-          <p>코드가 같을 때만 Mac의 “이 기기 승인”을 누르세요. 스캔만으로 실행 권한이 열리지 않습니다.</p>
+          <p>Mac의 「승인 대기」 칸에 이 6자리를 입력하고 「정확히 일치 — 승인」을 누르세요. 숫자가 다르면 승인하지 마세요. 스캔만으로 실행 권한이 열리지 않습니다.</p>
         </section>
       ) : status.state === 'connecting' ? (
         <section className="remote-panel remote-centered" role="status">

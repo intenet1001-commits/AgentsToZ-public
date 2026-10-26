@@ -29,6 +29,7 @@ export function RemoteMetaCommonMemoryCloudHint({ request, ...panel }: { request
   }, [request]);
   return <>
     {hint && <p role="note" data-testid="meta-common-memory-cloud-hint">{META_MEMORY_CLOUD_TAB_HINT}</p>}
-    <MetaCommonMemoryPanel {...panel} request={observed} />
+    {/* With the hint up, a new local memory or a backup import would only be refused by the Mac: those buttons go. */}
+    <MetaCommonMemoryPanel {...panel} request={observed} cloudTabHint={hint} />
   </>;
 }

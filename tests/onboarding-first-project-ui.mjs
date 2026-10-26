@@ -27,8 +27,8 @@ try{
    const ops=page.getByTestId('onboarding-control-center');assert.equal(await ops.getAttribute('open'),null,'OPS is optional; the first project stays primary');
    assert.equal(await page.getByRole('list',{name:'첫 업무 순서'}).getByRole('listitem').count(),3);
    await ops.locator('summary').click();
-	 await page.getByRole('button',{name:'내 AgentsToZ OPS 준비',exact:true}).click();await page.getByRole('status').filter({hasText:'control:create'}).waitFor();
-	 await open();await page.getByTestId('onboarding-control-center').locator('summary').click();await page.getByRole('button',{name:'다른 Mac의 AgentsToZ OPS 복원',exact:true}).click();await page.getByRole('status').filter({hasText:'control:restore'}).waitFor();
+	 await page.getByRole('button',{name:'내 아젠투지 준비',exact:true}).click();await page.getByRole('status').filter({hasText:'control:create'}).waitFor();
+	 await open();await page.getByTestId('onboarding-control-center').locator('summary').click();await page.getByRole('button',{name:'다른 Mac의 아젠투지 복원',exact:true}).click();await page.getByRole('status').filter({hasText:'control:restore'}).waitFor();
 	 await open();
 	 await page.getByRole('button',{name:'새 프로젝트 만들기',exact:true}).click();await page.getByRole('status').filter({hasText:'project:new'}).waitFor();
  await open();await page.getByRole('button',{name:'가지고 있는 폴더 열기',exact:true}).click();await page.getByRole('status').filter({hasText:'project:existing'}).waitFor();

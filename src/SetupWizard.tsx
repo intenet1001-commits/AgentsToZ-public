@@ -912,7 +912,7 @@ npm install -g supabase`;
 
   return (
     <WizardLayout
-      title="최초 세팅"
+      title="초기 설정"
       progressColor="blue"
       steps={steps}
       step={step}
@@ -1118,7 +1118,7 @@ export function FirstSetupWizard({
           ? '로컬 관리자 연결이 확인됐으므로 완료 후 바로 첫 Push를 확인할 수 있습니다. 사용자 로그인은 필요하지 않습니다.'
           : isDeployedWeb()
             ? `${DEPLOYED_WEB_LOGIN_NOTE} 두 번째 기기는 웹앱의 “기기 연결”에서 정보를 한 번 복사해 연결할 수 있습니다.`
-            : '완료 후 이 PC의 앱에서 첫 Push를 확인하세요. 로컬 웹은 Google 로그인이 필요하지 않습니다.'}</p>
+            : '완료 후 이 PC의 앱에서 첫 올리기(Push)를 확인하세요. 로컬 웹은 Google 로그인이 필요하지 않습니다.'}</p>
       </InfoBox>
       <IphoneAppNextStep />
     </div>,
@@ -1126,7 +1126,7 @@ export function FirstSetupWizard({
 
   return (
     <WizardLayout
-      title="첫 기기 · 동기화 세팅"
+      title="첫 기기 · 동기화 설정"
       progressColor="blue"
       steps={steps}
       step={step}
@@ -1406,7 +1406,7 @@ bun run start`;
 
   return (
     <WizardLayout
-      title="추가 기기 세팅"
+      title="추가 기기 설정"
       progressColor="emerald"
       steps={steps}
       step={step}
@@ -1544,7 +1544,7 @@ function AdditionalDeviceInviteWizard({ onBack }: { onBack: () => void }) {
             <li><span className="text-[var(--ink)]">두 번째·추가 기기 연결</span>을 선택해 방금 복사한 정보를 붙여넣습니다.</li>
             <li>그 PC에서만 <code>supabase login</code>을 한 번 확인하면 새 UUID로 등록됩니다.</li>
           </ol>
-          <p className="mt-3 text-[10px] leading-relaxed text-[var(--ink-3)]">보안 원칙: 기존 기기 ID, service_role 키, 로그인 토큰은 복사하지 않는다. 초대에는 Project URL·anon/publishable key·추천 이름만 들어갑니다. Tauri 앱은 localhost sidecar의 로컬 service_role 연결을 새 PC에서 별도로 만듭니다.</p>
+          <p className="mt-3 text-[10px] leading-relaxed text-[var(--ink-3)]">보안 원칙: 기존 기기 ID, service_role 키, 로그인 토큰은 복사하지 않습니다. 초대에는 Project URL·anon/publishable key·추천 이름만 들어갑니다. Tauri 앱은 localhost sidecar의 로컬 service_role 연결을 새 PC에서 별도로 만듭니다.</p>
         </div>
       </div>
     </div>
@@ -2367,7 +2367,7 @@ vercel deploy --prod`;
           <span className={NUM_CIRCLE_CLASS}>3</span>
           <div>
             <p className="font-medium">선택: 로컬 데이터와 왕복 확인</p>
-            <p className="text-xs text-[var(--ink-3)] mt-1">로컬 앱에서 Push한 뒤 개인 포털에서 Pull해 같은 항목이 보이는지 확인합니다. 추가 PC 연결에는 이 포털이 필수가 아닙니다.</p>
+            <p className="text-xs text-[var(--ink-3)] mt-1">로컬 앱에서 올리기(Push)한 뒤 개인 포털에서 받기(Pull)해 같은 항목이 보이는지 확인합니다. 추가 PC 연결에는 이 포털이 필수가 아닙니다.</p>
           </div>
         </li>
       </ol>
@@ -2661,7 +2661,7 @@ export default function SetupWizard({ onComplete, onSkip, onStartProject, onStar
                           ? 'Supabase 설정은 있지만 기기 등록은 끝나지 않았습니다. 첫 설정을 마치거나 기존 PC의 연결 정보를 붙여넣으세요.'
                           : deviceStage === 'unavailable'
                             ? '기기 설정을 확인하지 못했습니다. 다시 확인하거나 로컬로 앱을 열 수 있습니다.'
-                            : '이 앱에는 아직 확정된 기기 신원이 없습니다. 다른 PC에서 이미 쓰고 있다면 “두 번째·추가 기기”, 아니면 “첫 기기”을 선택하세요.'}
+                            : '이 앱에는 아직 확정된 기기 신원이 없습니다. 다른 PC에서 이미 쓰고 있다면 “두 번째·추가 기기”, 아니면 “첫 기기”를 선택하세요.'}
                 </span>
               </div>
               {statusError && <div className={BANNER_WARN} role="alert">연결 상태를 확인하지 못했습니다. 저장된 설정은 유지됩니다. <button type="button" onClick={retryStatus} disabled={statusChecking} className={LINK_BUTTON_CLASS}>다시 확인</button></div>}
@@ -3399,7 +3399,7 @@ function TerminalToolsWizard({ onBack }: { onBack: () => void }) {
         {tab === 'tmux' && (
           <div className="space-y-5">
             <InfoBox color="blue">
-              <strong>tmux</strong>는 터미널 세션을 분리·유지하는 멀티플렉서입니다. 포트 관리기에서 "tmux" 버튼을 클릭하면 별도 tmux 세션에서 Claude가 실행됩니다.
+              <strong>tmux</strong>는 터미널 세션을 분리·유지하는 멀티플렉서입니다. AgentsToZ에서 "tmux" 버튼을 클릭하면 별도 tmux 세션에서 Claude가 실행됩니다.
             </InfoBox>
 
             <OsToggle os={os} onChange={setOs} />
@@ -3426,7 +3426,7 @@ function TerminalToolsWizard({ onBack }: { onBack: () => void }) {
             )}
 
             <InfoBox color="green">
-              설치 완료 후 포트 관리기 카드의 더보기 메뉴 → <strong>tmux ⚡</strong> 버튼으로 Claude를 tmux 세션에서 실행합니다.
+              설치 완료 후 AgentsToZ 프로젝트 카드의 더보기 메뉴 → <strong>tmux ⚡</strong> 버튼으로 Claude를 tmux 세션에서 실행합니다.
             </InfoBox>
           </div>
         )}
@@ -3453,7 +3453,7 @@ function TerminalToolsWizard({ onBack }: { onBack: () => void }) {
                 Socket Control 설정 <span className={`${BADGE_CLASS} bg-[var(--danger-soft)] text-[var(--danger)]`}>필수</span>
               </h3>
               <InfoBox color="amber">
-                cmux는 기본으로 <strong>cmuxOnly 모드</strong>입니다 — 외부 앱(포트 관리기 API 서버 등)의 소켓 연결을 차단합니다. 아래 명령으로 <strong>Allow All</strong>로 변경 후 재시작해야 버튼이 정상 작동합니다.
+                cmux는 기본으로 <strong>cmuxOnly 모드</strong>입니다 — 외부 앱(AgentsToZ API 서버 등)의 소켓 연결을 차단합니다. 아래 명령으로 <strong>Allow All</strong>로 변경 후 재시작해야 버튼이 정상 작동합니다.
               </InfoBox>
               <CodeBlock
                 label="① Socket Control → Allow All 설정"
@@ -3482,7 +3482,7 @@ function TerminalToolsWizard({ onBack }: { onBack: () => void }) {
                 <span className={`${BADGE_CLASS} bg-[var(--violet-soft)] text-[var(--violet)]`}>신규</span>
               </h3>
               <InfoBox color="blue">
-                헤더 <strong>[Agents]</strong> 버튼으로 cmux에서 claude agents 전역 뷰를 엽니다. 포트 카드 더보기 → <strong>Project Agents</strong>로 프로젝트 폴더에서 <code>claude --resume</code> TUI를 시작합니다.
+                헤더 <strong>[Agents]</strong> 버튼으로 cmux에서 claude agents 전역 뷰를 엽니다. 프로젝트 카드 더보기 → <strong>Project Agents</strong>로 프로젝트 폴더에서 <code>claude --resume</code> TUI를 시작합니다.
               </InfoBox>
               <div className={`${CARD_CLASS} space-y-1.5 text-xs text-[var(--ink-2)]`}>
                 <p className="font-medium text-[var(--ink-2)] mb-1">진입점</p>
@@ -3493,27 +3493,27 @@ function TerminalToolsWizard({ onBack }: { onBack: () => void }) {
 
             <div className="space-y-4">
               <h3 className={`${SECTION_TITLE_CLASS} flex items-center gap-2`}>
-                claude --bg (bypass 모드)
+                claude --bg (승인 없이 실행 · 권한 우회 모드)
                 <span className={`${BADGE_CLASS} bg-[var(--warn-soft)] text-[var(--warn)]`}>신규</span>
               </h3>
               <InfoBox color="amber">
-                <code>--dangerously-skip-permissions</code>으로 Claude를 권한 프롬프트 없이 실행합니다. <strong>bypass ON</strong> 토글을 켜면 모든 cmux 버튼이 bypass 모드로 전환됩니다.
+                <code>--dangerously-skip-permissions</code>로 Claude를 권한 확인 없이 실행합니다. <strong>승인 없이 실행 (권한 우회)</strong> 토글을 켜면 모든 cmux 버튼에 권한 우회가 적용됩니다.
               </InfoBox>
               <div className={`${CARD_CLASS} space-y-1.5 text-xs text-[var(--ink-2)]`}>
                 <p className="font-medium text-[var(--ink-2)] mb-1">진입점</p>
-                <p><span className="text-[var(--warn)] font-mono">헤더 [--bg]</span> — HOME(<code>~</code>)에서 bypass Claude 실행</p>
-                <p><span className="text-[var(--warn)] font-mono">터미널뷰 [--bg]</span> — 현재 포트 폴더에서 bypass 실행</p>
-                <p><span className="text-[var(--warn)] font-mono">bypass ON 토글</span> — 활성화 시 모든 cmux 버튼 bypass 모드</p>
+                <p><span className="text-[var(--warn)] font-mono">헤더 [--bg]</span> — HOME(<code>~</code>)에서 권한 우회 Claude 실행</p>
+                <p><span className="text-[var(--warn)] font-mono">터미널뷰 [--bg]</span> — 현재 프로젝트 폴더에서 권한 우회 실행</p>
+                <p><span className="text-[var(--warn)] font-mono">승인 없이 실행 (권한 우회)</span> — 활성화 시 모든 cmux 버튼 권한 우회 모드</p>
               </div>
             </div>
 
             <InfoBox color="green">
-              설치 완료 후 포트 관리기 카드의 더보기 메뉴 → <strong>cmux ⚡ (Mac)</strong> 버튼으로 cmux에서 Claude를 실행합니다.
+              설치 완료 후 AgentsToZ 프로젝트 카드의 더보기 메뉴 → <strong>cmux ⚡ (Mac)</strong> 버튼으로 cmux에서 Claude를 실행합니다.
             </InfoBox>
 
             <div className={`${BANNER_WARN} flex items-center gap-3`}>
               <Zap className="w-4 h-4 text-[var(--warn)] shrink-0" />
-              <span>선택 도구 설치 전에는 <strong className="text-[var(--ink-2)]">세팅 첫 화면 → 에이전트 온보딩 프롬프트</strong>에서 현재 환경을 먼저 진단하세요.</span>
+              <span>선택 도구 설치 전에는 <strong className="text-[var(--ink-2)]">설정 첫 화면 → 에이전트 온보딩 프롬프트</strong>에서 현재 환경을 먼저 진단하세요.</span>
             </div>
 
             <div className="space-y-4">

@@ -103,3 +103,40 @@ describe('iPhone app: a scan from the workroom that cannot be used', () => {
     expect(home).toContain('rejectedScan == nil, let resumed = LANWorkroomSession.resumeSaved()');
   });
 });
+
+// Registering a Mac for AgentsToZ Screen took the first QR the camera saw: a neighbouring QR on the Mac's screen ended
+// the registration with 「등록 QR이 아닙니다」 and closed the scanner (2026-10-25, iPad mini). The registration scanner
+// now tracks every QR in view, skips one it cannot register with a hint, and keeps scanning. Source contract only, as above.
+describe('iPhone app: the Screen registration scanner skips a QR it cannot register', () => {
+  const app = join(import.meta.dir, '..', 'mobile', 'ios', 'App');
+  const scanner = readFileSync(join(app, 'QRScannerSheet.swift'), 'utf8');
+  const section = readFileSync(join(app, 'ScreenMacsSection.swift'), 'utf8');
+  test('the section filters with the same parser it registers with', () => {
+    expect(section).toContain('QRScannerSheet(accepts: { (try? RegistrationInvite(text: $0)) != nil },');
+    expect(section).toContain('rejectedHint:');
+  });
+  test('a skipped QR neither stops the scan nor reaches the caller', () => {
+    expect(scanner).toContain('recognizesMultipleItems: accepts != nil');
+    const delegate = scanner.slice(scanner.indexOf('func dataScanner('), scanner.indexOf('if skipped { rejected() }'));
+    const skip = delegate.indexOf('guard accepts?(value) ?? true else { skipped = true; continue }');
+    expect(skip).toBeGreaterThan(-1);
+    expect(delegate.indexOf('scanner.stopScanning(); scanned(value)')).toBeGreaterThan(skip);
+  });
+  test('both newly added and updated QR items reconsider all tracked payloads through the same filter', () => {
+    for (const event of ['didAdd addedItems', 'didUpdate updatedItems']) {
+      const start = scanner.indexOf('func dataScanner(_ scanner: DataScannerViewController, ' + event);
+      expect(start).toBeGreaterThan(-1);
+      const callback = scanner.slice(start, scanner.indexOf('\n        }', start));
+      expect(callback).toContain('scan(allItems, using: scanner)');
+    }
+    const scan = scanner.slice(scanner.indexOf('private func scan('));
+    expect(scan).toContain('guard !delivered else { return }');
+    expect(scan).toContain('guard accepts?(value) ?? true');
+    expect(scan).toContain('value.utf8.count <= 4096');
+    expect(scan.indexOf('delivered = true')).toBeLessThan(scan.indexOf('scanner.stopScanning(); scanned(value)'));
+  });
+  test('the home scanner, which has no filter, still takes the first QR', () => {
+    expect(scanner).toContain('var accepts: ((String) -> Bool)? = nil');
+    expect(readFileSync(join(app, 'RemoteHomeView.swift'), 'utf8')).toContain('QRScannerSheet { value in');
+  });
+});

@@ -129,6 +129,9 @@
 /* Text entry remains available before microphone consent, including on a phone. */
 .az-voice-dock__main { max-width:100%; flex-wrap:wrap; box-sizing:border-box; }
 .az-voice-dock__call { min-width:0; flex:1 1 150px; }
+/* Idle on a Mac the row is call · 텍스트로만 · 열린 세션 · 설정; a shrink-to-fit dock otherwise drops 설정 onto a row of its own. */
+.az-voice-dock[data-active="false"]:not([data-remote="true"]) .az-voice-dock__main { flex-wrap:nowrap; }
+.az-voice-dock[data-active="false"]:not([data-remote="true"]) .az-voice-dock__text-start { flex:none; white-space:nowrap; }
 .az-voice-dock__text-start { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:44px; padding:8px 10px; border:1px solid var(--line-2); border-radius:10px; background:var(--surface); color:var(--ink); font:inherit; font-size:12px; cursor:pointer; }
 .az-voice-dock__text-start:hover { background:var(--raised); border-color:var(--accent); }
 .az-voice-dock__text-start:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
@@ -172,3 +175,55 @@
   .az-voice-dock[data-remote="true"] .az-voice-dock__notice,
   .az-voice-dock[data-remote="true"] .az-voice-dock__error { margin:0; }
 }
+
+/* 「열린 AI 세션」 — open project + agent sessions with context % and save/sync (VOC 2026-10-24). */
+.az-voice-dock__sessions-toggle[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.az-voice-dock__sessions-toggle { position: relative; }
+.az-voice-dock__badge { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+.az-sessions { display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: min(380px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+.az-sessions__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.az-sessions__head > div { display: flex; flex-direction: column; min-width: 0; }
+.az-sessions__head strong { font-size: 13px; font-weight: 700; }
+.az-sessions__head small { font-size: 11px; color: var(--ink-3); }
+.az-sessions__icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink-2); cursor: pointer; }
+.az-sessions__icon:hover { color: var(--ink); border-color: var(--line-2); }
+.az-sessions__tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.az-sessions__save-all { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--accent); border-radius: 8px; background: rgb(var(--accent-rgb) / .12); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.az-sessions__save-all:hover:not(:disabled) { background: rgb(var(--accent-rgb) / .2); }
+.az-sessions__save-all:disabled { border-color: var(--line); background: var(--raised); color: var(--ink-3); font-weight: 600; cursor: default; }
+.az-sessions__save-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.az-sessions__hint { margin: 0; font-size: 11px; line-height: 1.45; color: var(--ink-3); }
+.az-sessions__error { margin: 0; font-size: 12px; color: var(--danger); }
+.az-sessions__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.az-session { display: flex; flex-direction: column; gap: 4px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.az-session__title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.az-session__name { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-session__name em { font-style: normal; color: var(--ink-3); }
+.az-session__agent { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: 10.5px; background: rgb(var(--info-rgb) / .12); color: var(--info); }
+.az-session__agent[data-agent="claude"] { background: rgb(var(--violet-rgb) / .12); color: var(--violet); }
+.az-session__pct { flex-shrink: 0; font-family: var(--font-mono); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.az-session__pct[data-level="warn"] { color: var(--warn); }
+.az-session__pct[data-level="danger"] { color: var(--danger); }
+.az-session__pct[data-level="none"] { color: var(--ink-3); }
+.az-session__bar { height: 4px; border-radius: 2px; background: var(--sunken); overflow: hidden; }
+.az-session__bar i { display: block; height: 100%; border-radius: 2px; background: var(--ok); transition: width .3s; }
+.az-session__bar i[data-level="warn"] { background: var(--warn); }
+.az-session__bar i[data-level="danger"] { background: var(--danger); }
+.az-session__thread { margin: 0; font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-session__state { margin: 0; font-size: 11px; line-height: 1.45; color: var(--ink-2); }
+.az-session__state[data-action="remember"], .az-session__state[data-action="push"] { color: var(--warn); }
+.az-session__state[data-action="conflict"], .az-session__state[data-action="retry"] { color: var(--danger); }
+.az-session__state[data-action="pull"] { color: var(--info); }
+.az-session__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.az-session__actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.az-session__actions button:hover:not(:disabled) { border-color: var(--line-2); }
+.az-session__actions button:disabled { opacity: .45; cursor: default; }
+.az-session__actions .az-session__primary { border-color: var(--accent); background: rgb(var(--accent-rgb) / .12); color: var(--ink); font-weight: 700; }
+.az-session__actions button:focus-visible, .az-sessions__icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.az-session__spin { animation: az-session-spin .9s linear infinite; }
+@keyframes az-session-spin { to { transform: rotate(360deg); } }
+.az-session__result { margin: 0; font-size: 11px; line-height: 1.45; color: var(--ok); overflow-wrap: anywhere; }
+.az-session__result--error { color: var(--danger); }
+.voice-popout .az-sessions { width: 100%; }
+@media (pointer: coarse) { .az-session__actions button, .az-sessions__icon, .az-sessions__save-all { min-height: 44px; min-width: 44px; } }
+@media (prefers-reduced-motion: reduce) { .az-session__spin { animation: none; } }

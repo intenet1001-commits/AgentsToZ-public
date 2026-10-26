@@ -44,6 +44,7 @@ export interface WhatISaidPanelProps {
   projects: readonly WhatISaidProject[];
   language: WhatISaidLanguage;
   visible: boolean;
+  onOpenUserProfile?:()=>void;
 }
 
 export interface WhatISaidScanSummary {
@@ -1081,7 +1082,7 @@ const canFallBackToExplicitLocalDelete = (error: unknown): boolean => {
     || code === 'WHAT_I_SAID_REMOTE_DELETE_FAILED';
 };
 
-export function WhatISaidPanel({ projects, language, visible }: WhatISaidPanelProps) {
+export function WhatISaidPanel({ projects, language, visible, onOpenUserProfile }: WhatISaidPanelProps) {
   const [voiceHistory,setVoiceHistory]=useState(false);
   const t = copy[language];
   const idPrefix = useId();
@@ -1824,6 +1825,7 @@ export function WhatISaidPanel({ projects, language, visible }: WhatISaidPanelPr
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-[var(--line)] px-6 py-2">
         <h1 id={`${idPrefix}-title`} className="m-0 text-[15px] font-bold tracking-[-0.01em] text-[var(--ink)]">{t.title}</h1>
         <span className="min-w-0 text-xs text-[var(--ink-3)]">{t.intro}</span>
+        {onOpenUserProfile&&<button type="button" className="min-h-11 rounded-lg border border-[var(--line)] px-3 text-sm" onClick={onOpenUserProfile}>{language==='ko'?'내 프로필 · 선호 직접 정리':'My profile · review preferences'}</button>}
         {/* ⚠️ 적재가 켜지면 "이 기기에서만"은 더 이상 참이 아니다. 배지가 실제
             상태를 따라가지 않으면 앱이 사용자에게 거짓말을 하게 된다. */}
         <span

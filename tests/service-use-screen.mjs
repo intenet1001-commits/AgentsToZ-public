@@ -13,7 +13,7 @@ import {normalizeMobileWorkspaceRequest} from '../src/mobileWorkspaceProtocol.ts
 const root=resolve(import.meta.dirname,'..'),scratch=realpathSync(mkdtempSync(join(tmpdir(),'use-screen-')));
 for(const key of Object.keys(process.env))if(key.startsWith('VITE_'))delete process.env[key];
 process.env.VITE_SUPABASE_URL='https://use-screen-fixture.supabase.co';process.env.VITE_SUPABASE_ANON_KEY='fixture-anon-key';
-const projects=new Map(),appCalls=[],requests=[];let devStarts=0,vite,threads;
+const projects=new Map(),appCalls=[],requests=[];let devStarts=0,vite,threads,failStatusAfterOff=false;
 const keys={read:async()=>Buffer.alloc(32,3),create:async()=>Buffer.alloc(32,3)};
 const adapters=[];
 for(const engine of ['webkit','chromium']){
@@ -36,6 +36,8 @@ try{
     const p=projects.get(body.portId);assert.ok(p);
     if(req.url.endsWith('/prepare-use-memory')){assert.equal(body.consent,true);ensureServiceMemory(scratch,{projectId:p.projectId,projectName:p.projectName,projectMemoryId:p.memoryId,canonicalPath:p.canonicalPath,displayName:'ShadowLoop USE'});migrateServiceMemoryToProject(scratch,{projectId:p.projectId,projectMemoryId:p.memoryId});}
     if(req.url.endsWith('/enable-use')){assert.equal(body.consent,true);await host.enable(p.projectId);}
+    if(req.url.endsWith('/disable-use')){assert.equal(body.consent,true);await host.disable(p.projectId);}
+    if(req.url.endsWith('/use-status')&&failStatusAfterOff&&(await host.status(p.projectId,'test-user')).turnedOff){failStatusAfterOff=false;throw Error('상태를 다시 읽지 못했습니다.');}
     if(req.url.endsWith('/connect-shadowloop')){assert.equal(body.consent,true);if(body.connectionCode!=='fixture-connection-code')throw Error('테스트 연결 코드를 확인하세요.');}
     result={success:true,...await host.status(p.projectId,'test-user')};
    }
@@ -55,7 +57,7 @@ try{
     import R from '/@react-refresh';import React from ${JSON.stringify(react)};import ReactDOM from ${JSON.stringify(dom)};R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>t=>t;window.__vite_plugin_react_preamble_installed__=true;
     import '/src/index.css';const {default:Setup}=await import('/src/ServiceUseSetupDialog.tsx');const {CommunityWorkspace}=await import('/src/CommunityWorkspace.tsx');
     const transport=async r=>{const response=await fetch('/__use-thread',{method:'POST',body:JSON.stringify(r)}),body=await response.json();if(!response.ok)throw Error(body.error);if(window.dropNextCreate&&r.workspace.action==='workroom.threads.create'){window.dropNextCreate=false;throw Error('lost acknowledgement');}return body;};
-    function App(){const [setup,setSetup]=React.useState(true);return setup?React.createElement(Setup,{projects:[{id:${JSON.stringify(id)},name:'ShadowLoop',folderPath:'fixture-only'}],onClose:()=>setSetup(false)}):React.createElement(CommunityWorkspace,{channels:[{id:'local',label:'테스트 Mac',projects:async()=>[{targetId:${JSON.stringify(id)},label:'ShadowLoop',useServices:['default']}],transport}],onOpenWorkroom:()=>{throw Error('unexpected developer workroom');}});}
+    function App(){const [setup,setSetup]=React.useState(true);return setup?React.createElement(Setup,{projects:[{id:${JSON.stringify(id)},name:'ShadowLoop',folderPath:'fixture-only'}],onClose:()=>setSetup(false)}):React.createElement(CommunityWorkspace,{channels:[{id:'local',label:'테스트 Mac',projects:async()=>[{targetId:${JSON.stringify(id)},label:'ShadowLoop',useServices:['default']}],transport,usePhones:async()=>[{id:'approved-phone-13',name:'아이폰13'}]}],onOpenWorkroom:()=>{throw Error('unexpected developer workroom');}});}
     const uiRoot=ReactDOM.createRoot(document.getElementById('root'));uiRoot.render(React.createElement(App));
     window.openOpsUse=async(includeUse=true,sessionId='fixture-ops-session')=>{const {AiTerminalPanel}=await import('/src/AiTerminalPanel.tsx');window.terminalCalls=[];
       const session={id:sessionId,targetId:'fixture-ops-project',agent:'claude',state:'running',createdAt:'2026-10-23T00:00:00Z',exitCode:null,cols:80,rows:24};
@@ -66,7 +68,34 @@ try{
     console.log(engineName+': opening USE setup');await page.getByTestId('service-use-readiness').waitFor();await page.getByRole('button',{name:'프로젝트 USE 운영기억 준비·활성화',exact:true}).click();
     await page.getByRole('button',{name:'USE 활성화됨',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'USE 활성화됨',exact:true}).isEnabled(),false);
     const mutations=requests.filter(r=>r.body.portId===id&&!r.path.endsWith('/use-status'));assert.deepEqual(mutations.map(r=>r.path.split('/').at(-1)),['prepare-use-memory','enable-use']);
-    await page.getByLabel('ShadowLoop 운영 연결 코드').fill('wrong-fixture-code');await page.getByRole('button',{name:'이 Mac에 운영 도구 연결',exact:true}).click();await page.getByRole('alert').getByText('테스트 연결 코드를 확인하세요.',{exact:true}).waitFor();
+    // 「USE 끄기」 asks first in plain words, keeps the memory, and 「USE 다시 켜기」 continues the same USE memory.
+    const memoryId=(await host.status(id,'test-user')).serviceMemory.record.serviceMemoryId;
+    await page.evaluate(()=>{window.useChanged=0;window.addEventListener('agentstoz:service-use-changed',()=>{window.useChanged++;});});
+    await page.getByRole('button',{name:'USE 끄기',exact:true}).click();
+    const confirmOff=page.getByRole('alertdialog',{name:'USE 끄기 확인',exact:true});await confirmOff.waitFor();
+    await confirmOff.getByText('운영기억·앱 연결·이전 결과는 그대로 남고, 다시 켜면 그대로 이어집니다.',{exact:false}).waitFor();
+    await page.keyboard.press('Escape');await confirmOff.waitFor({state:'detached'});
+    await page.getByTestId('service-use-setup').waitFor({state:'visible'});
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'USE 끄기');
+    assert.equal(requests.some(r=>r.body.portId===id&&r.path.endsWith('/disable-use')),false);
+    await page.getByRole('button',{name:'USE 끄기',exact:true}).click();await confirmOff.getByRole('button',{name:'끄기',exact:true}).click();
+    await page.getByTestId('service-use-readiness').getByText('꺼 둠 · 기억·연결 보존',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'USE 다시 켜기',exact:true}).waitFor();
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'USE 다시 켜기');
+    assert.equal(await page.getByRole('button',{name:'USE 끄기',exact:true}).count(),0);
+    assert.equal(await page.evaluate(()=>window.useChanged),1);
+    const off=await host.status(id,'test-user');assert.equal(off.readiness.enabled,false);assert.equal(off.turnedOff,true);assert.equal(off.serviceMemory.record.serviceMemoryId,memoryId);
+    await page.getByRole('button',{name:'USE 다시 켜기',exact:true}).click();await page.getByRole('button',{name:'USE 활성화됨',exact:true}).waitFor();
+    assert.equal((await host.status(id,'test-user')).serviceMemory.record.serviceMemoryId,memoryId);assert.equal(await page.evaluate(()=>window.useChanged),2);
+    assert.deepEqual(requests.filter(r=>r.body.portId===id&&!r.path.endsWith('/use-status')).map(r=>r.path.split('/').at(-1)),['prepare-use-memory','enable-use','disable-use','prepare-use-memory','enable-use']);
+    // Off on the server but the refresh after it fails: the dialog stops asking to turn it off and says it is off.
+    failStatusAfterOff=true;
+    await page.getByRole('button',{name:'USE 끄기',exact:true}).click();await confirmOff.getByRole('button',{name:'끄기',exact:true}).click();
+    await page.getByRole('alert').getByText('상태를 다시 읽지 못했습니다.',{exact:true}).waitFor();
+    await confirmOff.waitFor({state:'detached'});await page.getByRole('button',{name:'USE 다시 켜기',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'USE 끄기',exact:true}).count(),0);assert.equal(failStatusAfterOff,false);
+    await page.getByRole('button',{name:'USE 다시 켜기',exact:true}).click();await page.getByRole('button',{name:'USE 활성화됨',exact:true}).waitFor();
+    await page.getByLabel('ShadowLoop 운영 연결 코드').fill('wrong-fixture-code');await page.getByRole('button',{name:'이 Mac에 운영 도구 연결',exact:true}).click();await page.getByRole('region',{name:'ShadowLoop 운영 도구 연결'}).getByRole('alert').getByText('테스트 연결 코드를 확인하세요.',{exact:true}).waitFor();
     await page.getByLabel('ShadowLoop 운영 연결 코드').fill('fixture-connection-code');await page.getByRole('button',{name:'이 Mac에 운영 도구 연결',exact:true}).click();await page.getByRole('button',{name:'USE 준비 닫기',exact:true}).waitFor({state:'visible'});
     await page.waitForFunction(()=>document.querySelector('input[aria-label="ShadowLoop 운영 연결 코드"]').value==='');
     assert.equal(await page.evaluate(()=>Object.values(localStorage).concat(Object.values(sessionStorage)).join('').includes('fixture-connection-code')),false);
@@ -81,10 +110,15 @@ try{
     await page.getByLabel('프로젝트에 맡길 업무').fill('@ShadowLoop USE 짧은 인사 자료를 만들어줘');
     await page.getByLabel('USE 운영 도구').waitFor();assert.equal(await page.getByLabel('업무 역할').inputValue(),'use');assert.equal(await page.getByLabel('업무 AI').count(),0);
     await page.evaluate(()=>{window.dropNextCreate=true;});await page.getByRole('button',{name:'업무 맡기기',exact:true}).click();
-    await page.getByRole('button',{name:'전송 결과 확인',exact:true}).click();await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('테스트 자료 생성 확인',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'전송 결과 확인',exact:true}).click();await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('테스트 자료 생성 확인\n자료 ID: fixture-material',{exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'연결 워크룸 열기',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'세션 기억하기',exact:true}).count(),0);
-    await page.getByLabel('USE 운영 도구').selectOption('audio.prepare');await page.getByLabel('USE 자료 ID').fill('fixture-material');await page.getByLabel('스레드 답변').fill('이 자료의 음성을 준비해줘');await page.getByRole('button',{name:'답변 보내기',exact:true}).click();
-    await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('테스트 음성 준비 확인',{exact:true}).waitFor();
+    await page.getByLabel('USE 운영 도구').selectOption('audio.prepare');assert.equal(await page.getByLabel('USE 자료 ID').inputValue(),'fixture-material');assert.equal(await page.getByText('자료 ID와 요청 ID는 이 스레드의 앞선 결과에 표시됩니다.',{exact:false}).count(),1);await page.getByLabel('USE 메모 (선택)').fill('이 자료의 음성을 준비해줘');await page.getByRole('button',{name:'답변 보내기',exact:true}).click();
+    await threads.idle();await page.getByRole('button',{name:'새로고침',exact:true}).click();await page.getByText('테스트 음성 준비 확인\n자료 ID: fixture-material',{exact:true}).waitFor();
+    // This Mac's own USE status names the approved phones; the request still carries only the chosen ID.
+    await page.getByLabel('USE 운영 도구').selectOption('phone.deliver');await page.getByLabel('USE 승인된 폰').selectOption({label:'아이폰13'});
+    assert.equal(await page.getByLabel('USE 승인된 폰').inputValue(),'approved-phone-13');assert.equal(await page.getByLabel('USE 승인된 폰 ID').count(),0);
+    assert.equal(await page.getByLabel('USE 자료 ID').evaluate(e=>getComputedStyle(e).fontSize),'16px');assert.notEqual(await page.getByLabel('USE 자료 ID').evaluate(e=>getComputedStyle(e).borderTopWidth),'0px');
+    await page.getByLabel('USE 운영 도구').selectOption('audio.prepare');
     assert.equal(appCalls.filter(c=>c.projectId===id&&c.call.tool==='materials.generate').length,1);assert.equal(devStarts,0);assert.deepEqual(errors,[]);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=402));console.log(engineName+': USE preparation, role mention, lost receipt, follow-up and DEV isolation passed (synthetic app only)');
     await page.evaluate(()=>window.openOpsUse());
@@ -102,7 +136,7 @@ try{
     await page.getByRole('button',{name:'USE 대화 열기',exact:true}).click();
     assert.equal(await dialog.getByLabel('프로젝트에 맡길 업무').inputValue(),'Edited USE draft survives closing');
     await dialog.getByRole('button',{name:'업무 맡기기',exact:true}).click();await threads.idle();
-    await dialog.getByRole('button',{name:'새로고침',exact:true}).click();await dialog.getByText('테스트 자료 생성 확인',{exact:true}).last().waitFor();
+    await dialog.getByRole('button',{name:'새로고침',exact:true}).click();await dialog.getByText('테스트 자료 생성 확인\n자료 ID: fixture-material',{exact:true}).last().waitFor();
     assert.equal(await page.evaluate(()=>window.terminalCalls.filter(r=>r.operation==='start'||r.operation==='input'||r.operation==='submission').length),0);
     await dialog.getByRole('button',{name:'USE 대화 닫기',exact:true}).click();assert.equal(await composer.inputValue(),'');
     assert.equal(appCalls.filter(c=>c.projectId===id&&c.call.tool==='materials.generate').length,2);

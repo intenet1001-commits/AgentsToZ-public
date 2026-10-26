@@ -7,6 +7,7 @@ import {VOICE_POPOUT_ACTION_EVENT,type VoicePopoutContext} from './voicePopout';
 import {OPEN_HELPDESK_EVENT} from './helpdeskKnowledge';
 import {revealMainWindow} from './mainWindowReveal';
 import {initialVoiceDockWindowState,OPEN_VOICE_DOCK_EVENT,showVoiceDockReopen,voiceDockWindowReducer} from './voiceDockWindowState';
+import {AutomaticSaveNotice} from './AutomaticSaveNotice';
 import './NativeVoiceLauncher.css';
 
 const VOICE_DOCK_CLOSED_EVENT='voice-dock:closed';
@@ -68,5 +69,6 @@ export function NativeVoiceLauncher({context,onOpenOpsWorkroom,onOpenDeviceWorkr
   },[offerReopen]);
   if(error)return <div role="alert" data-testid="voice-popout-error">음성 독립 창을 열지 못했습니다. {error}<button type="button" onClick={()=>{setError('');reopen();}}>다시 열기</button></div>;
   if(!offerReopen)return null;
-  return <button type="button" className="voice-dock-reopen" data-testid="voice-dock-reopen" aria-label="아젠투지 호출 열기 — 닫은 음성 호출 창을 다시 엽니다" title="닫은 「아젠투지 호출」 창을 다시 엽니다" onClick={reopen}><Mic aria-hidden="true" size={14}/>아젠투지 호출 열기</button>;
+  // The 「아젠투지 호출」 window shows the saved-notice stack; while it is closed, this window does, above the reopen button.
+  return <><AutomaticSaveNotice placement="floating"/><button type="button" className="voice-dock-reopen" data-testid="voice-dock-reopen" aria-label="아젠투지 호출 열기 — 닫은 음성 호출 창을 다시 엽니다" title="닫은 「아젠투지 호출」 창을 다시 엽니다" onClick={reopen}><Mic aria-hidden="true" size={14}/>아젠투지 호출 열기</button></>;
 }

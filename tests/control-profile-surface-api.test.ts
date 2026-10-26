@@ -57,7 +57,7 @@ test('OPS external-app/Orca adapters resolve the bound folder and preserve modes
   // Display names/roles never override the profile binding.
   writeFileSync(join(f.data, 'ports.json'), JSON.stringify(f.ports.map(p => ({...p, name: 'renamed', role: p.id === 'ops-project' ? 'managed' : 'ops'}))));
   for (const agent of ['codex', 'claude', 'hermes']) {
-    const r = await f.call('open_code_app', {target: 'ops', agent, bypass: true, ...(agent === 'codex' ? {mode: 'prepare'} : {})});
+    const r = await f.call('open_code_app', {target: 'ops', agent, surface: 'app', ...(agent === 'hermes' ? {hermesVariant: 'default'} : {}), bypass: true, ...(agent === 'codex' ? {mode: 'prepare'} : {})});
     expect(r).toMatchObject({success: true, target: 'ops', projectId: 'ops-project', projectName: 'AgentsToZ OPS', bypassRequested: true});
     expect(r.permissionModeForwarded).toBe(agent === 'claude');
     expect(r.warnings.length).toBe(agent === 'claude' ? 0 : agent === 'codex' ? 2 : 1);
@@ -83,12 +83,12 @@ test('OPS external-app/Orca adapters resolve the bound folder and preserve modes
   expect(agyApp).toMatchObject({success: true, agent: 'agy', surface: 'app', launchVerified: true, projectApplied: false});
   expect(f.launches().at(-1)).toEqual({path: '/api/open-code-app', body: {agent: 'agy', folderPath: f.root}});
   // A task reaches the sidecar unchanged; Codex reports the prefill and a new conversation, the others say it was not delivered.
-  const prefilled = await f.call('open_code_app', {target: 'ops', agent: 'codex', task: '로그인 화면을 고쳐 주세요.'});
+  const prefilled = await f.call('open_code_app', {target: 'ops', agent: 'codex', surface: 'app', task: '로그인 화면을 고쳐 주세요.'});
   expect(prefilled).toMatchObject({success: true, mode: 'new', taskApplied: 'prefilled'});
   expect(prefilled).not.toHaveProperty('taskNote');
   expect(f.launches().at(-1)).toEqual({path: '/api/open-code-app', body: {agent: 'codex', folderPath: f.root, mode: 'new', task: '로그인 화면을 고쳐 주세요.'}});
   for (const agent of ['claude', 'hermes', 'agy']) {
-    const r = await f.call('open_code_app', {target: 'ops', agent, task: '로그인 화면을 고쳐 주세요.'});
+    const r = await f.call('open_code_app', {target: 'ops', agent, surface: 'app', ...(agent === 'hermes' ? {hermesVariant: 'default'} : {}), task: '로그인 화면을 고쳐 주세요.'});
     expect(r).toMatchObject({success: true, taskApplied: false, taskReason: 'unsupported-app'});
     expect(r.warnings.some((w: string) => w.startsWith('작업 요청은 앱에 전달되지 않았습니다'))).toBe(true);
     expect(f.launches().at(-1).body.task).toBe('로그인 화면을 고쳐 주세요.');
@@ -96,13 +96,13 @@ test('OPS external-app/Orca adapters resolve the bound folder and preserve modes
   // Rejected before any app is touched.
   const before = f.launches().length;
   for (const args of [{agent: 'codex', task: '!ls'}, {agent: 'agy', surface: 'orca-floating', task: '고쳐'}, {agent: 'codex', mode: 'prepare', task: '고쳐'}]) {
-    const r = await f.call('open_code_app', {target: 'ops', ...args});
+    const r = await f.call('open_code_app', {target: 'ops', surface: 'app', ...args});
     expect(r.success).not.toBe(true);
   }
   expect(f.launches().length).toBe(before);
   for (const projectApplied of [false, true]) {
     writeFileSync(join(f.home, 'surface-result.json'), JSON.stringify({status: 200, body: {success: true, mode: 'new', projectRegistered: true, projectApplied, projectNote: `연결 상태: ${f.root}`}}));
-    const result = await f.call('open_code_app', {target: 'ops', agent: 'codex', mode: 'new'});
+    const result = await f.call('open_code_app', {target: 'ops', agent: 'codex', surface: 'app', mode: 'new'});
     expect(result).toMatchObject({success: true, projectApplied, projectRegistered: true});
     expect(result.warnings.length).toBe(projectApplied ? 0 : 1);
     expect(JSON.stringify(result)).not.toContain(f.root);
@@ -110,12 +110,12 @@ test('OPS external-app/Orca adapters resolve the bound folder and preserve modes
   writeFileSync(join(f.home, 'surface-result.json'), JSON.stringify({status: 409, body: {success: false, projectApplied: false,
     backendRegistered: true, backendProjectId: 'retained-project', desktopProjectVisible: false,
     code: 'CODEX_DESKTOP_PROJECT_CATALOG_PENDING', error: `목록 반영 대기: ${f.root}`}}));
-  const unregistered = await f.call('open_code_app', {target: 'ops', agent: 'codex', mode: 'prepare'});
+  const unregistered = await f.call('open_code_app', {target: 'ops', agent: 'codex', surface: 'app', mode: 'prepare'});
   expect(unregistered).toMatchObject({success: false, performed: false, projectApplied: false, backendRegistered: true,
     backendProjectId: 'retained-project', desktopProjectVisible: false, code: 'CODEX_DESKTOP_PROJECT_CATALOG_PENDING'});
   expect(JSON.stringify(unregistered)).not.toContain(f.root);
   writeFileSync(join(f.home, 'surface-result.json'), JSON.stringify({status: 409, body: {success: false, code: 'CLAUDE_REMOTE_SESSION_PERMISSION_MODE_MISMATCH', error: `기존 모드와 다름: ${f.root}`}}));
-  const failed = await f.call('open_code_app', {target: 'ops', agent: 'claude', bypass: true});
+  const failed = await f.call('open_code_app', {target: 'ops', agent: 'claude', surface: 'app', bypass: true});
   expect(failed).toMatchObject({success: false, performed: false, code: 'CLAUDE_REMOTE_SESSION_PERMISSION_MODE_MISMATCH'});
   expect(JSON.stringify(failed)).not.toContain(f.root);
 }, 30_000);
@@ -123,7 +123,7 @@ test('OPS external-app/Orca adapters resolve the bound folder and preserve modes
 test('all four OPS Workroom agents use real isolated sessions with exact target and request identity', async () => {
   const f = await fixture();
   for (const agent of ['codex', 'claude', 'hermes', 'agy']) {
-    const args = {target: 'ops', agent, requestId: `ops_start_${agent}_123`};
+    const args = {target: 'ops', agent, surface: 'internal', ...(agent === 'hermes' ? {hermesVariant: 'default'} : {}), requestId: `ops_start_${agent}_123`};
     const started = await f.call('start_workroom_session', args);
     expect(started).toMatchObject({success: true, target: 'ops', projectId: 'ops-project', session: {targetId: 'ops-project', agent, state: 'running'}});
     const sessionId = started.session.id;
@@ -188,13 +188,13 @@ test('OPS launch fails closed on missing authentication, changed registration or
   expect((await f.post('/api/control-profile/open', {...local, expectedProfileId: 'stale-profile'})).body.code).toBe('CONTROL_PROFILE_SURFACE_MISMATCH');
   expect((await f.post('/api/control-profile/open', {...local, folderPath: f.dev})).status).toBe(400);
   writeFileSync(join(f.data, 'ports.json'), JSON.stringify(f.ports.map(p => p.id === 'ops-project' ? {...p, folderPath: f.dev} : p)));
-  expect((await f.call('open_code_app', {target: 'ops', agent: 'hermes'})).success).toBe(false);
+  expect((await f.call('open_code_app', {target: 'ops', agent: 'hermes', surface: 'app', hermesVariant: 'default'})).success).toBe(false);
   expect(f.launches()).toEqual([]);
   writeFileSync(join(f.data, 'ports.json'), JSON.stringify(f.ports));
   const configPath = join(f.root, '.agent-memory', 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   writeFileSync(configPath, JSON.stringify({...config, memoryId: crypto.randomUUID()}));
-  expect((await f.call('start_workroom_session', {target: 'ops', agent: 'codex', requestId: 'never_start_123'})).success).toBe(false);
+  expect((await f.call('start_workroom_session', {target: 'ops', agent: 'codex', surface: 'internal', requestId: 'never_start_123'})).success).toBe(false);
   expect(f.launches()).toEqual([]);
 }, 30_000);
 
@@ -205,7 +205,7 @@ test('local-only OPS keeps dashboard/memory available and reports launch gaps wi
   expect(dashboard).toMatchObject({success: true, target: 'ops', panel: 'ops', focusRequested: true});
   const nav = await fetch(f.baseUrl + '/api/agentstoz-use/workroom-navigation').then(r => r.json()) as any;
   expect(nav.navigation).toMatchObject({panel: 'ops'}); expect(nav.navigation).not.toHaveProperty('targetId');
-  for (const [name, args] of [['open_code_app', {agent: 'codex'}], ['open_code_app', {agent: 'hermes', surface: 'orca-floating'}], ['start_workroom_session', {agent: 'agy', requestId: 'local_only_start'}]] as const) {
+  for (const [name, args] of [['open_code_app', {agent: 'codex', surface: 'app'}], ['open_code_app', {agent: 'hermes', surface: 'orca-floating', hermesVariant: 'default'}], ['start_workroom_session', {agent: 'agy', surface: 'internal', requestId: 'local_only_start'}]] as const) {
     expect(await f.call(name, {target: 'ops', ...args})).toMatchObject({success: false, code: 'CONTROL_PROFILE_SURFACE_UNAVAILABLE'});
   }
   expect((await f.call('get_control_profile')).profile.memoryId).toBe(f.profile.memoryId);
@@ -258,7 +258,7 @@ test('a foreground failure retains the started Workroom receipt and never report
   const f = await fixture(true, 'tests/fixtures/ops-surface-api.ts', true);
   expect(await f.call('open_dashboard', {target: 'ops'})).toMatchObject({success:false, performed:false, code:'AGENTSTOZ_USE_DASHBOARD_OPEN_FAILED'});
   expect((await fetch(f.baseUrl+'/api/agentstoz-use/workroom-navigation').then(r=>r.json()) as any).navigation).toBeNull();
-  const args={target:'ops',agent:'codex',requestId:'ops_foreground_failure'};
+  const args={target:'ops',agent:'codex',surface:'internal',requestId:'ops_foreground_failure'};
   const started=await f.call('start_workroom_session',args);
   expect(started).toMatchObject({success:true, performed:true, openedWorkroom:false, session:{targetId:'ops-project'}});
   expect(started.navigationWarning).toContain('새 세션을 다시 만들지');

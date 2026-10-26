@@ -22,6 +22,11 @@ const RESOURCE_ROOT = 'Contents/Resources/resources/';
 export const MACOS_BASE_CODEX_ACCESSIBILITY_HELPER_IDENTIFIER =
   'com.intenet.agentstozbycs.helper.codex-accessibility' as const;
 export const MACOS_BASE_KMSG_IDENTIFIER = 'com.intenet.agentstozbycs.helper.kmsg' as const;
+export const MACOS_BASE_SCREEN_HELPER = Object.freeze({
+  path: 'Contents/Helpers/AgentsToZ Screen.app',
+  executablePath: 'Contents/Helpers/AgentsToZ Screen.app/Contents/MacOS/AgentsToZScreen',
+  identifier: 'com.intenet.agentstozbycs.screen', teamIdentifier: 'DA8QKAQ2C9',
+} as const);
 export const MACOS_BASE_CODE = Object.freeze([
   { path: RESOURCE_ROOT + 'agentstoz-api-sidecar', identifier: MACOS_RUNTIME_PRODUCTION_API_SIDECAR_IDENTIFIER },
   { path: RESOURCE_ROOT + 'agentstoz-use-mcp', identifier: MACOS_RUNTIME_PRODUCTION_USE_MCP_IDENTIFIER },
@@ -33,6 +38,9 @@ export const MACOS_BASE_CODE = Object.freeze([
 // Deliberately exact: a new template or native executable needs a reviewed policy change.
 export const MACOS_BASE_REQUIRED_FILES = Object.freeze([
   ...MACOS_BASE_CODE.map(code => code.path),
+  MACOS_BASE_SCREEN_HELPER.executablePath,
+  ...['Info.plist', 'embedded.provisionprofile', '_CodeSignature/CodeResources']
+    .map(path => `${MACOS_BASE_SCREEN_HELPER.path}/Contents/${path}`),
   'Contents/Info.plist', 'Contents/Resources/icon.icns',
   RESOURCE_ROOT + 'windows-process-supervisor.ps1',
   RESOURCE_ROOT + 'agentstoz-kmsg.LICENSE',
@@ -77,8 +85,8 @@ export function inspectMacOSBaseBundle(app: string): readonly string[] {
   }
   walk('');
   if (MACOS_BASE_REQUIRED_FILES.some(path => !found.includes(path))) throw new Error('base bundle file missing');
-  for (const code of MACOS_BASE_CODE) {
-    const fd = openSync(join(app, code.path), 'r');
+  for (const path of [...MACOS_BASE_CODE.map(code => code.path), MACOS_BASE_SCREEN_HELPER.executablePath]) {
+    const fd = openSync(join(app, path), 'r');
     try {
       const header = Buffer.alloc(8);
       if (readSync(fd, header, 0, 8, 0) !== 8 || header.readUInt32LE(0) !== 0xfeedfacf
@@ -90,8 +98,8 @@ export function inspectMacOSBaseBundle(app: string): readonly string[] {
 
 export interface MacOSBaseSigningCommand {
   readonly operation: 'sign' | 'verify' | 'inspect';
-  readonly code: typeof MACOS_BASE_CODE[number];
-  readonly entitlements: 'apiSidecar' | 'empty' | 'app';
+  readonly code: typeof MACOS_BASE_CODE[number] | typeof MACOS_BASE_SCREEN_HELPER;
+  readonly entitlements: 'apiSidecar' | 'empty' | 'app' | 'preservedScreen';
   readonly args: readonly string[];
 }
 
@@ -110,6 +118,17 @@ export function planMacOSBaseAppSigning(identity: Readonly<MacOSRuntimeProductio
     throw new Error('base signing path rejected');
   }
   const key = identity.identity!;
+  const screenRequirement = '=anchor apple generic'
+    + ` and certificate 1[field.${MACOS_RUNTIME_BROKER_DEVELOPER_ID_ISSUER_OID}] exists`
+    + ` and certificate leaf[field.${MACOS_RUNTIME_BROKER_DEVELOPER_ID_APPLICATION_OID}] exists`
+    + ` and certificate leaf[subject.OU] = "${MACOS_BASE_SCREEN_HELPER.teamIdentifier}"`
+    + ` and identifier "${MACOS_BASE_SCREEN_HELPER.identifier}"`;
+  const screenCommands: MacOSBaseSigningCommand[] = [
+    { operation: 'verify', code: MACOS_BASE_SCREEN_HELPER, entitlements: 'preservedScreen',
+      args: ['--verify', '--deep', '--strict', '--all-architectures', '-R', screenRequirement, join(app, MACOS_BASE_SCREEN_HELPER.path)] },
+    { operation: 'inspect', code: MACOS_BASE_SCREEN_HELPER, entitlements: 'preservedScreen',
+      args: ['--display', '--verbose=4', '--entitlements', '-', '--xml', join(app, MACOS_BASE_SCREEN_HELPER.path)] },
+  ];
   return Object.freeze(MACOS_BASE_CODE.flatMap(code => {
     const target = code.path === 'Contents/MacOS/app' ? app : join(app, code.path);
     const entitlementKind = code.path === RESOURCE_ROOT + 'agentstoz-api-sidecar' ? 'apiSidecar' : code.path === 'Contents/MacOS/app' ? 'app' : 'empty';
@@ -119,6 +138,7 @@ export function planMacOSBaseAppSigning(identity: Readonly<MacOSRuntimeProductio
       + ` and certificate leaf[field.${MACOS_RUNTIME_BROKER_DEVELOPER_ID_APPLICATION_OID}] exists`
       + ` and certificate leaf[subject.OU] = "${key.teamIdentifier}" and identifier "${code.identifier}"`;
     return [
+      ...(target === app ? screenCommands : []),
       { operation: 'sign' as const, code, entitlements: entitlementKind, args: ['--force', '--sign', key.certificateFingerprint, '--options', 'runtime', '--timestamp', '--identifier', code.identifier, '--entitlements', entitlementPath, target] },
       { operation: 'verify' as const, code, entitlements: entitlementKind, args: ['--verify', '--strict', '--all-architectures', ...(target === app ? ['--deep'] : []), '-R', requirement, target] },
       { operation: 'inspect' as const, code, entitlements: entitlementKind, args: ['--display', '--verbose=4', '--entitlements', '-', '--xml', target] },
@@ -126,7 +146,7 @@ export function planMacOSBaseAppSigning(identity: Readonly<MacOSRuntimeProductio
   }));
 }
 
-export function verifyMacOSBaseSignatureInspection(output: string, app: string, code: typeof MACOS_BASE_CODE[number], identity: Readonly<MacOSRuntimeProductionBuildIdentityResolution>): void {
+export function verifyMacOSBaseSignatureInspection(output: string, app: string, code: MacOSBaseSigningCommand['code'], identity: Readonly<MacOSRuntimeProductionBuildIdentityResolution>): void {
   const lines = output.split(/\r?\n/u);
   const exact = (prefix: string): string => {
     const values = lines.filter(line => line.startsWith(prefix));
@@ -135,6 +155,7 @@ export function verifyMacOSBaseSignatureInspection(output: string, app: string, 
   };
   const key = identity.identity!;
   const isApp = code.path === 'Contents/MacOS/app';
+  const isScreen = code.path === MACOS_BASE_SCREEN_HELPER.path;
   const flags = /(?:^|\s)flags=0x([0-9a-f]+)(?:\([^\r\n]*\))?(?:\s|$)/iu.exec(exact('CodeDirectory '));
   const flagValue = flags ? BigInt('0x' + flags[1]) : 0n;
   const authorities = lines.filter(line => line.startsWith('Authority=')).map(line => line.slice(10));
@@ -143,7 +164,19 @@ export function verifyMacOSBaseSignatureInspection(output: string, app: string, 
   const plists = [...output.matchAll(/<plist\b[^>]*>([\s\S]*?)<\/plist>/gu)];
   const entitlementBody = plists.length === 1 ? plists[0]![1]!.trim() : '';
   const apiSidecar = code.path === RESOURCE_ROOT + 'agentstoz-api-sidecar';
-  const entitlementsValid = apiSidecar
+  const screenApplicationId = `${MACOS_BASE_SCREEN_HELPER.teamIdentifier}.${MACOS_BASE_SCREEN_HELPER.identifier}`;
+  const screenGrants = [
+    `<key>com.apple.application-identifier</key>\\s*<string>${screenApplicationId}</string>`,
+    `<key>com.apple.developer.team-identifier</key>\\s*<string>${MACOS_BASE_SCREEN_HELPER.teamIdentifier}</string>`,
+    `<key>keychain-access-groups</key>\\s*<array>\\s*<string>${screenApplicationId}</string>\\s*</array>`,
+  ];
+  let screenBody = /^<dict>[\s\S]*<\/dict>$/u.test(entitlementBody) ? entitlementBody.slice(6, -7) : 'invalid';
+  for (const grant of screenGrants) {
+    const pattern = new RegExp(grant.replaceAll('.', '\\.'), 'gu');
+    if ([...screenBody.matchAll(pattern)].length !== 1) { screenBody = 'invalid'; break; }
+    screenBody = screenBody.replace(pattern, '');
+  }
+  const entitlementsValid = isScreen ? screenBody.trim() === '' : apiSidecar
     ? /^<dict>\s*<key>com\.apple\.security\.cs\.allow-jit<\/key>\s*<true\s*\/>\s*<\/dict>$/u.test(entitlementBody)
     : isApp ? /^<dict>\s*<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>\s*<\/dict>$/u.test(entitlementBody)
     : /^(?:<dict\s*\/\s*>|<dict>\s*<\/dict>)$/u.test(entitlementBody);
@@ -151,12 +184,16 @@ export function verifyMacOSBaseSignatureInspection(output: string, app: string, 
   // Full sidecar and app runtime smoke remains a separate release gate. Only
   // the API sidecar's Bun FFI may use JIT; GUI alone gets microphone capture.
   // Inherited debug/broker grants still fail.
-  if (exact('Executable=') !== join(app, code.path) || exact('Identifier=') !== code.identifier
-    || exact('Format=') !== `${isApp ? 'app bundle with ' : ''}Mach-O thin (arm64)`
-    || exact('TeamIdentifier=') !== key.teamIdentifier || exact('Hash type=') !== 'sha256 size=32'
+  const authorityValid = isScreen
+    ? authorities.length === 3 && /^Developer ID Application: [^\u0000-\u001F\u007F]{1,300} \(DA8QKAQ2C9\)$/u.test(authorities[0]!)
+      && authorities[1] === 'Developer ID Certification Authority' && authorities[2] === 'Apple Root CA'
+    : authorities.join('\n') === [key.commonName, 'Developer ID Certification Authority', 'Apple Root CA'].join('\n');
+  if (exact('Executable=') !== join(app, isScreen ? MACOS_BASE_SCREEN_HELPER.executablePath : code.path) || exact('Identifier=') !== code.identifier
+    || exact('Format=') !== `${isApp || isScreen ? 'app bundle with ' : ''}Mach-O thin (arm64)`
+    || exact('TeamIdentifier=') !== (isScreen ? MACOS_BASE_SCREEN_HELPER.teamIdentifier : key.teamIdentifier) || exact('Hash type=') !== 'sha256 size=32'
     || !/^[0-9a-f]{64}$/u.test(exact('CandidateCDHashFull sha256='))
     || signature.length !== 1 || !/^Signature size=[1-9][0-9]*$/u.test(signature[0]!)
-    || authorities.join('\n') !== [key.commonName, 'Developer ID Certification Authority', 'Apple Root CA'].join('\n')
+    || !authorityValid
     || (flagValue & 0x10000n) === 0n || (flagValue & 2n) !== 0n
     || !timestamp || /^(?:none|not set)$/iu.test(timestamp)
     || !entitlementsValid) {
@@ -171,6 +208,7 @@ export async function signMacOSBaseApp(identity: Readonly<MacOSRuntimeProduction
   for (const command of commands) {
     if (command.operation === 'sign') {
       inspectMacOSBaseBundle(app);
+      if (command.entitlements === 'preservedScreen') throw new Error('base Screen signature must be preserved');
       const entitlementPath = entitlements[command.entitlements];
       const expected = command.entitlements === 'apiSidecar'
         ? MACOS_BASE_API_SIDECAR_ENTITLEMENTS
@@ -194,6 +232,6 @@ export async function signMacOSBaseApp(identity: Readonly<MacOSRuntimeProduction
     digest.update(JSON.stringify([path, fileHash.digest('hex')]) + '\n');
   }
   return Object.freeze({ schemaVersion: 1, mode: 'developer-id-base', result: 'signed-awaiting-notarization',
-    appSigned: true, nestedCodeSigned: MACOS_BASE_CODE.length - 1, bundleDigest: digest.digest('hex'),
+    appSigned: true, nestedCodeSigned: MACOS_BASE_CODE.length - 1, screenHelperPreserved: true, bundleDigest: digest.digest('hex'),
     enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false } as const);
 }

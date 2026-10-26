@@ -135,13 +135,13 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
       const key=sessionDirectoryDeviceKey(device);
       if(device.local){
         const [result,targets]=await Promise.all([requester(key,device.deviceId)({operation:'list'}),new AgentRuntimeClient().targets({includeProductUses:true}).catch(()=>null)]);
-        if(!result.sessions)throw new Error('이 기기의 대화 세션 목록을 확인하지 못했습니다.');
+        if(!result.sessions)throw new Error('이 기기의 작업 세션 목록을 확인하지 못했습니다.');
         const supplied=propsRef.current.projects;
         const discovered=targets?.targets;
         return {projects:discovered?reconcileRegisteredWorkroomTargets(supplied,discovered):supplied,sessions:result.sessions,opsTargetId:propsRef.current.opsTargetId??null};
       }
       const [projectList,result]=await Promise.all([loadCommunityRemoteProjects(device.endpointId),requester(key,device.deviceId)({operation:'list'})]);
-      if(!result.sessions)throw new Error('그 기기의 대화 세션 목록을 확인하지 못했습니다.');
+      if(!result.sessions)throw new Error('그 기기의 작업 세션 목록을 확인하지 못했습니다.');
       return {projects:projectList.projects,sessions:result.sessions,opsTargetId:projectList.opsTargetId};
     },()=>{if(alive)setSnapshots(current.snapshots());},Date.now,snapshotsRef.current);
     inventory.current=current;
@@ -205,7 +205,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
   const holdEntry=useCallback((next:PendingEntry)=>{
     const prior=pendingEntriesRef.current;
     if(prior.some(item=>item.id===next.id))return true;
-    if(prior.length>=MAX_PENDING_ENTRIES){setNotice('대기 요청이 8개입니다. 보관한 요청을 먼저 확인해 주세요. 새 요청은 아직 받아들이지 않았습니다.');return false;}
+    if(prior.length>=MAX_PENDING_ENTRIES){setNotice('대기 요청이 8개입니다. 보관한 요청을 먼저 확인해 주세요. 새 요청은 아직 추가하지 않았습니다.');return false;}
     const held=[...prior,next];pendingEntriesRef.current=held;setPendingEntries(held);
     setNotice('작성 중인 요청을 보존하고 새 요청을 대기 목록에 보관했습니다. 기존 내용을 전송하거나 비운 뒤 직접 열 수 있습니다.');return true;
   },[]);
@@ -269,7 +269,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
         try{
           const windowTitle=workroomPopoutTitle(project?.label??'프로젝트',exact.agent);
           await openWorkroomPopout({sessionId:exact.id,targetId:exact.targetId,agent:exact.agent,bypassPermissions:propsRef.current.bypassPermissions??true},savedTitle?`${savedTitle} · ${windowTitle}`:windowTitle);
-          if(action===actionGeneration.current)setNotice(`${project?.label??'프로젝트'}의 대화 창을 열었습니다.`);
+          if(action===actionGeneration.current)setNotice(`${project?.label??'프로젝트'}의 워크룸을 열었습니다.`);
           return;
         }catch(error){
           if(action!==actionGeneration.current)return;
@@ -309,7 +309,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
   useWorkroomSeen(activeSession?.id,visible&&viewOpen&&!!activeSnapshot?.device.local);
 
   return <section className="workroom-session-directory" data-testid="session-directory">
-    <header className="session-directory-header"><div><span className="session-directory-eyebrow">기기 전체의 AI 작업</span><h2>작업 세션</h2><p>진행 중인 대화를 확인하고, 필요한 작업을 이어가세요.</p></div>{props.onPrepareUse&&!props.remote&&<button type="button" className="session-directory-button" onClick={()=>props.onPrepareUse?.()}>USE 준비</button>}<button type="button" className="session-directory-button session-directory-button--primary" onClick={()=>{const snapshot=snapshots.find(item=>sessionDirectoryDeviceKey(item.device)===filter)??snapshots.find(item=>item.device.local);if(snapshot)openDraft(snapshot);}} disabled={!snapshots.length}><Plus size={16}/>새 대화</button></header>
+    <header className="session-directory-header"><div><span className="session-directory-eyebrow">기기 전체의 AI 작업</span><h2>작업 세션</h2><p>진행 중인 대화를 확인하고, 필요한 작업을 이어가세요.</p></div>{props.onPrepareUse&&!props.remote&&<button type="button" className="session-directory-button" onClick={()=>props.onPrepareUse?.(view&&activeSnapshot?.device.local?view.entry.targetId:undefined)}>USE 준비</button>}<button type="button" className="session-directory-button session-directory-button--primary" onClick={()=>{const snapshot=snapshots.find(item=>sessionDirectoryDeviceKey(item.device)===filter)??snapshots.find(item=>item.device.local);if(snapshot)openDraft(snapshot);}} disabled={!snapshots.length}><Plus size={16}/>새 대화</button></header>
     <div className="session-directory-filters">
       <label className="session-directory-search"><Search size={16} aria-hidden="true"/><span>검색</span><input aria-label="대화 세션 검색" placeholder="프로젝트, AI, 기기 검색" value={query} onChange={event=>setQuery(event.target.value)}/></label>
       <label>기기<select aria-label="대화 세션 기기" value={filter} onChange={event=>setFilter(event.target.value)}><option value="all">모든 기기</option>{snapshots.map(snapshot=><option key={sessionDirectoryDeviceKey(snapshot.device)} value={sessionDirectoryDeviceKey(snapshot.device)}>{snapshot.device.label}{snapshot.device.local?' (이 기기)':''}</option>)}</select></label>
@@ -317,7 +317,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
     </div>
     <p className="session-directory-summary" data-testid="session-directory-summary">실행 중 {totalRunning}개{attention>0?` · 확인할 세션 ${attention}개`:''}{ended>0?` · 종료 ${ended}개`:''} · 조회 대상 기기 {snapshots.length}개</p>
     {(deviceError||limited)&&<p className="session-directory-notice" role="status">{deviceError?`기기 목록 확인 실패: ${deviceError} 마지막으로 확인한 목록을 유지합니다.`:`한 번에 ${SESSION_DIRECTORY_MAX_DEVICES}개 기기까지 표시합니다.`}</p>}
-    {view&&!viewOpen&&activeSnapshot&&<button type="button" className="session-directory-button" data-testid="session-directory-resume-view" onClick={()=>setViewOpen(true)}>대화 창 다시 보기 · {activeSnapshot.device.label}</button>}
+    {view&&!viewOpen&&activeSnapshot&&<button type="button" className="session-directory-button" data-testid="session-directory-resume-view" onClick={()=>setViewOpen(true)}>워크룸 다시 보기 · {activeSnapshot.device.label}</button>}
     {!!pendingEntries.length&&<section className="session-directory-pending" data-testid="session-directory-pending" aria-label="대기 중인 요청"><strong>대기 중인 요청 {pendingEntries.length}개</strong><p>작성 중인 요청을 전송하거나 비운 뒤 원하는 요청을 열어 주세요.</p>{view&&<button type="button" className="session-directory-button" data-testid="session-directory-review-draft" onClick={()=>setViewOpen(true)}>작성 중 요청 확인</button>}<ul>{pendingEntries.map(pending=><li key={pending.id}><span>{pending.label}</span><button type="button" className="session-directory-button" data-testid="session-directory-open-pending" disabled={draftDirty} onClick={()=>openPending(pending)}>대기 요청 열기</button></li>)}</ul></section>}
     {notice&&<p className="session-directory-notice" role="status" data-testid="session-directory-notice">{notice}</p>}
     {!snapshots.length&&<p role="status">대화 세션을 불러오는 중…</p>}
@@ -339,7 +339,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
     })}
     <details className="session-directory-help"><summary>세션 상태와 대화 저장 안내</summary><p className="session-directory-footnote">작업 세션은 응답 필요 · 작업 중 · 완료 · 응답 멈춤 · 대기 · 실행 중 · 종료 순으로 보입니다. 「완료」는 AI의 대화 기록이 작업 끝을 알린 세션이고, 「응답 멈춤」은 화면이 조용해진 것만 본 세션입니다. 상태는 이 기기의 세션만 표시하며, 종료된 세션은 호스트가 정리할 때까지 「종료」에 남습니다. 창을 닫아도 실행은 계속되고, 앱 종료 후에는 저장된 대화에서 이어 열기를 검토할 수 있습니다.</p></details>
     {devices.length>0&&<CommunityChatPanel visible={visible} unread={unread} label={`함께 있는 대상 ${devices.length}개`}/>}
-    {view&&activeSnapshot&&<dialog ref={dialog} className="workroom-session-dialog" data-testid="session-directory-dialog" aria-label={`${activeSnapshot.device.label} 대화 창`} onCancel={event=>{if(event.target!==event.currentTarget)return;event.preventDefault();closeView();}}>
+    {view&&activeSnapshot&&<dialog ref={dialog} className="workroom-session-dialog" data-testid="session-directory-dialog" aria-label={`${activeSnapshot.device.label} 대화 창`} onCancel={event=>{if(event.target!==event.currentTarget)return;event.preventDefault();if(document.activeElement?.closest('[data-workroom-local-escape]'))return;closeView();}}>
       <header className="workroom-session-dialog-header"><div><strong>{activeSession?.id===view.entry.sessionId&&view.savedTitle?view.savedTitle:activeSession?.label||activeSnapshot.projects.find(project=>project.targetId===view.entry.targetId)?.label||'대화 세션'}</strong><span>{activeSnapshot.device.label}</span></div><button type="button" className="session-directory-button" data-testid="session-directory-dialog-close" aria-label="대화 창 닫기" onClick={closeView}><X size={18}/></button></header>
       {view.notice&&<p className="session-directory-notice" role="status">{view.notice}</p>}
       {!viewConnected&&<p className="session-directory-notice" role="status">이 기기가 현재 커뮤니티 연결 목록에 없습니다. 작성한 요청은 보존했습니다. 다시 연결되면 같은 대화를 이어갈 수 있습니다.</p>}

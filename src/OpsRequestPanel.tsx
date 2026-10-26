@@ -29,12 +29,12 @@ export function OpsRequestWindows({onError,onOpenInline}:{onError:(error:string)
             opening=true;
             let inline=false;
             try{await openWorkroomPopout({sessionId:r.sessionId,targetId:r.targetId,agent:r.agent,bypassPermissions:false},workroomPopoutTitle('AgentsToZ OPS',r.agent));}
-            catch(e){if(!inlineRef.current)throw e;await inlineRef.current(r);inline=true;errorRef.current('OPS 새 창을 열 수 없어 이 기기의 본창 워크룸에서 엽니다.');}
+            catch(e){if(!inlineRef.current)throw e;await inlineRef.current(r);inline=true;errorRef.current('아젠투지(OPS) 새 창을 열 수 없어 이 기기의 본창 워크룸에서 엽니다.');}
             opened.set(r.sessionId,inline);if(opened.size>64)opened.delete(opened.keys().next().value!);
           }
           await communityControlRequest({operation:'ops-window-opened',claimId:item.claimId,...(opened.get(r.sessionId)?{inline:true}:{})});
         }
-      }catch(e){if(!stopped&&opening)errorRef.current(`상대 기기에서 받은 OPS 창을 확인하세요. ${String(e)}`);}
+      }catch(e){if(!stopped&&opening)errorRef.current(`상대 기기에서 받은 아젠투지(OPS) 창을 확인하세요. ${String(e)}`);}
       if(!stopped)timer=setTimeout(poll,3000);
     };
     void poll();return()=>{stopped=true;clearTimeout(timer);};
@@ -127,8 +127,8 @@ export function OpsRequestPanel({endpointId,deviceName,onClose,onViewWorkroom}:{
   const terminal=receipt&&['completed','failed','unknown'].includes(receipt.state);
   return <dialog className="ops-request-modal" aria-labelledby="ops-request-title" ref={node=>{if(node&&!node.open)node.showModal();}} onCancel={e=>{e.preventDefault();onClose();}}>
     <section className="w-full max-w-xl max-h-[90vh] overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5" data-testid="ops-request-panel">
-      <h2 id="ops-request-title" className="text-lg font-semibold">{deviceName} · OPS에 작업 맡기기</h2>
-      <p className="my-3 text-sm">상대 기기의 설정된 AI로 OPS 워크룸을 열어 처리하고, 결과를 이곳으로 돌려받습니다.</p>
+      <h2 id="ops-request-title" className="text-lg font-semibold">{deviceName} · 아젠투지(OPS)에 작업 맡기기</h2>
+      <p className="my-3 text-sm">상대 기기에 설정된 AI로 아젠투지(OPS) 워크룸을 열어 처리하고, 결과를 이곳으로 돌려받습니다.</p>
       {!requestId&&<label className="block">맡길 작업<textarea aria-label="맡길 작업" className="my-2 min-h-28 w-full rounded-lg border border-[var(--line)] bg-transparent p-3" value={text} onChange={e=>setText(e.target.value)}/></label>}
       {/* Bytes, not characters: one Korean character is three bytes, so maxLength would let 3x the limit through. */}
       {!requestId&&bytes>OPS_REQUEST_MAX_TEXT_BYTES*0.8&&<p className="text-xs" data-testid="ops-request-bytes" data-over={tooLong?'true':'false'}>{bytes.toLocaleString()} / {OPS_REQUEST_MAX_TEXT_BYTES.toLocaleString()}바이트{tooLong?' · 너무 깁니다':''}</p>}
@@ -136,11 +136,11 @@ export function OpsRequestPanel({endpointId,deviceName,onClose,onViewWorkroom}:{
       {requestId&&text&&<p className="my-3 whitespace-pre-wrap text-sm">맡긴 작업: {text}</p>}
       {receipt&&<div aria-live="polite" className="my-3" data-testid="ops-request-result">
         <p className="font-semibold">{OPS_STATE_LABELS[receipt.state]}{receipt.agent?` · ${receipt.agent}`:''}</p>
-        {receipt.sessionId&&<p className="text-sm">상대 OPS 창: {receipt.windowOpened?'새 창 열림 확인':receipt.windowFallback?'본창 워크룸에서 열림':'열기 대기'}</p>}
+        {receipt.sessionId&&<p className="text-sm">상대 아젠투지(OPS) 창: {receipt.windowOpened?'새 창 열림 확인':receipt.windowFallback?'본창 워크룸에서 열림':'열기 대기'}</p>}
         {receipt.message&&<p>{receipt.message}</p>}
         {receipt.result&&<p className="whitespace-pre-wrap">{receipt.result}</p>}
         {receipt.evidence&&<p className="mt-3 whitespace-pre-wrap text-sm">수행 근거: {receipt.evidence}</p>}
-        {receipt.state==='needs-attention'&&<p>상대 기기의 OPS에서 로그인·신뢰·승인 화면을 확인해 주세요.</p>}
+        {receipt.state==='needs-attention'&&<p>상대 기기의 아젠투지(OPS)에서 로그인·신뢰·승인 화면을 확인해 주세요.</p>}
       </div>}
       {error&&<p role="alert" className="my-3 text-sm">{error}</p>}
       <div className="mt-4 flex flex-wrap gap-3">

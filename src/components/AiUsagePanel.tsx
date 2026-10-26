@@ -13,7 +13,6 @@ import {
   visibleContextSessions,
   pinnedProjectVoiceHistory,
 } from '../contextSessionVisibility';
-import type { ContextSurfacePresence } from '../contextSessionVisibility';
 import {
   CONTEXT_API_SCHEMA_VERSION,
   classifyContextApiVersion,
@@ -22,7 +21,12 @@ import {
 } from '../contextApiVersion';
 import type { ContextProjectNavigationCandidate } from '../contextProjectNavigation';
 import { resolveContextSessionProjectBinding } from '../contextSessionProject';
-import type { ContextSessionProjectHint } from '../contextSessionMetadata';
+import {
+  contextSessionMemoryPath,
+  contextSessionProjectPath,
+  voiceProjectMemoryIsBlocked,
+  type ContextSession,
+} from '../contextSessionMemoryPath';
 import type { ProjectCodexVoiceBindingState } from '../projectCodexVoice';
 import {
   CODEX_AUTO_REMEMBER_THRESHOLDS,
@@ -33,6 +37,8 @@ import {
   sessionMemoryAction,
   type SessionMemoryStatusState,
 } from './aiUsageMemoryState';
+
+export { contextSessionMemoryPath, contextSessionProjectPath, voiceProjectMemoryIsBlocked, type ContextSession };
 
 /**
  * Shows Claude and Codex usage side by side.
@@ -97,79 +103,8 @@ function UsageBar({ percent }: { percent: number | null }) {
   );
 }
 
-interface ContextSession {
-  sessionId: string;
-  sourceAgent: 'claude' | 'codex';
-  cwd: string | null;
-  /** Original cwd from the session record, retained so a completed move can
-   * be explained without treating its old scratch directory as a project. */
-  initialCwd?: string | null;
-  projectDir?: string | null;
-  threadSource?: string | null;
-  threadTitle?: string | null;
-  projectHint?: ContextSessionProjectHint | null;
-  modelId: string | null;
-  modelName: string | null;
-  windowSize: number | null;
-  usedPercent: number | null;
-  remainingPercent: number | null;
-  usedTokens: number | null;
-  costUsd: number | null;
-  ageMs: number;
-  state: 'active' | 'idle' | 'stale';
-  clientLabel: string;
-  surfaceKind: string;
-  surfaceLabel: string;
-  surfaceDetail: string | null;
-  /** Runtime presence for integrations such as Orca and cmux.  Snapshot
-   * freshness is intentionally a separate field (`state`). */
-  surfacePresence?: ContextSurfacePresence | null;
-  /** Project binding for a ChatGPT Desktop `realtime_voice` rollout. This is
-   * independent of whether the Voice rollout emitted a token-count event. */
-  voiceBindingState?: ProjectCodexVoiceBindingState;
-  navigation?: {
-    available: boolean;
-    kind: string | null;
-    exact: boolean;
-    actionLabel: string | null;
-    detail: string;
-  };
-}
-
-/** A Voice row may show a remembered project assignment before it is safe to
- * use that project's durable memory. Only an applied assignment with either a
- * confirmed project execution or no turn yet is allowed to reach the memory
- * API. This fails closed when an older sidecar cannot supply binding state. */
-const voiceProjectMemoryIsBlocked = (session: ContextSession): boolean => (
-  session.sourceAgent === 'codex'
-  && session.threadSource === 'realtime_voice'
-  && !!session.projectHint
-  && session.voiceBindingState !== 'execution-confirmed'
-  && session.voiceBindingState !== 'assigned-awaiting-execution'
-);
-
 const contextPathLeaf = (folderPath: string | null | undefined, fallback: string): string => (
   folderPath?.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || fallback
-);
-
-/** The currently assigned project can differ from the rollout cwd while the
- * ChatGPT desktop client applies a project move. */
-const contextSessionProjectPath = (session: ContextSession): string | null => (
-  session.projectHint?.path ?? session.projectDir ?? session.cwd
-);
-
-/** Voice project moves must fail closed: a scratch/subfolder can resolve back
- * to a main worktree's memory root, so do not even probe memory until the
- * Voice binding is verified. Non-Voice relocation keeps its existing cwd
- * behavior. */
-const contextSessionMemoryPath = (session: ContextSession): string | null => (
-  voiceProjectMemoryIsBlocked(session)
-    ? null
-    : session.projectHint?.moveState === 'pending'
-    || session.voiceBindingState === 'move-pending'
-    || session.voiceBindingState === 'scope-conflict'
-      ? session.cwd
-      : contextSessionProjectPath(session)
 );
 
 const contextPathsDiffer = (left: string | null | undefined, right: string | null | undefined): boolean => {
@@ -532,7 +467,7 @@ export function AiUsagePanel({
         return;
       }
       if (action === 'push' || action === 'pull' || action === 'conflict') {
-        const label = action === 'push' ? 'Supabase Push' : action === 'pull' ? 'Supabase Pull' : '동기화 확인';
+        const label = action === 'push' ? 'Supabase 올리기(Push)' : action === 'pull' ? 'Supabase 받기(Pull)' : '동기화 확인';
         setRememberResult({
           sessionId: session.sessionId,
           success: false,
@@ -708,7 +643,7 @@ export function AiUsagePanel({
               {!autoRemember.error && autoRemember.data && <AutoRememberEvidence status={autoRemember.data} />}
               {!!autoRemember.data?.backups?.length && (
                 <span>자동 백업: {autoRemember.data.backups.some(job => job.state === 'blocked')
-                  ? '내용·연결 확인이 필요한 작업이 있습니다. 프로젝트의 싱크 상태를 확인해 주세요.'
+                  ? '내용·연결 확인이 필요한 작업이 있습니다. 프로젝트의 동기화 상태를 확인해 주세요.'
                   : '저장한 기억을 백업 대기 중입니다. AI를 다시 실행하지 않습니다.'}</span>
               )}
               {autoRemember.error && <span>{autoRemember.error}</span>}
@@ -1031,11 +966,11 @@ export function AiUsagePanel({
                               : savedMemory
                               ? '컨텍스트는 높지만 이 프로젝트의 장기기억은 최신입니다. 저장해도 현재 대화의 컨텍스트 수치는 줄어들지 않습니다.'
                               : memoryAction === 'push'
-                                ? '로컬 장기기억은 최신이지만 Supabase Push가 필요합니다. 프로젝트 영역에서 Push하면 동기화가 완료됩니다.'
+                                ? '로컬 장기기억은 최신이지만 Supabase 올리기(Push)가 필요합니다. 프로젝트 영역에서 올리기(Push)하면 동기화가 완료됩니다.'
                                 : memoryAction === 'pull'
-                                  ? 'Supabase 장기기억이 더 최신입니다. 프로젝트 영역에서 Pull 내용을 확인하세요.'
+                                  ? 'Supabase 장기기억이 더 최신입니다. 프로젝트 영역에서 받기(Pull) 내용을 확인하세요.'
                                   : memoryAction === 'conflict'
-                                    ? '로컬과 Supabase 장기기억이 모두 변경되었습니다. 프로젝트 영역에서 Push 또는 Pull 방향을 확인하세요.'
+                                    ? '로컬과 Supabase 장기기억이 모두 변경되었습니다. 프로젝트 영역에서 올리기(Push) 또는 받기(Pull) 방향을 확인하세요.'
                                     : memoryAction === 'checking'
                                       ? '프로젝트 장기기억과 Supabase 동기화 상태를 확인하고 있습니다.'
                                       : memoryAction === 'missing'
@@ -1103,10 +1038,10 @@ export function AiUsagePanel({
                           ) : syncNeedsAttention ? (
                             <span
                               data-testid={`context-session-memory-sync-${s.sessionId}`}
-                              title="프로젝트 영역으로 이동해 Push 또는 Pull을 안전하게 처리하세요."
+                              title="프로젝트 영역으로 이동해 올리기(Push) 또는 받기(Pull)를 안전하게 처리하세요."
                               style={{ fontSize: 10, color:memoryTone, fontWeight: 600 }}
                             >
-                              {memoryAction === 'push' ? 'Supabase Push 필요' : memoryAction === 'pull' ? 'Supabase Pull 검토' : '동기화 확인 필요'}
+                              {memoryAction === 'push' ? 'Supabase 올리기(Push) 필요' : memoryAction === 'pull' ? 'Supabase 받기(Pull) 검토' : '동기화 확인 필요'}
                             </span>
                           ) : memoryFolderPath ? (
                             <button
@@ -1184,7 +1119,7 @@ export function AiUsagePanel({
             <div style={headStyle}>
               <span style={{ color:'var(--ink-93c5fd)' }}>Codex</span>
               <span style={{ fontSize: 10, color:'var(--text-dim)', fontWeight: 400 }}>
-                {codex.source === 'session-log' ? '세션 기록 fallback' : '실시간 계정 한도'}
+                {codex.source === 'session-log' ? '세션 기록 (대체 조회)' : '실시간 계정 한도'}
               </span>
               <button style={refreshBtn} onClick={() => void loadCodex(true)} disabled={codex.loading}>
                 <RefreshCw style={{ width: 9, height: 9 }} /> 실시간 새로고침
@@ -1221,7 +1156,7 @@ export function AiUsagePanel({
                 </div>
                 <div style={{ fontSize: 10, color:'var(--text-dim)', lineHeight: 1.5, borderTop: '1px solid rgb(var(--surface-highlight-rgb) / 0.06)', paddingTop: 7 }}>
                   Codex 앱서버의 읽기 전용 계정 한도 조회를 사용합니다. CLI가 오프라인이거나 지원하지 않으면
-                  마지막 세션 기록으로 자동 전환하며, 그 경우 위에 fallback으로 표시됩니다.
+                  마지막 세션 기록으로 자동 전환하며, 그 경우 위에 세션 기록(대체 조회)으로 표시됩니다.
                 </div>
               </div>
             )}

@@ -161,7 +161,7 @@ describe("generated Claude/Codex remember-session safety", () => {
   test("v11 identity migration tells the user that the local revision still needs Push", () => {
     expect(panel).toContain('entryIdsStabilized: boolean');
     expect(panel).toContain('result.entryIdsStabilized');
-    expect(panel).toContain('Supabase Push가 필요합니다');
+    expect(panel).toContain('Supabase 올리기(Push)가 필요합니다');
   });
 
   test("standalone upgrade backs up and validates all entries before advancing v11", () => {

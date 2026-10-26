@@ -54,8 +54,8 @@ export function CliAccountPicker({agent,targetId,request,remote,visible,onChange
       if(generation.current!==epoch)return;
       if(current.accounts)setSelection(current.accounts);
       if(r.operation==='create'){setLabel('');setMessage('계정을 추가했습니다. 공식 로그인을 완료한 뒤 선택하세요.');}
-      if(r.operation==='login')setMessage('호스트 PC의 공식 로그인 화면에서 원하는 계정으로 로그인하세요.');
-      if(r.operation==='archive')setMessage('목록에서 제외했습니다. 로그인 파일은 호스트 PC에 보존됩니다.');
+      if(r.operation==='login')setMessage('이 기기의 공식 로그인 화면에서 원하는 계정으로 로그인하세요.');
+      if(r.operation==='archive')setMessage('목록에서 제외했습니다. 로그인 파일은 이 기기에 보존됩니다.');
     } catch(error){if(generation.current===epoch)setMessage(error instanceof Error?error.message:'계정 관리 결과를 확인하지 못했습니다. 다시 실행하기 전에 목록을 확인하세요.');}
     finally{if(generation.current===epoch)setBusy(false);}
   };
@@ -67,7 +67,7 @@ export function CliAccountPicker({agent,targetId,request,remote,visible,onChange
         {!selection&&<option value="">계정 선택 확인 필요</option>}{selection?.items.map(s=><option key={s.id} value={s.id}>{s.label}{s.id==='host-default'?'':` · ${authLabel(s.authState)}`}</option>)}
       </select></label>
       {!remote&&<button type="button" className="ai-terminal-btn" aria-expanded={manageOpen} onClick={()=>setManageOpen(v=>!v)}>계정 관리</button>}
-      <button type="button" className="ai-terminal-btn" disabled={busy} onClick={()=>{const epoch=generation.current;void request({operation:'accounts',accountAction:'list',targetId,agent}).then(r=>{if(generation.current===epoch&&r.accounts){setSelection(r.accounts);setItems(r.accounts.items);setMessage('');}},e=>{if(generation.current===epoch)setMessage(String(e));});}}>계정 새로고침</button>
+      <button type="button" className="ai-terminal-btn" disabled={busy} onClick={()=>{const epoch=generation.current;void request({operation:'accounts',accountAction:'list',targetId,agent}).then(r=>{if(generation.current===epoch&&r.accounts){setSelection(r.accounts);setItems(r.accounts.items);setMessage('');}},e=>{if(generation.current===epoch)setMessage(e instanceof Error?e.message:'계정 목록을 새로고침하지 못했습니다.');});}}>계정 새로고침</button>
     </div>
     {message&&<p role="status" className="ai-terminal-hint">{message}</p>}
     {!remote&&manageOpen&&<div className="cli-account-manager" data-testid="cli-account-manager">

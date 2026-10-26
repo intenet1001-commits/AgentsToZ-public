@@ -27,8 +27,8 @@ export function BrowserContextPanel({lang='ko',request,projects,defaultProjectId
    const r=await request(operation==='open'?{operation:'open',url:validated}:{operation:'read',sessionId:session!.sessionId,screenshot},c.signal);
    if(!mounted.current||version!==epoch.current){if(r.success&&r.session)void cleanup(r.session.sessionId);return;}
    if(!r.success)throw new Error(r.error);
-   if(operation==='open'){if(!r.session)throw new Error('Missing browser session.');owned.current=r.session.sessionId;setSession(r.session);}
-   else{if(!r.snapshot||r.snapshot.sessionId!==session?.sessionId)throw new Error('Browser session changed.');setSnapshot(r.snapshot);setText(r.snapshot.text);setLinks([]);setMetadata(true);setIncludeText(false);setIncludeText(false);}
+   if(operation==='open'){if(!r.session)throw new Error(lang==='ko'?'브라우저 세션을 찾지 못했습니다. 다시 열어 주세요.':'Missing browser session.');owned.current=r.session.sessionId;setSession(r.session);}
+   else{if(!r.snapshot||r.snapshot.sessionId!==session?.sessionId)throw new Error(lang==='ko'?'브라우저 세션이 변경되었습니다. 다시 읽어 주세요.':'Browser session changed.');setSnapshot(r.snapshot);setText(r.snapshot.text);setLinks([]);setMetadata(true);setIncludeText(false);setIncludeText(false);}
   }catch(e){if(mounted.current&&version===epoch.current&&!c.signal.aborted)setError(e instanceof Error?e.message:String(e));}
   finally{if(mounted.current&&version===epoch.current){setBusy(false);controller.current=null;}}
  };
@@ -60,7 +60,7 @@ export function BrowserContextPanel({lang='ko',request,projects,defaultProjectId
     <span className="browser-context-muted">{text.length} / {BROWSER_TEXT_LIMIT}</span>
     {snapshot.links.length>0&&<fieldset><legend>{m.links}</legend>{snapshot.links.map((link,index)=><label key={index} className="browser-context-check browser-context-link"><input type="checkbox" checked={links.includes(index)} onChange={e=>setLinks(current=>e.target.checked?[...current,index]:current.filter(i=>i!==index))}/><span>{link.text}<small>{link.url}</small></span></label>)}</fieldset>}
     {snapshot.screenshotDataUrl&&<img alt={m.image} src={snapshot.screenshotDataUrl}/>}
-    <p className="browser-context-muted" data-testid="browser-context-budget">{attachmentBudget.bytes.toLocaleString()} / {attachmentBudget.limit.toLocaleString()} UTF-8 bytes{!attachmentBudget.attachable&&attachment?` · ${m.tooLarge}`:""}</p><div className="browser-context-actions"><button type="button" disabled={!attachment||busy} onClick={()=>void copy()}>{m.copy}</button><button type="button" disabled={!attachmentBudget.attachable||busy||!target||!onAttach} onClick={()=>{if(!attachmentBudget.attachable||!projects.some(p=>p.id===target))return;onAttach?.(target,attachment);setNotice(m.attached);}}>{m.attach}</button></div>
+    <p className="browser-context-muted" data-testid="browser-context-budget">{attachmentBudget.bytes.toLocaleString()} / {attachmentBudget.limit.toLocaleString()} {lang==='ko'?'바이트 (UTF-8)':'UTF-8 bytes'}{!attachmentBudget.attachable&&attachment?` · ${m.tooLarge}`:""}</p><div className="browser-context-actions"><button type="button" disabled={!attachment||busy} onClick={()=>void copy()}>{m.copy}</button><button type="button" disabled={!attachmentBudget.attachable||busy||!target||!onAttach} onClick={()=>{if(!attachmentBudget.attachable||!projects.some(p=>p.id===target))return;onAttach?.(target,attachment);setNotice(m.attached);}}>{m.attach}</button></div>
    </section>}
   </div>
  </div>;

@@ -3,7 +3,8 @@ import {SerializeAddon} from '@xterm/addon-serialize';
 import {terminalOutputPage} from './aiTerminalOutput';
 
 type OutputChunk = {seq:number;text:string};
-export interface AiTerminalSnapshotPage {chunks:OutputChunk[];nextCursor:number;hasMore:boolean;truncated:boolean}
+/** cols/rows are host-private serialization metadata; the service projects them into the existing session summary. */
+export interface AiTerminalSnapshotPage {chunks:OutputChunk[];nextCursor:number;hasMore:boolean;truncated:boolean;cols:number;rows:number}
 
 /** The same wire limits `terminalOutputPage` keeps (old phones validate every response with them). */
 export const AI_TERMINAL_PAGE_MAX_CHUNKS = 4;
@@ -19,7 +20,7 @@ const SNAPSHOT_CACHE_ENTRIES = 4;
 const SNAPSHOT_CACHE_TTL_MS = 120_000;
 const UNIT_CHARS = 256;
 
-interface CachedSnapshot {first:number;last:number;pages:OutputChunk[][];at:number}
+interface CachedSnapshot {first:number;last:number;pages:OutputChunk[][];at:number;cols:number;rows:number}
 
 const encoder = new TextEncoder();
 const chunkBytes = (chunk:OutputChunk) => encoder.encode(JSON.stringify(chunk)).length;
@@ -183,7 +184,7 @@ export class AiTerminalScreen {
   #page(entry:CachedSnapshot, index:number, latest:number):AiTerminalSnapshotPage {
     const chunks = entry.pages[index]!;
     return {chunks:chunks.map(chunk => ({...chunk})), nextCursor:chunks.at(-1)!.seq,
-      hasMore:index < entry.pages.length - 1 || latest > entry.last, truncated:true};
+      hasMore:index < entry.pages.length - 1 || latest > entry.last, truncated:true,cols:entry.cols,rows:entry.rows};
   }
   async snapshotPage(after:number, retained:readonly OutputChunk[], latest:number):Promise<AiTerminalSnapshotPage | null> {
     if (this.#disposed) return null;
@@ -200,7 +201,7 @@ export class AiTerminalScreen {
     const count = texts?.reduce((sum, page) => sum + page.length, 0) ?? 0;
     if (!texts || !count || last < count) return null;
     let seq = last - count;
-    const entry:CachedSnapshot = {first:last - count + 1, last, at:this.now(), pages:texts.map(page => page.map(text => ({seq:++seq, text})))};
+    const entry:CachedSnapshot = {first:last - count + 1, last, at:this.now(),cols:this.#term.cols,rows:this.#term.rows,pages:texts.map(page => page.map(text => ({seq:++seq, text})))};
     this.#snapshots = [entry, ...this.#snapshots].slice(0, SNAPSHOT_CACHE_ENTRIES);
     return this.#page(entry, 0, latest);
   }

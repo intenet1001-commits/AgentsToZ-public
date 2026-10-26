@@ -3,6 +3,7 @@ import {createPortal} from 'react-dom';
 import {CommunityThreadView} from './CommunityWorkspace';
 import type {WorkroomMentionProject} from './workroomProjectMention';
 import type {WorkroomTransport} from './WorkroomSessionFooter';
+import {localUsePhonesFor} from './serviceUseLocalClient';
 
 /** A USE mention opens the same bounded product conversation used by Community, never a DEV CLI. */
 export function WorkroomUseConversation({project,scope,transport,draft,onAccepted,onClose,drafts,recipients,onDraftChange}: {
@@ -16,6 +17,6 @@ export function WorkroomUseConversation({project,scope,transport,draft,onAccepte
     <button type="button" className="ai-terminal-btn" onClick={onClose}>USE 대화 닫기</button>
     <CommunityThreadView scope={scope} targetId={project.targetId} label={project.label} projects={[project]} transport={transport} visible
       initialRole="use" serviceKey={project.serviceKey} initialDraft={draft} drafts={drafts} recipients={recipients}
-      onOpen={()=>{}} onAccepted={onAccepted} onDraftChange={onDraftChange}/>
+      onOpen={()=>{}} onAccepted={onAccepted} onDraftChange={onDraftChange} usePhones={localUsePhonesFor(transport)}/>
   </dialog>,document.body);
 }

@@ -316,7 +316,7 @@ export default function OnboardingInfrastructureCenter({
                   <span className={`rounded border px-2 py-1 ${deviceStatus?.hasSupabaseConfig ? 'border-emerald-500/20 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>Supabase 정보 {deviceStatus?.hasSupabaseConfig ? '있음' : '확인 필요'}</span>
                   <span className={`rounded border px-2 py-1 ${deviceStatus?.hasDeviceIdentity ? 'border-emerald-500/20 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>이 PC 기기 ID {deviceStatus?.hasDeviceIdentity ? '있음' : '확인 필요'}</span>
                   <span className={`rounded border px-2 py-1 ${deviceStatus?.localAdminPresent ? 'border-emerald-500/20 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>로컬 관리자 {deviceStatus?.localAdminPresent ? '연결됨' : '확인 필요'}</span>
-                  <span className={`rounded border px-2 py-1 ${deviceStatus?.lastSuccessfulPushAt ? 'border-emerald-500/20 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>이전 Push 기록 {deviceStatus?.lastSuccessfulPushAt ? '있음' : '확인 필요'}</span>
+                  <span className={`rounded border px-2 py-1 ${deviceStatus?.lastSuccessfulPushAt ? 'border-emerald-500/20 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>이전 올리기(Push) 기록 {deviceStatus?.lastSuccessfulPushAt ? '있음' : '확인 필요'}</span>
                 </div>
                 <p className="mt-3 text-[10px] leading-relaxed text-zinc-500">도구 준비 숫자는 설치 상태만 뜻합니다. 도구의 로그인 확인은 선택한 프로젝트 권한이나 첫 AI 작업 성공까지 보장하지 않습니다.</p>
               </div>

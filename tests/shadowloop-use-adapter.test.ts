@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {ShadowLoopUseConnector,SHADOWLOOP_USE_REVISION} from '../src/shadowLoopUseAdapter';
 import {WorkroomThreadStore} from '../src/workroomThreadStore';
 import {SERVICE_USE_TOOLS,type ServiceUseBinding} from '../src/serviceUseProtocol';
+import {SERVICE_USE_ENVIRONMENT_PROBLEM,serviceUseConnectProblem,serviceUseEnvironmentProblem} from '../src/serviceUseHost';
 
 const roots:string[]=[];afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
 const installation='11111111-1111-4111-8111-111111111111',grant='22222222-2222-4222-8222-222222222222',secret='X'.repeat(43),code=`SLUSE1.${installation}.${grant}.${secret}`;
@@ -68,4 +69,14 @@ test('a lost app response is never retried and an inactive caller cannot submit'
  f.fail();const call={role:'use' as const,serviceKey:'default',tool:'materials.generate' as const,input:{text:'Hello'}};
  await expect(adapter.execute(call,'original-request',binding,()=>true)).rejects.toThrow('원래 요청');expect(f.calls.filter(c=>c.operation==='execute')).toHaveLength(1);
  await expect(adapter.execute(call,'inactive-request',binding,()=>false)).rejects.toThrow();expect(f.calls.filter(c=>c.operation==='execute')).toHaveLength(1);
+});
+test('ShadowLoop connection failures map to a next step, and other failures stay generic',async()=>{
+ const f=fixture();await f.connector().connect('project',code,true);const adapter=(await f.connector().adapter('project','default'))!;
+ const remote=await adapter.scope('remote-controller').then(()=>null,e=>e);
+ expect(serviceUseEnvironmentProblem(remote,'ShadowLoop','device:host:controller')).toBe('USE 실행은 지금 이 Mac에서만 할 수 있습니다. Mac의 작업 세션이나 커뮤니티에서 요청하세요.');
+ f.fail();const down=await adapter.scope('local').then(()=>null,e=>e);
+ expect(serviceUseEnvironmentProblem(down,'ShadowLoop','local')).toBe('ShadowLoop 앱이 응답하지 않습니다. 이 Mac에서 앱이 실행 중인지 확인한 뒤 다시 확인하세요.');
+ expect(serviceUseConnectProblem(await f.connector().connect('project',code,true).then(()=>null,e=>e),'Renamed')).toBe('ShadowLoop 앱이 이 Mac에서 실행 중인지 확인한 뒤 다시 연결하세요.');
+ const other=fixture();other.wrongApp();
+ expect(serviceUseEnvironmentProblem(await other.connector().connect('project',code,true).then(()=>null,e=>e),'ShadowLoop','local')).toBe(SERVICE_USE_ENVIRONMENT_PROBLEM);
 });

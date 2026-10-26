@@ -1,0 +1,23 @@
+[package]
+name = "agentstoz-workroom-browser"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+fixtures = []
+
+[dependencies]
+cef = { version = "=156.0.0", default-features = false, features = ["sandbox", "build-util"] }
+serde_json = "1"
+
+[build-dependencies]
+cc = "1"
+
+[[bin]]
+name = "agentstoz-browser-helper"
+path = "src/helper.rs"
+
+[[bin]]
+name = "bundle-workroom-browser"
+path = "src/bundle.rs"

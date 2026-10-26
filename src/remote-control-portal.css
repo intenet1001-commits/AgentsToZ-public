@@ -76,6 +76,12 @@ button { font: inherit; }
 .remote-security-note p { margin: 0; }
 .remote-panel, .remote-project { border: 1px solid var(--border); background: var(--panel); box-shadow: var(--shadow); }
 .remote-panel { padding: 26px 22px; border-radius: 22px; }
+/* A short landscape phone (844×390: the bottom navigation starts at 321px) has to show the first session row on the
+   first screen. The card's own breathing room gives way — never a control's 44px touch target. */
+@media (max-height: 460px) {
+  .remote-header { margin-bottom: 12px; }
+  .remote-panel { padding-top: 18px; }
+}
 .remote-centered { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .remote-centered > svg { width: 32px; height: 32px; margin-bottom: 14px; color: var(--mint); }
 .remote-membership-detail code { color: var(--ink-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; user-select: all; }
@@ -548,6 +554,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .remote-community-message--self { background: var(--sunken, var(--surface)); }
 .remote-community-message header { display: flex; gap: 8px; font-size: 11.5px; font-weight: 800; color: var(--ink-2); }
 .remote-community-message header span { margin-left: auto; font-weight: 600; color: var(--ink-3); }
+/* AI의 운영 기록(빌드 기록)은 미리보기로 접혀 있다 — 원문은 「전체 보기」(communityMessageView.ts). */
+.remote-community-kind { padding: 0 6px; border-radius: 999px; background: var(--raised); color: var(--ink-3); font-style: normal; font-weight: 700; }
+.remote-community-more { min-height: 32px; padding: 4px 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.remote-community-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .remote-community-message p { margin: 4px 0 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .remote-community-compose { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
 .remote-community-compose textarea { flex: 1; min-height: 44px; padding: 10px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; font-size: 16px; resize: vertical; }
@@ -583,6 +593,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .meta-common-memory-mobile [data-testid=meta-common-memory-panel] { margin: .75rem 0; }
 .meta-common-memory-mobile input:not([type=checkbox]), .meta-common-memory-mobile textarea, .meta-common-memory-mobile select { font-size: 16px; }
 .meta-common-memory-mobile details { overflow-wrap: anywhere; }
+/* A cloud group on a phone: one box, not three. The group's own panel and editor give up their side padding and border
+   so the fields use the width inside the 공통기억 box (the local-common panel keeps its box). */
+.meta-common-memory-mobile [data-testid=common-memory-panel] :is([data-testid=meta-common-memory-panel], [data-testid=meta-memory-editor]) { padding-left: 0; padding-right: 0; border: 0; }
+/* This page has no Tailwind preflight, so a fieldset kept the browser's groove box and inset — a fourth box around the
+   link list. Zero specificity: the panel's own utilities (border-t, pt-4) still draw what they ask for. */
+:where(.meta-common-memory-mobile fieldset) { margin: 0; padding: 0; min-width: 0; border: 0 solid; }
 
 /* w11 (2026-10-16): inbox first on a phone — the sessions come right under the Mac tabs, and the pane switches and the
    frequent prompts are folded behind one 「더 보기」 after them (critique 34). Nothing was removed. */

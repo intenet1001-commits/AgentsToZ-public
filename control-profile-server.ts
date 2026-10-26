@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {ControlProfileStore,readControlProfileSeed,controlMemoryRevision,type ControlProfileCandidate,type ControlProfileSeed} from './src/controlProfileStore';
 import {CONTROL_PROFILE_PRIVATE_PATH,CONTROL_PROFILE_MARKER,ControlProfileError} from './src/controlProfileContract';
 import {detectProjectMemory,detectProjectMemoryIdentity,initializeProjectMemory,readProjectMemorySnapshot,readMemoryDocument,writeMemoryDocument,pullProjectMemory,pushProjectMemory,runWithTimeout} from './project-memory-server';
-import {recallProjectMemoryEntries} from './src/projectMemoryRecall';
+import {parseProjectMemoryEntries,recallProjectMemoryEntries} from './src/projectMemoryRecall';
 import {isAgentsToZControlProject} from './buzz-agent-bootstrap-server';
 import {LEGACY_OPS_FOLDER_NAMES,OPS_FOLDER_NAME,isOpsFolderName} from './src/opsFolderName';
 import {PINNED_REPOSITORY_KEY_CONFIG,canonicalProjectRepositoryKey,pinnedProjectRepositoryKey} from './src/projectMemoryIdentity';
@@ -174,6 +174,11 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
   }
   return {profile:store.context(),hits,bytes,scope:'operating',...(options.deviceRecall?{deviceMemoryState}:{}),projectMemoryIncluded:false};
  };
+ /** get_control_profile only: context() rides along with every recall, so the entry titles (last 20, titles only) stay here. */
+ const profile=()=>{
+  const {snapshot}=store.read(),entries=parseProjectMemoryEntries(snapshot.document);
+  return {profile:store.context(),entryTitles:entries.slice(-20).map(e=>[...e.title].slice(0,120).join('')),entryCount:entries.length};
+ };
  const backup=async()=>{
   const {binding}=store.read();const memory=detectProjectMemory(binding.root);
   if(!memory.config?.autoBackup)return {backedUp:false,reason:'not-configured'};
@@ -181,5 +186,5 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
   catch{return {backedUp:false,reason:'needs-attention'};}
  };
  const prepare=async(projectId?:string)=>{const wasReady=store.status().state==='ready';const result=await store.prepare(projectId);return result.state==='ready'?store.synchronize(wasReady):result;};
- return {store,recall,backup,prepare};
+ return {store,recall,profile,backup,prepare};
 }

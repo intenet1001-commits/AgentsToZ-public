@@ -49,16 +49,17 @@ function requestToken(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value !== value.trim() || new TextEncoder().encode(value).length > 200 || /[\u0000-\u001f\u007f]/.test(value)) throw new MetaMemoryError('META_MEMORY_REQUEST_ID_INVALID', 'requestId는 앞뒤 공백 없는 1~200 UTF-8 bytes의 재시도 식별자여야 합니다.');
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : value;
 }
-function text(value: unknown, max: number, required = false): string {
-  if (typeof value !== 'string' || new TextEncoder().encode(value).length > max || /\u0000/.test(value) || (required && !value.trim())) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '입력 내용과 길이를 확인하세요.');
+/** `field` names the request key in the message, so an AI caller knows which one to fix (the code stays the same). */
+function text(value: unknown, max: number, required = false, field?: string): string {
+  if (typeof value !== 'string' || new TextEncoder().encode(value).length > max || /\u0000/.test(value) || (required && !value.trim())) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', field ? `입력 내용과 길이를 확인하세요: ${field}${required ? '(필수)' : ''}, 최대 ${max} bytes.` : '입력 내용과 길이를 확인하세요.');
   return value.trim();
 }
-function list(value: unknown): string[] {
+function list(value: unknown, field?: string): string[] {
   if (!Array.isArray(value) || value.length > 16) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '태그와 자동 연결 카테고리는 각각 16개까지입니다.');
-  return [...new Set(value.map(v => text(v, 120, true).normalize('NFC')))];
+  return [...new Set(value.map(v => text(v, 120, true, field && `${field}[]`).normalize('NFC')))];
 }
-function integer(value: unknown, max = Number.MAX_SAFE_INTEGER): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '리비전과 조회 위치를 확인하세요.');
+function integer(value: unknown, max = Number.MAX_SAFE_INTEGER, field?: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', field ? `리비전과 조회 위치를 확인하세요: ${field}(0 이상의 정수).` : '리비전과 조회 위치를 확인하세요.');
   return value as number;
 }
 function entryId(value: unknown): string {
@@ -86,7 +87,7 @@ function assignment(a: any): MetaMemoryAssignment {
   if (!a || typeof a !== 'object' || Array.isArray(a) || !['include', 'exclude', 'inherit'].includes(a.mode)) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '프로젝트 연결 방식을 확인하세요.');
   const keys = Object.keys(a).sort().join(',');
   if (keys === 'memoryId,mode') return { memoryId: metaMemoryId(a.memoryId), mode: a.mode };
-  if (keys === 'expectedMemoryId,mode,portId') return { portId: text(a.portId, 200, true), expectedMemoryId: metaMemoryId(a.expectedMemoryId), mode: a.mode };
+  if (keys === 'expectedMemoryId,mode,portId') return { portId: text(a.portId, 200, true, 'assignments[].portId'), expectedMemoryId: metaMemoryId(a.expectedMemoryId), mode: a.mode };
   throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '연결 대상은 {portId, expectedMemoryId, mode} 또는 {memoryId, mode} 중 한 형식으로 보내세요.');
 }
 const GROUP_OPERATIONS = new Set(['read', 'history', 'export', 'save', 'archive', 'save-entry', 'propose-entry', 'propose-source-entry', 'review-entry', 'review-entries']);
@@ -123,17 +124,17 @@ export function parseMetaMemoryRequest(raw: unknown): MetaMemoryRequest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '공통 기억 요청을 확인하세요.');
   const b = normalizeMetaMemoryVocabulary(raw) as Record<string, any>;
   const op = b.operation;
-  if (op === 'list') return { operation: op, query: text(b.query ?? '', 500), offset: integer(b.offset ?? 0, 1000) };
+  if (op === 'list') return { operation: op, query: text(b.query ?? '', 500, false, 'query'), offset: integer(b.offset ?? 0, 1000, 'offset') };
   if (op === 'projects') return { operation: op };
-  if (op === 'prepare-project') return { operation: op, portId: text(b.portId, 200, true) };
+  if (op === 'prepare-project') return { operation: op, portId: text(b.portId, 200, true, 'portId') };
   if (op === 'read') return { operation: op, memoryId: metaMemoryId(b.memoryId), ...(b.withProjects === false ? { withProjects: false as const } : {}) };
   if (op === 'history' || op === 'export') return { operation: op, memoryId: metaMemoryId(b.memoryId) };
   if (op === 'recall') {
     if ((b.portId === undefined) === (b.projectMemoryId === undefined)) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '조회할 프로젝트를 portId 또는 projectMemoryId 중 하나로만 지정하세요.');
-    const query = text(b.query, 2000, true);
-    return b.portId === undefined ? { operation: op, projectMemoryId: metaMemoryId(b.projectMemoryId), query } : { operation: op, portId: text(b.portId, 200, true), query };
+    const query = text(b.query, 2000, true, 'query');
+    return b.portId === undefined ? { operation: op, projectMemoryId: metaMemoryId(b.projectMemoryId), query } : { operation: op, portId: text(b.portId, 200, true, 'portId'), query };
   }
-  const mutation = { expectedRevision: integer(b.expectedRevision), requestId: requestToken(b.requestId) };
+  const mutation = { expectedRevision: integer(b.expectedRevision, undefined, 'expectedRevision'), requestId: requestToken(b.requestId) };
   if (op === 'import') return { operation: op, ...mutation, snapshot: validateMetaMemorySnapshot(b.snapshot) };
   if (op === 'save') {
     if (b.memoryId === undefined && mutation.expectedRevision !== 0) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '공통기억 생성은 memoryId를 생략하고 expectedRevision=0을 사용하세요.');
@@ -144,13 +145,13 @@ export function parseMetaMemoryRequest(raw: unknown): MetaMemoryRequest {
     // A memory named directly appears once, and never also through a project card (main/worktree cards may still share one).
     const memberIds = new Set(members.map(a => a.memoryId));
     if (memberIds.size !== members.length || ports.some(a => memberIds.has(a.expectedMemoryId))) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '같은 장기기억이 중복 선택되었습니다.');
-    return { operation: op, ...mutation, ...(b.memoryId === undefined ? {} : { memoryId: metaMemoryId(b.memoryId) }), name: text(b.name, 240, true), description: text(b.description ?? '', 2000), tags: list(b.tags ?? []), categories: list(b.categories ?? []), assignments };
+    return { operation: op, ...mutation, ...(b.memoryId === undefined ? {} : { memoryId: metaMemoryId(b.memoryId) }), name: text(b.name, 240, true, 'name'), description: text(b.description ?? '', 2000, false, 'description'), tags: list(b.tags ?? [], 'tags'), categories: list(b.categories ?? [], 'categories'), assignments };
   }
   const memoryId = metaMemoryId(b.memoryId);
   if (op === 'archive') { if (typeof b.archived !== 'boolean') throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '보관 상태를 확인하세요.'); return { operation: op, ...mutation, memoryId, archived: b.archived }; }
   if (op === 'save-entry' || op === 'propose-entry') {
     if (b.portId !== undefined && b.sourceMemoryId !== undefined) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '출처는 portId 또는 sourceMemoryId 중 하나로만 지정하세요.');
-    return { operation: op, ...mutation, memoryId, ...(b.entryId === undefined ? {} : { entryId: entryId(b.entryId) }), title: text(b.title, 240, true), body: text(b.body, META_COMMON_MEMORY_LIMITS.bodyBytes, true), ...(b.portId === undefined ? {} : { portId: text(b.portId, 200, true) }), ...(b.sourceMemoryId === undefined ? {} : { sourceMemoryId: metaMemoryId(b.sourceMemoryId) }) };
+    return { operation: op, ...mutation, memoryId, ...(b.entryId === undefined ? {} : { entryId: entryId(b.entryId) }), title: text(b.title, 240, true, 'title'), body: text(b.body, META_COMMON_MEMORY_LIMITS.bodyBytes, true, 'body'), ...(b.portId === undefined ? {} : { portId: text(b.portId, 200, true, 'portId') }), ...(b.sourceMemoryId === undefined ? {} : { sourceMemoryId: metaMemoryId(b.sourceMemoryId) }) };
   }
   if (op === 'propose-source-entry') {
     if (!Array.isArray(b.evidence) || !b.evidence.length || b.evidence.length > 16 || !Array.isArray(b.conditions ?? []) || (b.conditions ?? []).length > 16) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '원본 근거와 적용 조건의 범위를 확인하세요.');
@@ -159,7 +160,7 @@ export function parseMetaMemoryRequest(raw: unknown): MetaMemoryRequest {
       return {memoryId: metaMemoryId(e.memoryId), revisionId: metaMemoryId(e.revisionId), entryId: entryId(e.entryId), contentHash: e.contentHash};
     });
     if (new Set(evidence.map((e: any) => `${e.memoryId}:${e.entryId}`)).size !== evidence.length) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '원본 근거가 중복 선택되었습니다.');
-    return {operation: op, ...mutation, memoryId, title: text(b.title, 240, true), body: text(b.body, META_COMMON_MEMORY_LIMITS.bodyBytes, true), reason: text(b.reason, 2000, true), category: text(b.category ?? '', 120), conditions: (b.conditions ?? []).map((condition: any) => text(condition, 500, true)), evidence, ...(b.supersedesEntryId === undefined ? {} : {supersedesEntryId: entryId(b.supersedesEntryId)})};
+    return {operation: op, ...mutation, memoryId, title: text(b.title, 240, true, 'title'), body: text(b.body, META_COMMON_MEMORY_LIMITS.bodyBytes, true, 'body'), reason: text(b.reason, 2000, true, 'reason'), category: text(b.category ?? '', 120, false, 'category'), conditions: (b.conditions ?? []).map((condition: any) => text(condition, 500, true, 'conditions[]')), evidence, ...(b.supersedesEntryId === undefined ? {} : {supersedesEntryId: entryId(b.supersedesEntryId)})};
   }
   if (op === 'review-entry') { if (!['active', 'candidate', 'contested', 'superseded'].includes(b.state)) throw new MetaMemoryError('META_MEMORY_INPUT_INVALID', '항목 상태를 확인하세요.'); return { operation: op, ...mutation, memoryId, entryId: entryId(b.entryId), state: b.state }; }
   if (op === 'review-entries') {

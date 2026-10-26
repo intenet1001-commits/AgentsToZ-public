@@ -311,15 +311,56 @@ test('the composer\'s raw-input send says it was not kept when the vault is on',
  const panel=readFileSync(join(import.meta.dir,'..','src','AiTerminalPanel.tsx'),'utf8');
  const start=panel.indexOf('const sendTerminalDraft='),end=panel.indexOf('sendWithDraftSeal(',start);
  expect(start).toBeGreaterThan(0);expect(end).toBeGreaterThan(start);
- const raw=panel.slice(start,end).split('\n').find(line=>line.includes('!usableSessionStorage()'))??'';
+ const body=panel.slice(start,end),rawStart=body.indexOf('  if(!attach.ids.length&&('),rawEnd=body.indexOf('\n',rawStart);
+ expect(rawStart).toBeGreaterThan(0);expect(rawEnd).toBeGreaterThan(rawStart);
+ const raw=body.slice(rawStart,rawEnd);
  expect(raw).toContain('sendBoundInput(');expect(raw).toContain('if(draftVault.vault)setError(DRAFT_RAW_SEND_NOTICE)');
+ // Run the raw branch itself, rather than matching the earlier browser-grant receipt guard's storage check.
+ for(const enabled of [true,false])for(const accepted of [true,false]){
+  const notices:string[]=[],cleared:string[]=[],sent:unknown[][]=[];
+  const env={attach:{ids:[]},submissionSupported:true,images:[],remote:false,usableSessionStorage:()=>null,
+   draftMessage:()=> 'Raw person draft',terminalDraft:'Raw person draft',activeReferences:()=>['reference-1'],
+   sendBoundInput:(...args:unknown[])=>{sent.push(args);return accepted;},
+   setTerminalDraft:(value:string)=>cleared.push(value),setTerminalCursor:()=>{},setReferenceChips:()=>{},setImages:()=>{},
+   draftVault:{vault:enabled?{}:null},setError:(notice:string)=>notices.push(notice),DRAFT_RAW_SEND_NOTICE,
+   requestAnimationFrame:()=>0,terminalComposer:{current:null},
+  };
+  new Function(...Object.keys(env),new Bun.Transpiler({loader:'ts'}).transformSync(raw))(...Object.values(env));
+  expect(sent).toEqual([['Raw person draft\r',['reference-1']]]);
+  expect(notices).toEqual(enabled&&accepted?[DRAFT_RAW_SEND_NOTICE]:[]);expect(cleared).toEqual(accepted?['']:[]);
+ }
 });
-test('the composer\'s direct send goes through the seal-then-send path',()=>{
+test('the composer\'s direct send goes through the seal-then-send path',async()=>{
  const panel=readFileSync(join(import.meta.dir,'..','src','AiTerminalPanel.tsx'),'utf8');
  const start=panel.indexOf('const sendTerminalDraft='),end=panel.indexOf('const sendQueuedDraftItem=',start);
  expect(start).toBeGreaterThan(0);expect(end).toBeGreaterThan(start);
  const body=panel.slice(start,end);
- expect(body).toContain('sendWithDraftSeal(');expect(body).not.toContain('submitWorkroomDraft(');expect(body).not.toContain('vault.save(');
+ expect(body).toContain('sendWithDraftSeal(');expect(body).not.toContain('submitWorkroomDraft(');
+ const fragment=(from:string,to:string)=>{const a=body.indexOf(from),b=body.indexOf(to,a);expect(a).toBeGreaterThan(0);expect(b).toBeGreaterThan(a);return body.slice(a,b);};
+ const declaration=fragment('  const sessionId=activeSession.id,draft=terminalDraft,','  const remember='),adapter=fragment('  const sealVault=','  const sending='),sending=fragment('  const sending=','  const kept=');
+ // The only direct save is a callback passed to sendWithDraftSeal; evaluating its definition must store nothing.
+ expect(body.replace(adapter,'')).not.toContain('vault.save(');
+ const js=(source:string)=>new Bun.Transpiler({loader:'ts'}).transformSync(source);
+ for(const withHandoff of [false,true]){
+  const storage=new RecordingStorage(),vault=new WorkroomDraftVault({storage}),f=journalFixture();
+  const grant='SYNTHETIC_DIRECT_SEND_GRANT',draft='Check the coupon field.',wire=withHandoff?draft+'\n[Workroom browser access]\ngrant='+grant:draft,id='panel-direct-sealed-'+Number(withHandoff);
+  const env={activeSession:{id:sessionId},terminalDraft:draft,draftMessage:(include=false)=>include?wire:draft,requestUuid:()=>id,pendingSubmissionKey:()=> 'pending-test',sessionScope:scope,browserHandoff:withHandoff?{grant}:null,vault};
+  const assembled=new Function(...Object.keys(env),js(declaration+adapter)+';return {sealVault,vaultText,text};')(...Object.values(env)) as {sealVault:Pick<WorkroomDraftVault,'save'>;vaultText:string;text:string};
+  expect(storage.writes).toBe(0);expect(assembled.vaultText).toBe(draft+'\r');expect(assembled.text).toBe(wire+'\r');
+  if(!withHandoff)expect(assembled.sealVault).toBe(vault);
+  let calls=0;
+  const request:typeof f.request=async input=>{
+   calls++;
+   const kept=(await vault.list(scope,sessionId)).drafts;
+   expect(kept).toHaveLength(1);expect(kept[0]!.text).toBe(draft+'\r');expect(kept[0]!.attempted).toBe(true);
+   expect(kept[0]!.submissionId).toBe(id);expect(kept[0]!.references).toEqual(['reference-1']);expect(JSON.stringify(kept)).not.toContain(grant);
+   return f.request(input);
+  };
+  const sendEnv={...env,...assembled,sendWithDraftSeal,draftVaultScope:scope,sessionId,id,references:['reference-1'],attach:{ids:[]},request,handoffRequest:request,remember:()=>{},draftSealNotice,setError:()=>{}};
+  const sent=new Function(...Object.keys(sendEnv),js("let sealNote='';"+sending)+';return sending;')(...Object.values(sendEnv)) as ReturnType<typeof sendWithDraftSeal>;
+  expect(await sent.stored).toBe(true);expect((await sent.receipt).state).toBe('written');
+  expect(calls).toBe(1);expect(f.writes).toEqual([wire+'\r']);
+ }
 });
 
 test('a vault object kept by another window stores nothing once the setting is turned off',async()=>{

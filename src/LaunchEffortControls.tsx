@@ -76,7 +76,7 @@ export function LaunchEffortControls({lang = 'ko', request = requestLaunchEffort
       <button type="button" disabled={mode === null || busy} aria-pressed={mode === 'recommend'} onClick={() => void change('recommend')}
         style={{padding:'4px 6px',fontSize:11,border:0,background:'transparent',color:'var(--text-secondary)',fontFamily:'inherit',cursor:'pointer'}}>{t(lang,'adviceOnly')}</button>
       <button type="button" disabled={mode === null || busy} aria-pressed={mode === 'off'} onClick={() => void change('off')}
-        data-testid="launch-effort-off" style={{padding:'4px 6px',fontSize:11,border:0,background:'transparent',color:'var(--text-secondary)',fontFamily:'inherit',cursor:'pointer'}}>OFF</button>
+        data-testid="launch-effort-off" style={{padding:'4px 6px',fontSize:11,border:0,background:'transparent',color:'var(--text-secondary)',fontFamily:'inherit',cursor:'pointer'}}>{t(lang,'off')}</button>
     </div>
     <p style={{fontSize:11,color:'var(--text-muted)',lineHeight:1.5,margin:'6px 0'}}>{t(lang,'effortHostHelp')}</p>
     <p style={{fontSize:11,color:'var(--text-muted)',lineHeight:1.5,margin:'6px 0'}}>{t(lang,'effortMacHelp')}</p>
@@ -115,7 +115,7 @@ function DesktopEffortAdviceControls({lang,request}: {lang:Lang;request:DesktopE
         data-testid={'desktop-effort-'+value} disabled={mode===null || busy} onClick={()=>void change(value)}
         style={{padding:'6px 10px',fontSize:12,borderRadius:6,border:'1px solid',fontFamily:'inherit',cursor:mode===null || busy ? 'wait' : 'pointer',
           borderColor:mode===value ? 'var(--violet)' : 'var(--border-subtle)',background:mode===value ? 'var(--bg-purple)' : 'transparent',color:'var(--text-primary)'}}>
-        {value==='recommend' ? (t(lang,'effortRecommendDefault')) : 'OFF'}
+        {value==='recommend' ? (t(lang,'effortRecommendDefault')) : (t(lang,'off'))}
       </button>)}
     </div>
     <p style={{fontSize:11,color:'var(--text-muted)',lineHeight:1.5,margin:'6px 0'}}>{t(lang,'desktopEffortHelp')}</p>

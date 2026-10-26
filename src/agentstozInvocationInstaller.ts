@@ -14,8 +14,9 @@ import {agyGlobalConfigDir} from './agentOutputStyleInstaller';
 import {CONTROL_PROFILE_ALIASES} from './controlProfileContract';
 import {AGENTSTOZ_TARGET_ALIAS_GUIDANCE} from './conversationTargetAlias';
 import {AGENTSTOZ_MENTION_GUIDANCE} from './agentstozMention';
+import {AGENTSTOZ_TEAM_SKILL, AGENTSTOZ_TEAM_SKILL_NAME} from './agentstozTeamSkill';
 
-export const AGENTSTOZ_INVOCATION_VERSION = 7;
+export const AGENTSTOZ_INVOCATION_VERSION = 9;
 const START = '<!-- AgentsToZ invocation:start -->';
 const END = '<!-- AgentsToZ invocation:end -->';
 
@@ -36,9 +37,10 @@ ${AGENTSTOZ_MENTION_GUIDANCE}
 - Creating a project uses \`agentstoz_use_create_project\`; it creates the folder, initializes Git with an initial commit, registers the project, and initializes DEV long-term memory.
 - Registering an existing folder uses \`agentstoz_use_register_existing_project\` after listing workspace roots. Give its exact folder name directly under a registered root; registration preserves its Git and memory files. If that root is not registered, add it in the app first.
 - Before creating a project, ask about a GitHub repository only when the user has not already decided. Repository visibility must be explicit. Creating the local project does not require GitHub.
-- For Workroom, start or list a session, read its initial output, and then send the instruction. Supported agents are Codex, Claude, Hermes, and agy.
+- Before an AI launch, follow the shared choice preparation above; a tool name is not the user's surface choice. After the choices are resolved, pass the chosen surface explicitly to the matching launch tool, including internal for a Workroom. For an explicitly selected Workroom, start or list a session, read its initial output, and then send the instruction. Supported agents are Codex, Claude, Hermes, and agy.
 - For an explicit task on another device, use \`agentstoz_use_list_ops_devices\`, select its exact endpointId, then \`agentstoz_use_submit_ops_request\` and \`agentstoz_use_wait_ops_request\` until its actual result. The receiving device opens its own configured OPS AI. Preserve endpointId/requestId and exact text on retry; use \`agentstoz_use_get_ops_request_result\` after interruption. Admission or a window is not completion. A receiving OPS worker submits its actual result and evidence with \`agentstoz_use_complete_ops_request\` using its private task capability. Never expose that capability or automatically replay an unknown outcome with a fresh ID.
 - Use a durable mission only when the user requests continuing orchestration or the work spans multiple projects or agents. After a restart, resume only on an explicit request to continue.
+- For 팀 작전 (one task split across several AI agents, each in its own git worktree, one leader merging), follow the ${AGENTSTOZ_TEAM_SKILL_NAME} skill and its \`agentstoz_use_*_team\` tools. Any model can lead.
 - Report success only from a successful MCP result. If the tools are unavailable, say that the local AgentsToZ bridge is offline.
 
 Arguments or the words following the invocation are the user's request. Continue naturally when the invocation is spoken in an active voice conversation.`;
@@ -129,20 +131,23 @@ export function installAgentsToZInvocation(input: { home: string; hermesHome?: s
   const results = [
     installTarget('codex', [
       [join(input.home, '.codex', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      [join(input.home, '.codex', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
       [join(input.home, '.codex', 'AGENTS.md'), withAgentsToZInvocation(read(join(input.home, '.codex', 'AGENTS.md')))],
     ]),
     installTarget('claude', [
       [join(input.home, '.claude', 'commands', 'agentstoz.md'), CLAUDE_COMMAND],
       [join(input.home, '.claude', 'commands', 'remember_agentstoz.md'), CLAUDE_REMEMBER_COMMAND],
       [join(input.home, '.claude', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      [join(input.home, '.claude', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
       [join(input.home, '.claude', 'CLAUDE.md'), withAgentsToZInvocation(read(join(input.home, '.claude', 'CLAUDE.md')))],
     ]),
     installTarget('antigravity', [
       [join(input.home, '.gemini', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      [join(input.home, '.gemini', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
       // agy (Antigravity CLI) loads global customizations from ~/.gemini/config/ (MCP from its
       // mcp_config.json); its bundled docs place global skills at ~/.gemini/config/skills/<name>/SKILL.md
       // and always-on global rules in a standalone GEMINI.md there. Only when agy made that folder.
-      ...(agyConfig ? [[join(agyConfig, 'skills', 'agentstoz', 'SKILL.md'), SKILL] as [string, string]] : []),
+      ...(agyConfig ? [[join(agyConfig, 'skills', 'agentstoz', 'SKILL.md'), SKILL] as [string, string], [join(agyConfig, 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL] as [string, string]] : []),
       [join(input.home, '.gemini', 'GEMINI.md'), withAgentsToZInvocation(read(join(input.home, '.gemini', 'GEMINI.md')))],
       ...(agyConfig ? [[join(agyConfig, 'GEMINI.md'), withAgentsToZInvocation(read(join(agyConfig, 'GEMINI.md')))] as [string, string]] : []),
     ]),
@@ -151,6 +156,7 @@ export function installAgentsToZInvocation(input: { home: string; hermesHome?: s
     results.push(installTarget('hermes', [
       [join(hermesHome, 'skills', 'agentstoz', 'SKILL.md'), SKILL],
       [join(hermesHome, 'skills', 'remember_agentstoz', 'SKILL.md'), HERMES_REMEMBER_SKILL],
+      [join(hermesHome, 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
       [join(hermesHome, 'SOUL.md'), withAgentsToZInvocation(read(join(hermesHome, 'SOUL.md')))],
     ]));
   }

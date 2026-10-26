@@ -71,7 +71,7 @@ for(const [engineName,engine] of [['chromium',chromium],['webkit',webkit]]){
    const backup={format:'agentstoz-meta-common-memory',schemaVersion:1,snapshot,checksum:'0'.repeat(64)};
    const upload=async()=>knowledge.locator('input[type=file]').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))});
    await upload();await knowledge.getByRole('alert').filter({hasText:'백업 내용의 검증 값이 일치하지 않습니다.'}).waitFor();
-   backup.checksum=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');await upload();await knowledge.getByRole('alert').filter({hasText:'이미 있는 공통 기억입니다. 현재 내용과 백업을 비교한 뒤 항목을 편집하세요.'}).waitFor();
+   backup.checksum=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');await upload();await knowledge.getByRole('alert').filter({hasText:'이미 있는 공통기억입니다. 현재 내용과 백업을 비교한 뒤 항목을 편집하세요.'}).waitFor();
    assert.equal(JSON.stringify((await json(fixture.url+'/fixture/stats')).groups),beforeBackup,'backup review never overwrites an existing memory');
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);assert.deepEqual(errors,[]);
    report.push({engine:engineName,width,journeys:['open-group-read-and-history-only','picker-loads-catalog-once','cloud-only-memory-linked-by-memoryId','own-save-history-only','old-mac-device-rows-port-form'],errors:0});

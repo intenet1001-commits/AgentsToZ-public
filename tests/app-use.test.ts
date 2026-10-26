@@ -6,7 +6,7 @@ import {AppUseConnector} from '../src/appUseConnector';
 import {APP_USE_PYTHON_SDK} from '../src/appUsePythonSdk';
 import {normalizeAppUseActions,type AppUseAction} from '../src/appUseCatalog';
 import {prepareServiceUseWorkroom} from '../src/serviceUsePreparation';
-import {ServiceUseHost,publicServiceUseStatus} from '../src/serviceUseHost';
+import {ServiceUseHost,SERVICE_USE_ENVIRONMENT_PROBLEM,publicServiceUseStatus,serviceUseConnectProblem} from '../src/serviceUseHost';
 import {WorkroomThreadStore} from '../src/workroomThreadStore';
 import {ensureServiceMemory,migrateServiceMemoryToProject} from '../src/serviceMemory';
 import {normalizeServiceUseCall,type ServiceUseCall} from '../src/serviceUseProtocol';
@@ -45,7 +45,7 @@ server.serve_forever()
   const reader=child.stdout.getReader(),chunk=await Promise.race([reader.read(),new Promise<never>((_,reject)=>setTimeout(()=>reject(Error('app fixture did not start')),5000))]);
   if(chunk.done)throw Error(await new Response(child.stderr).text());
   const connection=JSON.parse(new TextDecoder().decode(chunk.value));reader.releaseLock();
-  return {...connection,state,home,restart:async()=>{child.kill();await child.exited;child=Bun.spawn(['python3',join(home,'app.py')],{cwd:home,env:{...process.env,FIXTURE_APP_PORT:String(connection.port)},stdout:'pipe',stderr:'pipe'});children.push(child);const reader=child.stdout.getReader();const first=await reader.read();reader.releaseLock();if(first.done)throw Error(await new Response(child.stderr).text());},effects:()=>existsSync(join(home,'effects.json'))?JSON.parse(readFileSync(join(home,'effects.json'),'utf8')):[]};
+  return {...connection,state,home,stop:async()=>{child.kill();await child.exited;},restart:async()=>{child.kill();await child.exited;child=Bun.spawn(['python3',join(home,'app.py')],{cwd:home,env:{...process.env,FIXTURE_APP_PORT:String(connection.port)},stdout:'pipe',stderr:'pipe'});children.push(child);const reader=child.stdout.getReader();const first=await reader.read();reader.releaseLock();if(first.done)throw Error(await new Response(child.stderr).text());},effects:()=>existsSync(join(home,'effects.json'))?JSON.parse(readFileSync(join(home,'effects.json'),'utf8')):[]};
 }
 async function fixture(){
   const root=realpathSync(mkdtempSync(join(tmpdir(),'app-use-')));roots.push(root);
@@ -92,7 +92,7 @@ test('two real local apps publish distinct catalogs and run only the selected pr
   expect(await f.host().execute('report-project','local','original-request-id',call,()=>true)).toEqual(result);
   expect(await f.host().receipt('report-project','local','original-request-id',()=>true)).toEqual(result);
   expect(f.first.effects()).toHaveLength(1);expect(f.second.effects()).toHaveLength(0);
-  expect((await f.host().status('report-project','other-user')).readiness.executionReady).toBe(false);
+  expect((await f.host().status('report-project','other-user')).readiness).toMatchObject({executionReady:false,problem:'USE 실행은 지금 이 Mac에서만 할 수 있습니다. Mac의 작업 세션이나 커뮤니티에서 요청하세요.'});
 },20000);
 test('a lost acknowledgment survives host restart and queries the same app receipt without replay',async()=>{
   const f=await fixture();await f.connector().connect('report-project','default',f.first.code,true);f.lose();
@@ -113,7 +113,8 @@ test('an app error after an effect stays unknown and neither app nor host retrie
 test('a profile change and forged capability cannot authorize execution or expose raw connection errors',async()=>{
   const f=await fixture();await f.connector().connect('report-project','default',f.first.code,true);
   writeFileSync(f.first.state,JSON.stringify({principalId:'different-user',libraryId:'library-report-project',deviceId:'device-report-project'}));
-  expect((await f.use.status('report-project','local')).readiness.executionReady).toBe(false);
+  // The reference SDK refuses a changed profile outright (403): status keeps the generic line, never the raw error.
+  expect((await f.use.status('report-project','local')).readiness).toMatchObject({executionReady:false,tools:'verified',problem:SERVICE_USE_ENVIRONMENT_PROBLEM});
   await expect(f.use.execute('report-project','local','changed-profile-request',call,()=>true)).rejects.toThrow();expect(f.first.effects()).toHaveLength(0);
   const forged=f.second.code.slice(0,-43)+'X'.repeat(43);
   await expect(f.connector().connect('booking-project','default',forged,true)).rejects.toThrow();
@@ -131,4 +132,18 @@ test('an early background completion is not overwritten by the worker-start ackn
   const asyncCall={...call,input:{actionId:'report.create',arguments:{topic:'finish-first'}}};
   const result=await f.use.execute('report-project','local','early-finish-request',asyncCall,()=>true);
   expect(result.state).toBe('completed');expect(result.message).toBe('Background result verified');expect(f.first.effects()).toHaveLength(1);
+},20000);
+
+test('a changed action list, a closed app and a code for another project get their own next step from the real connector',async()=>{
+  const f=await fixture();
+  const wrongProject=await f.connector().connect('booking-project','default',f.first.code,true).then(()=>null,e=>e);
+  expect(serviceUseConnectProblem(wrongProject,'booking-project')).toBe('이 코드가 선택한 프로젝트와 맞지 않습니다. 위에서 프로젝트를 확인하거나 이 프로젝트의 앱에서 코드를 다시 발급하세요.');
+  await f.connector().connect('report-project','default',f.first.code,true);
+  // DEV changed the app's action list after USE was connected: the stored catalog no longer matches.
+  const script=join(f.first.home,'app.py');writeFileSync(script,readFileSync(script,'utf8').replace('보고서 만들기','주간 보고서 만들기'));await f.first.restart();
+  expect((await f.use.status('report-project','local')).readiness).toMatchObject({tools:'verified',environmentReady:false,problem:'앱의 동작 목록이나 사용자가 바뀌었습니다. 앱에서 연결 코드를 다시 발급해 Mac의 작업 세션 → USE 준비에 입력하세요.'});
+  await f.first.stop();
+  expect((await f.use.status('report-project','local')).readiness).toMatchObject({tools:'verified',environmentReady:false,problem:'report-project 앱이 응답하지 않습니다. 이 Mac에서 앱이 실행 중인지 확인한 뒤 다시 확인하세요.'});
+  const closed=await f.connector().connect('report-project','default',f.first.code,true).then(()=>null,e=>e);
+  expect(serviceUseConnectProblem(closed,'report-project')).toBe('코드를 발급한 앱이 이 Mac에서 실행 중인지 확인한 뒤 다시 연결하세요.');
 },20000);

@@ -1,5 +1,6 @@
 import SwiftUI
 import AgentsToZCore
+import ScreenControlCore
 
 private struct RequestedAction: Identifiable {
     let id = UUID()
@@ -32,10 +33,16 @@ struct RemoteHomeView: View {
     @State private var openAfterWorkroom: SavedWorkspace?
     /// Photos shared into "AgentsToZ VOC" that no portal page has taken yet.
     @State private var pendingVocShares = 0
+    /// A screen-control registration QR read by this screen's scanner, handed to 「Mac 화면」.
+    @State private var screenInvite: String?
+    /// A registration QR read by the scanner sheet, held until that sheet has gone: 「Mac 화면」 opens its own sheet, and
+    /// iOS drops a presentation made while another sheet is still being dismissed.
+    @State private var pendingScreenInvite: String?
 
     var body: some View {
         NavigationStack {
             List {
+                ScreenMacsSection(scannedInvite: $screenInvite)
                 if let snapshot = model.snapshot {
                     projectSections(snapshot)
                 } else {
@@ -65,6 +72,7 @@ struct RemoteHomeView: View {
             .sheet(isPresented: $showScanner, onDismiss: {
                 if !scanDelivered { resumeIfIdle() }
                 scanDelivered = false; scanFromWorkroom = false
+                if let invite = pendingScreenInvite { pendingScreenInvite = nil; screenInvite = invite }
             }) { QRScannerSheet { value in
                 let returnable = scanFromWorkroom
                 scanDelivered = true; scanFromWorkroom = false; showScanner = false; review(value)
@@ -358,6 +366,11 @@ struct RemoteHomeView: View {
     private func review(_ value: String, addressField: Bool = false) {
         model.notice = nil
         scannedText = ""
+        if value.hasPrefix(RegistrationInvite.prefix) {
+            // From the scanner sheet (`scanDelivered`) wait for it to finish closing; typed text has no sheet to wait for.
+            if scanDelivered { pendingScreenInvite = value } else { screenInvite = value }
+            return
+        }
         if value.contains(PhoneConnectLink.prefix) {
             if let link = parseConnectLink(value) { connectLink = link }
             return

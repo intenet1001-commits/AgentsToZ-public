@@ -19,15 +19,19 @@ type PanelSnapshot={scopeId:string;groups:any[];groupsNext:number|null;legacyPen
 const phoneSnapshots=new Map<string,PanelSnapshot>();
 /** Source-change advice (`updates`) only concerns groups that track source memories; a list without any needs no call. */
 const tracksSources=(groups:any[])=>groups.some(r=>!r.state.archived&&((r.state.sourceMemoryIds?.length??0)>0||(r.state.knowledgeSourceHeads?.length??0)>0));
-export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initiallyOpen=false,onProjectsChanged,workroom,activeProjects=[],phoneCacheKey,focusGroupId,focusMemoryId,onCloudList}:{
+export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initiallyOpen=false,onProjectsChanged,workroom,workroomUnavailable,activeProjects=[],phoneCacheKey,focusGroupId,focusMemoryId,onFocusHandled,onCloudList,onOpenOps,onOpenCloudSettings}:{
   memories?:SourceChoice[];client?:CommonMemoryClient;initiallyOpen?:boolean;onProjectsChanged?:()=>void;workroom?:CommonMemoryWorkroomBridge;activeProjects?:CommonMemoryActiveProject[];
+  /** Why AI work cannot start here (a phone whose connection has no OPS project); replaces the default no-OPS line. */workroomUnavailable?:string;
   /** Set by the phone: requests run one after another over the relay, and the last list is cached per Mac. */phoneCacheKey?:string;
   /** Opens this group when the panel opens (instead of the remembered selection). */focusGroupId?:string;
   /** Opens the first live group linking this long-term memory, or knowledge creation with it preset when none does. */focusMemoryId?:string;
+  /** Called once a focus prop has been acted on, so a parent that remounts this panel can drop it instead of focusing again. */onFocusHandled?:()=>void;
   /** After each list read: whether the cloud list really answered, and (a phone) how many of the Mac's local groups the cloud does not hold yet (null from an older Mac). */onCloudList?:(state:{ok:boolean;localPending:number|null})=>void;
+  /** Mac only: opens 아젠투지 settings, where an OPS workroom is set up. */onOpenOps?:()=>void;
+  /** Mac only: opens the long-term memory cloud connection settings. */onOpenCloudSettings?:()=>void;
 }){
   const api=client;const remote=client!==defaultApi;const [memories,setMemories]=useState(provided),[scope,setScope]=useState<string|undefined>(),[after,setAfter]=useState<string|null>(null),[pending,setPending]=useState<{operation:string;input:any}|null>(null);const working=useRef(false),scopeRef=useRef<string|undefined>(undefined),loadSeq=useRef(0),catalogLoading=useRef<string|undefined>(undefined);const [intents,setIntents]=useState<CommonMemoryIntent[]>([]);
-  useEffect(()=>{if(!initiallyOpen)return;const cached=phoneCacheKey?phoneSnapshots.get(phoneCacheKey):undefined;if(!cached){void run(async()=>{await openPanel();});return;}
+  useEffect(()=>{if(!initiallyOpen)return;const cached=phoneCacheKey?phoneSnapshots.get(phoneCacheKey):undefined;if(!cached){void run(openList);return;}
     applySnapshot(cached);setOpen(true);void load().catch(e=>setError(e instanceof Error?e.message:'공통기억 목록을 새로 확인하지 못했습니다.'));
     if(focusGroupId||focusMemoryId){void run(()=>focusTarget(cached));return;}
     const saved=recallCommonMemoryNavigation(cached.scopeId);if(saved)void run(()=>inspect(saved));},[initiallyOpen,client]);
@@ -40,6 +44,10 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
   const [sourceSearch,setSourceSearch]=useState(''),[managingList,setManagingList]=useState(false),[updates,setUpdates]=useState<CommonMemoryUpdate[]>([]);
   const [topicDiscovery,setTopicDiscovery]=useState<any>(null),[catalogScope,setCatalogScope]=useState<string|undefined>(),[sourcesOpen,setSourcesOpen]=useState(false),[hostCapabilities,setHostCapabilities]=useState<string[]>([]);
   const [presetMember,setPresetMember]=useState<string|undefined>(),focusedKey=useRef('');
+  // Why the list could not open (its error code, '' without one), and whether it is opening now.
+  const [openFailure,setOpenFailure]=useState<string|null>(null),[opening,setOpening]=useState(false);
+  // Groups this panel just created through the previous goal model, whose review section opens right away.
+  const legacyCreated=useRef(new Set<string>()),sectionRef=useRef<HTMLElement|null>(null);
   const target=workroom?.targetId;
   const blocked=busy||knowledgeBlocked||!!pending||intents.length>0;
   const knowledgeRequest=useMemo<MetaMemoryRequester>(()=>async(request)=>api.request('knowledge',{request,scopeId:scope}),[api,scope]);
@@ -75,11 +83,12 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
   const openPanel=async()=>{
     const saved=focusGroupId||focusMemoryId?null:peekCommonMemoryNavigation(),wanted=focusGroupId??saved?.groupId;
     const [snapshot,picked]=await Promise.all([load(),wanted?api.inspect(wanted,0).catch(()=>null):Promise.resolve(null)]);
-    if(focusGroupId){focusedKey.current=focusKey;if(picked&&picked.scopeId===scopeRef.current)showGroup(picked,focusGroupId);else setError('선택한 공통기억을 찾지 못했습니다. 목록에서 다시 선택하세요.');}
+    if(focusGroupId){focusedKey.current=focusKey;if(picked&&picked.scopeId===scopeRef.current)showGroup(picked,focusGroupId);else setError('선택한 공통기억을 찾지 못했습니다. 목록에서 다시 선택하세요.');onFocusHandled?.();}
     // A failed lookup must not keep the panel shut: report it and open the list, as a missing focused group does.
     else if(focusMemoryId)await focusTarget(snapshot).catch(()=>setError('이 장기기억을 연결한 공통기억을 확인하지 못했습니다. 목록에서 선택하세요.'));
     else if(saved&&picked&&saved.scopeId===scopeRef.current&&picked.scopeId===scopeRef.current)showGroup(picked,saved.groupId);
     setOpen(true);};
+  const openList=async()=>{setOpening(true);try{await openPanel();setOpenFailure(null);}catch(e){setOpenFailure(String((e as any)?.code??''));throw e;}finally{setOpening(false);}};
   const focusKey=`${focusGroupId??''}|${focusMemoryId??''}`;
   /** Which live group links this long-term memory: one host lookup, or (an older Mac) the linking groups read one by one. */
   const groupForMemory=async(snapshot:PanelSnapshot,memoryId:string):Promise<string|undefined>=>{
@@ -98,6 +107,9 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
   const startKnowledgeCreate=(member?:string)=>{setSelected(null);setCreating(true);setCreatingKnowledge(true);setPresetMember(member);setName('');setObjective('');setInclude('');setExclude('');setConditions('');setChecks('');setSdkModules('');setSources([]);setEntry(null);};
   const focusTarget=async(snapshot:PanelSnapshot|undefined)=>{
     if(!snapshot)return;focusedKey.current=focusKey;
+    try{await focusOn(snapshot);}finally{onFocusHandled?.();}
+  };
+  const focusOn=async(snapshot:PanelSnapshot)=>{
     if(focusGroupId){await inspect(focusGroupId);return;}
     if(!focusMemoryId)return;
     // Over the phone relay an older Mac (no memory lookup) would need one read per group: show the list instead.
@@ -120,9 +132,23 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
   const useNames=selected?(selected.state.portableKnowledge?.current.members??[]).filter((m:any)=>m.mode==='include').map((m:any)=>m.name):[];
   const advice=selected?commonMemoryUpdateAdvice({groupId:selected.state.id,name:selected.state.name,version:selected.version,...commonMemoryTracking(selected.state),heads:selected.currentTrackedSourceHeads??selected.sourceHeads??[],publishedAt:selected.state.publication?.publishedAt,archived:selected.state.archived}):null;
   // The goal/source-review/publication model ('이전 방식') shows only for a group that carries it, and opens by default
-  // only when the group has nothing else (no knowledge entries, candidates or linked memories).
+  // only when the group has nothing else (no knowledge entries, candidates or linked memories) and either holds reviewed
+  // items or a publication, or was just created here through that model. Sources alone (a topic made from the
+  // intersection candidates) leave it collapsed.
   const legacy=!!selected&&((selected.state.sourceMemoryIds?.length??0)>0||(selected.state.items?.length??0)>0||(selected.itemCount??0)>0||!!selected.state.publication);
   const knowledgeUsed=!!selected?.state.knowledgeSummary&&(selected.state.knowledgeSummary.entryCount+selected.state.knowledgeSummary.candidateCount+selected.state.knowledgeSummary.memberCount)>0;
+  const legacyOpen=legacy&&!knowledgeUsed&&((selected.state.items?.length??0)>0||(selected.itemCount??0)>0||!!selected.state.publication||legacyCreated.current.has(selected.state.id));
+  // Recall reads a group's knowledge only through a linked long-term memory or a category (a previous-model publication
+  // has its own binding): without either, no project AI reads it, whatever the card says.
+  const summary=selected?.state.knowledgeSummary;
+  const unread=!!selected&&!selected.state.archived&&!selected.state.publication&&(summary?.memberCount??0)===0&&!(summary?.categories?.length)&&(knowledgeUsed||!legacy);
+  /** Opens the knowledge panel's link picker natively, so its own toggle handler loads the long-term memories (deferred on a phone). */
+  const openLinkPicker=()=>{const picker=sectionRef.current?.querySelector('[data-testid="meta-memory-use-projects"]')?.closest('details');
+    if(!picker){setNotice('아래 「연결할 장기기억·이름·태그 수정」을 열어 장기기억을 선택하세요.');return;}
+    if(!picker.open)picker.open=true;picker.scrollIntoView({block:'start'});picker.querySelector('summary')?.focus({preventScroll:true});};
+  const workroomHelp=target?'클라우드 원본을 주제별로 정리할 요청을 OPS 대화에 준비합니다. AI와 계정을 선택해 요청을 보내고, 근거 있는 후보를 이 화면에서 검토합니다.'
+    :workroomUnavailable?workroomUnavailable:!selected?'AI 정리에는 OPS 대화 연결이 필요합니다. 클라우드 원본의 교집합 후보는 아래에서 먼저 확인할 수 있습니다.'
+    :selected.state.archived?'AI 정리에는 OPS 대화 연결이 필요합니다.':'AI 정리에는 OPS 대화 연결이 필요합니다. 기억 항목은 아래에서 직접 작성할 수 있습니다.';
   const showSources=legacy||sourceNames.length>0;
   const run=async(fn:()=>Promise<any>)=>{if(working.current)return;working.current=true;setBusy(true);setError('');setNotice('');try{await fn();}catch(e){setError(e instanceof Error?e.message:'공통기억 작업을 확인하지 못했습니다.');}finally{working.current=false;setBusy(false);}};
   const readPage=async(offset:number,itemOffset=0)=>{const r=await api.inspect(selected.state.id,offset,itemOffset);if(r.version!==selected.version||r.scopeId!==selected.scopeId)throw Error('다른 작업에서 공통기억이 바뀌었습니다. 기억을 다시 선택해 내용을 확인하세요.');return r;};
@@ -134,17 +160,28 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
       <details><summary className="min-h-11 cursor-pointer text-sm">주제 설명·세부 설정</summary><label className="text-sm">공통기억의 목표 · 선택<textarea aria-label="공통기억의 목표" className={input} value={objective} onChange={e=>setObjective(e.target.value)} placeholder="공유할 내용과 적용 범위를 적으세요. 비우면 이름을 주제로 사용합니다."/></label>
       <details><summary className="min-h-11 text-sm">범위·적용 조건·점검 기준 설정</summary><div className="grid gap-3 sm:grid-cols-2">{[['포함할 주제',include,setInclude],['제외할 주제',exclude,setExclude],['적용 조건',conditions,setConditions],['적용 점검 기준',checks,setChecks],['관련 SDK 모듈 키',sdkModules,setSdkModules]].map(([label,value,set])=><label className="text-sm" key={label as string}>{label as string}<textarea aria-label={label as string} className={input} value={value as string} onChange={e=>(set as (s:string)=>void)(e.target.value)} placeholder="한 줄에 하나씩"/></label>)}</div></details>
       </details><div data-testid="common-memory-source-selection" className="rounded-lg border border-[var(--line)] p-3"><h4 className="m-0 text-sm font-semibold">어떤 기억에서 가져올까요? · {sources.length}/16개</h4><p className="text-sm">선택한 장기기억을 읽고 이 주제에 함께 쓸 내용을 정리합니다.</p><p className="text-xs text-[var(--ink-3)]">같은 자료를 여러 공통기억에서 참고할 수 있습니다. 연결할 장기기억은 따로 선택합니다.</p><label className="text-sm">원본 장기기억 검색<input aria-label="원본 장기기억 검색" className={input} value={sourceSearch} onChange={e=>setSourceSearch(e.target.value)} placeholder="이름·저장소·기억 ID 검색"/></label><p className="text-xs">불러온 원본에서 검색합니다. 검색해도 이미 선택한 원본은 유지됩니다.</p><div className="max-h-56 overflow-auto grid gap-2">{matchingSources.map(m=><label className="flex min-h-11 items-center gap-2 text-sm" key={m.memoryId}><input type="checkbox" aria-label={sourceChoices.filter(s=>s.name===m.name).length>1?`${m.name} · 기억 ${m.memoryId.slice(0,8)}`:m.name} aria-describedby={`common-source-${m.memoryId}`} disabled={!sources.includes(m.memoryId)&&sources.length>=16} checked={sources.includes(m.memoryId)} onChange={e=>setSources(old=>e.target.checked?[...old,m.memoryId]:old.filter(id=>id!==m.memoryId))}/><span className="min-w-0"><span className="block">{m.name}</span><span id={`common-source-${m.memoryId}`} className="block break-all text-xs text-[var(--ink-3)]">{m.githubUrl?.replace('https://github.com/','')??'저장소 연결 없음'} · 기억 {m.memoryId.slice(0,8)}</span></span></label>)}</div>{after&&<button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>void run(async()=>{const r=await api.catalog(after);setMemories(m=>[...m,...r.sources]);setAfter(r.nextAfter);})}>원본 장기기억 더 보기</button>}</div>
-      <button className={button} disabled={!name.trim()||!sources.length&&!selected?.state.portableKnowledge} onClick={()=>void run(async()=>{if(selected)await mutate('configure',{name,goal:goal(),sourceMemoryIds:sources});else await mutate('create',{name,goal:goal(),sourceMemoryIds:sources});})}>{selected?'주제·가져올 기억 저장':'만들고 원본 항목 검토'}</button>
+      <button className={button} disabled={!name.trim()||!sources.length&&!selected?.state.portableKnowledge} onClick={()=>void run(async()=>{if(selected)await mutate('configure',{name,goal:goal(),sourceMemoryIds:sources});else{const groupId=commonMemoryUuid();legacyCreated.current.add(groupId);await mutate('create',{groupId,name,goal:goal(),sourceMemoryIds:sources});}})}>{selected?'주제·가져올 기억 저장':'만들고 원본 항목 검토'}</button>
     </fieldset></details>;
-  return <section data-testid="common-memory-panel" className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 text-[var(--ink)]">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="m-0 text-sm font-bold">클라우드 공통기억</h3><p className="m-0 mt-1 text-xs">여러 기기의 클라우드 장기기억에서 주제별 교훈을 모으고 검토합니다.</p></div><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0||isDeployedWeb()&&!remote} onClick={()=>void run(async()=>{if(!open)await openPanel();else setOpen(false);})}>{open?'관리 닫기':'공통기억 관리'}</button></div>
+  const listActions=<div className="flex flex-wrap gap-2"><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>startKnowledgeCreate()}>공통기억 만들기</button><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>void run(load)}>목록 새로고침</button></div>;
+  return <section ref={sectionRef} data-testid="common-memory-panel" className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 text-[var(--ink)]">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="m-0 text-sm font-bold">클라우드 공통기억</h3><p className="m-0 mt-1 text-xs">여러 기기의 클라우드 장기기억에서 주제별 교훈을 모으고 검토합니다.</p></div><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0||isDeployedWeb()&&!remote} onClick={()=>void run(async()=>{if(!open)await openList();else setOpen(false);})}>{open?'관리 닫기':openFailure!==null?'다시 불러오기':'공통기억 관리'}</button></div>
     {isDeployedWeb()&&!remote&&<p role="status" className="text-xs">연결한 Mac을 통해 클라우드 공통기억을 관리할 수 있습니다.</p>}
+    {opening&&!open&&<p role="status" className="m-0 mt-2 text-xs" data-testid="common-memory-opening">{phoneCacheKey?'연결한 Mac을 거쳐 공통기억 목록을 불러오는 중…':'공통기억 목록을 불러오는 중…'}</p>}
     {error&&<p role="alert" className="text-sm text-[var(--danger)]">{error}</p>}{notice&&<p role="status" className="text-sm">{notice}</p>}
+    {!open&&!opening&&(openFailure==='COMMON_MEMORY_CLOUD_REQUIRED'||openFailure==='COMMON_MEMORY_MIGRATION_REQUIRED')&&<div role="status" data-testid="common-memory-cloud-setup" className="grid gap-2 rounded-lg border border-[var(--line)] p-3 text-sm">
+      <p className="m-0">{openFailure==='COMMON_MEMORY_CLOUD_REQUIRED'
+        ?`공통기억은 장기기억과 같은 클라우드(Supabase)에 저장됩니다. ${remote?'연결한 Mac의 장기기억 연결 설정에서':'장기기억 연결 설정에서'} 클라우드를 연결한 뒤 「다시 불러오기」를 누르세요.`
+        :`클라우드 DB의 공통기억 표를 최신으로 맞춰야 합니다. ${remote?'연결한 Mac의 장기기억 연결 설정에서':'장기기억 연결 설정에서'} Supabase 안내를 확인한 뒤 「다시 불러오기」를 누르세요. 기존 장기기억은 그대로입니다.`}</p>
+      {onOpenCloudSettings&&<button type="button" className={button} onClick={onOpenCloudSettings}>장기기억 연결 설정 열기</button>}
+    </div>}
     {intents.filter(i=>i.requestId!==(pending?.input.requestId??pending?.input.application?.id)).map(i=><div key={i.requestId} role="status"><p>이전 공통기억 저장 결과를 확인해야 합니다.</p><button className={button} disabled={busy} onClick={()=>void run(async()=>{const r=i.kind==='report'?await api.applicationStatus(i.groupId,i.requestId,i.scopeId):await api.operationStatus(i.groupId,i.requestId,i.requestHash,i.scopeId);if(r.found){forgetCommonMemoryIntent(i.requestId);refreshIntents();await inspect(i.groupId);setNotice('이전 요청의 저장을 확인했습니다.');}else{const p=commonMemoryIntentPayload(i.requestId);if(p)setPending(p);setNotice('완료 영수증이 아직 없습니다. 원래 요청의 결과를 다시 확인하세요. 새 요청을 자동 실행하지 않습니다.');}})}>이전 저장 영수증 확인</button></div>)}
     {pending&&<div role="status" className="grid gap-2"><p>{busy?'공통기억 요청을 처리하고 있습니다. 결과를 기다려주세요.':'저장 결과가 미확정입니다. 같은 요청으로 확인하면 중복 저장을 막을 수 있습니다.'}</p><button className={button} disabled={busy} onClick={()=>void run(()=>sendMutation(pending))}>같은 요청으로 결과 확인</button></div>}
     {open&&<div className="mt-4 grid gap-4">
+      {/* Without an AI target the AI actions below are disabled, so what can be done now comes first. */}
+      {!creating&&!selected&&!target&&listActions}
       {!creating&&<div className="flex flex-wrap gap-2"><button className={`${button} bg-[var(--accent-soft)]`} disabled={blocked||!target||!scope||selected?.state.archived} onClick={()=>void run(async()=>continueInWorkroom(selected?'update':'recommend'))}>{selected?'AI로 정리·업데이트':'AI로 공통기억 추천받기'}</button>{selected&&<button className={button} disabled={blocked} onClick={()=>void run(async()=>{await inspect(selected.state.id);setNotice('현재 기억과 새 검토 후보를 확인했습니다.');})}>진행 내용 확인</button>}</div>}
-      {!creating&&<p className="m-0 text-xs text-[var(--ink-3)]" data-testid="common-memory-workroom-help">{target?'클라우드 원본을 주제별로 정리할 요청을 OPS 대화에 준비합니다. AI와 계정을 선택해 요청을 보내고, 근거 있는 후보를 이 화면에서 검토합니다.':'AI 정리에는 OPS 대화 연결이 필요합니다. 클라우드 원본의 교집합 후보는 아래에서 먼저 확인할 수 있습니다.'}</p>}
+      {!creating&&<p className="m-0 text-xs text-[var(--ink-3)]" data-testid="common-memory-workroom-help">{workroomHelp}</p>}
+      {!creating&&!target&&onOpenOps&&<div><button type="button" className={button} onClick={onOpenOps}>아젠투지 설정 열기</button></div>}
       {!creating&&!selected&&<section data-testid="common-memory-cloud-topics" className="grid gap-3 rounded-xl border border-[var(--line)] p-3">
         <div><h4 className="m-0 text-sm font-semibold">클라우드 원본의 교집합·카테고리</h4><p className="m-0 mt-1 text-xs text-[var(--ink-3)]">현재 Mac에 없는 장기기억도 분석합니다. 서로 다른 원본의 실제 항목이 만나는 주제를 찾아, 공통 규칙과 예외는 AI 정리 후 사람이 판단합니다.</p></div>
         <div className="flex flex-wrap gap-2"><button className={button} disabled={blocked||!scope} onClick={()=>void run(async()=>setTopicDiscovery(await api.topicCandidates()))}>교집합·카테고리 후보 확인</button>{topicDiscovery?.nextAfter&&<button className={button} disabled={blocked} onClick={()=>void run(async()=>setTopicDiscovery(await api.topicCandidates(topicDiscovery.nextAfter)))}>다음 클라우드 원본 확인</button>}</div>
@@ -160,11 +197,12 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
         <p className="m-0 text-sm">함께 쓸 기억 {selected.state.knowledgeSummary?.entryCount??0}개 · 검토 후보 {selected.state.knowledgeSummary?.candidateCount??0}개{selected.itemCount>0?` · 원본 검토 규칙 ${selected.itemCount}개`:''}</p>
         {advice&&showSources&&<p role="status" className="m-0 text-sm">{sourceNames.length?advice.reason:'가져올 기억을 선택하면 변경 시점을 확인할 수 있습니다.'}</p>}
         {selected.state.publication?.publishedAt&&<p className="m-0 text-xs text-[var(--ink-3)]">원본 검토 규칙 마지막 게시 {new Date(selected.state.publication.publishedAt).toLocaleDateString()}</p>}
-        {(selected.state.knowledgeSummary?.entryCount??0)>0&&<p className="m-0 text-xs text-[var(--ink-3)]">공통 항목을 연결된 장기기억에서 함께 읽습니다.</p>}
+        {unread?<div role="status" data-testid="common-memory-unread-warning" className="grid gap-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-soft)] p-3"><p className="m-0 text-sm">아직 어떤 장기기억에도 연결되지 않아 프로젝트 AI가 이 내용을 읽지 않습니다.</p><button type="button" className={button} disabled={blocked} onClick={openLinkPicker}>연결할 장기기억 선택</button></div>
+          :(selected.state.knowledgeSummary?.entryCount??0)>0&&<p className="m-0 text-xs text-[var(--ink-3)]">공통 항목을 연결된 장기기억에서 함께 읽습니다.</p>}
       </article>}
       {!creating&&!selected&&updates.some(u=>u.suggested)&&<div className="grid gap-2" data-testid="common-memory-update-suggestions"><h4 className="m-0 text-sm font-semibold">지금 정리하면 좋은 공통기억</h4>{updates.filter(u=>u.suggested).map(u=><button key={u.groupId} className={`${button} text-left`} disabled={blocked} onClick={()=>void run(()=>inspect(u.groupId))}><b className="block">{u.name}</b><span className="block text-xs">{u.reason}</span></button>)}</div>}
 
-      {!creating&&!selected?<div className="flex flex-wrap gap-2"><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>startKnowledgeCreate()}>공통기억 만들기</button><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>void run(load)}>목록 새로고침</button></div>:<div className="flex flex-wrap items-center justify-between gap-2"><h4 className="m-0 text-base font-semibold">{selected?`${selected.state.name} 관리·수정`:'새 공통기억 만들기'}</h4><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>{rememberCommonMemoryNavigation(scope??'',null);setSelected(null);setCreating(false);setCreatingKnowledge(false);setEntry(null);}}>목록으로 돌아가기</button><p className="m-0 w-full text-xs">목록으로 돌아가면 미저장 입력은 취소됩니다.</p></div>}
+      {!creating&&!selected?target&&listActions:<div className="flex flex-wrap items-center justify-between gap-2"><h4 className="m-0 text-base font-semibold">{selected?`${selected.state.name} 관리·수정`:'새 공통기억 만들기'}</h4><button className={button} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>{rememberCommonMemoryNavigation(scope??'',null);setSelected(null);setCreating(false);setCreatingKnowledge(false);setEntry(null);}}>목록으로 돌아가기</button><p className="m-0 w-full text-xs">목록으로 돌아가면 미저장 입력은 취소됩니다.</p></div>}
       {creating&&!selected&&<details>
         <summary className="min-h-11 cursor-pointer text-sm">만들기 방식 변경</summary>
         <fieldset disabled={busy||knowledgeBlocked||!!pending||intents.length>0} className="grid gap-2 rounded-lg border border-[var(--line)] p-3">
@@ -181,11 +219,15 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
       <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>setCheckedGroups(visibleGroups.map(r=>r.state.id))}>검색 결과 모두 선택</button><button className={button} disabled={busy||!checkedGroups.length||!!pending||intents.length>0} onClick={()=>void run(async()=>{for(const id of checkedGroups){const row=groups.find(r=>r.state.id===id);if(!row)continue;const request={operation:showArchived?'unarchive':'archive',groupId:id,scopeId:scope,expectedVersion:row.version,requestId:commonMemoryUuid()};await retainCommonMemoryIntent({operation:'manage',input:request},scope!,id,request.requestId);await api.manage(request);forgetCommonMemoryIntent(request.requestId);}setCheckedGroups([]);setSelected(null);await load();})}>선택한 {checkedGroups.length}개 {showArchived?'복원':'휴지통으로 이동'}</button></div></details>
       {legacyPending.map(m=><article key={m.id} className="rounded-lg border border-[var(--line)] p-3 text-sm"><b>{m.name}</b> · 이 Mac의 보존 사본 {m.entryCount}개<button className={button} disabled={busy} onClick={()=>void run(async()=>{const preview=await api.request('migration-preview',{groupId:m.id});const requestId=commonMemoryUuid();await api.request('migration-execute',{plan:preview.plan,requestId});await load();await inspect(m.id);setNotice(preview.plan.mode==='follow-cloud'?'클라우드 정본에 연결했습니다. 이 Mac의 원본과 변경 이력은 보존했으며, 차이는 별도 검토합니다.':'원본과 변경 이력을 보존하고 클라우드로 통합했습니다.');})}>{groups.some(r=>r.state.id===m.id)?'이미 있는 클라우드 정본에 연결':'원본을 보존하고 클라우드로 통합'}</button></article>)}
       {scope&&!blocked&&!error&&visibleGroups.length===0&&<div role="status" data-testid="common-memory-list-empty" className="rounded-lg border border-[var(--line)] p-3 text-sm">
+        {/* No group at all (not a search or filter that matched nothing): say what a common memory is for. */}
+        {groups.length===0&&!search&&!showArchived&&groupsNext===null?<><p className="m-0">아직 공통기억이 없습니다.</p>
+        <p className="mt-1 text-xs">여러 프로젝트가 함께 쓸 규칙·노하우를 주제로 묶어 장기기억에 연결하면, 그 장기기억을 쓰는 프로젝트의 AI가 작업 전에 함께 읽습니다. 위의 「공통기억 만들기」로 시작하세요.</p></>:<>
         <p className="m-0">현재 불러온 목록에서 조건에 맞는 공통기억이 없습니다.</p>
-        <p className="mt-1 text-xs">{groupsNext!==null?'공통기억 더 보기로 남은 목록을 확인하세요.':showArchived?'목록 관리·휴지통에서 보관된 공통기억 보기를 해제하면 사용 중인 기억을 찾을 수 있습니다.':'검색어를 줄이거나 목록 관리·휴지통에서 보관된 기억을 확인하세요. 새 기억은 공통기억 만들기로 시작합니다.'}</p>
+        <p className="mt-1 text-xs">{groupsNext!==null?'공통기억 더 보기로 남은 목록을 확인하세요.':showArchived?'목록 관리·휴지통에서 보관된 공통기억 보기를 해제하면 사용 중인 기억을 찾을 수 있습니다.':'검색어를 줄이거나 목록 관리·휴지통에서 보관된 기억을 확인하세요. 새 기억은 공통기억 만들기로 시작합니다.'}</p></>}
         {search.length>0&&<button type="button" className={button} onClick={()=>{setSearch('');searchRef.current?.focus();}}>검색어 지우기</button>}
       </div>}
-      <div className="grid gap-3 sm:grid-cols-2">{visibleGroups.map(r=><div key={r.state.id} className="flex min-w-0 items-start gap-2 rounded-xl border border-[var(--line)] p-2">{managingList&&<button type="button" role="checkbox" aria-label={`${r.state.name} 선택`} aria-checked={checkedGroups.includes(r.state.id)} className={`${button} min-w-11 shrink-0 px-0`} onClick={()=>setCheckedGroups(ids=>ids.includes(r.state.id)?ids.filter(id=>id!==r.state.id):[...ids,r.state.id])}><span aria-hidden="true">{checkedGroups.includes(r.state.id)?'✓':'□'}</span></button>}<button className={`${button} min-w-0 flex-1 text-left break-words`} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>void run(()=>inspect(r.state.id))}><b className="block">{r.state.name}{r.state.archived?' · 보관됨':''}{r.state.knowledgeSummary?` · 기억 항목 ${r.state.knowledgeSummary.entryCount}개`:''}</b><span className="mt-1 block text-xs text-[var(--ink-3)]" aria-hidden="true">{r.state.goal.objective}</span><span className="mt-1 block text-xs" aria-hidden="true">가져올 기억 {r.state.sourceMemoryIds.length}개{r.state.knowledgeSummary?` · 직접 사용 ${r.state.knowledgeSummary.memberCount}개`: ''}</span></button></div>)}</div>
+      {/* Columns follow the panel's own width (a narrow Mac window keeps one), not the viewport. */}
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]">{visibleGroups.map(r=><div key={r.state.id} className="flex min-w-0 items-start gap-2 rounded-xl border border-[var(--line)] p-2">{managingList&&<button type="button" role="checkbox" aria-label={`${r.state.name} 선택`} aria-checked={checkedGroups.includes(r.state.id)} className={`${button} min-w-11 shrink-0 px-0`} onClick={()=>setCheckedGroups(ids=>ids.includes(r.state.id)?ids.filter(id=>id!==r.state.id):[...ids,r.state.id])}><span aria-hidden="true">{checkedGroups.includes(r.state.id)?'✓':'□'}</span></button>}<button className={`${button} min-w-0 flex-1 text-left break-words`} disabled={busy||knowledgeBlocked||!!pending||intents.length>0} onClick={()=>void run(()=>inspect(r.state.id))}><b className="block">{r.state.name}{r.state.archived?' · 보관됨':''}<span className="sr-only">{r.state.knowledgeSummary?` · 기억 항목 ${r.state.knowledgeSummary.entryCount}개`:''}{r.state.knowledgeSummary?.candidateCount>0?` · 검토 후보 ${r.state.knowledgeSummary.candidateCount}개`:''}</span></b><span className="mt-1 block text-xs text-[var(--ink-3)]" aria-hidden="true">{r.state.goal.objective}</span><span className="mt-1 block text-xs" aria-hidden="true">{r.state.knowledgeSummary&&`기억 항목 ${r.state.knowledgeSummary.entryCount}개 · `}{r.state.knowledgeSummary?.candidateCount>0&&<><b data-testid="common-memory-card-candidates">검토 후보 {r.state.knowledgeSummary.candidateCount}개</b> · </>}가져올 기억 {r.state.sourceMemoryIds.length}개{r.state.knowledgeSummary?` · 연결된 장기기억 ${r.state.knowledgeSummary.memberCount}개`:''}</span></button></div>)}</div>
       {groupsNext!==null&&<button className={button} disabled={busy} onClick={()=>void run(async()=>{const r=await api.list(groupsNext);setGroups(old=>[...old,...r.groups.filter((g:any)=>!old.some(o=>o.state.id===g.state.id))]);setGroupsNext(r.nextOffset);})}>공통기억 더 보기</button>}
       </>}
       {creating&&creatingKnowledge&&!selected&&<MetaCommonMemoryPanel key={'create:'+(presetMember??'')} createOnly presetMemberId={presetMember} cloud request={knowledgeRequest} catalog={knowledgeCatalog} remote={remote} hostCapabilities={hostCapabilities} onBlockedChange={setKnowledgeBlocked} onSaved={id=>{setCreating(false);setCreatingKnowledge(false);if(id)void run(async()=>{await inspect(id);});}}/>}
@@ -193,7 +235,7 @@ export function CommonMemoryPanel({memories:provided=[],client=defaultApi,initia
       {selected?.sourceWarning&&<p role="alert" className="text-sm">{selected.sourceWarning} 원본 연결을 수정해 다시 검토하세요. 원본 조회를 완료한 상태가 아닙니다.</p>}
       {selected?.reviewSignals?.length>0&&<p role="status" className="text-sm">현재 게시본에 실패·미적용 근거가 {selected.reviewSignals.length}건 있습니다. 아래 근거의 항목·조건을 점검한 뒤 수정·재게시하세요.</p>}
       {creating&&!creatingKnowledge&&!selected&&goalEditor()}
-      {selected&&legacy&&<details data-testid="common-memory-legacy" key={'legacy:'+selected.state.id} open={!knowledgeUsed} className="grid gap-3 rounded-xl border border-[var(--line)] p-3">
+      {selected&&legacy&&<details data-testid="common-memory-legacy" key={'legacy:'+selected.state.id} open={legacyOpen} className="grid gap-3 rounded-xl border border-[var(--line)] p-3">
         <summary className="min-h-11 cursor-pointer text-sm font-semibold">이전 방식 (목표·원본 검토·게시)</summary>
         <p className="m-0 text-xs text-[var(--ink-3)]">목표를 정하고 원본 항목을 검토해 게시하던 이전 방식입니다. 기억 항목과 연결할 장기기억은 위에서 관리합니다.</p>
         {(selected.state.items.length>0||selected.state.publication)&&<p role="status">{selected.state.goalConfigured===false?'기억 항목 사용 중 · 주제에 따른 원본 검토를 추가할 수 있습니다.':selected.ready?'게시됨 · 새 작업에 사용 가능':'정리할 내용을 검토한 뒤 게시하세요.'}</p>}

@@ -279,6 +279,6 @@ describe('onboarding infrastructure center', () => {
     expect(source('src/onboardingDashboardClient.ts')).toContain('/api/onboarding/status');
     expect(center).toContain('onboarding-device-connection-status');
     expect(center).toContain('첫 AI 작업 성공까지 보장하지 않습니다.');
-    expect(center).toContain('이전 Push 기록');
+    expect(center).toContain('이전 올리기(Push) 기록');
   });
 });

@@ -2,7 +2,7 @@ import {confirmAction} from './confirmAction';
 import {hasUnselectedProjectCall} from './workroomThreadGroup';
 import {aiTerminalAgentLabel} from './aiTerminalAgentLabel';
 import React,{useEffect,useId,useMemo,useRef,useState} from 'react';
-import {ArrowLeft,ArrowUpRight,AtSign,Bot,ChevronDown,Hash,Info,Loader2,MessageSquare,Monitor,Plus,RefreshCw,Send,UserRound,X} from 'lucide-react';
+import {ArrowLeft,ArrowUpRight,AtSign,Bot,ChevronDown,Hash,Info,Loader2,MessageSquare,Monitor,Plus,RefreshCw,Send,UserRound,Users,X} from 'lucide-react';
 import type {WorkroomTransport} from './WorkroomSessionFooter';
 import type {WorkroomMentionProject} from './workroomProjectMention';
 import {normalizeMobileWorkspaceResult} from './mobileWorkspaceProtocol';
@@ -13,7 +13,7 @@ import {workroomMentionCandidates,workroomMentionQuery,selectWorkroomMention} fr
 import './CommunityWorkspace.css';
 import {commonMemoryUuid as requestUuid} from './commonMemoryCrypto';
 import {normalizeServiceUseCall} from './serviceUseProtocol';
-import {ServiceUseOperationFields,serviceUseInput,type ServiceUseFields} from './ServiceUseOperationFields';
+import {ServiceUseOperationFields,serviceUseInput,serviceUseRequestText,type ServiceUseFields} from './ServiceUseOperationFields';
 import {parseProjectExecutionRole} from './conversationTargetAlias';
 import {projectMentionChoices, projectMentionKey} from './projectUseMention';
 import {ProjectStateBundlePreview} from './ProjectStateBundlePreview';
@@ -21,7 +21,10 @@ import {ReadToolBundlePanel} from './ReadToolBundlePanel';
 import type {ReadToolBatchRequester} from './readToolBatchClient';
 import type {WorkPackClient} from './workPackClient';
 import type {ProjectStatePrepared,ProjectStateRequester,ProjectStateSectionId,ProjectStateSelectionReference} from './projectStateBundleClient';
-import {projectStateCopy} from './i18n';
+import {projectStateCopy,workroomTeamCopy} from './i18n';
+import {WorkroomTeamBuilder} from './WorkroomTeamBuilder';
+import {useTeamAccountChoices} from './teamAccountChoices';
+import type {CliAccountAgent} from './cliAccountProtocol';
 import {useAppLanguage} from './useAppLanguage';
 import type {WorkroomUseCatalog} from './workroomThreadProtocol';
 import {validateAppUseAction} from './appUseCatalog';
@@ -32,6 +35,13 @@ export interface CommunityWorkspaceChannel {
  readToolBatch?:ReadToolBatchRequester;
  /** Local-only P3 work packs attached to this device's 규격 명령. */
  workPacks?:WorkPackClient;
+ /** Product USE runs only for the host device's local owner. A phone or another device's channel sets false: no USE role, no '-USE' entries. */
+ productUse?:boolean;
+ /** This Mac only: approved phone names from its own USE status (serviceUseLocalClient.ts). Never part of the request. */
+ usePhones?(targetId:string,serviceKey:string):Promise<{id:string;name:string}[]>;
+ /** This Mac only: one AI's CLI account list for a project, read (never selected) for the 팀 작전 builder. Without it the builder
+  * shows every list as unavailable, so another device's or a phone's channel never offers an account it cannot check. */
+ teamAccounts?(targetId:string,agent:CliAccountAgent):Promise<unknown>;
 }
 interface ProjectStateAttachment {reference:ProjectStateSelectionReference;text:string;currentDraft:string;start:number;end:number;invalid:boolean;invalidReason?:'edited'|'context'}
 /** Track the edited attachment span, retaining only the previous draft and current bounds. */
@@ -65,7 +75,7 @@ export function CommunityWorkspace({channels,visible=true,online=true,onOpenWork
   void channel.projects().then(rows=>{if(alive){projectCache.current.set(channel.id,{revision,retry,at:Date.now(),rows});setProjects({id:channel.id,rows});setTargets(prior=>prior[channel.id]?prior:{...prior,[channel.id]:rows[0]?.targetId??''});}}).catch(e=>{if(alive)setLoadError(e instanceof Error?e.message:String(e));});
   return()=>{alive=false;};
  },[channel?.id,channel?.projectRevision,visible,online,retry]);
- const rows=projects&&projects.id===channel?.id?projectMentionChoices(projects.rows):[],target=targets[channel?.id??'']??rows[0]?.targetId??'';
+ const rows=projects&&projects.id===channel?.id?projectMentionChoices(projects.rows).filter(p=>channel.productUse!==false||p.executionRole!=='use'):[],target=targets[channel?.id??'']??rows[0]?.targetId??'';
  const choice=rows.find(p=>projectMentionKey(p)===target);
  return <section className="community-workspace" data-testid="community-workspace">
   <header className="community-heading"><div><span className="community-eyebrow">기기별 프로젝트 업무</span><h2>커뮤니티</h2><p>프로젝트에 업무를 맡기고, 질문과 결과를 한 스레드에서 이어가세요.</p></div><span className="community-channel-count"><Monitor size={15} aria-hidden="true"/>{channels.length}개 채널</span></header>
@@ -78,7 +88,7 @@ export function CommunityWorkspace({channels,visible=true,online=true,onOpenWork
    <div className="community-main">
    {!online?<p className="community-feedback" role="status">기기에 연결하면 업무 스레드를 확인할 수 있습니다.</p>:!channel?<p className="community-feedback">연결된 아젠투지가 없습니다.</p>:<>
    <div className="community-project-bar"><label className="community-project"><span>업무를 맡길 프로젝트</span><span className="community-select"><select aria-label="기준 프로젝트" value={target} onChange={e=>setTargets(prior=>({...prior,[channel.id]:e.target.value}))} disabled={!rows.length}><option value="">프로젝트 선택</option>{rows.map(p=><option key={projectMentionKey(p)} value={projectMentionKey(p)}>@{p.label}</option>)}</select><ChevronDown size={15} aria-hidden="true"/></span></label><span className="community-project-device"><Monitor size={14} aria-hidden="true"/>{channel.label}</span></div>
-   {loadError?<p className="community-feedback community-error" role="alert">{loadError} <button type="button" onClick={()=>setRetry(v=>v+1)}>다시 확인</button></p>:projects?.id!==channel.id?<p className="community-feedback" role="status">채널의 프로젝트를 확인하고 있습니다…</p>:!rows.length?<p className="community-feedback">이 기기에 허용된 프로젝트가 없습니다.</p>:choice?<CommunityThreadView key={channel.id+':'+target} scope={channel.id+':'+target} targetId={choice.targetId} label={choice.label} initialRole={choice.executionRole} serviceKey={choice.serviceKey} transport={channel.transport} projectState={channel.projectState} readToolBatch={channel.readToolBatch} workPacks={channel.workPacks} stateAttachments={stateAttachments.current} visible={visible} drafts={drafts.current} recipients={recipients.current} projects={rows}
+   {loadError?<p className="community-feedback community-error" role="alert">{loadError} <button type="button" onClick={()=>setRetry(v=>v+1)}>다시 확인</button></p>:projects?.id!==channel.id?<p className="community-feedback" role="status">채널의 프로젝트를 확인하고 있습니다…</p>:!rows.length?<p className="community-feedback">이 기기에 허용된 프로젝트가 없습니다.</p>:choice?<CommunityThreadView key={channel.id+':'+target} scope={channel.id+':'+target} targetId={choice.targetId} label={choice.label} initialRole={choice.executionRole} serviceKey={choice.serviceKey} transport={channel.transport} projectState={channel.projectState} readToolBatch={channel.readToolBatch} workPacks={channel.workPacks} stateAttachments={stateAttachments.current} visible={visible} drafts={drafts.current} recipients={recipients.current} projects={rows} useAvailable={channel.productUse!==false} usePhones={channel.usePhones} teamAccounts={channel.teamAccounts}
     onSelectTarget={(p,text)=>{const key=projectMentionKey(p);drafts.current.set(channel.id+':'+key+':new',text);setTargets(prior=>({...prior,[channel.id]:key}));}}
     onOpen={(thread,participantTarget)=>onOpenWorkroom(channel.id,participantTarget??choice.targetId,thread)}/>:<p role="status">선택했던 프로젝트가 현재 허용 목록에 없습니다. 위에서 프로젝트를 선택하세요.</p>}
    </>}
@@ -87,8 +97,11 @@ export function CommunityWorkspace({channels,visible=true,online=true,onOpenWork
  </section>;
 }
 const emptyStateAttachments=new Map<string,ProjectStateAttachment>();
-export function CommunityThreadView({scope,targetId,label,transport,visible,drafts,recipients,onOpen,projects,initialRole='dev',serviceKey='default',initialDraft='',onSelectTarget,onAccepted,onDraftChange,projectState,readToolBatch,workPacks,stateAttachments=emptyStateAttachments}:{scope:string;targetId:string;label:string;transport:WorkroomTransport;visible:boolean;drafts:Map<string,string>;recipients:Map<string,string[]>;projects:WorkroomMentionProject[];onOpen:(thread:WorkroomThreadSummary,targetId?:string)=>void;initialRole?:'dev'|'use';serviceKey?:string;initialDraft?:string;onSelectTarget?:(project:WorkroomMentionProject,text:string)=>void;onAccepted?:()=>void;onDraftChange?:()=>void;projectState?:ProjectStateRequester;readToolBatch?:ReadToolBatchRequester;workPacks?:WorkPackClient;stateAttachments?:Map<string,ProjectStateAttachment>}){
- const [language]=useAppLanguage(),stateCopy=projectStateCopy(language);
+export function CommunityThreadView({scope,targetId,label,transport,visible,drafts,recipients,onOpen,projects,initialRole='dev',serviceKey='default',initialDraft='',onSelectTarget,onAccepted,onDraftChange,projectState,readToolBatch,workPacks,stateAttachments=emptyStateAttachments,useAvailable=true,usePhones,teamAccounts}:{scope:string;targetId:string;label:string;transport:WorkroomTransport;visible:boolean;drafts:Map<string,string>;recipients:Map<string,string[]>;projects:WorkroomMentionProject[];onOpen:(thread:WorkroomThreadSummary,targetId?:string)=>void;initialRole?:'dev'|'use';serviceKey?:string;initialDraft?:string;onSelectTarget?:(project:WorkroomMentionProject,text:string)=>void;onAccepted?:()=>void;onDraftChange?:()=>void;projectState?:ProjectStateRequester;readToolBatch?:ReadToolBatchRequester;workPacks?:WorkPackClient;stateAttachments?:Map<string,ProjectStateAttachment>;useAvailable?:boolean;usePhones?:CommunityWorkspaceChannel['usePhones'];teamAccounts?:CommunityWorkspaceChannel['teamAccounts']}){
+ const [language]=useAppLanguage(),stateCopy=projectStateCopy(language),teamCopy=workroomTeamCopy(language);
+ // 팀 작전 (src/workroomTeam.ts): a new single-project DEV task whose 「작업 AI」 leads; the builder only fills this draft.
+ const [teamOpen,setTeamOpen]=useState(false);
+ const teamAccountChoices=useTeamAccountChoices(teamAccounts?cli=>teamAccounts(targetId,cli):undefined,targetId,teamOpen);
  const [,renderStateAttachment]=useState(0);
  const fixedUse=initialRole==='use'&&!onSelectTarget;
  const [beforeThread,setBeforeThread]=useState<string|undefined>(),[nextThread,setNextThread]=useState<string|null>(null),[beforeMessage,setBeforeMessage]=useState<number|undefined>();
@@ -148,14 +161,14 @@ export function CommunityThreadView({scope,targetId,label,transport,visible,draf
   try{const r=await call('workroom.threads.read',{threadId:id});if(alive.current&&mine===epoch.current){show(r);requestAnimationFrame(()=>{if(alive.current&&mine===epoch.current)heading.current?.focus({preventScroll:true});});}}catch(e){if(alive.current&&mine===epoch.current)setError(e instanceof Error?e.message:String(e));}finally{if(alive.current&&mine===epoch.current)setLoading(false);}};
  const remember=(p:Pending|null)=>{savePending(scope,p);setPending(p);};
  const send=async()=>{
-  if(mutating.current||pending||!draft.trim()||support!=='ready')return;
+  if(mutating.current||pending||!outgoing.trim()||support!=='ready')return;
   if(fixedUse&&executionRole!=='use'){setError('선택한 USE 제품 운영 대화에서 확인하세요.');return;}
   // Selecting a thread is never permission to turn a missing/loading reply into a new task.
   if(selected&&(loading||detail?.thread?.id!==selected||!canReply||beforeMessage))return;
   const attached=stateAttachments.get(draftKey);
   if(attached&&(attached.invalid||!draft.includes(attached.text)||!projectState||useMode||called.length!==1||!!thread?.participants)){setError(stateCopy.edited);return;}
   const projectStateContext=attached?{projectState:attached.reference}:{};
-  try{workroomThreadText(draft);}catch(e){setError(e instanceof Error?e.message:String(e));return;}
+  try{workroomThreadText(outgoing);}catch(e){setError(e instanceof Error?e.message:String(e));return;}
   if(!selected&&hasUnselectedProjectCall(attached?draft.replace(attached.text,''):draft,called.flatMap(id=>projects.filter(p=>p.targetId===id).map(p=>p.label)))){setError('@프로젝트는 호출 후보에서 선택하세요. 표시된 호출 대상에만 업무를 보냅니다.');return;}
   if(!selected&&called.some(id=>!projects.some(p=>p.targetId===id))){setError('호출 대상의 현재 프로젝트 권한을 확인하세요.');return;}
   if(!selected&&mentionedRoles.some(role=>role!==executionRole)){setError('본문의 DEV/USE 역할과 선택한 실행 역할을 일치시키세요.');return;}
@@ -164,7 +177,7 @@ export function CommunityThreadView({scope,targetId,label,transport,visible,draf
   mutating.current=true;setBusy(true);setError('');epoch.current++;
   const id=requestUuid(),current=detail?.thread,operation=current?'reply':'create',p:Pending={id,threadId:current?.id??id,kind:operation};remember(p);
   try{
-   const r=operation==='create'?await call('workroom.threads.create',{agent,text:draft,...projectStateContext,...(use?{use}:{}),...(called.length>1?{targetIds:called}:{})},id):await call('workroom.threads.reply',{threadId:current!.id,text:draft,...projectStateContext,expectedRevision:current!.revision,...(use?{use}:{}),...(current!.participants?{recipientTargetId:replyMember!.targetId}:{})},id);
+   const r=operation==='create'?await call('workroom.threads.create',{agent,text:outgoing,...projectStateContext,...(use?{use}:{}),...(called.length>1?{targetIds:called}:{})},id):await call('workroom.threads.reply',{threadId:current!.id,text:outgoing,...projectStateContext,expectedRevision:current!.revision,...(use?{use}:{}),...(current!.participants?{recipientTargetId:replyMember!.targetId}:{})},id);
    if(!alive.current)return;if(r.refusal){if(r.thread)show(r);remember(null);if(attached){stateAttachments.set(draftKey,{...attached,invalid:true,invalidReason:'context'});renderStateAttachment(value=>value+1);}setError(r.refusal.message);return;}show(r);remember(null);stateAttachments.delete(draftKey);setDraft('');onAccepted?.();
   }catch(e){if(alive.current)setError((e instanceof Error?e.message:String(e))+' 전송 결과를 확인한 뒤 이어가세요.');}
   finally{mutating.current=false;if(alive.current)setBusy(false);}
@@ -177,6 +190,21 @@ export function CommunityThreadView({scope,targetId,label,transport,visible,draf
  const thread=detail?.thread;
  const useMode=!!thread?.execution||!selected&&executionRole==='use';
  const catalogKey=targetId+'\0'+(thread?.execution?.serviceKey??serviceKey),catalog=useCatalog?.key===catalogKey?useCatalog.catalog:undefined;
+ // USE tools other than materials.generate ignore the text; an empty memo sends the action's own label.
+ const optionalMemo=useMode&&useFields.tool!=='materials.generate',outgoing=useMode?serviceUseRequestText(useFields,draft,catalog):draft;
+ const [usePhoneList,setUsePhoneList]=useState<{key:string;phones:{id:string;name:string}[]}|null>(null);
+ useEffect(()=>{
+  if(!visible||!useMode||!usePhones||useFields.tool!=='phone.deliver')return;let active=true;
+  void usePhones(targetId,thread?.execution?.serviceKey??serviceKey).then(phones=>{if(active)setUsePhoneList({key:catalogKey,phones});},()=>{if(active)setUsePhoneList({key:catalogKey,phones:[]});});
+  return()=>{active=false;};
+ },[visible,useMode,useFields.tool,catalogKey,catalogRetry]);
+ // The host writes 「자료 ID: …」/「요청 ID: …」 under a USE result (useResultText). Prefill the fields, never send.
+ const lastResult=thread?.execution?detail?.messages?.findLast(m=>m.role==='assistant'&&m.kind==='result')?.text??'':'';
+ const lastIds={materialId:lastResult.match(/^자료 ID: ([A-Za-z0-9_-]{1,128})$/mu)?.[1]??'',operationId:lastResult.match(/^요청 ID: ([A-Za-z0-9_-]{1,128})$/mu)?.[1]??''};
+ const prefilled=useRef({materialId:'',operationId:''});
+ useEffect(()=>{const previous=prefilled.current;if(previous.materialId===lastIds.materialId&&previous.operationId===lastIds.operationId)return;prefilled.current=lastIds;
+  setUseFields(old=>({...old,materialId:old.materialId===previous.materialId?lastIds.materialId:old.materialId,operationId:old.operationId===previous.operationId?lastIds.operationId:old.operationId}));
+ },[lastIds.materialId,lastIds.operationId]);
  useEffect(()=>{
   if(!visible||!useMode)return;let active=true;
   setUseCatalog({key:catalogKey});
@@ -218,7 +246,7 @@ export function CommunityThreadView({scope,targetId,label,transport,visible,draf
   const suffix=content.slice(start+name.length+2).match(/^(DEV(?:\/개발)?|개발|USE(?:\/운영)?|운영|사용)(?=\s|$)/iu);
   return [suffix?parseProjectExecutionRole(name+' '+suffix[0]).executionRole!:project.executionRole??'dev'];
  });
- useEffect(()=>{if(!fixedUse&&!selected&&new Set(mentionedRoles).size===1&&!busy&&!pending)setExecutionRole(mentionedRoles[0]!);},[fixedUse,selected,mentionedRoles.join(','),busy,!!pending]);
+ useEffect(()=>{if(!fixedUse&&!selected&&new Set(mentionedRoles).size===1&&!busy&&!pending&&(useAvailable||mentionedRoles[0]!=='use'))setExecutionRole(mentionedRoles[0]!);},[fixedUse,selected,mentionedRoles.join(','),busy,!!pending]);
  const leaveThread=(fresh:boolean)=>{const id=selected;epoch.current++;setWritingNew(fresh);setSelected('');selectedRef.current='';if(fresh)setBeforeThread(undefined);setBeforeMessage(undefined);setDetail(null);setLoading(false);setError('');requestAnimationFrame(()=>{if(fresh){field.current?.focus({preventScroll:true});field.current?.scrollIntoView({block:'center'});}else (Array.from(rail.current?.querySelectorAll<HTMLButtonElement>('[data-thread-id]')??[]).find(button=>button.dataset.threadId===id)??rail.current)?.focus();});};
  const displayed=list.filter(row=>!fixedUse||row.execution?.serviceKey===serviceKey).map(row=>row.id===thread?.id?thread:row);
  const composeVisible=!selected||thread?.id===selected&&canReply&&!beforeMessage;
@@ -249,20 +277,22 @@ export function CommunityThreadView({scope,targetId,label,transport,visible,draf
    <div className="community-thread-messages" aria-live="polite">{detail?.messages?.map(m=><article key={m.id} className={'community-message community-message--'+m.role} data-kind={m.kind}><span className="community-message-avatar" aria-hidden="true">{m.role==='user'?<UserRound size={16}/>:m.role==='assistant'?<Bot size={17}/>:<Info size={16}/>}</span><div className="community-message-content"><header><strong>{m.projectLabel?'@'+m.projectLabel+' · ':''}{m.role==='user'?'사용자':m.role==='assistant'?(thread.execution?'USE · 제품 운영':aiTerminalAgentLabel(thread.agent)):'상태'}{m.kind==='question'&&<span className="community-question-label">질문</span>}</strong><time>{phoneDateTime(m.at)}</time></header><p>{m.text}</p>{m.delivery==='unknown'&&<small>전달 결과 확인 필요 · 자동 재전송하지 않음</small>}</div></article>)}</div>
    {thread.participants&&<label className="community-reply-project">답변할 프로젝트<select aria-label="답변할 프로젝트" value={replyMember?.targetId??''} disabled={busy||!!pending} onChange={e=>setReplyTarget(e.target.value)}>{thread.participants.map(m=><option key={m.targetId} value={m.targetId}>@{m.label} · {workroomThreadStateLabel(m.state)}</option>)}</select></label>}
    {nativeQuestion&&<p role="status">CLI 승인·선택은 연결 워크룸에서 현재 선택지를 확인하고 답하세요.</p>}
-   {thread.state==='unknown'&&<button type="button" disabled={busy} onClick={async ()=>{if(!(await confirmAction('워크룸과 작업 결과를 직접 확인했나요? 스레드를 종료 표시하고 새 업무를 시작할 수 있게 합니다. 워크룸은 닫지 않습니다.')))return;setBusy(true);void call('workroom.threads.close',{threadId:thread.id,expectedRevision:thread.revision,consent:true}).then(r=>{if(alive.current)show(r);}).catch(e=>setError(String(e))).finally(()=>{if(alive.current)setBusy(false);});}}>결과 확인 후 스레드 종료 표시</button>}
+   {thread.state==='unknown'&&<button type="button" disabled={busy} onClick={async ()=>{if(!(await confirmAction(thread.execution?'앱에서 결과를 직접 확인했나요? 이 업무를 종료 표시하면 새 USE 업무를 시작할 수 있습니다. 앱의 작업은 취소되지 않습니다.':'워크룸과 작업 결과를 직접 확인했나요? 스레드를 종료 표시하고 새 업무를 시작할 수 있게 합니다. 워크룸은 닫지 않습니다.')))return;setBusy(true);void call('workroom.threads.close',{threadId:thread.id,expectedRevision:thread.revision,consent:true}).then(r=>{if(alive.current)show(r);}).catch(e=>setError(String(e))).finally(()=>{if(alive.current)setBusy(false);});}}>결과 확인 후 스레드 종료 표시</button>}
    {thread.sessionId&&<details className="community-memory-panel"><summary>프로젝트 기억·저장 관리</summary><p className="community-memory-note">연결 워크룸의 세션 기억하기·자동 저장 설정을 따릅니다.</p><CommunityThreadMemory key={thread.sessionId} scope={scope+':'+thread.id} targetId={targetId} sessionId={thread.sessionId} transport={transport} visible={visible}/></details>}
   </article>}
   {composeVisible&&<div className="community-compose">
-   <div className="community-compose-heading"><label htmlFor={fieldId}>{thread?'스레드에 답변':'업무 내용'}</label>{!selected&&<><label>역할<select aria-label="업무 역할" className="min-h-11 bg-[var(--surface)]" value={executionRole} disabled={busy||!!pending||initialRole==='use'&&!onSelectTarget} onChange={e=>setExecutionRole(e.target.value as 'dev'|'use')}><option value="dev">DEV · 제품 개발</option><option value="use">USE · 제품 사용·운영</option></select></label>{!useMode&&<label className="community-agent">작업 AI<span className="community-select"><select aria-label="업무 AI" value={agent} disabled={busy||!!pending} onChange={e=>setAgent(e.target.value as typeof agent)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="hermes">Hermes</option><option value="agy">Antigravity</option></select><ChevronDown size={14} aria-hidden="true"/></span></label>}</>}</div>
+   <div className="community-compose-heading"><label htmlFor={fieldId}>{optionalMemo?'메모 (선택)':thread?'스레드에 답변':'업무 내용'}</label>{!selected&&<>{(useAvailable||initialRole==='use')&&<label>역할<select aria-label="업무 역할" className="min-h-11 bg-[var(--surface)]" value={executionRole} disabled={busy||!!pending||initialRole==='use'&&!onSelectTarget} onChange={e=>setExecutionRole(e.target.value as 'dev'|'use')}><option value="dev">DEV · 제품 개발</option><option value="use">USE · 제품 사용·운영</option></select></label>}{!useMode&&<label className="community-agent">작업 AI<span className="community-select"><select aria-label="업무 AI" value={agent} disabled={busy||!!pending} onChange={e=>setAgent(e.target.value as typeof agent)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="hermes">Hermes</option><option value="agy">Antigravity</option></select><ChevronDown size={14} aria-hidden="true"/></span></label>}{!useMode&&called.length<=1&&<button type="button" className="community-team-open" data-testid="community-team-open" aria-expanded={teamOpen} title={teamCopy.openTitle} disabled={busy||!!pending} onClick={()=>setTeamOpen(open=>!open)}><Users size={14} aria-hidden="true"/>{teamCopy.open}</button>}</>}</div>
+   {!selected&&!useMode&&called.length<=1&&teamOpen&&<WorkroomTeamBuilder leader={agent} initialGoal={draft} disabled={busy||!!pending} accounts={teamAccountChoices.accounts} accountsLoading={teamAccountChoices.loading} onClose={()=>{setTeamOpen(false);field.current?.focus();}}
+    onCompose={text=>{if(setDraft(text)!==false){setTeamOpen(false);requestAnimationFrame(()=>field.current?.focus());}}}/>}
    {thread?.execution&&<p role="status">USE · 제품 사용·운영 · {thread.execution.serviceKey} · 원래 실행 문맥 유지</p>}
-   {useMode&&<><ServiceUseOperationFields value={useFields} onChange={setUseFields} disabled={busy||!!pending||!catalog?.executionReady} catalog={catalog}/>{useCatalog?.key===catalogKey&&useCatalog.error&&<p role="alert">앱의 USE 동작 목록을 확인하지 못했습니다. <button type="button" onClick={()=>setCatalogRetry(n=>n+1)}>동작 목록 다시 확인</button></p>}</>}
-   <textarea id={fieldId} ref={field} aria-label={thread?'스레드 답변':'프로젝트에 맡길 업무'} aria-describedby={fieldId+'-hint'+(textError?' '+fieldId+'-error':'')} aria-invalid={!!textError} value={draft} onChange={e=>{setDraft(e.target.value);setCaret(e.target.selectionStart);}} onSelect={e=>setCaret(e.currentTarget.selectionStart)} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)&&!e.nativeEvent.isComposing&&!composing.current){e.preventDefault();void send();}}} disabled={busy||!!pending} rows={4} placeholder={thread?'답변이나 추가 요청을 남겨 주세요.':`무엇을 해야 하나요? @로 프로젝트를 추가 호출할 수 있습니다.`}/>
-   <ProjectStateBundlePreview targetId={targetId} contextKey={scope+':'+draftKey+':'+executionRole+':'+called.join(',')+':'+(replyMember?.targetId??'')} visible={visible} supported={stateSupported} request={projectState} disabled={busy||!!pending} onAttach={attachState}/>
-   {thread&&<ReadToolBundlePanel targetId={targetId} threadId={thread.id} visible={visible} supported={batchSupported} request={readToolBatch} packs={workPacks} disabled={busy||!!pending}/>}
+   {useMode&&<><ServiceUseOperationFields value={useFields} onChange={setUseFields} disabled={busy||!!pending||!catalog?.executionReady} catalog={catalog} phones={usePhoneList?.key===catalogKey?usePhoneList.phones:undefined}/>{useCatalog?.key===catalogKey&&useCatalog.error&&<p role="alert">앱의 USE 동작 목록을 확인하지 못했습니다. <button type="button" onClick={()=>setCatalogRetry(n=>n+1)}>동작 목록 다시 확인</button></p>}</>}
+   <textarea id={fieldId} ref={field} aria-label={optionalMemo?'USE 메모 (선택)':thread?'스레드 답변':'프로젝트에 맡길 업무'} aria-describedby={fieldId+'-hint'+(textError?' '+fieldId+'-error':'')} aria-invalid={!!textError} value={draft} onChange={e=>{setDraft(e.target.value);setCaret(e.target.selectionStart);}} onSelect={e=>setCaret(e.currentTarget.selectionStart)} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)&&!e.nativeEvent.isComposing&&!composing.current){e.preventDefault();void send();}}} disabled={busy||!!pending} rows={4} placeholder={optionalMemo?`비워 두면 「${serviceUseRequestText(useFields,'',catalog)}」로 기록합니다.`:useMode?'자료로 만들 내용을 적어 주세요.':thread?'답변이나 추가 요청을 남겨 주세요.':`무엇을 해야 하나요? @로 프로젝트를 추가 호출할 수 있습니다.`}/>
+   {!useMode&&<ProjectStateBundlePreview targetId={targetId} contextKey={scope+':'+draftKey+':'+executionRole+':'+called.join(',')+':'+(replyMember?.targetId??'')} visible={visible} supported={stateSupported} request={projectState} disabled={busy||!!pending} onAttach={attachState}/>}
+   {thread&&!useMode&&<ReadToolBundlePanel targetId={targetId} threadId={thread.id} visible={visible} supported={batchSupported} request={readToolBatch} packs={workPacks} disabled={busy||!!pending}/>}
    {stateAttachment&&<div className="project-state-attached" data-testid="project-state-attached" data-invalid={stateAttachment.invalid} role={stateAttachment.invalid?'alert':'status'}><span>{stateAttachment.invalid?(stateAttachment.invalidReason==='context'?stateCopy.invalid:stateCopy.edited):stateCopy.attached}</span><button type="button" disabled={busy||!!pending} onClick={removeState}>{stateCopy.remove}</button></div>}
    {candidates.length>0&&<div className="community-mentions" role="group" aria-label="프로젝트 호출·참고 후보">{candidates.map(project=><button type="button" key={projectMentionKey(project)} onClick={()=>chooseMention(project)}>{workroomMentionQuery(draft,caret)?.kind==='reference'?'#':'@'}{project.label}</button>)}</div>}
    {textError&&<p id={fieldId+'-error'} className="community-error">{textError}</p>}
-   <div className="community-compose-footer"><small id={fieldId+'-hint'}>{useMode?'선택한 USE 도구만 서버 권한검사 후 실행합니다.':thread?'연결 워크룸에도 전달됩니다.':called.length>1?`${called.length}개 프로젝트가 각각 워크룸에서 실행합니다.`:'선택한 기기·프로젝트에서 실행합니다.'}<span>{bytes.toLocaleString()} / 6,000바이트 · ⌘/Ctrl + Enter</span></small><button type="button" className="community-primary" disabled={busy||!!pending||support!=='ready'||!draft.trim()||!!textError||!!stateAttachment?.invalid} onClick={()=>void send()}>{busy?<Loader2 size={15} className="community-spinner" aria-hidden="true"/>:<Send size={15} aria-hidden="true"/>}{busy?'보내는 중…':thread?'답변 보내기':'업무 맡기기'}</button></div>
+   <div className="community-compose-footer"><small id={fieldId+'-hint'}>{useMode?'선택한 USE 도구만 서버 권한검사 후 실행합니다.':thread?'연결 워크룸에도 전달됩니다.':called.length>1?`${called.length}개 프로젝트가 각각 워크룸에서 실행합니다.`:'선택한 기기·프로젝트에서 실행합니다.'}<span>{bytes.toLocaleString()} / 6,000바이트 · ⌘/Ctrl + Enter</span></small><button type="button" className="community-primary" disabled={busy||!!pending||support!=='ready'||!outgoing.trim()||!!textError||!!stateAttachment?.invalid} onClick={()=>void send()}>{busy?<Loader2 size={15} className="community-spinner" aria-hidden="true"/>:<Send size={15} aria-hidden="true"/>}{busy?'보내는 중…':thread?'답변 보내기':'업무 맡기기'}</button></div>
   </div>}
    </section>
   </div>

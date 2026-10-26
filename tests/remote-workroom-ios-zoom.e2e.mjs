@@ -95,9 +95,15 @@ for (const [engineName, engine] of [['chromium', chromium], ['webkit', webkit]])
         const width = await page.evaluate(() => ({doc: document.documentElement.scrollWidth, view: innerWidth}));
         assert.ok(width.doc <= width.view, `${where}: the selected project name widened the page ${JSON.stringify(width)}`);
       }
-      // No session: 「요청 적고 시작하기」 opens the start-prompt textarea (.ai-terminal-textarea).
+      // No session: the start-prompt textarea (.ai-terminal-textarea) must be on screen. With no session the panel
+      // already shows it — measured 2026-10-25: the toggle reads 「요청 칸 접기」 with aria-expanded="true" and the
+      // textarea is visible — so an unconditional click collapsed it and the field was gone. Open it only when closed,
+      // and state what must hold either way: the start prompt is open.
       await page.goto(origin + '/__remote-ios-zoom-start');
-      await page.getByTestId('workroom-composer-toggle').click({timeout: 15000});
+      const startToggle = page.getByTestId('workroom-composer-toggle');
+      await startToggle.waitFor({timeout: 15000});
+      if ((await startToggle.getAttribute('aria-expanded')) !== 'true') await startToggle.click({timeout: 15000});
+      assert.equal(await startToggle.getAttribute('aria-expanded'), 'true', `${where}: the start prompt is open`);
       const startPrompt = page.getByLabel('터미널에 전달할 작업');
       await startPrompt.waitFor();
       await startPrompt.fill('휴대폰에서 새 작업 요청 https://github.com/example-org-account/ExampleRepo_ab/blob/13641e76/src/AiTerminalPanel.css');

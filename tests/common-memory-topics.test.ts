@@ -56,3 +56,34 @@ test('approved cloud source C outside configured A+B remains tracked in updates,
 test('approval refuses tracking a 33rd source before RPC and never drops earlier approved heads',async()=>{
  const f=await fixture(),entry=(await f.service.readCloudSource(C)).entries[0]!,saved=await f.service.knowledge({operation:'propose-source-entry',memoryId:f.group.state.id,expectedRevision:0,requestId:'bounded-C',title:'추가 iOS 원천',body:'추가 아이폰 권한 조건',reason:'검증한 추가 원천',category:'모바일',conditions:[],evidence:[{memoryId:C,revisionId:entry.revisionId,entryId:entry.entryId,contentHash:entry.contentHash}]},[]);const row=f.cloud.tables.portmgr_common_memories![0]!;row.state.knowledgeSourceHeads=Array.from({length:30},()=>{const memoryId=crypto.randomUUID(),revisionId=f.cloud.source(memoryId,'### 기존 원천\n기존 검토 규칙');const revision=f.cloud.tables.portmgr_project_memory_revisions!.find(revision=>revision.id===revisionId)!;return {memoryId,revisionId,contentHash:revision.content_hash};});const before=JSON.stringify(row.state),receipts=f.cloud.tables.portmgr_common_memory_operations!.length;await expect(f.service.knowledge({operation:'review-entry',memoryId:f.group.state.id,expectedRevision:1,requestId:'reject-33rd',entryId:saved.state.portableKnowledge!.current.entries[0]!.id,state:'active'},[])).rejects.toMatchObject({code:'COMMON_MEMORY_BUDGET_EXCEEDED'});expect(JSON.stringify(row.state)).toBe(before);expect(f.cloud.tables.portmgr_common_memory_operations!.length).toBe(receipts);
 });
+// A topic made by linking long-term memories ('직접 작성하기') tracks no sources. Its AI draft offers the linked memories
+// as this draft's cloudSources (never saved as sources); a topic with neither gets a catalog page and still must not guess.
+test('an update draft with no tracked sources reads the linked memories, without writing them as sources',async()=>{
+ const cloud=Object.assign(new CommonCloud(),{commonMemoryScope:'a'.repeat(64)}),service=createCommonMemoryService(()=>cloud);
+ const verified=new Map((await service.memoryTargets([A,B])).map(t=>[t.memoryId,t.name]));
+ const linked=await service.knowledge(parseMetaMemoryRequest({operation:'save',requestId:crypto.randomUUID(),expectedRevision:0,name:'배포 공통',assignments:[{memoryId:A,mode:'include'},{memoryId:B,mode:'include'}]}),[],undefined,verified);
+ const before=JSON.stringify(cloud.tables.portmgr_common_memories);
+ const draft=await service.workroomDraft('update',linked.state.id,[],cloud.commonMemoryScope),context=JSON.parse(draft.prompt.split('\n').at(-1)!);
+ expect(context.cloudSources.map((s:any)=>s.memoryId)).toEqual([A,B]);expect(context.cloudSources.map((s:any)=>s.name)).toEqual(['원본 A','원본 B']);
+ expect(context.cloudSources.every((s:any)=>cloud.tables.portmgr_project_memory_heads!.some(h=>h.memory_id===s.memoryId&&h.head_revision_id===s.revisionId))).toBe(true);
+ expect(context.group.sourceMemoryIds).toEqual([]);expect(context.group.useProjectMemoryIds).toEqual([A,B]);expect(context.sourceNextAfter).toBeNull();
+ expect(draft.prompt).toContain('연결된 장기기억(cloudSources)을 원본으로 읽고');expect(draft.prompt).not.toContain('원본을 정하는 기준이 아닙니다');expect(draft.prompt).not.toContain('추측하지 마세요');
+ expect(JSON.stringify(cloud.tables.portmgr_common_memories)).toBe(before);expect((await service.get(linked.state.id)).state.sourceMemoryIds).toEqual([]);
+ // An archived linked memory is left out of the draft rather than failing it.
+ cloud.tables.portmgr_project_memory_trash!.push({memory_id:B});clearCommonMemoryServiceCaches();
+ expect(JSON.parse((await service.workroomDraft('update',linked.state.id,[],cloud.commonMemoryScope)).prompt.split('\n').at(-1)!).cloudSources.map((s:any)=>s.memoryId)).toEqual([A]);
+ // With every linked memory archived there is nothing linked to read: it searches a catalog page and still must not guess,
+ // instead of being told to read an empty cloudSources list.
+ cloud.tables.portmgr_project_memory_trash!.push({memory_id:A});clearCommonMemoryServiceCaches();
+ const deadLinks=await service.workroomDraft('update',linked.state.id,[],cloud.commonMemoryScope),deadContext=JSON.parse(deadLinks.prompt.split('\n').at(-1)!);
+ expect(deadContext.cloudSources.map((s:any)=>s.memoryId)).toEqual([C]);expect(deadContext.group.useProjectMemoryIds).toEqual([A,B]);
+ expect(deadLinks.prompt).not.toContain('연결된 장기기억(cloudSources)을 원본으로 읽고');expect(deadLinks.prompt).toContain('지금 읽을 수 없습니다');
+ expect(deadLinks.prompt).toContain('list_common_memory_sources');expect(deadLinks.prompt).toContain('추측하지 마세요');
+ cloud.tables.portmgr_project_memory_trash=cloud.tables.portmgr_project_memory_trash!.filter(r=>r.memory_id!==A);clearCommonMemoryServiceCaches();
+ const empty=await service.knowledge(parseMetaMemoryRequest({operation:'save',requestId:crypto.randomUUID(),expectedRevision:0,name:'빈 주제',assignments:[]}),[]);
+ const searched=await service.workroomDraft('update',empty.state.id,[],cloud.commonMemoryScope),searchContext=JSON.parse(searched.prompt.split('\n').at(-1)!);
+ expect(searchContext.cloudSources.map((s:any)=>s.memoryId)).toEqual([A,C]);expect(searched.prompt).toContain('list_common_memory_sources');expect(searched.prompt).toContain('추측하지 마세요');
+ // A topic that tracks sources keeps the deliberate split: the linked list is not the source criterion, and no catalog is attached.
+ const f=await fixture(),tracked=await f.service.workroomDraft('update',f.group.state.id,[],f.cloud.commonMemoryScope);
+ expect(JSON.parse(tracked.prompt.split('\n').at(-1)!).cloudSources).toEqual([]);expect(tracked.prompt).toContain('원본을 정하는 기준이 아닙니다');expect(tracked.prompt).toContain('추측하지 마세요');
+});

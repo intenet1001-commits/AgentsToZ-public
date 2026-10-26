@@ -10,6 +10,7 @@
  * the Rust workroom_popout tests.
  */
 import assert from 'node:assert/strict';
+import {workroomBackgroundResponse} from './fixtures/workroom-runtime-background-mocks.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { chromium, webkit } from 'playwright';
@@ -74,7 +75,11 @@ async function fixture(path, extraSessions = [], options = {}) {
     if (url.pathname === '/__popout-harness') return route.fulfill({ contentType: 'text/html', body: harness(url.searchParams.get('remote') === '1', url.searchParams.get('dialog') === '1') });
     if (!url.pathname.startsWith('/api/')) return route.continue();
     const respond = body => route.fulfill({ json: body });
+    // The VOC journey needs its explicit synthetic DEV project; other Workroom
+    // fixtures use the shared empty suggestions list instead.
     if (url.pathname === '/api/ports' && request.method() === 'GET') return respond(ports);
+    const background = workroomBackgroundResponse(url.pathname, request.method(), request.postDataJSON());
+    if (background) return respond(background);
     if (url.pathname === '/api/agent-runtime/targets') return respond({ protocolVersion: 'agentstoz-tasks-v2', complete: true, targets: projects.map(p => ({ ...p, projectTargetId: p.targetId, scope: 'main', branch: 'main', locked: false, worktreeCapable: true })) });
     if (url.pathname === '/api/agent-runtime/terminals/access') return respond({ connections: [] });
     // VOC in the pop-out: the fixture stores nothing; a save answers like a local-only sidecar.
@@ -142,6 +147,14 @@ try {
       assert.equal(await page.locator('.ai-terminal-panel').evaluate(node=>node.scrollTop),0,'The first view has not been scrolled to reveal the composer');
     };
     await initiallyVisible();
+    // 팀 작전 opens from the session's own controls, in sight without scrolling; on the usage line under the terminal it
+    // was out of sight in a short window (2026-10-25). The builder opens under the terminal and is brought into view.
+    const teamOpen=page.locator('.ai-terminal-view-controls').getByTestId('workroom-team-open'),teamBox=await teamOpen.boundingBox();
+    assert.ok(teamBox&&teamBox.y>=0&&teamBox.y+teamBox.height<=780,'The team opener is visible on the first screen: '+JSON.stringify(teamBox));
+    await page.setViewportSize({width:1120,height:587});await teamOpen.click();
+    await until(async()=>{const box=await page.getByTestId('workroom-team-builder').boundingBox();return !!box&&box.y>=0&&box.y<587;},'The opened team builder is scrolled into a short window');
+    await teamOpen.click();await until(async()=>await page.getByTestId('workroom-team-builder').count()===0,'The opener closes the builder again');
+    await page.setViewportSize({width:1120,height:780});await page.locator('.ai-terminal-panel').evaluate(node=>node.scrollTo(0,0));
     await page.getByRole('button',{name:'종료된 세션 보기 (1)',exact:true}).click();
     await until(async()=>await page.getByRole('tab').count()===2,'Active and ended sessions remain accessible');
     await initiallyVisible();

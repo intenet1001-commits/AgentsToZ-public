@@ -9,6 +9,7 @@ import type {ControlMemoryProposal} from './controlProfileStore';
 import type {AgentsToZUseWorkroomAgent} from './agentstozUseControl';
 import {OpsFolderMigrationNotice, type OpsFolderMigrationRecord} from './opsFolderMigrationNotice';
 import {opsLaunchBypassSupported} from './opsLaunchOptions';
+import {isDialogDismissKey} from './dialogEscape';
 
 export type ControlProfileOpenResult = {message: string; warnings: string[]; session?: {id: string; targetId: string; agent: AgentsToZUseWorkroomAgent}};
 
@@ -17,8 +18,30 @@ export async function requestControlProfile(path:string,body?:unknown,signal?:Ab
  const result=await response.json();if(!response.ok||result.success!==true)throw new Error(result.error??'아젠투지 설정 상태를 확인하지 못했습니다.');return result;
 }
 const deviceMemoryRequest=(body:Record<string,unknown>,signal?:AbortSignal)=>requestControlProfile('device-memory',body,signal);
-export function ControlProfilePanel({onClose,onOpenWork,onOpenProject,onOpenUserMemory,onOpened}: {onClose:()=>void;onOpenWork:()=>void;onOpenProject?:(id:string)=>void;onOpenUserMemory?:()=>void;onOpened?:(result:ControlProfileOpenResult)=>void}){
- const [profile,setProfile]=useState<ControlProfileStatus|null>(null),[pending,setPending]=useState<ControlMemoryProposal[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+/** A server message is Korean; a fetch, timeout or JSON failure is not, so the panel says what it means instead. */
+const readableError=(error:unknown,fallback:string)=>{const message=error instanceof Error?error.message:'';return /[가-힣]/.test(message)?message:fallback;};
+const STATUS_UNREADABLE='아젠투지 상태를 읽지 못했습니다. 잠시 뒤 「상태 다시 확인」을 누르세요.',SAVED_UNREADABLE='저장된 운영 기억을 읽지 못했습니다. 「상태 다시 확인」을 누르세요.';
+type SavedMemory={ready:boolean;total:number;entries:Array<{entryId:string;section:string;title:string}>;problem?:string};
+/** What 아젠투지 already remembers, read-only: titles first, one body when opened (GET entries — Mac only, never a phone DTO). */
+function SavedOperatingMemory({revision,reload,localOnly}:{revision:string|null;reload:number;localOnly:boolean}){
+ const [list,setList]=useState<SavedMemory|null>(null),[error,setError]=useState(''),[open,setOpen]=useState<{entryId:string;body?:string;truncated?:boolean;error?:string}|null>(null);
+ const alive=useRef(true);useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+ // A changed memory closes the open body; every status read (「상태 다시 확인」, a save) reloads the list, so the
+ // retry the error line names really retries — the revision alone does not change after a failed read.
+ useEffect(()=>{setOpen(null);},[revision]);
+ useEffect(()=>{let current=true;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15_000);void requestControlProfile('entries',undefined,controller.signal).then(r=>{if(!current)return;if(!r.memory||!Array.isArray(r.memory.entries))throw new Error(SAVED_UNREADABLE);setList(r.memory);setError('');}).catch(e=>{if(current)setError(readableError(e,SAVED_UNREADABLE));});return()=>{current=false;clearTimeout(timer);controller.abort();};},[revision,reload]);
+ // A body that failed to load is read again on the next press (its message says so) instead of folding away.
+ const toggle=(entryId:string)=>{if(open?.entryId===entryId&&!open.error){setOpen(null);return;}setOpen({entryId});void requestControlProfile(`entries?entryId=${entryId}`).then(r=>{if(alive.current)setOpen(c=>c?.entryId===entryId&&c.body===undefined?{entryId,body:typeof r.entry?.body==='string'?r.entry.body:'',truncated:r.entry?.truncated===true}:c);}).catch(e=>{if(alive.current)setOpen(c=>c?.entryId===entryId?{entryId,error:readableError(e,'내용을 읽지 못했습니다. 다시 눌러 보세요.')}:c);});};
+ return <section className="mt-5" data-testid="control-profile-saved-memory" aria-labelledby="control-profile-saved-memory-title">
+  <h3 id="control-profile-saved-memory-title" className="font-bold">저장된 운영 기억 · {list?.ready?list.total:'…'}</h3><p className="mt-1 text-xs">아젠투지가 회상하는 내용입니다. 제목을 누르면 본문을 봅니다. 이 목록은 읽기 전용입니다.</p>
+  {error?<p role="alert" className="mt-2 text-sm text-red-500">{error}</p>:!list?<p className="mt-2 text-sm">불러오는 중…</p>:!list.ready?<p className="mt-2 text-sm text-amber-600">{list.problem}</p>:list.entries.length===0?<p className="mt-2 text-sm">아직 저장된 운영 기억이 없습니다. {localOnly?'AI에게 “아젠투지, 이 운영 결정을 기억해”라고 요청하면 여기에 보입니다.':'저장 후보를 저장하면 여기에 보입니다.'}</p>:<ul className="mt-2 space-y-2">{list.entries.map((entry,index)=>{const expanded=open?.entryId===entry.entryId;return <li key={`${entry.entryId}:${index}`} className="rounded-lg border border-[var(--line)]"><button type="button" aria-expanded={expanded} className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm" onClick={()=>toggle(entry.entryId)}><span className="min-w-0 break-words font-semibold">{entry.title}</span><span className="shrink-0 text-xs text-[var(--ink-3)]">{entry.section}</span></button>{expanded&&<div className="border-t border-[var(--line)] px-3 py-2 text-sm">{open.error?<p role="alert" className="text-red-500">{open.error}</p>:open.body===undefined?<p>불러오는 중…</p>:<><p className="whitespace-pre-wrap break-words">{open.body||'(본문 없음)'}</p>{open.truncated&&<p className="mt-1 text-xs">앞부분만 보여 줍니다.</p>}</>}</div>}</li>;})}</ul>}
+  {list?.ready&&list.entries.length<list.total&&<p className="mt-2 text-xs">최근 {list.entries.length}개만 보여 줍니다.</p>}
+ </section>;
+}
+export function ControlProfilePanel({onClose,onOpenWork,onOpenProject,onOpenUserMemory,onOpenUserProfile,onOpened,onRestoreOps,restoreFrom}: {onClose:()=>void;onOpenWork:()=>void;onOpenProject?:(id:string)=>void;onOpenUserMemory?:()=>void;onOpenUserProfile?:()=>void;onOpened?:(result:ControlProfileOpenResult)=>void;
+ /** Only when this Mac has no OPS folder: the same restore the header and onboarding start. `restoreFrom` names a Mac already using one. */
+ onRestoreOps?:()=>void;restoreFrom?:string}){
+ const [profile,setProfile]=useState<ControlProfileStatus|null>(null),[pending,setPending]=useState<ControlMemoryProposal[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[statusProblem,setStatusProblem]=useState(''),[statusReads,setStatusReads]=useState(0);
  const [controls,setControls]=useState<Array<{projectId:string|null;memoryId:string}>>([]);
  const [migration,setMigration]=useState<OpsFolderMigrationRecord|null>(null);
  const [connections,setConnections]=useState<ControlProfileConnection[]>([]);
@@ -42,16 +65,29 @@ export function ControlProfilePanel({onClose,onOpenWork,onOpenProject,onOpenUser
  useEffect(()=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15_000);void requestControlProfile('launch-preference',undefined,controller.signal).then(r=>{const saved=r.preference;if(controller.signal.aborted||launchTouched.current||!saved)return;const next={agent:saved.agent,surface:saved.surface,mode:saved.mode??'reopen',bypass:saved.bypass??false};launchDraft.current=next;setLaunchSurface(next.surface);setLaunchAgent(next.agent);setLaunchMode(next.mode);setLaunchBypass(next.bypass);}).catch(()=>{});return()=>{clearTimeout(timer);controller.abort();};},[]);
  const refresh=useCallback(async(signal?:AbortSignal)=>{
   const run=++serial.current;
-  const [status,proposals]=await Promise.all([requestControlProfile('status',undefined,signal),requestControlProfile('pending',undefined,signal)]);
+  let status,proposals;
+  try{[status,proposals]=await Promise.all([requestControlProfile('status',undefined,signal),requestControlProfile('pending',undefined,signal)]);}
+  catch(e){if(mounted.current&&run===serial.current)setStatusProblem(readableError(e,STATUS_UNREADABLE));throw e;}
   const candidates=await requestControlProfile('controls',undefined,signal).catch(()=>({controls:[]}));
-  if(mounted.current&&run===serial.current){setControls(candidates.controls);setProfile(status.profile);setMigration(status.opsFolderMigration??null);setPending(proposals.proposals);setError('');}
+  if(mounted.current&&run===serial.current){setControls(candidates.controls);setProfile(status.profile);setMigration(status.opsFolderMigration??null);setPending(proposals.proposals);setStatusProblem('');setError('');setStatusReads(n=>n+1);}
  },[]);
- useEffect(()=>{mounted.current=true;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15_000);void refresh(controller.signal).catch(e=>{if(mounted.current)setError(e.message);});return()=>{mounted.current=false;clearTimeout(timer);controller.abort();};},[refresh]);
+ useEffect(()=>{mounted.current=true;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15_000);void refresh(controller.signal).catch(()=>{});return()=>{mounted.current=false;clearTimeout(timer);controller.abort();};},[refresh]);
  useEffect(()=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15_000);void requestControlProfile('connections',undefined,controller.signal).then(r=>{if(!controller.signal.aborted)setConnections(r.connections);}).catch(()=>{});return()=>{clearTimeout(timer);controller.abort();};},[]);
- const operate=async(action:()=>Promise<any>)=>{if(busy)return;setBusy(true);setError('');setNotice('');try{const result=await action();if(mounted.current&&result?.backup)setNotice(result.backup.backedUp?'운영 기억 저장과 백업을 확인했습니다.':'운영 기억은 로컬에 저장했습니다. 원격 백업 상태는 별도 확인이 필요합니다.');await refresh();}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'처리 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.');}finally{if(mounted.current)setBusy(false);}};
- const state=profile?.state==='ready'?'운영 기억 연결됨':profile?.state==='preparing'?'준비 중':profile?.state==='needs-attention'?'연결 확인 필요':'프로필 준비 필요';
+ // Focus starts inside so Escape reaches this dialog (App's own Escape handler stands aside while it is open), and
+ // goes back to the button that opened it when it is dismissed — not when it hands over to a workroom or voice.
+ // The opener is kept in a ref and never taken from inside the panel: StrictMode runs this effect twice in
+ // development, and the second run would otherwise record the panel itself (gone by the time it closes).
+ const panelRef=useRef<HTMLElement>(null),opener=useRef<HTMLElement|null>(null),returnFocus=useRef(false);
+ useEffect(()=>{const active=document.activeElement;if(!opener.current&&active instanceof HTMLElement&&active!==document.body&&!panelRef.current?.contains(active))opener.current=active;panelRef.current?.focus({preventScroll:true});return()=>{if(returnFocus.current&&opener.current?.isConnected)opener.current.focus({preventScroll:true});};},[]);
+ const dismiss=()=>{returnFocus.current=true;onClose();};
+ const operate=async(action:()=>Promise<any>)=>{if(busy)return;setBusy(true);setError('');setNotice('');try{const result=await action();if(mounted.current&&result?.backup)setNotice(result.backup.backedUp?'운영 기억 저장과 백업을 확인했습니다.':'운영 기억은 로컬에 저장했습니다. 원격 백업 상태는 별도 확인이 필요합니다.');await refresh();}catch(e){if(mounted.current)setError(readableError(e,'처리 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.'));}finally{if(mounted.current)setBusy(false);}};
+ // Nothing read yet is not "unprepared": say it is being checked, or why the read failed. A local-only profile is not shared.
+ const state=!profile?statusProblem||'상태 확인 중…':profile.state==='ready'?profile.backend==='app-data'?'운영 기억 준비됨 · 이 Mac 전용':'운영 기억 연결됨':profile.state==='preparing'?'준비 중':profile.state==='needs-attention'?'연결 확인 필요':'아젠투지 준비 필요';
  const button='min-h-11 rounded-xl border border-[var(--line)] px-4 py-2 text-sm disabled:opacity-50';
  const launchReady=profile?.state==='ready'&&profile.backend==='control-folder'&&!!profile.projectId;
+ // A local-only (app-data) memory saves an AI's memory request at once (controlProfileStore.propose): there is no
+ // candidate to review, so the copy right under the status must not tell the user to save one here.
+ const localOnly=profile?.state==='ready'&&profile.backend==='app-data';
  const launchLabel=launchSurface==='workroom'?'워크룸으로':launchSurface==='buzz'?'Buzz 채널로':launchSurface==='app'?`${{codex:'Codex',claude:'Claude',hermes:'Hermes',agy:'Antigravity'}[launchAgent]} 앱으로`:launchSurface==='orca-floating'?'Orca 플로팅으로':'Orca 워크트리로';
  const openSurface=()=>operate(async()=>{
   await preferenceQueue.current;
@@ -69,23 +105,31 @@ export function ControlProfilePanel({onClose,onOpenWork,onOpenProject,onOpenUser
   if(mounted.current){setNotice([message,...warnings].join('\n'));onOpened?.({message,warnings,...(result.session?{session:result.session}:{})});}
   return result;
  });
- return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-  <section role="dialog" aria-modal="true" aria-labelledby="control-profile-title" data-testid="control-profile-panel" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 text-[var(--ink)]" onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape')onClose();}}>
-   <div className="flex items-start justify-between gap-3"><div><h2 id="control-profile-title" className="text-xl font-bold">아젠투지 설정</h2><p className="mt-2 text-sm">어느 프로젝트에서든 쓰는 아젠투지(OPS)의 운영 기억입니다. 내가 지시한 내용이 아니라, 아젠투지가 일하는 방식을 기억합니다.</p></div><button className={`${button} shrink-0 whitespace-nowrap`} onClick={onClose} aria-label="아젠투지 설정 닫기">닫기</button></div>
+ return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={dismiss}>
+  <section ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="control-profile-title" data-testid="control-profile-panel" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 text-[var(--ink)] outline-none" onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(!isDialogDismissKey(e.nativeEvent))return;e.preventDefault();e.stopPropagation();dismiss();}}>
+   <div className="flex items-start justify-between gap-3"><div><h2 id="control-profile-title" className="text-xl font-bold">아젠투지 설정</h2><p className="mt-2 text-sm">어느 프로젝트에서든 쓰는 아젠투지(OPS)의 운영 기억입니다. 내가 지시한 내용이 아니라, 아젠투지가 일하는 방식을 기억합니다.</p></div><button className={`${button} shrink-0 whitespace-nowrap`} onClick={dismiss} aria-label="아젠투지 설정 닫기">닫기</button></div>
    <div className="mt-4 rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="control-profile-memory-map">
-    <dl className="grid gap-3 sm:grid-cols-3"><div><dt className="font-bold">내 지시</dt><dd>「내가 한 말」에서 지시 원문과 연결된 세션 기록을 봅니다.</dd></div><div><dt className="font-bold">아젠투지 운영 기억</dt><dd>프로젝트 별칭·관계·일하는 방식을 이 화면에서 관리합니다.</dd></div><div><dt className="font-bold">프로젝트 기억</dt><dd>각 프로젝트에서 설계·수정·검증 경험을 이어갑니다.</dd></div></dl>
+    <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-bold">내 프로필</dt><dd>장기기억에서 직접 확인한 나의 선호와 적용 범위를 관리합니다.</dd></div><div><dt className="font-bold">내 지시</dt><dd>「내가 한 말」에서 지시 원문과 연결된 세션 기록을 봅니다. 과거 지시를 선호로 자동 확정하지 않습니다.</dd></div><div><dt className="font-bold">아젠투지 운영 기억</dt><dd>프로젝트 별칭·관계·일하는 방식. 저장된 내용과 저장 후보를 이 화면에서 봅니다.</dd></div><div><dt className="font-bold">프로젝트 기억</dt><dd>각 프로젝트에서 설계·수정·검증 경험을 이어갑니다.</dd></div></dl>
+    {onOpenUserProfile&&<button type="button" className={`${button} mt-3 mr-2`} onClick={onOpenUserProfile}>내 프로필 보기</button>}
     {onOpenUserMemory&&<button type="button" className={`${button} mt-3`} onClick={onOpenUserMemory}>내 지시·결과 기록 보기</button>}
    </div>
    <p role="status" className="mt-4 font-semibold">{state}</p>
    {profile?.problem&&<p className="mt-2 text-sm text-amber-600">{profile.problem}</p>}
    <OpsFolderMigrationNotice record={migration}/>
    {profile?.sync&&<p role="status" className="mt-2 text-sm">{profile.sync.state==='current'?'다른 Mac의 운영 기억과 동기화됨':profile.sync.state==='not-configured'?'이 사용자에 로컬 저장 · 다른 Mac 연결은 기존 OPS 운영 폴더(AgentsToZ-OPS, 예전 이름 AgentsToZ-Control) 복원으로 준비할 수 있습니다.':profile.sync.problem}</p>}
+   {/* A second Mac (2호) otherwise only learned in prose that restoring is how to share; the button sits with that line. */}
+   {onRestoreOps&&(restoreFrom||profile?.sync?.state==='not-configured')&&<div className="mt-2 rounded-lg border border-[var(--line)] p-3 text-sm" data-testid="control-profile-restore"><p>{restoreFrom?`${restoreFrom}에서 쓰는 아젠투지(OPS)가 있습니다. 새로 만들면 운영 기억이 갈라지니 복원해서 이어가세요.`:'다른 Mac에서 아젠투지(OPS)를 쓰고 있다면 복원해서 같은 운영 기억을 이어가세요.'}</p><button type="button" className={`${button} mt-2`} onClick={onRestoreOps}>다른 Mac의 아젠투지 복원</button></div>}
+   {/* The one thing here that waits for the user, so it sits right under the status (UX audit 2026-10-25). */}
+   <section className="mt-4" data-testid="control-profile-pending" aria-labelledby="control-profile-pending-title"><h3 id="control-profile-pending-title" className="font-bold">운영 기억 저장 후보 · {pending.length}</h3><p className="mt-1 text-xs">{localOnly&&pending.length===0?'이 Mac 전용 운영 기억은 AI가 남긴 기억을 후보 없이 바로 저장합니다. 저장된 내용은 아래 「저장된 운영 기억」에서 봅니다.':'AI에게 “아젠투지, 이 운영 결정을 기억 후보로 남겨줘”라고 요청한 뒤 여기서 저장합니다. 후보 접수는 저장 완료와 다릅니다.'}</p>
+   {pending.map(p=><article key={p.id} className="mt-3 rounded-xl border border-[var(--line)] p-3"><h4 className="font-semibold">{p.title}</h4><p className="mt-2 whitespace-pre-wrap break-words text-sm">{p.body}</p><p className="mt-2 text-xs">근거: {p.evidence}</p><div className="mt-3 flex gap-2"><button className={button} disabled={busy||profile?.state!=='ready'} onClick={()=>void operate(()=>requestControlProfile('review',{id:p.id,accept:true,expectedRevision:profile?.revision}))}>운영 기억에 저장</button><button className={button} disabled={busy} onClick={()=>void operate(()=>requestControlProfile('review',{id:p.id,accept:false,expectedRevision:profile?.revision??''}))}>제외</button></div></article>)}</section>
+   {/* Results of the buttons above sit with them, not at the end of a long panel. */}
+   {notice&&<p role="status" className="mt-3 text-sm">{notice}</p>}{error&&<p role="alert" className="mt-3 text-sm text-red-500">{error}</p>}
    <p className="mt-2 text-sm">호출: <strong>agentstoz · 아젠투지 · 에이전츠투지</strong></p>
-   <p className="mt-2 text-sm">내 지시는 「내가 한 말」에서, 구현·검증 결과는 각 프로젝트 기억에서 확인합니다. 이 화면에서는 아젠투지의 운영 방식과 연결을 관리합니다.</p>
+   <p className="mt-2 text-sm">내 지시는 「내가 한 말」에서, 구현·검증 결과는 각 프로젝트 기억에서 확인합니다. 이 화면에서는 아젠투지의 운영 기억을 보고 연결을 관리합니다.</p>
    <dl className="mt-4 space-y-2 text-xs"><div><dt>마지막 기억 갱신</dt><dd>{profile?.lastSavedAt?new Date(profile.lastSavedAt).toLocaleString('ko-KR'):'확인된 기록 없음'}</dd></div></dl>
    <details className="mt-2 text-xs"><summary className="cursor-pointer">고급 정보</summary><dl className="mt-1"><div><dt>기억 식별자</dt><dd className="break-all">{profile?.memoryId??'준비 후 표시'}</dd></div></dl></details>
    <div className="mt-4 flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>void operate(()=>requestControlProfile('prepare',{}))}>{busy?'확인 중…':'아젠투지 준비·연결 다시 확인'}</button><button className={button} disabled={busy} onClick={()=>void operate(()=>refresh())}>상태 다시 확인</button><button className={button} disabled={busy||profile?.state!=='ready'||!profile.projectId} title={!profile?.projectId?'OPS 운영 폴더(AgentsToZ-OPS)를 이 Mac에 연결하면 사용할 수 있습니다.':undefined} onClick={onOpenWork}>아젠투지 채팅·워크룸 열기</button></div>
-   {profile?.state==='ready'&&!profile.projectId&&<p className="mt-2 text-xs text-[var(--ink-3)]">OPS 채팅·워크룸은 OPS 운영 폴더(AgentsToZ-OPS, 예전 이름 AgentsToZ-Control)를 이 Mac에 연결한 뒤 사용할 수 있습니다. 로컬 전용 운영 기억은 이 패널에서 계속 관리할 수 있습니다.</p>}
+   {profile?.state==='ready'&&!profile.projectId&&<p className="mt-2 text-xs text-[var(--ink-3)]">OPS 채팅·워크룸은 OPS 운영 폴더(AgentsToZ-OPS, 예전 이름 AgentsToZ-Control)를 이 Mac에 연결한 뒤 사용할 수 있습니다. 로컬 전용 운영 기억도 이 패널에서 볼 수 있습니다.</p>}
    <fieldset className="mt-5 rounded-xl border border-[var(--line)] p-3" disabled={busy}>
     <legend className="px-1 font-bold">아젠투지 열기</legend><p className="text-sm">음성은 화면 아래 「아젠투지 호출」을 누르세요.<button type="button" className={button+' ml-2'} data-testid="control-profile-voice-settings" disabled={profile?.state!=='ready'} onClick={()=>{onClose();window.dispatchEvent(new Event(OPEN_OPS_VOICE_EVENT));}}>음성 창 열기</button></p>
     <div className="flex flex-wrap gap-3">
@@ -101,14 +145,12 @@ export function ControlProfilePanel({onClose,onOpenWork,onOpenProject,onOpenUser
     <button className={`${button} mt-3`} disabled={busy||!launchReady} onClick={()=>void openSurface()}>{launchSurface==='app'&&launchAgent==='agy'?'Antigravity 앱 열기 (OPS 폴더는 앱에서 선택)':`아젠투지를 ${launchLabel} 열기`}</button>
    </fieldset>
    {controls.filter(c=>c.projectId&&c.projectId!==profile?.projectId).map(c=><div key={c.projectId} className="mt-3 rounded-lg border border-[var(--line)] p-3 text-sm"><p>등록된 OPS 운영 폴더의 기억: {c.memoryId}</p><button className={button} disabled={busy} onClick={()=>void operate(()=>profile?.state==='ready'?requestControlProfile('attach',{projectId:c.projectId,expectedProfileId:profile.profileId}):requestControlProfile('prepare',{projectId:c.projectId}))}>이 운영 기억을 아젠투지에 연결</button></div>)}
+   {profile?.state==='ready'&&<SavedOperatingMemory revision={profile.revision} reload={statusReads} localOnly={localOnly}/>}
    {profile?.state==='ready'&&<DeviceOperatingMemoryPanel request={deviceMemoryRequest}/>}
    <h3 className="mt-5 font-bold">AI별 MCP 사용 설정</h3><p className="mt-1 text-xs">이 목록은 설정 등록 상태입니다. 실제 도구 응답은 각 AI 대화에서 “아젠투지 상태 확인”을 요청해 확인합니다.</p>
    {connections.map(c=><div key={c.agent} className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] p-2"><div><strong>{({codex:'Codex',claude:'Claude',hermes:'Hermes',agy:'Antigravity'} as Record<string,string>)[c.agent]??c.agent}</strong><p className="text-xs">{c.message}</p></div><button className={button} disabled={busy||c.state==='unavailable'} onClick={()=>void operate(async()=>{const result=await requestControlProfile('connections',{agent:c.agent});if(mounted.current)setConnections(current=>current.map(item=>item.agent===c.agent?result.connection:item));return result;})}>설정 점검·갱신</button></div>)}
    {profile?.state==='ready'&&onOpenProject&&<p className="mt-5 text-sm">아래 프로젝트 테스트 현황은 등록 프로젝트의 검사 결과입니다. 운영 기억의 연결 상태나 AI 응답 성공과는 별개입니다.</p>}
    {profile?.state==='ready'&&onOpenProject&&<TesterOverviewPanel transport={async request=>(await requestControlProfile('tester-results',request)).overview} onOpenProject={onOpenProject}/>}
-   <h3 className="mt-5 font-bold">운영 기억 저장 후보 · {pending.length}</h3><p className="mt-1 text-xs">AI에게 “아젠투지, 이 운영 결정을 기억 후보로 남겨줘”라고 요청한 뒤 여기서 저장합니다. 후보 접수는 저장 완료와 다릅니다.</p>
-   {pending.map(p=><article key={p.id} className="mt-3 rounded-xl border border-[var(--line)] p-3"><h4 className="font-semibold">{p.title}</h4><p className="mt-2 whitespace-pre-wrap break-words text-sm">{p.body}</p><p className="mt-2 text-xs">근거: {p.evidence}</p><div className="mt-3 flex gap-2"><button className={button} disabled={busy||profile?.state!=='ready'} onClick={()=>void operate(()=>requestControlProfile('review',{id:p.id,accept:true,expectedRevision:profile?.revision}))}>운영 기억에 저장</button><button className={button} disabled={busy} onClick={()=>void operate(()=>requestControlProfile('review',{id:p.id,accept:false,expectedRevision:profile?.revision??''}))}>제외</button></div></article>)}
-   {notice&&<p role="status" className="mt-3 text-sm">{notice}</p>}{error&&<p role="alert" className="mt-3 text-sm text-red-500">{error}</p>}
   </section>
  </div>;
 }

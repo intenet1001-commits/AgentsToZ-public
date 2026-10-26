@@ -51,6 +51,11 @@ async function fixture(options={}){
   if(url.pathname==='/__ai-work-request')return route.fulfill({contentType:'text/html',body:html(options)});
   if(!url.pathname.startsWith('/api/'))return route.continue();
   if(url.pathname==='/api/control-profile/status')return route.fulfill({json:{success:true,profile:options.profile??{state:'unprepared'}}});
+  // 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts): this Mac's own items. Here Claude has a credential
+  // and Codex does not, so the picker must offer one and refuse the other — with the provider, never a secret.
+  if(url.pathname==='/api/agent-runtime/hermes-variants')return route.fulfill({json:options.variants??{checked:true,sessions:[],items:[
+   {variant:'claude',provider:'anthropic',model:'claude-opus-5-5',available:true},
+   {variant:'codex',provider:'openai-codex',model:'gpt-6.1-sol',available:false}]}});
   if(url.pathname!=='/api/agent-runtime/terminals'){state.blocked.push(url.pathname);return route.abort('blockedbyclient');}
   const body=request.postDataJSON();assert.equal(body.operation,'start');assert.ok([A,B,CONTROL].includes(body.targetId));state.starts.push(body);
   let session=state.sessions.get(body.requestId);
@@ -142,7 +147,7 @@ try{
  });
  await run('mission mode launches a visible Control coordinator with four selectable workers',async({page,prompt,start,state})=>{
   await page.getByLabel('AI 작업 실행 방식').selectOption('mission');
-  assert.equal(await page.getByLabel('AI 작업 실행 방식').locator('option:checked').innerText(),'AgentsToZ OPS 미션 관제');
+  assert.equal(await page.getByLabel('AI 작업 실행 방식').locator('option:checked').innerText(),'아젠투지(OPS) 미션 관제');
   await page.getByLabel('AI 작업 관제 전략').selectOption('cs-ceo');
   assert.equal(await page.getByRole('checkbox').count(),4);
   await page.getByLabel('AI 작업 프로젝트').selectOption(A);
@@ -164,6 +169,23 @@ try{
   const geometry=await panel.evaluate(node=>{const bounds=node.getBoundingClientRect();return{right:bounds.right,width:bounds.width,viewport:innerWidth,scroll:document.documentElement.scrollWidth,zoom:document.querySelector('#root').style.transform,overflow:[...node.querySelectorAll('select,textarea,button')].some(control=>{const b=control.getBoundingClientRect();return b.right>bounds.right+1||b.left<bounds.left-1})}});
   assert.equal(geometry.zoom,'scale(1.25)');assert.ok(geometry.scroll<=geometry.viewport+2&&geometry.right<=geometry.viewport+2&&!geometry.overflow,JSON.stringify(geometry));
   await prompt.focus();await page.keyboard.press('Tab');assert.equal(await page.getByTestId('ai-work-request-start').evaluate(node=>node===document.activeElement),true);
+ });
+ // 「Hermes · Claude」/「Hermes · Codex」 are their own items a beginner only has to pick (user request 2026-10-25).
+ await run('Hermes · Claude and Hermes · Codex are separate pickable items, and a missing provider cannot be started',async({page,prompt,start,state})=>{
+  const picker=page.getByTestId('ai-work-request-agent');
+  const options=await picker.evaluate(node=>[...node.options].map(option=>[option.value,option.textContent,option.disabled]));
+  assert.deepEqual(options,[['codex','Codex CLI',false],['claude','Claude Code',false],['hermes','Hermes',false],
+   ['hermes:claude','Hermes · Claude',false],['hermes:codex','Hermes · Codex · openai-codex 자격 없음',true],['agy','Antigravity',false]]);
+  await picker.selectOption('hermes:claude');
+  await prompt.fill('변형으로 실행할 작업');
+  await start.click();
+  await until(()=>state.starts.length===1,'One start');
+  // One start: Hermes, with this Mac's enum beside the ordinary request — the model itself is the host's business.
+  assert.equal(state.starts[0].agent,'hermes');
+  assert.equal(state.starts[0].hermesVariant,'claude');
+  // The gated item cannot be chosen at all, so no start can carry it.
+  await assert.rejects(picker.selectOption('hermes:codex',{timeout:800}));
+  assert.equal(state.starts.length,1);
  });
 }finally{
  await browser?.close();

@@ -1,10 +1,10 @@
 import {expect,test} from 'bun:test';
-import {APP_LANGUAGES,browserContextMessages,browserContextText,projectStateCopy,projectStateTranslations,readToolBatchCopy,readToolBatchMessages,workModeCopy,workModeMessages,type CopyShape,type Lang} from '../src/i18n';
+import {APP_LANGUAGES,browserContextMessages,browserContextText,projectStateCopy,projectStateTranslations,readToolBatchCopy,readToolBatchMessages,workModeCopy,workModeMessages,workroomTeamCopy,workroomTeamMessages,type CopyShape,type Lang} from '../src/i18n';
 import {workModeDuration,workModeRemaining} from '../src/WorkModeControl';
 
 // Feature copy blocks live beside the main catalog; they follow the same discipline.
-const blocks={projectStateTranslations,browserContextMessages,readToolBatchMessages,workModeMessages} as const;
-const accessors={projectStateTranslations:projectStateCopy,browserContextMessages:browserContextText,readToolBatchMessages:readToolBatchCopy,workModeMessages:workModeCopy} as const;
+const blocks={projectStateTranslations,browserContextMessages,readToolBatchMessages,workModeMessages,workroomTeamMessages} as const;
+const accessors={projectStateTranslations:projectStateCopy,browserContextMessages:browserContextText,readToolBatchMessages:readToolBatchCopy,workModeMessages:workModeCopy,workroomTeamMessages:workroomTeamCopy} as const;
 
 type Leaf={path:string;text:unknown};
 function leaves(value:unknown,path=''):Leaf[] {

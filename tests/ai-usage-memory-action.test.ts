@@ -23,7 +23,7 @@ describe('AI usage session-memory action', () => {
     expect(source).toContain('세션 기억 완료');
     expect(stateSource).toContain('status.activity.needsRemember');
     expect(source).toContain('projectMemoryApi.remoteStatus');
-    expect(source).toContain('Supabase Push 필요');
+    expect(source).toContain('Supabase 올리기(Push) 필요');
     expect(source).toContain('context-session-open-project-${s.sessionId}');
     expect(source).toContain('data-testid="codex-auto-remember-status"');
     expect(source).toContain('data-testid="codex-auto-remember-toggle"');

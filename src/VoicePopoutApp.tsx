@@ -3,6 +3,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
 import {getCurrentWindow} from '@tauri-apps/api/window';
 import {AgentsToZVoiceDock} from './components/AgentsToZVoiceDock';
+import {AutomaticSaveNotice} from './AutomaticSaveNotice';
 import {VoiceButton,OPEN_OPS_VOICE_EVENT} from './VoiceSessionPanel';
 import {localVoiceTransport} from './voiceSessionClient';
 import {voiceMediaClient} from './voiceMediaClient';
@@ -58,6 +59,7 @@ export function VoicePopoutApp({panel=false}:{panel?:boolean}){
     {isTauri()&&<header className={`voice-popout__titlebar${isMacHelpdeskSurface(true,navigator.platform)?' voice-popout__titlebar--mac':''}`} data-tauri-drag-region><span data-tauri-drag-region>아젠투지 호출</span><WorkModeControl compact/>{isMacHelpdeskSurface(true,navigator.platform)&&<button type="button" data-testid="voice-helpdesk-open" onClick={()=>action('helpdesk')} aria-label="아젠투지 헬프데스크 열기"><LifeBuoy size={14} aria-hidden="true"/>헬프데스크</button>}</header>}
     {error&&<p role="alert">{error}</p>}
     <VoiceButton target={{kind:'ops'}} label="아젠투지" hideTrigger openOnEvent initialOpen={panel}/>
-    <AgentsToZVoiceDock transport={localVoiceTransport} deviceName={context.deviceName} onOpenOpsWorkroom={context.opsAvailable?()=>action('ops'):undefined} opsDevices={context.devices} onOpenDeviceWorkroom={key=>action('device',key)}/>
+    <AgentsToZVoiceDock transport={localVoiceTransport} deviceName={context.deviceName} onOpenOpsWorkroom={context.opsAvailable?()=>action('ops'):undefined} opsDevices={context.devices} onOpenDeviceWorkroom={key=>action('device',key)}
+      notifications={<AutomaticSaveNotice placement="dock"/>} localSessions/>
   </div></main>;
 }

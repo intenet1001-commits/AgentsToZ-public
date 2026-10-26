@@ -3,9 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  AGENTSTOZ_INVOCATION_VERSION,
   installAgentsToZInvocation,
   withAgentsToZInvocation,
 } from '../src/agentstozInvocationInstaller';
+import {AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from '../src/agentstozMcpAgentChoice';
 
 describe('AgentsToZ conversational invocation installer', () => {
   // Updated 2026-09-29 (review L5): the agy entries are written only where agy keeps its global
@@ -43,12 +45,45 @@ describe('AgentsToZ conversational invocation installer', () => {
       expect(text).toContain('agentstoz_use_wait_ops_request');
       expect(text).toContain('Admission or a window is not completion');
       expect(text).toContain('동명 또는 DEV 후보가 여러 개');
+      expect(text).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
+      expect(text).toContain('Pass the chosen surface explicitly to start/open');
+      expect(text).toContain('Hermes open_code_app accepts only an explicit default');
+    }
+    // 팀 작전: every agent carries the same team skill, so whichever model the person opened can lead.
+    for (const path of [
+      join(home, '.codex', 'skills', 'agentstoz-team', 'SKILL.md'),
+      join(home, '.claude', 'skills', 'agentstoz-team', 'SKILL.md'),
+      join(home, '.gemini', 'skills', 'agentstoz-team', 'SKILL.md'),
+      join(home, '.gemini', 'config', 'skills', 'agentstoz-team', 'SKILL.md'),
+      join(hermesHome, 'skills', 'agentstoz-team', 'SKILL.md'),
+    ]) {
+      const text = readFileSync(path, 'utf8');
+      for (const part of ['name: agentstoz-team', 'agentstoz_use_create_team', 'agentstoz_use_wait_team', 'agentstoz_use_report_team_task', 'agentstoz_use_close_team', 'git merge --no-ff', 'Never push']) expect(text).toContain(part);
+      expect(text).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
+      expect(text).not.toContain('Otherwise choose by strength');
+      expect(text).not.toContain('Add one yourself when the change is risky');
+      expect(text).toContain('A natural request for a team alone does not delegate AI selection');
+      expect(text).toContain('Hermes default, Hermes · Claude and Hermes · Codex are distinct choices');
+      expect(text).toContain('never silently changed to internal');
+      expect(text).toContain('Every fresh MCP team member needs an explicit surface');
+      expect(text).toContain('Legacy version 1 canonical blocks');
+      expect(text).toContain('hermesVariant: "default" in MCP arguments explicitly, without asking again');
+    }
+    expect(readFileSync(join(home, '.claude', 'CLAUDE.md'), 'utf8')).toContain('follow the agentstoz-team skill');
+    expect(readFileSync(join(home, '.claude', 'commands', 'agentstoz.md'), 'utf8')).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
+    for (const path of [join(home, '.codex', 'AGENTS.md'), join(home, '.claude', 'CLAUDE.md'), join(home, '.gemini', 'GEMINI.md'), join(home, '.gemini', 'config', 'GEMINI.md'), join(hermesHome, 'SOUL.md')]) {
+      const text = readFileSync(path, 'utf8');
+      expect(text).toContain(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE);
+      expect(text.split(AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE)).toHaveLength(2);
+      expect(text).toContain(`AgentsToZ invocation-version:${AGENTSTOZ_INVOCATION_VERSION}`);
     }
     expect(installAgentsToZInvocation({ home, hermesHome }).every(result => !result.changed)).toBe(true);
     const antigravity = first.find(result => result.target === 'antigravity')!;
     expect(antigravity.paths).toEqual([
       join(home, '.gemini', 'skills', 'agentstoz', 'SKILL.md'),
+      join(home, '.gemini', 'skills', 'agentstoz-team', 'SKILL.md'),
       join(home, '.gemini', 'config', 'skills', 'agentstoz', 'SKILL.md'),
+      join(home, '.gemini', 'config', 'skills', 'agentstoz-team', 'SKILL.md'),
       join(home, '.gemini', 'GEMINI.md'),
       // agy's always-on global rule: a standalone GEMINI.md in its customization root.
       join(home, '.gemini', 'config', 'GEMINI.md'),
@@ -62,7 +97,7 @@ describe('AgentsToZ conversational invocation installer', () => {
     const bare = mkdtempSync(join(tmpdir(), 'agentstoz-invocation-no-agy-'));
     const withoutAgy = installAgentsToZInvocation({ home: bare }).find(result => result.target === 'antigravity')!;
     expect(existsSync(join(bare, '.gemini', 'config'))).toBe(false);
-    expect(withoutAgy.paths).toEqual([join(bare, '.gemini', 'skills', 'agentstoz', 'SKILL.md'), join(bare, '.gemini', 'GEMINI.md')]);
+    expect(withoutAgy.paths).toEqual([join(bare, '.gemini', 'skills', 'agentstoz', 'SKILL.md'), join(bare, '.gemini', 'skills', 'agentstoz-team', 'SKILL.md'), join(bare, '.gemini', 'GEMINI.md')]);
     expect(installAgentsToZInvocation({ home: bare }).every(result => !result.changed)).toBe(true);
 
     const home = mkdtempSync(join(tmpdir(), 'agentstoz-invocation-agy-rules-'));

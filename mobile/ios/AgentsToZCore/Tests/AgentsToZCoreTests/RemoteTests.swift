@@ -525,6 +525,10 @@ final class MemoryPreferenceStore: WorkroomPreferenceStore, @unchecked Sendable 
         try suite.testWipeReportTellsTheRealOutcome()
         try suite.testBundledPortalNamesItsHostsAndServesItsOwnProject()
         print("21 native regression groups passed")
+        try ScreenViewportChecks().runAll()
+        print("15 screen viewer gesture checks passed")
+        try ScreenViewerLifecycleChecks().runAll()
+        print("21 screen viewer lifecycle checks passed")
     }
 }
 #else

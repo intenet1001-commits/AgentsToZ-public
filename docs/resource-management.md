@@ -6,6 +6,12 @@
 
 | 영역 | 현재 기준 | 해제·복구 경로 |
 |---|---|---|
+| 워크룸 브라우저 연결·화면 | 호스트 연결8개, 연결별 대기8개·CDP 미응답8초, UI 표시 캐시8개·보일 때만2초 조회, 종료 워크룸60초 정리 | 종료 세션의 임시 연결은 회수하고 빌린 Chrome·탭과 영구 작업 기록은 보존한다. UI 캐시 제거는 페이지나 작업 기록 삭제가 아니다. Chrome 사람 승인 대기는120초, 프록시는150초다. |
+| 내장 Chromium·작업 복구 | native view4개·view별 팝업3개, 로컬 일지128작업·작업별128영수증·목록32행 | 브라우저 종료 버튼은 해당 view를 닫고 저장 프로필과 영수증은 보존한다. 앱 종료는 모든 native view 종료를 기다린다. 미확정 결과는 자동 재실행·삭제하지 않으며 예산이 차면 새 기록을 거절한다. 숨긴 작업은 계속되고 활성 view의 CEF 외부 펌프 안전 재호출은 최대33ms다. |
+| 팀 외부 실행 영수증 | 기본2,048개·JSON 파일8 MiB, 0600·소유 잠금·revision CAS·임시 파일 fsync/원자 rename | 부작용 전 예약. 활성·미확정·종료 중복 방지 기록을 축출하지 않고 예산 초과 쓰기를 거절한다. 재시작 reserved/sending은 미확정으로 보존하며 자동 launch/send/close 없음. 죽은 소유자가 입증된 잠금만 회수하고 실행 기록은 유지 |
+| 팀 Orca 체크아웃 영수증 | 기본2,048개·영수증 JSON 본문 합계8 MiB, 0600 SQLite·즉시 transaction CAS·FULL sync | 정확한 기준 SHA의 Orca 관리 체크아웃 생성 전에 예약. reserved/unknown/created 중복 방지 기록을 삭제해 자리를 만들지 않는다. 응답 유실 뒤 후보 경로를 보존하고 생성·삭제 재실행 없음. owner가 연결을 닫음 |
+| 팀 외부 private plan | host 인스턴스 기본128개, 실행 가능한 managed/manual-ready 계획만 보관 | 검증된 argv/command는 private planId lookup에만 두고 API DTO·HCA·영수증에 공개하지 않음. 실행 시 한 번 소모. waiting/needs-setup 계획은 저장하지 않으며 초과 시 새 준비 거절 |
+| 팀 프로젝트 런처 소유 결속 | host 인스턴스 기본128개, 설정 hard cap256개. pending/unknown/retired/live 모두 한도에 포함 | 새 Orca 창 생성 전에 예약. 미확정 기록을 축출하거나 다른 창을 찾아 재전송하지 않음. dispose는 metadata를 회수하고 helper를 비활성화하며 사람의 터미널을 종료하지 않음. 영속 실행 원장이 정본 |
 | 로컬 워크룸 대화 기록 | SQLite cache2 MiB·busy100ms, keyset50행, binding cache32개/15초·목록당 probe4회, 검토64개/60초, 요청 본문 streaming8 KiB | 보일 때15초 조회·숨김/unmount 후 늦은 목록 응답 무시. 최초 관측 전 Claude ID는 미확인 상태로 보존. 실행 전 영속 CAS 예약, crash 영수증은 unknown. 원문·credential·환경·실제 경로 저장 및 원격 공개 없음. 기록·미확정 영수증을 예산 때문에 삭제하거나 자동 재실행하지 않음. [첫 구현 범위](plans/workroom-conversation-recovery-2026-10-13/EXECUTION.md) |
 | 웹 공통 북마크 조회 | 페이지 500개, 전체 10,000개·JSON UTF-8 8 MiB 상한 | 인증된 동일 자료 범위에서 기기 선택과 독립 조회. 중간 실패·중복 ID·한도 초과는 부분 결과로 교체하지 않고 기존 목록 보존. 조회는 자료 이관·삭제를 수행하지 않음 |
 | 모바일 작업 공간 | 요청자 최대16개·분당60회, 응답8,500 bytes, 기록 페이지3개·본문1,500 codepoints, 화면 저장 상태 조회3초 | 비활성 화면의 상태 조회 중지, 문서 숨김/연결 종료 시 기록 본문 해제. 원본 기록은 삭제하지 않음. 같은 호스트 탭은 연결 객체를 유지 |
@@ -48,6 +54,9 @@
 | LAN 원격 메시지 | 처리 프레임 16 KiB, Bun 수신 한도 32 KiB, 초당 10회, 대기 20개·256 KiB | 비동기 처리 대기열에 넣기 전에 검사. 초과 연결을 종료하고 입력 직전에도 연결 권한을 재확인 |
 
 문자열 예산은 UTF-16과 객체 비용의 추정치다. V8/JSC·WebKit·Bun allocator의 실제 물리 메모리 한도와 같지 않다. 작업 이벤트 하나의 서버 JSON 한도는 64 KiB이고 화면당 이벤트는 500개이므로, 활성 작업 예외 역시 입력 계약의 상한을 가진다.
+
+팀 자원 기준의 정본은 `src/teamExternalHost.ts`, `src/teamOrcaCheckout.ts`, `src/teamProjectLauncher.ts`다. Orca SQLite의 8 MiB는 영수증 본문 합계이며
+DB 파일·journal의 물리 크기 상한을 뜻하지 않는다. 요청 옵션과 실제 적용 근거, 수동 합류·미확정 상태는 [팀 실행 계약](claude/mcp-ops.md)에 설명한다.
 
 ## 반복 검증
 

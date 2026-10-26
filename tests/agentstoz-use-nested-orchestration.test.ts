@@ -68,7 +68,7 @@ test('every agent drives every agent through agentstoz_use: 16 nested pairs rela
   const f = await fixture();
   const run = `${Date.now().toString(36)}`;
   const pairs = await Promise.all(AGENTS.map(async orchestrator => {
-    const started = await f.call('start_workroom_session', {target: 'ops', agent: orchestrator, requestId: `orch_start_${orchestrator}_${run}`, foreground: false});
+    const started = await f.call('start_workroom_session', {target: 'ops', agent: orchestrator, surface: 'internal', ...(orchestrator === 'hermes' ? {hermesVariant: 'default'} : {}), requestId: `orch_start_${orchestrator}_${run}`, foreground: false});
     expect(started).toMatchObject({success: true, target: 'ops', reused: false, openedWorkroom: false, session: {agent: orchestrator, targetId: 'ops-project'}});
     const sessionId: string = started.session.id;
     // wait returns the plain tail itself; an orchestrator stays quiet while it drives a worker.

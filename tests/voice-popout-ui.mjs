@@ -14,6 +14,8 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   // VOC 2026-10-15: a closed 「아젠투지 호출」 window must be reopenable without quitting the app.
   assert.equal(await main.getByTestId('voice-dock-reopen').count(),0,'no reopen button while the voice window is open');
   await main.evaluate(()=>window.closeVoiceWindow());await main.getByTestId('voice-dock-reopen').waitFor();
+  // Reopen DOM commits before the launcher's passive effect applies the shared toast offset.
+  await main.waitForFunction(()=>getComputedStyle(document.documentElement).getPropertyValue('--voice-dock-offset').trim()==='52px',null,{timeout:3000});
   assert.equal(await main.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--voice-dock-offset').trim()),'52px','toasts are lifted above the reopen button');
   assert.equal(await main.evaluate(()=>{const scrim=document.createElement('div');scrim.style.cssText='position:fixed;inset:0;z-index:50;background:#0006';document.body.append(scrim);const box=document.querySelector('[data-testid="voice-dock-reopen"]').getBoundingClientRect();const hit=document.elementFromPoint(box.x+box.width/2,box.y+box.height/2);scrim.remove();return hit===scrim;}),true,'a modal scrim (lowest z-50) covers the reopen button');
   const opensBefore=await main.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_voice_window').length);
@@ -21,6 +23,7 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   const reopenCall=await main.evaluate(n=>window.nativeCalls.filter(c=>c.command==='open_voice_window')[n],opensBefore);
   assert.deepEqual(reopenCall.args,{panel:false},'the reopen button brings back the compact dock, not the full panel');
   assert.equal(await main.evaluate(()=>window.creations),2);
+  await main.waitForFunction(()=>getComputedStyle(document.documentElement).getPropertyValue('--voice-dock-offset').trim()==='',null,{timeout:3000});
   assert.equal(await main.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--voice-dock-offset').trim()),'','offset is released once the dock is back');
   await main.evaluate(()=>window.closeVoiceWindow(true));await main.evaluate(()=>window.dispatchEvent(new Event('focus')));await main.getByTestId('voice-dock-reopen').waitFor();
   await main.evaluate(()=>window.dispatchEvent(new Event('agentstoz:open-voice-dock')));await main.getByTestId('voice-dock-reopen').waitFor({state:'detached'});

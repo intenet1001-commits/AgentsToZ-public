@@ -121,6 +121,12 @@ pub(crate) async fn open_workroom_window(
         return Err("이 창에서는 워크룸을 분리할 수 없습니다.".to_string());
     }
     validate_workroom_popout_query(&query)?;
+    #[cfg(all(target_os="macos",feature="embedded-browser"))]
+    for existing in app.webview_windows().into_values(){
+        if is_workroom_popout_label(existing.label())&&existing.url().ok().and_then(|url|url.query().map(str::to_string)).as_deref()==Some(query.as_str()){
+            existing.show().map_err(|e|e.to_string())?;let _=existing.unminimize();let _=existing.set_focus();return Ok(existing.label().to_string());
+        }
+    }
     let label = loop {
         let n = NEXT_POPOUT.fetch_add(1, Ordering::Relaxed);
         let candidate = format!("workroom-{}", n);

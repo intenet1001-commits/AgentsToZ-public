@@ -152,6 +152,17 @@ bun run install:ios:development -- --device '<connected-device-id>'
 
 **처음 서명할 때:** App Group ID는 `-allowProvisioningUpdates`로 자동 등록되지 않습니다. Xcode Signing & Capabilities에서 `group.<앱 번들 ID>`를 한 번 추가하거나 개발자 계정에서 등록해 앱·`.share` App ID에 지정해야 기기 빌드가 됩니다. USB 설치 스크립트는 이제 `PRODUCT_BUNDLE_IDENTIFIER`가 아니라 `AGENTSTOZ_APP_BUNDLE_ID`를 넘깁니다 — 전역 번들 ID는 확장까지 앱과 같은 ID로 바꿔 embed가 실패합니다. 구조 검사: `bun test --cwd mobile/ios/scripts/tests --max-concurrency=1`.
 
+## Mac 화면 보기·조작 (AgentsToZ Screen)
+
+설계·보안 요구사항의 정본은 [화면 제어 설계](../../docs/design/screen-control-2026-10-24/DESIGN.md)입니다. 뷰어(`App/ScreenViewerView.swift`)의 입력은 Jump Desktop처럼 두 방식이고, 도구 막대의 「터치/트랙패드」로 바꾸며 다음 연결에도 그대로 씁니다(`UserDefaults` 키 `screenControl.inputMode`, 민감 정보 아님).
+
+- **터치:** 탭 = 누른 곳 클릭(빠른 두 번 탭은 첫 탭 위치를 다시 써서 Mac이 더블클릭으로 셉니다. 단 두 탭이 유리에서 16pt **그리고** Mac 영상에서 8픽셀 안일 때만 — 축소한 폰에서는 16pt가 Finder 줄 세 개라, 바로 아랫줄·옆 계산기 키를 빠르게 누른 것이 첫 자리 더블클릭이 되면 안 됩니다. 그래서 1배 세로 화면에서는 더블클릭이 잘 안 잡힐 수 있고, 확대하거나 트랙패드 방식을 씁니다), 길게 누른 뒤 끌기 = 버튼을 누른 채 끌기(손을 떼면 놓음), 한 손가락 끌기 = 확대한 화면 이동.
+- **트랙패드:** 폰이 영상 위에 커서를 그리고 한 손가락이 상대 이동시킵니다(천천히 1:1, 빠르게 최대 3배). 탭 = 커서 위치 클릭, 길게 누른 뒤 끌기 = 끌기. 확대 중 커서가 가장자리에 가면 화면이 따라갑니다.
+- **공통:** 두 손가락 탭 = 오른쪽 클릭, 두 손가락 끌기 = 스크롤(내용이 손가락을 따라오고, 튕기면 미끄러짐), 벌리기 = 1~4배 확대, 두 손가락 두 번 탭 또는 「확대 원래대로」 = 1배. 두 손가락 동작은 처음 움직임으로 확대인지 스크롤인지 한 번만 정합니다.
+- **암호 입력(열쇠 버튼):** 보안 입력칸(자동 고침·예측·받아쓰기 없음, 복사·붙여넣기·끌어 놓기 막음)에 친 글자를 기존 유니코드 글자 입력으로 보내고 곧바로 칸을 비웁니다. 클립보드는 쓰지 않습니다(SR-17). 키보드의 보내기는 Mac에서 Return까지 누릅니다.
+- 포인터 이동과 스크롤은 화면 갱신마다 모아 각각 초당 60번까지만 보냅니다. Mac 입력 한도(초당 240)를 넘으면 Mac이 조용히 버리기 때문입니다. 스크롤 한 번은 Mac 한도(4000)를 넘지 않고, 글자는 제어 문자를 빼고 256바이트씩 나눕니다 — 둘 다 Mac에서는 세션을 끝내는 형식 오류입니다.
+- 좌표·확대·가속·스크롤 계산은 UIKit 없는 `AgentsToZCore/ScreenViewport.swift`에 있고 `bun run test:ios`(및 `swift test --package-path mobile/ios/AgentsToZCore`)의 `ScreenViewportTests.swift`가 확인합니다. 조작 느낌·Face ID·실제 Mac은 [실기기 체크리스트](DEVICE-CHECKLIST.md)의 「Mac 화면」 절로 확인합니다.
+
 ## 계정 없이 archive 준비하기
 
 ```sh

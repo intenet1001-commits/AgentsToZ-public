@@ -418,7 +418,7 @@ async function verifyCurrentGitWorktreeUi(browser) {
         await row.getByText('워크트리 실측 프로젝트', { exact: true }).first().click();
       }
       await launch.launcher.getByRole('combobox').selectOption(launch.agent);
-      await launch.launcher.getByRole('button', {name: '대화 창에서 작업', exact: true}).click();
+      await launch.launcher.getByRole('button', {name: '워크룸에서 작업', exact: true}).click();
       await worktreePage.getByTestId('ai-terminal-panel').waitFor({state: 'visible'});
       const selectedSession = worktreePage.getByTestId('ai-terminal-panel').locator('[role="tab"][aria-selected="true"]');
       // Focusing a session deliberately hides the overview tabs. Verify the real

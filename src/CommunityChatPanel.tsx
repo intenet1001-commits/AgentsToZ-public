@@ -1,6 +1,7 @@
 import React,{memo,useCallback,useEffect,useRef,useState} from 'react';
 import {Send,Users} from 'lucide-react';
 import {manageAgentDialogue} from './AgentDialoguePanel';
+import {COMMUNITY_KIND_LABEL,communityMessagePreview} from './communityMessageView';
 import {LOCAL_COMMUNITY_MESSAGE_LIMIT,LOCAL_COMMUNITY_TEXT_LIMIT,REMOTE_COMMUNITY_SEND_LIMIT,mergeRemoteCommunityMessages,normalizeRemoteCommunityState,type RemoteCommunityState} from './remoteCommunity';
 /** 서버가 맥 한도로 내보내므로 검사기도 같은 한도로 읽어야 한다 — 기본값(휴대폰)이면 통째로 거절한다. */
 const LOCAL_LIMITS={messages:LOCAL_COMMUNITY_MESSAGE_LIMIT,text:LOCAL_COMMUNITY_TEXT_LIMIT};
@@ -53,6 +54,8 @@ export function CommunityChatPanel({unread,label,visible=true}:{unread:number;la
   const [state,setState]=useState<RemoteCommunityState|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
+  /** Messages opened with 「전체 보기」, by seq. */
+  const [expanded,setExpanded]=useState<ReadonlySet<number>>(()=>new Set());
   const cursor=useRef(0);
   const flight=useRef(false);
   const visibleRef=useRef(visible);visibleRef.current=visible;
@@ -122,10 +125,14 @@ export function CommunityChatPanel({unread,label,visible=true}:{unread:number;la
         <div className="ai-terminal-community-log" data-testid="workroom-community-log">
           {state.messages.length===0
             ?<p className="ai-terminal-hint">아직 받은 대화가 없습니다. 입장 전에 지나간 대화는 보이지 않습니다.</p>
-            :state.messages.map(message=><div key={message.seq} className={`ai-terminal-community-row${message.self?' ai-terminal-community-row--mine':''}`}>
-              <span className="ai-terminal-community-from">{message.self?'이 Mac':message.from}</span>
-              <span className="ai-terminal-community-text">{message.text}{message.truncated?' …':''}</span>
-            </div>)}
+            :state.messages.map(message=>{
+              const {preview,folded}=communityMessagePreview(message.text),whole=!folded||expanded.has(message.seq),label=COMMUNITY_KIND_LABEL[message.kind];
+              return <div key={message.seq} className={`ai-terminal-community-row${message.self?' ai-terminal-community-row--mine':''}`}>
+                <span className="ai-terminal-community-from">{message.self?'이 Mac':message.from}{label&&<span className="ai-terminal-community-kind">{label}</span>}</span>
+                <span className="ai-terminal-community-text">{whole?message.text:preview}{whole&&message.truncated?' …':''}</span>
+                {folded&&<button type="button" className="ai-terminal-community-more" aria-expanded={whole} data-testid="workroom-community-more"
+                  onClick={()=>setExpanded(prior=>{const next=new Set(prior);if(!next.delete(message.seq))next.add(message.seq);return next;})}>{whole?'접기':'전체 보기'}</button>}
+              </div>;})}
         </div>
         <CommunityCompose busy={busy} onSend={handleSend} onComposing={onComposing}/>
       </>}

@@ -34,6 +34,11 @@ for(const width of [375,1024]){
   const context=await browser.newContext({viewport:{width,height:850},serviceWorkers:'block'});
   const unexpected=[],errors=[];
   await context.route('**/*',route=>{const url=new URL(route.request().url());
+    // 「Hermes · Claude」/「Hermes · Codex」 (src/hermesVariants.ts): this Mac's own items, read from the local sidecar.
+    // Claude has a credential here and Codex does not, so the dropdown must show one offered and one refused.
+    if(url.pathname==='/api/agent-runtime/hermes-variants')return route.fulfill({json:{checked:true,sessions:[],items:[
+     {variant:'claude',provider:'anthropic',model:'claude-opus-5-5',available:true},
+     {variant:'codex',provider:'openai-codex',model:'gpt-6.1-sol',available:false}]}});
     if(url.origin!==origin||url.pathname.startsWith('/api/')){unexpected.push(url.pathname);return route.abort();}
     if(url.pathname==='/__project-launch-fixture')return route.fulfill({contentType:'text/html',body:html});
     return route.continue();

@@ -157,3 +157,49 @@ describe('smaller shell fixes', () => {
     }
   });
 });
+
+// AgentsToZ Screen viewer (mobile/ios/App/ScreenViewerView.swift), review 2026-10-25. The viewer cannot be opened in the
+// simulator (App Attest, Face ID), so this pins the layout that keeps the Mac's own signals out of the picture.
+describe('AgentsToZ Screen: the Mac\'s signals sit outside its picture, and turning off says what it does', () => {
+  const viewer = read('mobile/ios/App/ScreenViewerView.swift');
+  const body = between(viewer, '    var body: some View {', '    /// Leaving the foreground ends the session at once');
+  const band = between(viewer, '    private var macSignalBand: some View {', '    private var toolbar: some View {');
+  const lockText = 'Mac이 잠겨 있습니다. 암호는 열쇠 버튼의 입력칸으로 보내세요.';
+  const pauseText = 'Mac 앞에서 마우스나 키보드를 쓰는 중이라 조작을 잠시 멈췄습니다.';
+  // Before: both banners floated in the toolbar's overlay over a full-screen picture, so in landscape (an iPhone with a
+  // 16:10 Mac) and at any zoom a fake lock strip drawn by a process on the Mac showed where the real banner would.
+  test('the lock and pause banners are a band above the picture, never an overlay on it', () => {
+    expect(band).toContain(lockText);
+    expect(band).toContain(pauseText);
+    expect(viewer.split(lockText).length - 1).toBe(1);
+    expect(viewer.split(pauseText).length - 1).toBe(1);
+    const overlays = body.split('.overlay(').slice(1);
+    expect(overlays.length).toBeGreaterThan(0);
+    for (const overlay of overlays) {
+      for (const word of ['macSignalBand', 'macState.locked', 'macState.inputPaused', lockText, pauseText]) expect(overlay).not.toContain(word);
+    }
+  });
+  test('the band and the picture are stacked, so the picture is laid out below the band', () => {
+    const stack = body.indexOf('VStack(spacing: 0) {');
+    expect(stack).toBeGreaterThan(-1);
+    expect(body.indexOf('macSignalBand')).toBeGreaterThan(stack);
+    expect(body.indexOf('ScreenSurface(')).toBeGreaterThan(body.indexOf('macSignalBand'));
+    // A zoomed picture is wider than its surface; the surface cuts it off at its own edges.
+    expect(between(viewer, '        init(hosted: CALayer) {', '        required init?(coder: NSCoder)')).toContain('clipsToBounds = true');
+  });
+  test('even without lock or pause, a neutral app-owned slot excludes all Mac pixels', () => {
+    expect(band.replace('private var macSignalBand: some View {', '').trimStart()).toMatch(/^VStack\(spacing: 0\) \{/);
+    expect(band).toContain('.frame(minHeight: 44)');
+    expect(band).toContain('Mac은 잠겨 있지 않습니다.');
+    expect(band).toContain('Mac 잠김 상태를 확인하지 못했습니다.');
+    const picture = between(body, '            ZStack {', '            // The phone');
+    expect(picture).not.toContain('.ignoresSafeArea()');
+    expect(picture).toContain('.clipped()');
+  });
+  test('turning off from the phone says screen control goes off and the Mac app stays in the menu bar', () => {
+    const message = between(viewer, '.confirmationDialog("\\(mac.macName)의 화면 제어를 끌까요?"', '    /// Leaving the foreground ends the session at once');
+    expect(message).not.toContain('AgentsToZ Screen이 꺼지고');
+    expect(message).toContain('Mac의 화면 제어가 꺼지고 이 연결도 끝납니다.');
+    expect(message).toContain('메뉴 막대');
+  });
+});

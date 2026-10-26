@@ -12,7 +12,7 @@ describe('Workroom-first App wiring',()=>{
     expect(appSource).not.toContain('<AiWorkRequestPanel');
     expect(appSource).not.toContain('<AgentRuntimePanel');
     expect(appSource).toContain('data-testid="control-profile-open"');
-    expect(appSource).toContain('AgentsToZ OPS · 운영 기억 확인');
+    expect(appSource).toContain('아젠투지 설정 열기');
   });
 
   test('preserves opaque target discovery for the Workroom',()=>{
@@ -54,7 +54,7 @@ describe('Workroom-first App wiring',()=>{
     expect(appSource).not.toContain('openAgentsToZConversation');
     expect(appSource).not.toContain('AgentsToZ에서 대화');
     expect(appSource).toContain('<ProjectLaunchActions');
-    expect(appSource).toContain('onWorkroom={agent => openProjectTerminal(sel, agent, undefined, undefined, true)}');
+    expect(appSource).toContain('onWorkroom={(agent, variant) => openProjectTerminal(sel, agent, undefined, undefined, true, variant)}');
   });
 
   test('preserves external launchers independently from Workroom',()=>{

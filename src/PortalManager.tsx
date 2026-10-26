@@ -487,7 +487,7 @@ function SetupGuide() {
   const allowedEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(allowedEmail.trim());
   const aiTablePrompt = allowedEmailValid
     ? aiTablePromptForAllowedEmails([allowedEmail])
-    : '먼저 Google owner 이메일을 입력하세요. server membership이 비어 있으면 모든 계정이 차단됩니다.';
+    : '먼저 Google 관리자(owner) 이메일을 입력하세요. 허용된 계정 목록(server membership)이 비어 있으면 모든 계정이 차단됩니다.';
 
   const handleSupabaseLogin = async () => {
     setLoginLoading(true);
@@ -574,7 +574,7 @@ vercel --prod
 
   const steps = [
     {
-      title: '🆕 최초 세팅',
+      title: '🆕 초기 설정',
       content: (
         <div className="space-y-2">
           <p className="portal-hint" style={{ margin: 0, color: 'var(--ink-2)', fontSize: 11.5 }}>Supabase CLI + MCP 방식으로 처음 설정하는 경우</p>
@@ -593,14 +593,14 @@ vercel --prod
               className="portal-mini-button portal-mini-button--info portal-mini-button--grow"
             >
               <Terminal className="w-3 h-3" />
-              {loginLoading ? '터미널 열는 중...' : 'supabase login 실행'}
+              {loginLoading ? '터미널 여는 중…' : 'supabase login 실행'}
             </button>
           </div>
         </div>
       ),
     },
     {
-      title: '💻 추가 기기 세팅',
+      title: '💻 추가 기기 설정',
       content: (
         <div className="space-y-2">
           <p className="portal-hint" style={{ margin: 0, color: 'var(--ink-2)', fontSize: 11.5 }}>기존 Supabase 프로젝트에 새 맥/PC를 추가하는 경우</p>
@@ -1072,7 +1072,7 @@ export default function PortalManager({ showToast, openSettings, onSettingsClose
       const { data: isMember, error } = await supabase.rpc('portmgr_is_member');
       if (error || isMember !== true) {
         throw new Error(
-          `DB 허용 이메일 정책 거부${error ? `: ${describeSupabaseFailure(error)}` : ': 현재 계정이 server member가 아닙니다.'}`,
+          `DB 허용 이메일 정책 거부${error ? `: ${describeSupabaseFailure(error)}` : ': 현재 계정이 허용된 계정(server member)이 아닙니다.'}`,
         );
       }
       setAuthenticatedSessionEmail(session.user.email ?? 'authenticated');
@@ -2463,7 +2463,7 @@ export default function PortalManager({ showToast, openSettings, onSettingsClose
                       {authenticatedSessionEmail ? `Google 로그인됨 · ${authenticatedSessionEmail}` : 'Google 로그인이 필요합니다'}
                     </p>
                     <p className="portal-hint" style={{marginTop:4}}>
-                      같은 origin의 <code className="portal-code">/portal.html</code> popup에서 session을 완료합니다.
+                      같은 주소의 <code className="portal-code">/portal.html</code> 팝업 창에서 로그인을 완료합니다.
                     </p>
                   </div>
                   <button

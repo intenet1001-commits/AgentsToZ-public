@@ -66,7 +66,7 @@ try {
     // Only the fixture's synthetic terminal is closed; the installed app is never contacted.
     assert.equal((await post({operation:'close',sessionId:session.id})).status,200);
     await row('시험 Codex 업무 계정').getByRole('button',{name:'목록에서 제외',exact:true}).click();
-    await picker.getByText('목록에서 제외했습니다. 로그인 파일은 호스트 PC에 보존됩니다.',{exact:true}).waitFor();
+    await picker.getByText('목록에서 제외했습니다. 로그인 파일은 이 기기에 보존됩니다.',{exact:true}).waitFor();
     await page.waitForFunction(()=>document.querySelector('[aria-label="새 작업의 CLI 계정"]')?.value==='host-default');
     assert.equal(await select.locator('option').filter({hasText:'시험 Codex 업무 계정'}).count(),0);
     await page.getByLabel('검사할 AI').selectOption('claude');

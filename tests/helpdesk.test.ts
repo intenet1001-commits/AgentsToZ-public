@@ -113,3 +113,15 @@ test('the HTTP reader rejects declared and streamed oversize input before parsin
  let cancelled=false;const stream=new ReadableStream<Uint8Array>({start(c){c.enqueue(new Uint8Array(16001));},cancel(){cancelled=true;}});await expect(readHelpdeskRequest(request(stream))).rejects.toThrow('너무');expect(cancelled).toBe(true);
  await expect(readHelpdeskRequest(request(new Uint8Array([255])))).rejects.toThrow();
 });
+// UX audit 2026-10-25: HELPDESK.md answered 「사용자 프로필은 어디에 있나요?」 but the in-app catalog — the only material the
+// helpdesk AI gets — did not. Appended so the panel's fixed HELPDESK_GUIDES[1]/[6] shortcuts keep their guides.
+test('the in-app catalog says where 아젠투지 설정 is, without calling OPS memory the user\'s own',()=>{
+ const guide=HELPDESK_GUIDES.find(g=>g.id==='profile')!;
+ expect(guide.question).toBe('사용자 프로필은 어디에 있나요?');
+ expect(guide.text).toContain('도구 및 설정 → 아젠투지 설정');
+ expect(guide.text).not.toMatch(/내 운영 프로필|나의 .*운영/);
+ expect([HELPDESK_GUIDES[1].id,HELPDESK_GUIDES[6].id]).toEqual(['project','error']);
+ expect(guide.text).toContain('장기기억 → 내 프로필');
+ expect(guide.text).toContain('지시 원문');
+ expect(helpdeskPrompt('프로필',[],{})).toContain('[profile] 내 프로필과 아젠투지 설정');
+});

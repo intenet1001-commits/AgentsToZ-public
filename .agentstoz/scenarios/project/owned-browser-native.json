@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "project.owned-browser-native",
+  "title": "자체 Chromium 네이티브 실행 검증",
+  "intent": "실제 Tauri/CEF 앱의 가상 문서로 쿠키·저장소 격리, 제어권 회수·반환, 페이지 유지와 정상 종료를 확인한다. 실제 계정·설치 앱·외부 사이트는 사용하지 않는다.",
+  "origin": "manual:owned-browser-2026-10-24",
+  "tags": [
+    "workroom",
+    "browser",
+    "native"
+  ],
+  "paths": [
+    "experiments/owned-browser-native/**"
+  ],
+  "platforms": [
+    "darwin"
+  ],
+  "safety": "writes-temp",
+  "risk": 3,
+  "cost": {
+    "estimateSeconds": 45
+  },
+  "requires": [
+    "experiments/owned-browser-native/bundle/agentstoz-browser-spike.app/Contents/MacOS/agentstoz-browser-spike"
+  ],
+  "steps": [
+    {
+      "type": "command",
+      "argv": [
+        "python3",
+        "experiments/owned-browser-native/verify.py",
+        "--contracts-only"
+      ],
+      "timeoutSeconds": 60
+    },
+    {
+      "type": "command",
+      "argv": [
+        "python3",
+        "experiments/owned-browser-native/verify.py",
+        "--repeat",
+        "3"
+      ],
+      "timeoutSeconds": 150
+    }
+  ],
+  "memoryQueries": [
+    "browser context installed app",
+    "브라우저 프로필"
+  ]
+}

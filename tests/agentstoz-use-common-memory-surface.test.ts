@@ -24,8 +24,46 @@ test('goal/publication tools are labelled legacy and point at the current tools'
     expect(tool(name).description.startsWith('Legacy goal model (이전 방식)')).toBe(true);
     expect(tool(name).description).toContain('manage_common_knowledge');
   }
-  expect(tool('manage_common_knowledge').description.startsWith('The current common-memory tool')).toBe(true);
+  expect(tool('manage_common_knowledge').description).toContain('The current common-memory tool');
   expect(tool('list_common_memories').description).not.toContain('goal-specific');
+});
+
+// A Korean request ('공통기억에 이거 정리해') found no tool through deferred tool search: the current tools lead with the word.
+test('the current common-memory tools start with the Korean word a person uses',()=>{
+  for(const name of ['manage_common_knowledge','recall_common_memory','list_common_memories'])expect(tool(name).description.startsWith('공통기억')).toBe(true);
+  expect(tool('manage_common_knowledge').description).toContain('장기기억 연결');
+  // The legacy tools keep their own lead, so a Korean search lands on the current ones first.
+  expect(tool('manage_common_memory').description.startsWith('공통기억')).toBe(false);
+});
+
+test('recall says which id names the group and where one whole common memory is read',()=>{
+  const d=tool('recall_common_memory').description;
+  expect(d).toContain('groupId/groupName');expect(d).toContain('top-level memoryId is the long-term memory');
+  expect(d).toContain('manage_common_knowledge {operation:"read", groupId}');expect(d).toContain('published goal groups only');
+});
+
+test('every documented request field is declared, typed, and the request object stays open for older forms',()=>{
+  const request=(tool('manage_common_knowledge').inputSchema as any).properties.request;
+  for(const key of ['name','description','title','body','reason','category','supersedesEntryId'])expect(request.properties[key].type).toBe('string');
+  for(const key of ['tags','categories','conditions','evidence'])expect(request.properties[key].type).toBe('array');
+  expect(request.properties.archived.type).toBe('boolean');expect(request.properties.offset.type).toBe('integer');
+  // Evidence items are described, not required, and the legacy {portId, expectedMemoryId, mode} member is not newly refused.
+  expect(request.properties.evidence.items.required).toBeUndefined();expect(request.additionalProperties).toBeUndefined();
+});
+
+test('an argument outside request:{…} is named and the wrapper is shown',()=>{
+  expect(()=>agentsToZUseMcpActionForTool('agentstoz_use_manage_common_knowledge',{operation:'read',groupId:G},'ctrl')).toThrow(/not operation, groupId\).*request:\{…\}/);
+  expect(()=>agentsToZUseMcpActionForTool('agentstoz_use_recall_common_memory',{groupId:G,query:'배포'},'ctrl')).toThrow(/operation:"read", groupId/);
+  // The documented forms are unchanged: the goal form and the memory form still build an action.
+  expect(agentsToZUseMcpActionForTool('agentstoz_use_recall_common_memory',{groupId:G,task:'배포'},'ctrl')).toMatchObject({action:'common-memory'});
+  expect(agentsToZUseMcpActionForTool('agentstoz_use_recall_common_memory',{memoryId:M,query:'배포'},'ctrl')).toMatchObject({action:'common-memory'});
+});
+
+test('a malformed knowledge request names the field to fix',()=>{
+  const fails=(request:Record<string,unknown>)=>{try{agentsToZUseMcpActionForTool('agentstoz_use_manage_common_knowledge',{request},'ctrl');}catch(error){return (error as Error).message;}throw Error('accepted');};
+  expect(fails({operation:'save',expectedRevision:0,requestId:'r-1',name:' '})).toContain('name(필수)');
+  expect(fails({operation:'propose-entry',groupId:G,expectedRevision:1,requestId:'r-2',title:'제목',body:''})).toContain('body(필수)');
+  expect(fails({operation:'propose-entry',groupId:G,requestId:'r-3',title:'제목',body:'본문'})).toContain('expectedRevision');
 });
 
 test('manage_common_knowledge documents the memoryId member form and one name per id',()=>{

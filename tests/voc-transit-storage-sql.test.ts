@@ -15,6 +15,11 @@ test('setup SQL carries the photo-VOC transit bucket, identical to its migration
 const NOT_APP_SCHEMA = new Set([
   'portmgr_device_credentials', // legacy, no longer read or written
   'wordpress_blogs', 'wordpress_writing_findings', 'wordpress_design_findings', 'wordpress_headline_examples', 'wordpress_playbook_rules', // corpus, not the app
+  // AgentsToZ Screen's push relay (screen-control DESIGN 「알림·원격 차단」): one publisher-run service behind the
+  // screen-push function, the publisher's APNs key and the endpoint baked into its builds — nothing a self-hosted
+  // install could use. Written as a migration, not applied, kept out of setup SQL (tests/screen-push-sql.test.ts).
+  ...['macs', 'tokens', 'commands', 'requests', 'admit', 'register', 'unregister', 'targets', 'drop_token', 'sync', 'queue', 'status']
+    .map(name => `portmgr_screen_push_${name}`),
 ]);
 test('no migration creates app schema that new installs would miss', () => {
   const dir = new URL('../supabase/migrations/', import.meta.url);

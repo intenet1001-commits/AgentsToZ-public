@@ -50,8 +50,15 @@ export interface WorkroomEffortState {
   /** Host-only: sampler must not mistake our confirmed control writes for a manual override. */
   automaticPending?: boolean;
   runtimeStatus?: 'applied' | 'deferred' | 'unsupported' | 'unconfirmed';
+  /**
+   * Host-only: the level the person pinned for this session (팀 작전 member). Auto never re-evaluates it and a restart
+   * keeps it. Never reported — strict readers reject unknown keys; a record shows it as a level without a tier.
+   */
+  pinned?: WorkroomEffortLevel;
 }
-export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending'> & {sessionId: string; agent: AiTerminalAgent};
+export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending' | 'pinned'> & {sessionId: string; agent: AiTerminalAgent};
+/** A host-only launch choice (team members): a pinned level, or the text auto classifies instead of the launch prompt. */
+export type WorkroomLaunchEffort = {pinned: WorkroomEffortLevel} | {requestText: string};
 
 export interface WorkroomEffortPlanInput {
   agent: AiTerminalAgent;
@@ -67,6 +74,10 @@ export interface WorkroomEffortPlanInput {
   envOverride: boolean;
   /** Codex only, asked lazily: the levels its model is proven to offer, or null when unproven. */
   codexAllowed?: () => readonly string[] | null;
+  /** A level the person chose for this launch. It is their explicit choice, so the off/recommend modes do not hold it back. */
+  pinned?: WorkroomEffortLevel;
+  /** What auto classifies instead of `prompt` (a team member's task, without the brief's shared rules). */
+  requestText?: string;
 }
 
 /** The launch decision. `level` present ⇔ a flag is passed. */
@@ -74,8 +85,17 @@ export function planWorkroomEffort(input: WorkroomEffortPlanInput): WorkroomEffo
   if (input.restricted) return {manual: false, skipped: 'restricted'};
   if (input.historyResume) return {manual: false, skipped: 'history-resume'};
   if (WORKROOM_EFFORT_SUPPORT[input.agent] !== 'launch') return {manual: false, skipped: 'unsupported'};
-  if ((input.mode ?? (input.auto ? 'auto' : 'off')) === 'off') return {manual: false, skipped: 'off'};
   const restart = !!input.previous;
+  const pinned = input.pinned ?? input.previous?.pinned;
+  if (pinned) {
+    const kept = {manual: false, pinned} as WorkroomEffortState;
+    if (input.agent === 'claude' && input.envOverride) return {...kept, skipped: 'env-override'};
+    const allowed = input.agent === 'codex' ? input.codexAllowed?.() ?? null : undefined;
+    const level = allowed === null ? null : workroomEffortLevel(input.agent, pinned, allowed);
+    if (!level) return {...kept, skipped: 'model-unknown'};
+    return {...kept, level, origin: restart ? 'restart' : 'launch'};
+  }
+  if ((input.mode ?? (input.auto ? 'auto' : 'off')) === 'off') return {manual: false, skipped: 'off'};
   let decision: {tier: WorkroomEffortTier; reason: WorkroomEffortReason} | null;
   if (restart) {
     // The tier of the replaced launch; the CLI-side checks below run again (the environment or config may have changed).
@@ -83,8 +103,9 @@ export function planWorkroomEffort(input: WorkroomEffortPlanInput): WorkroomEffo
     decision = previous.tier && previous.reason ? {tier: previous.tier, reason: previous.reason} : null;
     if (!decision) return {manual: false, skipped: previous.skipped === 'unclassified' ? 'unclassified' : 'no-request'};
   } else {
-    if (input.prompt === undefined) return {manual: false, skipped: 'no-request'};
-    decision = classifyWorkroomEffort(workroomEffortRequestText(input.prompt));
+    const text = input.requestText ?? input.prompt;
+    if (text === undefined) return {manual: false, skipped: 'no-request'};
+    decision = classifyWorkroomEffort(workroomEffortRequestText(text));
     if (!decision) return {manual: false, skipped: 'unclassified'};
   }
   const chosen = {...decision, manual: false} as WorkroomEffortState;
@@ -147,7 +168,7 @@ export function observeWorkroomEffortScreen(state: WorkroomEffortState, agent: A
  * clears it. Auto ON also re-evaluates a previous manual or higher level. Unknown current level: advise only low/high.
  */
 export function noteWorkroomEffortRequest(state: WorkroomEffortState, agent: AiTerminalAgent, text: string, auto: boolean, at: string): void {
-  if (WORKROOM_EFFORT_SUPPORT[agent] !== 'launch') return;
+  if (WORKROOM_EFFORT_SUPPORT[agent] !== 'launch' || state.pinned) return;
   if (!auto) { state.advice = undefined; return; }
   const decision = classifyWorkroomEffort(workroomEffortRequestText(text));
   if (!decision) return;
@@ -159,6 +180,6 @@ export function noteWorkroomEffortRequest(state: WorkroomEffortState, agent: AiT
 }
 
 export function workroomEffortRecord(sessionId: string, agent: AiTerminalAgent, state: WorkroomEffortState | undefined): WorkroomEffortRecord {
-  const {phraseLines: _baseline, automaticPending: _pending, ...rest} = state ?? {manual: false};
+  const {phraseLines: _baseline, automaticPending: _pending, pinned: _pinned, ...rest} = state ?? {manual: false};
   return {sessionId, agent, ...rest, ...(rest.advice ? {advice: {...rest.advice}} : {})};
 }

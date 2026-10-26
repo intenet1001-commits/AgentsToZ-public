@@ -63,6 +63,8 @@ const levelWord = (level: string) => (TIERS as readonly string[]).includes(level
 /** The receipt next to the model/effort the CLI shows; null when the session has no decision to report. */
 export function workroomEffortBadgeText(session: WorkroomEffortSessionView | undefined): string | null {
   if (!session) return null;
+  // A level without a tier is one the person pinned at launch (a 팀 작전 member): the Mac's mode does not apply to it.
+  if (session.level && !session.tier) return session.manual ? '에포트 직접 설정' : `에포트 고정 · ${WORKROOM_EFFORT_TIER_LABELS[session.level]}`;
   if (session.mode === 'off') return '에포트 미선택 · CLI 설정 사용';
   if (session.mode === 'recommend') return '에포트 추천제공';
   if (session.manual || session.skipped === 'manual') return MANUAL_TEXT;
@@ -77,7 +79,7 @@ export function workroomEffortBadgeText(session: WorkroomEffortSessionView | und
 
 /** A later whole request seemed to need another level. Advice only: the CLI is never switched for the person. */
 export function workroomEffortAdviceText(session: WorkroomEffortSessionView | undefined): string | null {
-  if (!session?.advice || session.manual || session.mode === 'off') return null;
+  if (!session?.advice || session.manual || session.mode === 'off' || session.level && !session.tier) return null;
   const hint = CHANGE_HINT[session.agent];
   if (!hint) return null;
   const current = session.seen ?? session.level;

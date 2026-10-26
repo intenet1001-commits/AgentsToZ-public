@@ -770,6 +770,8 @@ struct LANWorkroomView: View {
     @ObservedObject var session: LANWorkroomSession
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingConnection = false
+    /// 「Mac 화면」 lives on the app's first screen, which this saved workspace covers as soon as the app opens.
+    @State private var showingScreens = false
     @State private var confirmingDisconnect = false
     @State private var disconnecting = false
     /// 「다른 연결 QR 스캔」 closes this sheet first; the workroom closes once the sheet is gone.
@@ -809,8 +811,17 @@ struct LANWorkroomView: View {
             } message: { Text(session.authenticationIssue ?? "") }
             .navigationTitle("내 작업 공간").navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                Button("Mac 화면", systemImage: "display") { showingScreens = true }
+                    .accessibilityIdentifier("workroomScreenMacs")
                 Button("연결 설정", systemImage: "slider.horizontal.3") { showingConnection = true }
                     .accessibilityIdentifier("workroomConnectionSettings")
+            }
+            .sheet(isPresented: $showingScreens) {
+                NavigationStack {
+                    List { ScreenMacsSection(scannedInvite: .constant(nil)) }
+                        .navigationTitle("Mac 화면").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { Button("닫기") { showingScreens = false }.accessibilityIdentifier("screenMacsClose") }
+                }
             }
             .sheet(isPresented: $showingConnection, onDismiss: {
                 if scanAfterSheet { scanAfterSheet = false; onReconnect() }
