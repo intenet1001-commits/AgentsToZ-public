@@ -42,3 +42,26 @@ test('missing or changed version fields stop publication rather than silently sh
   expect(()=>publicReleaseVersionFiles(100,changed)).toThrow('field count');
   for(const number of [0,-1,1.5,Infinity])expect(()=>publicReleaseVersionFiles(number,sources())).toThrow();
 });
+
+test('the real version updater can rebuild an already versioned public snapshot twice and still rejects a missing package version',()=>{
+  const root=mkdtempSync(join(tmpdir(),'atz-public-version-rebuild-'));roots.push(root);
+  git(root,['init','-b','main']);git(root,['config','user.name','Test']);git(root,['config','user.email','test@example.com']);
+  for(const [path,text]of publicReleaseVersionFiles(1516,sources())){
+    mkdirSync(dirname(join(root,path)),{recursive:true});writeFileSync(join(root,path),text);
+  }
+  for(const path of ['update-version.ts','buildVersion.ts'])writeFileSync(join(root,path),readFileSync(resolve(import.meta.dir,'..',path),'utf8'));
+  // Icon rendering is outside this regression; execute the updater's real version-writing path.
+  writeFileSync(join(root,'stamp-icon.py'),'raise SystemExit(0)\n');
+  git(root,['add','.']);git(root,['commit','-m','public snapshot']);
+  const update=()=>Bun.spawnSync([process.execPath,join(root,'update-version.ts')],{cwd:root,stdout:'pipe',stderr:'pipe'});
+  for(let attempt=0;attempt<2;attempt++){
+    const result=update();expect(result.exitCode,result.stderr.toString()).toBe(0);
+    expect(readBuildNumberFile(root)).toEqual({buildNumber:1516});
+    expect(JSON.parse(readFileSync(join(root,'src-tauri/tauri.conf.json'),'utf8')).version).toBe('1516.0.0');
+    expect(readFileSync(join(root,'src-tauri/Cargo.toml'),'utf8')).toContain('version = "1516.0.0"');
+    expect(git(root,['status','--porcelain'])).toBe('');
+  }
+  writeFileSync(join(root,'src-tauri/Cargo.toml'),'[package]\nname = "app"\n');
+  const missing=update();expect(missing.exitCode).toBe(1);
+  expect(missing.stderr.toString()).toContain('package version was not found');
+});

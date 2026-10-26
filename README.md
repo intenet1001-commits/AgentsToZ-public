@@ -2,6 +2,8 @@
 
 > **업무 스레드에서 지시하고, 프로젝트 워크룸에서 실행하며, 검증한 경험은 프로젝트 메모리에 남깁니다.** 나를 이해하는 운영 기억부터 여러 기기·AI의 협업까지, 다음 업무를 더 잘 이어가기 위한 앱입니다.
 
+**iPad·iPhone으로 Mac 화면 제어를 테스트한다면:** [공개 Releases](https://github.com/intenet1001-commits/AgentsToZ-public/releases)에서 **Screen 동봉 · Apple Silicon** ZIP 패키지를 선택하세요(macOS 14 이상). 압축을 풀어 메인 앱을 Applications에 복사하고 처음 실행하면 Screen도 독립 앱으로 설치됩니다. 아래 v1165 DMG에는 Screen이 없습니다.
+
 **처음 설치한다면:** [Mac v1165 공증 DMG](https://github.com/intenet1001-commits/AgentsToZ-public/releases/tag/v1165.0.0) · [Mac 간단 설치 안내](docs/user-guide/MAC-INSTALL.md) · [아젠투지 헬프데스크](docs/user-guide/HELPDESK.md) · [Windows 최신 설치 파일](https://github.com/intenet1001-commits/AgentsToZ-public/releases/latest) · [그림으로 따라가는 온라인 시작 설명서](https://agentstoz-guide.vercel.app) · [저장소 안의 사용자 가이드](docs/user-guide/GUIDE.md) · [선택: 내 계정으로 개인 웹 포털 만들기](docs/SELF-HOSTING.md)
 
 | 공개 배포 구분 | 현재 버전 | 확인할 점 |

@@ -79,6 +79,8 @@ fast-forward Pull을 이어가도록 현재 공개 `main`을 부모로 쓰는 �
 이 모드는 기존에 공개된 이력만 유지한다. 기본 orphan 경로로 이미 끊긴 더 오래된 clone이나
 로컬에서 갈라진 작업 이력을 자동으로 reset·merge하지 않는다. 회귀는 임시 로컬 bare remote와
 별도 clone의 실제 `git pull --ff-only`로 검증하고 외부 저장소에는 쓰지 않는다.
+공개 snapshot은 버전 파일이 이미 확정돼 있으므로 `update-version.ts`는 Cargo 버전 필드의
+존재를 검사하고 같은 버전의 재빌드도 허용한다. 실제 updater를 두 번 실행하는 회귀로 확인한다.
 
 ### Screen 동봉과 독립 설치 (2026-10-26)
 

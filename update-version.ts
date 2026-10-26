@@ -36,13 +36,12 @@ async function updateVersion() {
     // Keep them aligned with tauri.conf.json and the installer version.
     const cargoToml = await Bun.file(CARGO_TOML_PATH).text();
     const nextVersion = `${next}.0.0`;
-    const updatedCargoToml = cargoToml.replace(
-      /(\[package\][\s\S]*?\nversion\s*=\s*)"[^"]+"/,
-      `$1"${nextVersion}"`,
-    );
-    if (updatedCargoToml === cargoToml) {
+    const packageVersion = /(\[package\][\s\S]*?\nversion\s*=\s*)"[^"]+"/;
+    if (!packageVersion.test(cargoToml)) {
       throw new Error('src-tauri/Cargo.toml package version was not found');
     }
+    // Public snapshots already carry this version. Rebuilding the same source is valid.
+    const updatedCargoToml = cargoToml.replace(packageVersion, `$1"${nextVersion}"`);
     await Bun.write(CARGO_TOML_PATH, updatedCargoToml);
 
     // The native iPhone release family follows the desktop/web build number.

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AgentsToZ_byCS",
-  "version": "1516.0.0",
+  "version": "1517.0.0",
   "identifier": "com.intenet.agentstozbycs",
   "build": {
     "frontendDist": "../dist",
