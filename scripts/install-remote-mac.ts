@@ -11,6 +11,10 @@
  * Safety: quitting the app ends any Workroom CLI it runs, so the install refuses while the remote
  * sidecar has Workroom children unless --force. The new bundle is unpacked and its signature
  * verified in a staging folder before the installed app is touched.
+ *
+ * AgentsToZ Control is a separate app and is not replaced here. The script reports the other Mac's Control version and
+ * warns when it is older than this Mac's: a new main app with an old Control has its computer-use approvals refused
+ * (2026-10-31, 1호 ran main 1619 with Control 1557).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -19,6 +23,18 @@ import { join } from 'node:path';
 
 export const APP_NAME = 'AgentsToZ_byCS.app';
 export const BUNDLE_ID = 'com.intenet.agentstozbycs';
+export const CONTROL_APP_NAME = 'AgentsToZ Control.app';
+const buildOf = (version: string | undefined) => /^([0-9]{1,9})(\.|$)/.exec(version ?? '')?.[1];
+
+/** A warning when the other Mac's Control (`none` when absent) is older than this Mac's, or null. */
+export function controlVersionWarning(host: string, remote: string | undefined, local: string | undefined): string | null {
+  const mine = buildOf(local);
+  if (!mine) return null;
+  const theirs = buildOf(remote);
+  if (theirs && Number(theirs) >= Number(mine)) return null;
+  return `⚠️ ${host}의 ${CONTROL_APP_NAME}은 ${theirs ? `v${remote}` : '설치되어 있지 않거나 읽을 수 없어'} 이 Mac(v${local})보다 오래됐습니다. `
+    + '전체 Mac·앱별 컴퓨터 유즈 승인이 거절될 수 있으니 Control도 같은 버전으로 설치하세요.';
+}
 const HOST_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,120}$/;
 const ZIP_RE = /^\/tmp\/agentstoz-install-[0-9a-z.-]{1,80}\.zip$/;
 
@@ -132,6 +148,8 @@ export function remoteInstallScript(zipPath: string, layout: Partial<RemoteInsta
     'fi',
     `echo "installed=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$dest/Contents/Info.plist")"`,
     'echo "sidecar=up"',
+    `control_plist="$apps/${CONTROL_APP_NAME}/Contents/Info.plist"`,
+    'if [ -f "$control_plist" ]; then echo "control=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$control_plist" 2>/dev/null || echo unreadable)"; else echo "control=none"; fi',
     'if [ "$had_app" -eq 1 ]; then echo "backup=$backup"; fi',
   ].join('\n');
 }
@@ -174,6 +192,9 @@ if (import.meta.main) {
     if (install.code !== 0) throw new Error(`install failed on ${host}: ${install.err.trim()}`);
     if (!install.out.includes(`installed=${version}`)) throw new Error(`${host} reports a different installed version.`);
     console.log(`[install-remote-mac] ✅ ${host} now runs v${version}`);
+    const localControl = run('/usr/libexec/PlistBuddy', ['-c', 'Print CFBundleShortVersionString', join('/Applications', CONTROL_APP_NAME, 'Contents', 'Info.plist')]);
+    const warning = controlVersionWarning(host, install.out.match(/^control=(.*)$/m)?.[1], localControl.code === 0 ? localControl.out.trim() : undefined);
+    if (warning) console.warn(`[install-remote-mac] ${warning}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

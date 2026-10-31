@@ -98,6 +98,24 @@ function runGit(cwd: string, args: string[]): string {
 }
 
 describe('Agent Runtime bundled-sidecar capability isolation', () => {
+  test('memory diagnosis has one authenticated fixed route, rejects arbitrary prompts, and lists no other project',async()=>{
+    const home=mkdtempSync(join(tmpdir(),'agentstoz-memory-diagnosis-'));roots.push(home);
+    const env=bundledEnvironment(home);mkdirSync(env.APP_DATA_DIR!,{recursive:true});writeFileSync(join(env.APP_DATA_DIR!,'ports.json'),'[]');
+    const {baseUrl,child}=await startTestApiServer({cwd:join(import.meta.dir,'..'),env});children.push(child);
+    const path='/api/agent-runtime/memory-save-recovery',body={operation:'list',requestId:crypto.randomUUID(),targetId:'project-missing-123',agent:'codex'};
+    for(const capability of [null,REMOTE_CONTROL_CAPABILITY,WHAT_I_SAID_CAPABILITY])expect((await runtimeRequest({baseUrl,path,method:'POST',body,capability})).response.status).toBe(403);
+    expect((await runtimeRequest({baseUrl,path,method:'POST',body,origin:'https://example.invalid'})).response.status).toBe(403);
+    expect((await runtimeRequest({baseUrl,path})).response.status).toBeGreaterThanOrEqual(400);
+    expect((await runtimeRequest({baseUrl,path:path+'?operation=start',method:'POST',body})).response.status).toBeGreaterThanOrEqual(400);
+    const listed=await runtimeRequest({baseUrl,path,method:'POST',body});expect(listed.response.status).toBe(200);expect(listed.body).toEqual({sessions:[]});
+    for(const extra of [{prompt:'PRIVATE_MEMORY_PROMPT'},{bypassPermissions:true},{folderPath:home}]){
+      const denied=await runtimeRequest({baseUrl,path,method:'POST',body:{...body,operation:'start',problem:'agent',...extra}});
+      expect(denied.response.status).toBe(400);expect(denied.body.code).toBe('MEMORY_RECOVERY_INPUT_INVALID');expect(JSON.stringify(denied.body).includes('PRIVATE')).toBe(false);
+    }
+    const oversized=await runtimeRequest({baseUrl,path,method:'POST',body:{...body,prompt:'x'.repeat(3000)}});expect(oversized.response.status).toBe(400);
+    const missing=await runtimeRequest({baseUrl,path,method:'POST',body:{...body,operation:'start',problem:'agent'}});
+    expect(missing.response.status).toBe(503);expect(missing.body.code).toBe('MEMORY_RECOVERY_UNCONFIRMED');expect(JSON.stringify(missing.body).includes(home)).toBe(false);
+  },15_000);
   test('saved Workroom history uses only the exact local management capability',async()=>{
     const home=mkdtempSync(join(tmpdir(),'agentstoz-history-api-'));roots.push(home);
     const env=bundledEnvironment(home);mkdirSync(env.APP_DATA_DIR!,{recursive:true});writeFileSync(join(env.APP_DATA_DIR!,'ports.json'),'[]');

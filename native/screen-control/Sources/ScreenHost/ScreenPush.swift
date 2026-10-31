@@ -11,6 +11,8 @@ import ScreenControlCore
 /// - While screen control is on, and only then, the Mac polls for remote-stop commands, acts on the ones its own
 ///   registry vouches for (`RemoteStopPoller`, `RemoteCommandVerifier`, `RemoteStopDecision`) and answers each with a
 ///   signed result. A remote command only ever takes access away; turning on stays here, behind Touch ID.
+/// - In the same rounds, the main AgentsToZ app's weekly allowance alerts (`WeeklyUsageOutbox`) go to the same devices,
+///   signed with the same key: the Mac's name, the provider and the 10% boundary — never an account or a token.
 ///
 /// ScreenService calls it from a few marked lines (`push?.…`), so the service itself stays as it was.
 @MainActor
@@ -27,6 +29,8 @@ final class ScreenPush {
     private var polling: Task<Void, Never>?
     private var onSince: Date?
     private var told: [String: Date] = [:]
+    /// Weekly allowance alerts sent in the last hour, capped like the relay's `usage` budget.
+    private var weeklyBudget = WeeklyUsageBudget()
 
     init(client: ScreenPushClient) {
         self.client = client
@@ -54,6 +58,7 @@ final class ScreenPush {
                 await MainActor.run { self?.apply(command) ?? .nothingToDo }
             }
             while !Task.isCancelled {
+                self?.deliverWeeklyUsage()
                 guard let ids = self?.deviceIDs() else { return }
                 let added = (try? await poller.round(deviceIDs: ids, apply: apply)) ?? 0
                 if added > 0 {
@@ -83,11 +88,28 @@ final class ScreenPush {
         let recipients = ScreenEvent.recipients(registered: Self.inUse(devices, at: now), actor: actor)
         guard !recipients.isEmpty,
               let event = try? ScreenEvent(macKey: identity.publicKey, kind: kind, at: now, macName: ScreenService.macName,
-                                           actorID: actor, actorName: device.name, recipients: recipients) else { return }
+                                           actorID: actor, actorName: device.displayName, recipients: recipients) else { return }
         told[key] = now
         let client = client
         // Nothing waits on it: a notification that does not go out changes nothing at the Mac.
         Task { _ = try? await client.notify(event, signer: identity) }
+    }
+
+    /// The main app's weekly allowance alerts (`WeeklyUsageOutbox`), told to this Mac's registered devices in use. Only while
+    /// screen control is on (also while it waits for an approved network), once per polling round: the identity key was taken
+    /// out by turning on here, and the relay knows this Mac's devices from these polls. Each hand-off is removed before its
+    /// alert is sent; a send that fails is not retried.
+    func deliverWeeklyUsage(now: Date = Date()) {
+        guard onSince != nil, let identity, let service else { return }
+        let handoffs = WeeklyUsageOutbox.take()
+        guard !handoffs.isEmpty else { return }
+        let events = WeeklyUsageEvent.plan(handoffs, macKey: identity.publicKey, macName: ScreenService.macName,
+                                           recipients: Self.inUse(service.devices, at: now), budget: &weeklyBudget, at: now)
+        let client = client
+        for event in events {
+            // Nothing waits on it: a weekly alert that does not go out changes nothing at the Mac.
+            Task { _ = try? await client.notify(event, signer: identity) }
+        }
     }
 
     // MARK: Remote stop
@@ -108,7 +130,7 @@ final class ScreenPush {
             registeredAt: Dictionary(devices.compactMap { device in Self.bytes(hex: device.id).map { ($0, device.registeredAt) } },
                                      uniquingKeysWith: max))
         let decision = RemoteStopDecision.decide(command, state: state)
-        let sender = devices.first { $0.id == ScreenService.hex(command.deviceID) }?.name ?? "등록된 기기"
+        let sender = devices.first { $0.id == ScreenService.hex(command.deviceID) }?.displayName ?? "등록된 기기"
         switch decision.effect {
         case .endSession: service.disconnect()
         case .revoke(let id):

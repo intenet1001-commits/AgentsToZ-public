@@ -53,10 +53,122 @@ extension ScreenControlChecks {
         ("remote command: wrong or unregistered device refused", { $0.testRemoteCommandFromAWrongOrUnregisteredDeviceIsRefused }),
         ("remote stop never undoes what the Mac did later", { $0.testRemoteStopNeverUndoesWhatTheMacDidLater }),
         ("notifications skip the acting device", { $0.testNotificationsSkipTheActingDevice }),
+        ("Mac controller notifications stay distinct and signed", { $0.testMacControllerEventsStayDistinctAndSigned }),
         ("no push endpoint: nothing signed, sent or polled", { $0.testNoEndpointMeansNothingIsSignedSentOrPolled }),
         ("poller acts once on verified commands, answers signed", { $0.testPollerActsOnceOnVerifiedCommandsAndAnswersSigned }),
         ("push messages match the relay's contract vectors", { $0.testPushMessagesMatchTheRelayContract }),
+        ("weekly usage alerts: relay bytes, strict reading, own label", { $0.testWeeklyUsageAlertsMatchTheRelayAndReadStrictly }),
+        ("weekly usage hand-offs: strict, fresh, budgeted, sent once", { $0.testWeeklyUsageHandoffsAreStrictFreshAndBudgeted }),
     ] }
+
+    /// The weekly allowance alert: the same bytes as the relay's vector (signed by WebCrypto), read strictly, never mistaken
+    /// for a screen event, and sent only with an endpoint.
+    func testWeeklyUsageAlertsMatchTheRelayAndReadStrictly() async throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "PushContract").appending(path: "vectors.json")
+        guard let v = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
+              let pair = v["weeklyUsage"] as? [String: Any] else { throw CheckFailure(description: "vectors.json weeklyUsage unreadable") }
+        func h(_ key: String) -> Data { hex(v[key] as? String ?? "") }
+        let mac = SoftwareSigner(key: try .init(rawRepresentation: h("macScalar")))
+        let device = SoftwareSigner(key: try .init(rawRepresentation: h("deviceScalar")))
+        let other = SoftwareSigner(key: try .init(rawRepresentation: h("otherScalar")))
+        guard let handoff = WeeklyUsageHandoff(provider: .codex, mark: UInt8(pair["mark"] as? Int ?? 0), windowKey: pair["windowKey"] as? String ?? "",
+                                               observedAt: UInt64(v["eventAt"] as? Double ?? 0)) else { throw CheckFailure(description: "vector hand-off") }
+        // The file the main app writes for this alert (tests/weekly-usage-push-host.test.ts writes the same bytes).
+        try check(WeeklyUsageHandoff.decode(Data((pair["handoff"] as? String ?? "").utf8)) == handoff, "the main app's hand-off file reads as this alert")
+        let usage = try WeeklyUsageEvent(macKey: mac.publicKey, macName: v["macName"] as? String ?? "", handoff: handoff,
+                                         recipients: [deviceID(device), deviceID(other)],
+                                         issuedAt: Date(timeIntervalSince1970: (v["issuedAt"] as? Double ?? 0) / 1000), nonce: h("nonce"))
+        let signed = SignedPushMessage(message: hex(pair["message"] as? String ?? ""), signature: hex(pair["signature"] as? String ?? ""))
+        try check(usage.encoded() == signed.message, "weekly usage bytes match the relay's")
+        try check(signed.isValid(for: mac.publicKey) && !signed.isValid(for: device.publicKey), "signed by the Mac key only")
+        try check(try WeeklyUsageEvent.decode(signed.message) == usage, "weekly usage decodes")
+        try check(usage.key == "codex:r498056:30", "the alert key is the collapse ID's")
+        try check((try? ScreenEvent.decode(signed.message)) == nil, "a weekly alert is not a screen event")
+        let screen = try ScreenEvent(macKey: mac.publicKey, kind: .connected, at: Date(), macName: "Mac", actorID: deviceID(device),
+                                     actorName: "iPad", recipients: [deviceID(other)])
+        try check((try? WeeklyUsageEvent.decode(screen.encoded())) == nil, "nor a screen event a weekly alert")
+        try await expectError(PushMessageError.malformed) { _ = try WeeklyUsageEvent.decode(signed.message + Data([0])) }
+        try await expectError(PushMessageError.wrongSigner) { _ = try await usage.signed(by: device) }
+        let roundTrip = try await usage.signed(by: mac)
+        try check(try WeeklyUsageEvent.decode(roundTrip.message) == usage && roundTrip.isValid(for: mac.publicKey), "signs and reads back")
+
+        for (mark, window) in [(UInt8(35), "r1"), (UInt8(100), "r1"), (UInt8(30), "r"), (UInt8(30), "r1234567890"), (UInt8(30), "x12"),
+                               (UInt8(30), "w2026-W4"), (UInt8(30), "w2026W441"), (UInt8(30), "ｒ12")] {
+            try check(WeeklyUsageHandoff(provider: .claude, mark: mark, windowKey: window, observedAt: 1) == nil, "refused \(mark) \(window)")
+        }
+        try check(WeeklyUsageHandoff(provider: .agy, mark: 0, windowKey: "w2026-W44", observedAt: 1) != nil, "소진 in an ISO week")
+        try await expectError(PushMessageError.malformed) {
+            _ = try WeeklyUsageEvent(macKey: mac.publicKey, macName: "Mac‮koob", handoff: handoff, recipients: [deviceID(device)])
+        }
+        try await expectError(PushMessageError.malformed) {
+            _ = try WeeklyUsageEvent(macKey: mac.publicKey, macName: "Mac", handoff: handoff, recipients: [])
+        }
+        try await expectError(PushMessageError.malformed) {
+            _ = try WeeklyUsageEvent(macKey: mac.publicKey, macName: "Mac", handoff: handoff, recipients: [deviceID(device), deviceID(device)])
+        }
+
+        // Without an endpoint nothing is signed or sent; with one, it goes as the `weekly-usage` kind, once.
+        let transport = RecordingTransport(reply: { _, _ in (200, Data(#"{"ok":true,"sent":1}"#.utf8)) })
+        let counting = CountingSigner()
+        let offEvent = try WeeklyUsageEvent(macKey: counting.publicKey, macName: "Mac", handoff: handoff, recipients: [deviceID(device)])
+        try check(try await !ScreenPushClient(endpoint: nil, transport: transport).notify(offEvent, signer: counting), "off: nothing")
+        let signedCount = await counting.counter.count
+        try check(transport.all.isEmpty && signedCount == 0, "nothing signed or sent without an endpoint")
+        let on = ScreenPushClient(endpoint: PushEndpoint("https://project.supabase.co/functions/v1/screen-push"), transport: transport)
+        try check(try await on.notify(usage, signer: mac), "sent with an endpoint")
+        try check(transport.all.count == 1 && transport.all[0]["type"] == "weekly-usage"
+                  && transport.all[0]["message"] == usage.encoded().base64EncodedString(), "one weekly-usage request")
+    }
+
+    /// What the main app hands over is read strictly, used only while fresh, capped like the relay, and addressed to the
+    /// Mac's own devices in use.
+    func testWeeklyUsageHandoffsAreStrictFreshAndBudgeted() async throws {
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        let ms = UInt64(now.timeIntervalSince1970 * 1000)
+        let good = #"{"version":1,"provider":"claude","mark":20,"windowKey":"r498056","observedAt":\#(ms)}"#
+        guard let handoff = WeeklyUsageHandoff.decode(Data(good.utf8)) else { throw CheckFailure(description: "a good hand-off") }
+        try check(handoff == WeeklyUsageHandoff(provider: .claude, mark: 20, windowKey: "r498056", observedAt: ms), "reads every field")
+        for bad in [
+            #"{"version":2,"provider":"claude","mark":20,"windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"gemini","mark":20,"windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":25,"windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":20.5,"windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":true,"windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":"20","windowKey":"r498056","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":20,"windowKey":"r498056\n","observedAt":1}"#,
+            #"{"version":1,"provider":"claude","mark":20,"windowKey":"r498056","observedAt":0}"#,
+            #"{"version":1,"provider":"claude","mark":20,"windowKey":"r498056","observedAt":1,"account":"a@b.c"}"#,
+            #"{"version":1,"provider":"claude","mark":20,"windowKey":"r498056"}"#,
+            #"[1]"#, "", String(repeating: " ", count: 600) + good,
+        ] { try check(WeeklyUsageHandoff.decode(Data(bad.utf8)) == nil, "refused: \(bad.prefix(80))") }
+
+        try check(handoff.isFresh(at: now) && handoff.isFresh(at: now + WeeklyUsageHandoff.maxAge), "fresh up to two hours")
+        try check(!handoff.isFresh(at: now + WeeklyUsageHandoff.maxAge + 1), "older is dropped unsent")
+        try check(!handoff.isFresh(at: now - RemoteStopClock.skew - 1), "and so is one from the future")
+
+        var budget = WeeklyUsageBudget()
+        try check((0..<WeeklyUsageBudget.limit).allSatisfy { budget.take(at: now + Double($0)) }, "twelve an hour")
+        try check(!budget.take(at: now + 60), "not a thirteenth")
+        try check(budget.take(at: now + WeeklyUsageBudget.window), "again an hour later")
+
+        let mac = SoftwareSigner(), phone = SoftwareSigner(), ipad = SoftwareSigner()
+        var fresh = WeeklyUsageBudget()
+        let stale = WeeklyUsageHandoff(provider: .codex, mark: 0, windowKey: "w2026-W44", observedAt: ms - 3 * 3600 * 1000)!
+        let events = WeeklyUsageEvent.plan([handoff, stale, handoff], macKey: mac.publicKey, macName: "사무실 Mac",
+                                           recipients: [deviceID(phone), deviceID(ipad)], budget: &fresh, at: now)
+        try check(events.count == 2 && events.allSatisfy { $0.recipients == [deviceID(phone), deviceID(ipad)] && $0.provider == .claude },
+                  "fresh ones, to the Mac's devices")
+        try check(Set(events.map(\.nonce)).count == 2, "each with its own nonce")
+        var unused = WeeklyUsageBudget()
+        try check(WeeklyUsageEvent.plan([handoff], macKey: mac.publicKey, macName: "Mac", recipients: [], budget: &unused, at: now).isEmpty,
+                  "nobody registered: nothing")
+        try check(unused.take(at: now) && (1..<WeeklyUsageBudget.limit).allSatisfy { _ in unused.take(at: now) }, "and no budget spent")
+        var spent = WeeklyUsageBudget()
+        for _ in 0..<WeeklyUsageBudget.limit { _ = spent.take(at: now) }
+        try check(WeeklyUsageEvent.plan([handoff], macKey: mac.publicKey, macName: "Mac", recipients: [deviceID(phone)], budget: &spent, at: now).isEmpty,
+                  "over budget: dropped")
+    }
 
     /// The relay reads the same bytes: Tests/PushContract/vectors.json, which tests/screen-push-protocol.test.ts decodes
     /// with supabase/functions/screen-push/protocol.ts. Its signatures came from WebCrypto, so this also shows the two
@@ -325,6 +437,32 @@ extension ScreenControlChecks {
             a + actor, UInt64(1).bigEndianData, randomBytes(16),
         ])
         try await expectError(PushMessageError.malformed) { _ = try ScreenEvent.decode(listing) }
+    }
+
+    func testMacControllerEventsStayDistinctAndSigned() async throws {
+        let mac = SoftwareSigner(), phone = SoftwareSigner(), controller = SoftwareSigner(), wrongMac = SoftwareSigner()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        for (kind, byte) in [(ScreenEventKind.controllerConnected, UInt8(3)), (.controllerRegistered, UInt8(4))] {
+            try check(kind.rawValue == byte, "controller events have their own wire values")
+            let event = try ScreenEvent(macKey: mac.publicKey, kind: kind, at: now, macName: "Mac B",
+                actorID: deviceID(controller), actorName: "Mac A", recipients: [deviceID(phone)], issuedAt: now)
+            let signed = try await event.signed(by: mac)
+            try check(try ScreenEvent.decode(signed.message) == event, "controller event round trip")
+            try check(ScreenEvent.open(signed, mac: pinned(mac.publicKey)) == event, "only the pinned host signs the event")
+            try check(ScreenEvent.open(signed, mac: pinned(wrongMac.publicKey)) == nil, "another host is refused")
+            let forged = SignedPushMessage(message: signed.message, signature: try await controller.signature(for: signed.message).rawRepresentation)
+            try check(ScreenEvent.open(forged, mac: pinned(mac.publicKey)) == nil, "controller cannot impersonate the host")
+        }
+        try check(ScreenEventKind.connected.rawValue == 1 && ScreenEventKind.registered.rawValue == 2,
+                  "existing phone event wire values stay unchanged")
+        try check(ScreenEventKind(rawValue: 5) == nil, "unknown event kinds fail closed")
+
+        // Controller registration is a separate key set: even a properly signed controller command has no phone authority.
+        let keys = RegisteredDeviceKeys(now: { now })
+        keys.set([.init(publicKey: phone.publicKey, registeredAt: now, lastConnectedAt: nil)])
+        let verifier = RemoteCommandVerifier(macFingerprint: deviceID(mac), now: { now }) { keys.key(for: $0) }
+        let command = try RemoteCommand(mac: pinned(mac.publicKey), deviceKey: controller.publicKey, action: .turnOff, issuedAt: now)
+        try await expectError(RemoteCommandError.unknownDevice) { _ = try verifier.verify(try await command.signed(by: controller)) }
     }
 
     func testNoEndpointMeansNothingIsSignedSentOrPolled() async throws {

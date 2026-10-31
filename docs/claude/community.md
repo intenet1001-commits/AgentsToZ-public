@@ -56,6 +56,21 @@
   준다 — 사용자 수준 `hooks.json`, 플러그인 훅, config.toml의 훅 표, 프로젝트 파일 안의 다른 명령 중 하나라도 있으면 Codex가 원래대로 묻는다.
   활동 훅 명령의 정본은 `src/projectMemoryActivityHook.ts` 하나다(생성기와 검사기가 같은 문자열을 만든다). 플래그를 모르는 옛 Codex에는 주지 않는다
   (`codex --help`를 실행 파일마다 한 번 확인).
+  ⚠️ **AgentsToZ가 프로젝트 `.codex/hooks.json`에 새 훅을 더하면 검사기(`OUR_EVENTS`)에도 함께 넣는다.** 5ead6c0c가 사전 압축 복구 훅
+  (`PreCompact`·`Stop`, 정본 `src/projectMemoryRecoveryHook.ts`)을 더하면서 이 표를 빠뜨려, 새 장기기억 버전의 프로젝트마다 우회 없는 Codex가
+  「Hooks need review — 3 hooks are new or changed」에서 다시 멈췄다(2026-10-31 3호 Testforcsagents1 실측). 같은 때 3호→1호 OPS 요청이
+  1호에서 「승인·확인 필요」(`awaitingAnswer`)로 멈췄다 — 받는 OPS도 우회 없이 시작하므로 이 메뉴가 그대로 막는다.
+  사용자 수준 훅이 있는 기기(3호는 config.toml에 codebase-memory-mcp의 `SessionStart`·`SubagentStart`, 1호는 `~/.codex/hooks.json`)에서는
+  고친 뒤에도 의도대로 Codex가 묻는다 — 그 기기에서 사람이 한 번 「Trust all」을 골라야 훅이 다시 바뀔 때까지 묻지 않는다.
+- **다른 Mac에서 넘어온 OPS 작업의 워커는 넘겨받기에 필요한 아젠투지 도구 15개만 묻지 않는다**(`src/opsWorkerToolApproval.ts`,
+  2026-10-31 사용자가 고름). 우회 없이 시작한 받는 쪽 CLI가 아젠투지 도구를 부를 때마다 「Allow the agentstoz_use MCP server to run tool
+  …?」(Claude는 「Do you want to proceed?」)를 물어, 3호→1호 작업이 「승인·확인 필요」에서 멈췄다. 허용은 **그 실행의 인자에만** 있다 —
+  Codex는 도구마다 `-c mcp_servers.agentstoz_use.tools.<도구>.approval_mode="approve"`, Claude는 `--allowedTools mcp__agentstoz_use__<도구>,…`.
+  사용자 설정 파일에는 아무것도 쓰지 않는다. 3호 실측(Codex 0.166·Claude 2.1.314): 목록의 도구는 바로 실행되고 목록 밖 도구는 그대로 물었다.
+  서버 전체 키(`default_tools_approval_mode`)는 쓰지 않는다. 목록 밖에 둔 것: 키 입력(신뢰·권한 화면에 답한다), 다른 기기로 넘기기,
+  컴퓨터 유즈, 공용 셸, 프로젝트·저장소 만들기, 기억 쓰기, 메시지, 팀, 제품 USE. 셸 명령·파일 편집·다른 MCP 서버도 그대로 묻는다.
+  켜는 길은 OPS 호스트의 시작 하나뿐이다(`perform`의 호스트 전용 옵션 `opsWorker` — 원격 authority·우회·제한 실행·재개에는 거절,
+  「다시 시작」은 물려받지 않는다). Hermes·agy는 바꾸지 않았다. 검증: `tests/ops-worker-tool-approval.test.ts`.
 - **다른 Mac으로는 권한 우회·다시 시작이 가지 않는다**(`agentDialogueControl.ts`가 거절 — 입장은 제어 허용이지 「묻지 않고 실행」
   허용이 아니다). 그래서 다른 기기를 모는 패널은 `bypassUnavailable`(`COMMUNITY_BYPASS_UNAVAILABLE`, `workroomDeviceLabel.ts`)로
   **우회 없이 시작**하고 토글이 「이 기기에서는 꺼짐」과 이유를 말한다. 기기 `@` 전달도 같다. 이것이 없던 동안 저장된 「켜짐」이
@@ -97,7 +112,7 @@
 일은 AI에게 시켜야 했다. 같은 일을 맥 화면에서 직접 하도록 `src/CommunityChatPanel.tsx`를 워크룸의
 「기기」 줄 **바로 아래**에 둔다(메인 창과 전용 창 모두). 다른 호를 생각하는 자리가 거기다.
 
-- **접혀 있으면 한 줄이다**(「커뮤니티 · 함께 있는 대상 N개 · 읽지 않음 N개」). 워크룸은 이 앱에서 가장
+- **접혀 있으면 한 줄이다**(「아젠투지 단톡방 · 함께 있는 대상 N개 · 읽지 않음 N개」 — 응답 없는 기기가 있으면 「· 응답 없음 N개」가 붙는다). 워크룸은 이 앱에서 가장
   빽빽한 화면이라 읽을 것이 없을 때 자리를 차지하면 안 된다. 펼치면 그 자리에서 읽고 답한다.
 - ⚠️ **접힌 동안은 아무 것도 두드리지 않는다.** 읽지 않음 개수는 워크룸이 이미 15초마다 하는 기기 조회의
   **덤**이다 — `controlDevices()`가 어차피 부르는 `community-status`의 `unread`를 함께 싣는다(RPC 추가 0).
@@ -106,7 +121,7 @@
   내보낸다. 그래서 화면도 휴대폰의 `normalizeRemoteCommunityState`·`mergeRemoteCommunityMessages`를 그대로
   쓴다 — 정규화기가 모르는 키를 통째로 거절하므로 서버가 키를 늘리면 맥 화면이 먼저 깨진다(의도).
 - 관리 경로에 더한 동작은 `community-read`·`community-send` 둘이다. 입장하지 않은 Mac은
-  `AGENT_DIALOGUE_COMMUNITY_OUTSIDE`로 거절되고 화면이 「아젠투지 설정에서 입장하세요」를 말한다.
+  `AGENT_DIALOGUE_COMMUNITY_OUTSIDE`로 거절되고 화면이 「「기기 간 대화」(아젠투지 설정 옆)에서 입장하세요」를 말한다.
   **나가기·종료는 여전히 「기기 간 대화」에서만** 한다(AI 연결에는 하드 거절).
 - ⚠️ **보내기에는 읽기 커서(`afterSeq`)를 함께 싣는다.** 호스트는 **커서를 준 `send`에만** 메시지를
   돌려준다(`agentDialogueHost`의 `cursorGiven`) — 빼먹으면 방금 보낸 내 말이 다음 폴링(12초)까지
@@ -250,6 +265,11 @@
   전달 전에 반드시 벗겨낸다. 참조를 모르는 옛 Mac은 이 키 때문에 봉투를 거절한다 — 그것이 업데이트 안내가 된다.
 - **기기 선택은 탭이다**(`ai-terminal-device-tab`, Mac·휴대폰 같은 모양). 드롭다운은 두 번 눌러야 하고 어느 호가
   있는지 가려졌다(VOC 2026-10-05). 기기가 하나도 없으면 줄 자체가 없어 예전 화면과 같다.
+- **답하지 않는 기기는 탭이 그렇게 말한다(2026-10-31, Mac 화면만).** 엔드포인트는 10분마다 heartbeat를 보내고
+  (`AGENT_DIALOGUE_HEARTBEAT_MS`, api-server의 유지 타이머), `lastSeenAt`이 그 세 배(30분)보다 오래되면 탭에
+  「응답 없음 · 마지막 N분/시간/일 전」이 붙고 대화창 접힌 줄에 「· 응답 없음 N개」가 붙는다(`src/communityDeviceLiveness.ts`).
+  **고를 수는 있다** — 잠든 Mac이 깨어나 답할 수 있고, 요청 영수증이 결과를 말한다. 고르면 「실행됐는지 모른 채 끝날 수
+  있다」는 한 줄이 뜬다. `lastSeenAt`을 모르면 응답 없음이라 하지 않는다. 휴대폰 DTO에는 키를 더하지 않았다.
 - **기기를 고른 직후에는 프로젝트 목록이 올 때까지 패널을 돌리지 않는다**(`visible=false`). 사용자가 기다리는 첫
   번째가 그 목록인데, 패널이 먼저 1초마다 `list`·`read`를 보내면 목록 요청이 뒤로 밀렸다. 첫 요청은 상대 Mac의
   유휴 폴링(3초) 틈에 떨어지기 쉬우므로 **한 번만** 자동으로 다시 묻는다(그 뒤 실패는 그대로 보여 준다).

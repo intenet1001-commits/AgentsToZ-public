@@ -1,6 +1,7 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { screenPushEndpoint } from './scripts/screenPushEndpoint';
 
 export const SCREEN_HELPER_BUNDLE_PATH = 'Contents/Helpers/AgentsToZ Screen.app';
 export const SCREEN_HELPER_IDENTIFIER = 'com.intenet.agentstozbycs.screen';
@@ -16,6 +17,13 @@ export interface ScreenControlBundleOptions {
   version: string;
   signingIdentity?: string;
   timestamp?: boolean;
+  /**
+   * The screen-push relay for this Screen's notifications, remote stop and weekly allowance alerts. Only an explicit option:
+   * never inherited from the environment, so a public package cannot pick up a private endpoint. The main app installs
+   * this bundled Screen over a separately built one whenever their signatures differ, so the installed form gets an
+   * endpoint only through here (build-macos.ts passes AGENTSTOZ_SCREEN_PUSH_URL).
+   */
+  pushEndpoint?: string | null;
 }
 
 /** Public packages must never inherit a private Screen push endpoint or unrelated service credentials. */
@@ -23,6 +31,16 @@ export function screenBundleBuildEnvironment(inherited: NodeJS.ProcessEnv): Reco
   const env: Record<string, string> = {};
   for (const key of ['HOME', 'PATH', 'TMPDIR', 'DEVELOPER_DIR', 'SDKROOT']) if (inherited[key]) env[key] = inherited[key]!;
   return env;
+}
+
+/** The Screen build's whole environment: the safe inherited part, then only what the options say. */
+export function screenBundleChildEnvironment(inherited: NodeJS.ProcessEnv, options: Pick<ScreenControlBundleOptions, 'signingIdentity' | 'pushEndpoint'>): Record<string, string> {
+  const endpoint = screenPushEndpoint(options.pushEndpoint ?? undefined);
+  return {
+    ...screenBundleBuildEnvironment(inherited),
+    ...(options.signingIdentity ? { SCREEN_SIGN_IDENTITY: options.signingIdentity } : {}),
+    ...(endpoint ? { AGENTSTOZ_SCREEN_PUSH_URL: endpoint } : {}),
+  };
 }
 
 export function assertScreenBundleEntitlements(xml: string): void {
@@ -48,6 +66,8 @@ export async function stageScreenControlBundle(options: ScreenControlBundleOptio
   if (process.platform !== 'darwin') throw Error('Screen bundling requires macOS');
   if (!/^\d+\.\d+\.\d+$/.test(options.version)) throw Error('Invalid Screen release version');
   const root = resolve(options.projectRoot ?? import.meta.dir);
+  // Checked before the long build: a mistyped endpoint fails here instead of shipping a Screen with push off.
+  const env = screenBundleChildEnvironment(process.env, options);
   const main = resolve(options.appBundlePath);
   if (!main.endsWith('.app') || !lstatSync(main).isDirectory() || lstatSync(main).isSymbolicLink()) throw Error('Screen destination must be a real app bundle');
   const scratch = mkdtempSync(join(tmpdir(), 'agentstoz-screen-payload-'));
@@ -57,7 +77,7 @@ export async function stageScreenControlBundle(options: ScreenControlBundleOptio
     if (options.timestamp !== false) args.push('--timestamp');
     const child = Bun.spawn(args, {
       cwd: scratch,
-      env: { ...screenBundleBuildEnvironment(process.env), ...(options.signingIdentity ? { SCREEN_SIGN_IDENTITY: options.signingIdentity } : {}) },
+      env,
       stdin: 'ignore', stdout: 'inherit', stderr: 'inherit',
     });
     if (await child.exited !== 0) throw Error('Signed Screen companion build failed; no incomplete main app can ship');
@@ -74,6 +94,10 @@ export async function stageScreenControlBundle(options: ScreenControlBundleOptio
     if (verified.exitCode !== 0) throw Error(`Bundled Screen signature rejected: ${verified.stderr.toString()}`);
     const version = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleVersion', 'raw', '-o', '-', join(helperAppPath, 'Contents/Info.plist')], { stdout: 'pipe', stderr: 'pipe' });
     if (version.exitCode !== 0 || version.stdout.toString().trim() !== options.version) throw Error('Bundled Screen version differs from main app');
+    const push = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'AgentsToZScreenPushURL', 'raw', '-o', '-', join(helperAppPath, 'Contents/Info.plist')], { stdout: 'pipe', stderr: 'pipe' });
+    const builtEndpoint = push.exitCode === 0 ? push.stdout.toString().trim() : null;
+    if (builtEndpoint !== (env.AGENTSTOZ_SCREEN_PUSH_URL ?? null)) throw Error('Bundled Screen push endpoint differs from the one requested');
+    if (builtEndpoint) console.log(`[screen-bundle] push relay: ${builtEndpoint}`);
     console.log(`[screen-bundle] signed Screen ${options.version} included for independent installation`);
     return { helperAppPath };
   } finally {

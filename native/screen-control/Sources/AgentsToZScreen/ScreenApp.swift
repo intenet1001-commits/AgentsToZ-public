@@ -189,7 +189,7 @@ struct ScreenMenu: View {
             ForEach(service.devices) { device in
                 // SR-13: 90 days without use. The key exchange refuses an expired device whatever this shows.
                 let expired = device.isExpired()
-                Menu("\(device.name) · \(device.model)\(expired ? " · 만료됨" : "")") {
+                Menu("\(device.displayName) · \(device.model)\(expired ? " · 만료됨" : "")") {
                     Text("등록 \(device.registeredAt.formatted(date: .abbreviated, time: .omitted))")
                     if let last = device.lastConnectedAt {
                         Text("마지막 연결 \(last.formatted(date: .abbreviated, time: .shortened))")
@@ -203,7 +203,8 @@ struct ScreenMenu: View {
                 }
             }
         }
-        ApprovedNetworksMenu(service: service)
+        // The self-hosted relay's state, only where one is saved: 「꺼짐」 here read as if remote use were off.
+        if service.internetRoute != nil { Text(service.internetConnection.label) }
         Divider()
         if ScreenRecordingPermission.current == .granted {
             Text("화면 기록 권한: 허용됨")
@@ -213,12 +214,20 @@ struct ScreenMenu: View {
                 Self.openSettings("Privacy_ScreenCapture")
             }
         }
-        if InputInjector.isAllowed {
-            Text("손쉬운 사용 권한: 허용됨 (조작 가능)")
+        if InputInjector.canPostEvents {
+            Text("손쉬운 사용 권한: 허용됨")
         } else {
             Button("손쉬운 사용 권한 허용하기 (조작에 필요)…") {
                 InputInjector.request()
                 Self.openSettings("Privacy_Accessibility")
+            }
+        }
+        if LocalInputMonitor.isAllowed {
+            Text("Mac 입력 우선 보호: 준비됨")
+        } else {
+            Button("Mac 입력 우선 보호 허용하기…") {
+                LocalInputMonitor.request()
+                Self.openSettings("Privacy_ListenEvent")
             }
         }
         if let problem = service.problem {
@@ -303,9 +312,25 @@ struct LoginItemToggle: View {
 /// The same switches as the menu, in a window: what the main app's 「AgentsToZ Screen 열기」 shows.
 struct StatusPanel: View {
     let service: ScreenService
+    @State private var relayEndpoint = ""
+    @State private var relayShown = false   // 「고급 · 자체 중계 서버」 is folded until opened or a relay is saved
     @State private var permissions = 0   // read again when the window comes back to the front
+    @State private var renaming: String?   // the device whose name is being edited
+    @State private var newName = ""
+    @State private var renameProblem: String?
+    @FocusState private var nameFieldFocused: Bool
+
+    private func saveName(_ device: RegisteredDevice) {
+        renameProblem = service.rename(device, to: newName)
+        if renameProblem == nil { renaming = nil }
+    }
+
+    /// Return turns on control or approves a network only while no name is being typed: Return in the name field
+    /// saves the name and must never open a Touch ID prompt.
+    private var touchIDReturnKey: KeyboardShortcut? { renaming == nil ? .defaultAction : nil }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             Text("아이폰·아이패드로 이 Mac 보기").font(.title3.bold())
             GroupBox {
@@ -314,7 +339,7 @@ struct StatusPanel: View {
                     case .off(let reason):
                         Label("화면 제어 꺼짐", systemImage: "display.and.arrow.down")
                         if let reason { Text(reason).font(.callout).foregroundStyle(.secondary) }
-                        Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(.defaultAction)
+                        Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(touchIDReturnKey)
                     case .starting:
                         Label("켜는 중…", systemImage: "hourglass")
                     case .on(let address):
@@ -330,7 +355,7 @@ struct StatusPanel: View {
                         HStack {
                             if text.canApprove {
                                 Button("이 네트워크 승인 (Touch ID)") { Task { await service.approveCurrentNetwork() } }
-                                    .keyboardShortcut(.defaultAction)
+                                    .keyboardShortcut(touchIDReturnKey)
                             }
                             Button("끄기") { service.turnOff() }
                         }
@@ -349,37 +374,101 @@ struct StatusPanel: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     let usable = service.devices.filter { !$0.isExpired() }.count
-                    Text(usable == 0 ? "아직 연결할 수 있는 기기가 없습니다." : "연결할 수 있는 기기 \(usable)대")
+                    Text("등록된 기기 \(usable)대 · 현재 연결 \(service.session == nil ? 0 : 1)대")
                     Button("기기 등록…") { PanelWindows.showRegistration() }
                         .disabled(!service.isOn || service.session != nil)
                     Text(service.isOn ? "기기마다 한 번, 이 Mac 앞에서 QR을 찍고 Touch ID로 승인합니다."
-                         : service.isWaiting ? "기기 등록은 승인된 네트워크에서 합니다."
+                         : service.isWaiting ? "기기 등록은 Mac 화면 제어를 켠 뒤에 합니다."
                          : "기기 등록은 화면 제어를 켠 뒤에 합니다.")
                         .font(.callout).foregroundStyle(.secondary)
+                    if !service.devices.isEmpty {
+                        Divider()
+                        ForEach(service.devices) { device in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(device.displayName) · \(device.model)")
+                                        if device.alias != nil {
+                                            Text("등록 이름: \(device.name)").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if service.session?.deviceID == device.id {
+                                            Text("현재 연결 중").font(.caption).foregroundStyle(.green)
+                                        } else if device.isExpired() {
+                                            Text("등록 만료됨").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if renaming != device.id {
+                                        Button("이름 변경") { renaming = device.id; newName = device.displayName; renameProblem = nil }
+                                            .accessibilityLabel("\(device.displayName) 이름 변경")
+                                    }
+                                    Button(device.isExpired() ? "목록에서 지우기" : "등록 해지", role: .destructive) {
+                                        service.revoke(device)
+                                    }
+                                    .accessibilityLabel("\(device.displayName) 등록 해지")
+                                }
+                                if renaming == device.id {
+                                    HStack {
+                                        TextField("이 Mac에서 부를 이름", text: $newName)
+                                            .textFieldStyle(.roundedBorder)
+                                            .focused($nameFieldFocused)
+                                            .onAppear { nameFieldFocused = true }
+                                            .onSubmit { saveName(device) }
+                                        Button("저장") { saveName(device) }
+                                        Button("취소") { renaming = nil; renameProblem = nil }
+                                    }
+                                    Text(renameProblem ?? "이 Mac에서만 바뀝니다. 비우면 기기가 등록한 이름으로 돌아갑니다.")
+                                        .font(.caption).foregroundStyle(renameProblem == nil ? Color.secondary : Color.red)
+                                }
+                                Text("등록 \(device.registeredAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let last = device.lastConnectedAt {
+                                    Text("마지막 연결 \(last.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        Text("iPad 목록에서 지운 기기도 Mac 등록은 남습니다. 쓰지 않는 등록을 여기서 해지하면 다시 연결할 수 없습니다. 현재 연결 중인 기기를 해지하면 즉시 끊깁니다.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("승인된 네트워크 \(service.networks.count)/\(NetworkApproval.limit)")
-                    if service.networks.isEmpty {
-                        Text("아직 없습니다. 켤 때 지금 네트워크를 함께 승인합니다.").font(.callout).foregroundStyle(.secondary)
-                    }
-                    ForEach(service.networks) { network in
-                        // The approval date tells rows apart even when two labels read alike (the same Wi‑Fi name).
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(network.label).lineLimit(1).truncationMode(.middle)
-                                Text("승인 \(network.approvedAt.formatted(date: .abbreviated, time: .shortened))"
-                                     + (service.listeningNetwork?.id == network.id ? " · 지금 연결을 받는 곳" : ""))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("지우기") { service.removeNetwork(network) }
-                        }
-                    }
-                    Text("기기는 승인된 네트워크에서만 이 Mac에 연결합니다. 다른 네트워크로 옮기면 연결을 받지 않고, 승인된 네트워크로 돌아오면 다시 받습니다.")
+                    // One listener (TCP 52741) serves both: near-field directly, and Cloudflare's private tunnel from outside.
+                    Text("연결 — 근거리·인터넷(Cloudflare)").font(.headline)
+                    Text("가까이에서는 두 기기의 Wi‑Fi를 켜면 직접 연결합니다. 같은 공유기에 연결할 필요는 없습니다.")
                         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("밖(LTE 등)에서는 Cloudflare 사설망으로 같은 연결에 닿습니다. 터널을 준비한 뒤 아이폰·아이패드에서 이 Mac을 길게 눌러 「사설망 연결 설정…」을 저장하세요.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    // The self-hosted WSS relay (NEARBY-INTERNET.md) still works as before, but none is deployed and
+                    // Cloudflare covers remote use, so it stays folded. A saved relay or its notice opens it, and the
+                    // folded title says 「설정됨」, so a Mac that uses one never loses sight of it.
+                    DisclosureGroup(isExpanded: $relayShown) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let route = service.internetRoute {
+                                Label(service.internetConnection.label, systemImage: "network")
+                                Text(route.endpoint.host ?? "").font(.caption).foregroundStyle(.secondary)
+                                Button("자체 중계 끄기") { service.disableInternet() }
+                            } else {
+                                TextField("wss://중계서버/screen-relay", text: $relayEndpoint)
+                                Button("자체 중계 켜기 (Touch ID)") { Task { await service.enableInternet(endpointText: relayEndpoint) } }
+                                    .disabled(!service.isOn || relayEndpoint.isEmpty)
+                                Text("직접 운영하는 중계 서버가 있을 때만 씁니다. 켠 뒤 새 QR로 기기를 다시 등록하세요.")
+                                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let notice = service.internetNotice {
+                                Text(notice).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.top, 4)
+                    } label: {
+                        Text(service.internetRoute == nil ? "고급 · 자체 중계 서버" : "고급 · 자체 중계 서버 · 설정됨")
+                    }
+                    .onChange(of: service.internetRoute != nil, initial: true) { _, saved in if saved { relayShown = true } }
+                    .onChange(of: service.internetNotice, initial: true) { _, notice in if notice != nil { relayShown = true } }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -394,24 +483,35 @@ struct StatusPanel: View {
                             ScreenMenu.openSettings("Privacy_ScreenCapture")
                         }
                     }
-                    if InputInjector.isAllowed {
-                        Label("손쉬운 사용 권한: 허용됨 (조작 가능)", systemImage: "checkmark.circle")
+                    if InputInjector.canPostEvents {
+                        Label("손쉬운 사용 권한: 허용됨", systemImage: "checkmark.circle")
                     } else {
                         Button("손쉬운 사용 권한 허용하기 (조작에 필요)…") {
                             InputInjector.request()
                             ScreenMenu.openSettings("Privacy_Accessibility")
                         }
                     }
+                    if LocalInputMonitor.isAllowed {
+                        Label("Mac 입력 우선 보호: 준비됨", systemImage: "checkmark.circle")
+                    } else {
+                        Button("Mac 입력 우선 보호 허용하기…") {
+                            LocalInputMonitor.request()
+                            ScreenMenu.openSettings("Privacy_ListenEvent")
+                        }
+                        Text("Mac의 실제 키·마우스 조작을 감지해 원격 입력을 멈춥니다. 입력 내용은 저장하지 않습니다.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     LoginItemToggle(service: service)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let problem = service.problem { Text(problem).font(.callout).foregroundStyle(.red) }
-            Text("아이폰·아이패드: AgentsToZ 앱 홈의 「Mac 화면」에서 이 Mac을 누르고 Face ID로 승인합니다. 같은 Wi‑Fi에서만 연결합니다. 이 창을 닫아도 메뉴 막대의 화면 아이콘에서 계속 쓸 수 있습니다.")
+            Text("아이폰·아이패드: AgentsToZ 앱 홈의 「Mac 화면」에서 이 Mac을 누르고 Touch ID 또는 Face ID로 승인합니다. 이 창을 닫아도 메뉴 막대의 화면 아이콘에서 계속 쓸 수 있습니다.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 400)
+        }
+        .frame(width: 440, height: 660)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             permissions += 1
             service.publishStatus()
@@ -427,8 +527,13 @@ struct RegistrationPanel: View {
         VStack(spacing: 16) {
             switch service.registration {
             case .showing(let invite, let until):
-                Text("iPhone·iPad에서 AgentsToZ 앱 → 「Mac 화면 등록」을 누르고 이 QR을 찍으세요.")
-                    .multilineTextAlignment(.center)
+                // Wrapped, never cut: the window takes its height from this view, and a Text without a fixed vertical
+                // size was laid out on one line and ended in 「…」 (2026-11-01).
+                Text("iPhone·iPad 카메라나 AgentsToZ 앱 홈의 「Mac 화면 등록 · QR 스캔」으로 이 QR을 찍으세요.")
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                Text("카메라에 「사용 가능한 데이터가 없음」이 뜨면 iPhone·iPad의 AgentsToZ 앱을 업데이트하거나 앱 안의 스캐너로 찍으세요.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 if let image = Self.qrImage(invite.text) {
                     Image(nsImage: image).interpolation(.none).resizable().frame(width: 260, height: 260)
                 }
@@ -440,20 +545,21 @@ struct RegistrationPanel: View {
             case .confirming(let name, let model, let sas):
                 Text("‘\(name)’ (\(model))이 등록을 요청했습니다.").font(.headline)
                 Text(sas.prefix(3) + " " + sas.suffix(3)).font(.system(size: 44, weight: .semibold, design: .monospaced))
-                Text("기기 화면의 숫자와 같을 때만 승인하세요. 다르면 거절하세요.").multilineTextAlignment(.center)
+                Text("기기 화면의 숫자와 같을 때만 승인하세요. 다르면 거절하세요.")
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("거절", role: .destructive) { Task { await service.refusePending() } }
                     Button("승인 (Touch ID)") { Task { await service.approvePending() } }.keyboardShortcut(.defaultAction)
                 }
             case .finished(let message):
-                Text(message).multilineTextAlignment(.center)
+                Text(message).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 Button("닫기") { service.cancelRegistration(); dismiss() }
             case nil:
                 if service.isOn || service.power == .starting {
                     ProgressView()
                 } else if service.isWaiting {
-                    Text("기기 등록은 승인된 네트워크에서 합니다. 이 Mac이 승인된 네트워크에 연결되면 다시 시작해 주세요.")
-                        .multilineTextAlignment(.center)
+                    Text("기기 등록은 Mac 화면 제어를 켠 뒤에 합니다. 이 Mac이 승인된 네트워크에 연결되면 다시 시작해 주세요.")
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                     Button("닫기") { dismiss() }
                 } else {
                     Text("먼저 메뉴 막대에서 화면 제어를 켜 주세요.")

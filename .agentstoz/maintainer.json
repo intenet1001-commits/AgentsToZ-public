@@ -6,7 +6,6 @@
       "essential-contracts",
       "service-use-contracts",
       "service-use-screen",
-      "voice-remote-benchmark",
       "workroom-submission",
       "workroom-effort",
       "workroom-effort-screen",
@@ -103,7 +102,8 @@
       "workroom-number-keys-screen",
       "device-memory-language-contracts",
       "device-memory-language-screen",
-      "app-language-shell-screen"
+      "app-language-shell-screen",
+      "click-sweep-screen"
     ],
     "native": [
       "ios-preflight",
@@ -139,7 +139,8 @@
       "workroom-number-keys-screen",
       "device-memory-language-contracts",
       "device-memory-language-screen",
-      "app-language-shell-screen"
+      "app-language-shell-screen",
+      "click-sweep-screen"
     ],
     "context": [
       "maintainer-self",
@@ -441,7 +442,8 @@
         "./tests/project-agent-terminal.test.ts",
         "./tests/model-effort-advice-policy.test.ts",
         "./tests/external-cli-effort.test.ts",
-        "./tests/ai-terminal-submit.test.ts"
+        "./tests/ai-terminal-submit.test.ts",
+        "./tests/desktop-session-effort.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -464,7 +466,11 @@
         "src/modelEffortAdvicePolicy.ts",
         "src/LaunchEffortControls.tsx",
         "src/externalCliEffort*.ts",
-        "api-sidecar-entry.ts"
+        "api-sidecar-entry.ts",
+        "src/computerUse*.ts",
+        "src/desktopSessionEffort.ts",
+        "native/computer-use/*",
+        "tests/desktop-session-effort.test.ts"
       ],
       "covers": [
         "First request chooses supported low medium high effort without changing models",
@@ -484,7 +490,10 @@
         "Standalone external PTY client starts no API listener or provider evaluation",
         "Desktop apps only recommend or turn off, independently of CLI auto recommendation and off, even with native control",
         "Memory-delivered guidance reads bounded host preferences without provider calls or transcript history",
-        "Hermes · Claude and Hermes · Codex are separate launch items whose model and provider come from one preset list, gated by provider name only"
+        "Hermes · Claude and Hermes · Codex are separate launch items whose model and provider come from one preset list, gated by provider name only",
+        "External desktop Auto requires explicit bound-session consent and verified native effective effort without changing model account defaults or other sessions",
+        "Pinned Max and xhigh minimum remain fixed and unsupported adapters only recommend",
+        "External desktop Auto keeps the session's effective Max or xhigh read at consent unless lowering is explicitly allowed"
       ],
       "evidence": "deterministic-policy-fake-pty-and-transport-no-live-provider"
     },
@@ -515,56 +524,37 @@
     {
       "id": "workroom-submission",
       "argv": [
-        "bun",
-        "test",
-        "./tests/workroom-submission.test.ts",
-        "./tests/workroom-conversation-history.test.ts",
-        "./tests/ai-terminal.test.ts"
+        "node",
+        "tests/run-workroom-submission-refusal-screen.mjs"
       ],
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 120,
-      "evidence": "bounded-submission-real-sqlite-and-pty-fixtures-no-live-provider",
+      "timeoutSeconds": 240,
+      "evidence": "real-sqlite-fake-pty-and-rendered-chromium-owned-loopback-server-no-live-provider",
       "paths": [
         "src/workroomSubmissionProtocol.ts",
         "src/workroomSubmissionClient.ts",
         "src/workroomSubmissions.ts",
         "src/workroomConversationJournal.ts",
         "src/aiTerminalService.ts",
-        "src/AiTerminalPanel.tsx"
+        "src/AiTerminalPanel.tsx",
+        "tests/workroom-submission-effort-gate.test.ts",
+        "tests/remote-control-mobile-submission-never-ran.test.ts",
+        "tests/workroom-submission-refusal.e2e.mjs",
+        "tests/run-workroom-submission-refusal-screen.mjs"
       ],
       "covers": [
         "Complete Unicode request is validated before terminal writes",
         "Lost acknowledgement and restart never replay a write_started submission",
         "Grant loss during paste settling prevents Enter",
         "Reviewed voice input reuses one durable submission identity",
-        "Version-bound correction context is recorded separately from efficacy"
-      ]
-    },
-    {
-      "id": "voice-remote-benchmark",
-      "argv": [
-        "bun",
-        "test",
-        "./tests/voice-remote-benchmark.test.ts"
-      ],
-      "requires": [
-        "node_modules"
-      ],
-      "timeoutSeconds": 60,
-      "evidence": "synthetic-reported-evidence-admission-and-readonly-file-cli-no-live-runtime",
-      "paths": [
-        "src/voiceRemoteBenchmark.ts",
-        "benchmark-voice-remote.ts",
-        "tests/voice-remote-benchmark.test.ts"
-      ],
-      "covers": [
-        "Precommitted paired trials retain omitted and failed attempts",
-        "Independent semantic evidence precedes paired latency statistics",
-        "CLI proxy never proves native product superiority",
-        "Hourly metadata is not correction efficacy",
-        "Bounded file reports contain no transcript or credential fields"
+        "Version-bound correction context is recorded separately from efficacy",
+        "Pre-write refusals release the composer while preserving the draft; unknown or partially written submissions never replay",
+        "Busy leader and member follow-ups keep distinct request IDs and are written once in order without a permanent prepared fence",
+        "A known pre-write refusal preserves the draft and reason while allowing the next distinct request",
+        "Lost delivery keeps the recovery fence and never resends by button, Enter or reload",
+        "Main windows and popouts reconcile the same request in its own session after switching sessions"
       ]
     },
     {
@@ -764,6 +754,7 @@
         "--max-concurrency=1",
         "remote-control-lan-reconnect.integration.test.ts",
         "remote-control-relay-controller.test.ts",
+        "remote-records-feature-availability.test.tsx",
         "remote-control-relay-session-vault.test.ts",
         "remote-project-create-client.test.ts",
         "remote-project-create-result.test.ts",
@@ -780,7 +771,12 @@
         "agentstoz-mcp-launch-flow.test.ts",
         "team-launch-options.test.ts",
         "workroom-team-e2e.test.ts",
-        "workroom-team-instruction.test.ts"
+        "workroom-team-instruction.test.ts",
+        "team-orca-recovery-read.test.ts",
+        "team-restart-read-only.test.ts",
+        "team-runtime-bridge.test.ts",
+        "team-external-host.test.ts",
+        "team-external-runtime.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -952,7 +948,8 @@
         "src/components/AgentsToZVoiceDock*",
         "tests/fixtures/voice/*",
         "tests/voice-text-only.e2e.mjs",
-        "src/remote-control-portal.css"
+        "src/remote-control-portal.css",
+        "src/VoiceSessionPanel.css"
       ],
       "covers": [
         "Mac and phone start text conversation without microphone permission or playback",
@@ -1041,7 +1038,8 @@
         "restore session",
         "cancel request",
         "Mac screen protocol",
-        "Mac screen session controls"
+        "Mac screen session controls",
+        "Mac controller enrollment"
       ],
       "memoryQueries": [
         "native transport resume session"
@@ -1051,7 +1049,7 @@
       "id": "ios-ui",
       "argv": [
         "{python}",
-        "mobile/ios/scripts/check-ui.py"
+        "mobile/ios/scripts/check-ui-suite.py"
       ],
       "platforms": [
         "darwin"
@@ -1118,6 +1116,7 @@
         "./tests/common-memory-followup.test.ts",
         "./tests/sdk-project-folders.test.ts",
         "./tests/common-memory-topics.test.ts",
+        "./tests/common-memory-lesson-clusters.test.ts",
         "./tests/common-memory-phone-surfaces.test.tsx"
       ],
       "timeoutSeconds": 120,
@@ -1144,6 +1143,7 @@
         "per-device member notices and exact single-member replay",
         "remote cloud/root grants and transfer admission",
         "actual stdio MCP source catalog/read",
+        "The same lesson written in two long-term memories is one evidence-backed discovery candidate; keyword topics only when no lesson repeats",
         "A phone without its own network says so on both common-memory tabs; links read as names and states and history rows in words"
       ],
       "memoryQueries": [
@@ -1315,7 +1315,7 @@
       "id": "voice-popout-screen",
       "argv": [
         "bun",
-        "tests/voice-popout-ui.mjs"
+        "scripts/check-voice-popout-and-memory-recovery.ts"
       ],
       "requires": [
         "node_modules"
@@ -1324,12 +1324,21 @@
       "paths": [
         "src/VoicePopout*",
         "src/NativeVoiceLauncher.tsx",
-        "src-tauri/src/voice_popout.rs"
+        "src-tauri/src/voice_popout.rs",
+        "src/AutomaticSaveNotice*",
+        "src/MemorySaveRecoveryAction.tsx",
+        "src/memorySaveNoticeRecovery*",
+        "src/memorySaveProblem.ts",
+        "src/unsavedSessionMemory.ts",
+        "src/projectMemoryAgentFailure.ts",
+        "tests/fixtures/memory-save-notice-recovery.tsx"
       ],
       "evidence": "chromium-webkit-component-native-ipc-fixture",
       "covers": [
         "독립 음성 창의 단일 마이크 소유권과 종료",
-        "처음 연 음성 창에서 네이티브 표시 영역 차이와 좁은 폭에도 텍스트 입력·전송 버튼이 잘리지 않는다"
+        "처음 연 음성 창에서 네이티브 표시 영역 차이와 좁은 폭에도 텍스트 입력·전송 버튼이 잘리지 않는다",
+        "기억 저장 실패는 원문 오류 노출 없이 확인·해결을 제공하고, 사람이 선택한 AI로 정확한 프로젝트의 고정 진단 작업을 연다",
+        "워크룸 시작 응답 유실은 반복하지 않고 기존 세션만 확인하며, 창 열기 실패는 같은 세션을 다시 연다"
       ]
     },
     {
@@ -1641,7 +1650,9 @@
         "./tests/agentstoz-mascot.test.tsx",
         "./tests/control-memory-entries.test.ts",
         "./tests/control-profile-surface.test.ts",
-        "./tests/control-profile-restore-button.test.tsx"
+        "./tests/control-profile-restore-button.test.tsx",
+        "./tests/control-profile-todo.test.ts",
+        "./tests/control-memory-conflict.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -1663,6 +1674,8 @@
         "src/ProjectRoleLabels.tsx",
         "src/controlMemoryEntries.ts",
         "src/ControlProfilePanel.tsx",
+        "src/ControlMemoryConflictPanel.tsx",
+        "src/projectMemoryReviewedIdentity.ts",
         "src/controlProfileSurface.ts"
       ],
       "covers": [
@@ -1714,9 +1727,12 @@
         "./tests/platform-cli-account-options.test.ts",
         "./tests/platform-cli-login.test.ts",
         "./tests/platform-cli-setup.test.ts",
+        "./tests/platform-cli-native-switch.test.ts",
+        "./tests/platform-cli-workroom.test.ts",
+        "./tests/platform-cli-everywhere.test.ts",
         "./tests/ui-glossary.test.ts"
       ],
-      "timeoutSeconds": 120,
+      "timeoutSeconds": 180,
       "evidence": "isolated-vault-project-binding-MCP-CLI-exact-push-and-retry-contracts",
       "paths": [
         "src/platformCli*",
@@ -1731,7 +1747,8 @@
         "src/platformCliSetupGuide.ts",
         "src/PlatformCliPreparation.tsx",
         "src/SupabaseSetupAccountPicker.tsx",
-        "src/platformCliAccountOptions.ts"
+        "src/platformCliAccountOptions.ts",
+        "src/aiTerminalService.ts"
       ],
       "covers": [
         "multiple provider accounts stay isolated across projects and agent hosts",
@@ -1751,16 +1768,21 @@
         "App sync explicitly chooses one verified Supabase account and returns only a public client key",
         "A failed selected account never falls back to another Supabase login",
         "Service account setup uses the shared 기기 vocabulary consistently",
-        "The same GitHub login appears once without changing a saved native credential binding"
+        "The same GitHub login appears once without changing a saved native credential binding",
+        "The Mac-wide switch changes gh, Supabase and Vercel's own login and repeats safely with the same request",
+        "A Workroom uses the project's own CLI account at each command and the real CLI untouched otherwise, never showing its token",
+        "git push asks the project account first, falls back to this Mac's helpers, and stops when the bound account is gone",
+        "Adding another account through the browser never changes which account this Mac uses",
+        "A project account applies in every new terminal and in git outside Workrooms, and off restores the startup files and git config"
       ]
     },
     {
       "id": "platform-cli-screen",
       "argv": [
         "bun",
-        "tests/platform-cli-accounts-ui.mjs"
+        "tests/platform-cli-screens.mjs"
       ],
-      "timeoutSeconds": 120,
+      "timeoutSeconds": 420,
       "evidence": "real-settings-and-push-dialog-Chromium-WebKit-fake-provider-credentials",
       "paths": [
         "src/PlatformCliSettings.tsx",
@@ -1770,7 +1792,11 @@
         "src/PlatformCliLoginPanel.tsx",
         "src/PlatformGoogleClientSetup.tsx",
         "src/GoogleWorkspaceSetupHelp.tsx",
-        "src/googleWorkspaceOnboardingGuide.ts"
+        "src/googleWorkspaceOnboardingGuide.ts",
+        "src/PlatformAccountSwitcher.tsx",
+        "tests/platform-account-switcher-ui.mjs",
+        "tests/platform-cli-screens.mjs",
+        "tests/fixtures/platform-account-switcher*"
       ],
       "covers": [
         "existing GitHub logins are selected without a credential copy or global account switch",
@@ -1785,7 +1811,12 @@
         "A verified account card switches the device default in one click without changing a project override",
         "Google client JSON accepts file picker and browser file drops with the same validation",
         "Tauri native JSON drops use the shared single-owner router and reject oversized files before reading",
-        "A newcomer copies a static computer-use guide before JSON attachment without account data, AI execution or external navigation"
+        "A newcomer copies a static computer-use guide before JSON attachment without account data, AI execution or external navigation",
+        "One pick switches this Mac's GitHub or Supabase login and offers to make git push follow",
+        "A project picks an account already signed in on this Mac at once, without signing in again or changing this Mac",
+        "A new account is added from the same picker through the official browser sign-in and applied to the project",
+        "A project being created chooses GitHub, Supabase and Vercel accounts that fit a phone-width screen",
+        "This Mac's section shows where project accounts apply and switches between everywhere and Workrooms only"
       ]
     },
     {
@@ -1875,7 +1906,8 @@
         "./tests/public-publish-safety.test.ts",
         "./tests/public-publish-append.test.ts",
         "./tests/macos-browser-upgrade.test.ts",
-        "./tests/macos-developer-id-build.test.ts"
+        "./tests/macos-developer-id-build.test.ts",
+        "./tests/screen-push-config.test.ts"
       ],
       "timeoutSeconds": 120,
       "evidence": "artifact-signing-public-orphan-and-failure-contracts-no-Apple-upload",
@@ -1945,23 +1977,32 @@
         "./tests/tester-improvements.test.ts",
         "./tests/tester-agent-host.test.ts",
         "./tests/tester-agent-client.test.ts",
-        "./tests/tester-agent-api.test.ts"
+        "./tests/tester-agent-api.test.ts",
+        "./tests/click-sweep-compare.test.ts",
+        "./tests/click-sweep-engine.test.ts"
       ],
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 180,
+      "timeoutSeconds": 300,
       "kind": "contract",
       "evidence": "isolated-local-journal-host-and-workspace-lease",
       "paths": [
         "src/testerImprovement*",
         "src/testerAgent*",
-        "tests/tester-improvements*"
+        "tests/tester-improvements*",
+        "tests/click-sweep/**",
+        "tests/click-sweep*",
+        "scripts/agentstoz-click-sweep.mjs",
+        "scripts/embed-click-sweep-engine.ts",
+        ".agentstoz/click-sweep.json"
       ],
       "covers": [
         "Scenario observations changes and rechecks accumulate separately from deterministic verdicts",
         "Lost acknowledgements and stale revisions cannot duplicate a journal entry",
-        "Capacity redaction malformed state and linked-folder boundaries preserve existing records"
+        "Capacity redaction malformed state and linked-folder boundaries preserve existing records",
+        "전수 클릭 검사는 새 오류·반응 상실·사라진 대상·예산 초과·기준선 없음을 실패로, 새 대상·새 반응·고쳐진 오류는 보고로만 다룬다.",
+        "전수 클릭 공통 엔진은 AgentsToZ가 아닌 프로젝트에서도 CLI로 돌고, loopback 주소만 받으며 쓰기 요청을 개발 서버에 보내지 않는다."
       ]
     },
     {
@@ -1995,7 +2036,8 @@
         "test",
         "./tests/project-memory-panel-status.test.ts",
         "./tests/project-memory-panel-status.integration.test.ts",
-        "./tests/project-memory-sync-state.test.ts"
+        "./tests/project-memory-sync-state.test.ts",
+        "./tests/project-memory-unagreed-sync.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -2091,12 +2133,20 @@
         "./tests/what-i-said-codex-delivery.test.ts",
         "./tests/what-i-said-prompt-origin.test.ts",
         "./tests/what-i-said-transcript-collector.test.ts",
-        "./tests/prompt-guide-suggestions.test.ts"
+        "./tests/prompt-guide-suggestions.test.ts",
+        "./tests/what-i-said-explicit-backfill.test.ts",
+        "./tests/what-i-said-backfill-regressions.test.ts",
+        "./tests/what-i-said-api-integration.test.ts",
+        "./tests/what-i-said-memory-sync.test.ts",
+        "./tests/what-i-said-remote-policy.test.ts",
+        "./tests/what-i-said-panel.test.ts",
+        "./tests/what-i-said-remote-mutation-lock.test.ts",
+        "./tests/what-i-said-remote-throttle.test.ts"
       ],
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 120,
+      "timeoutSeconds": 240,
       "evidence": "isolated-transcript-registry-encrypted-store-and-guide-contracts-no-live-history-write",
       "paths": [
         "src/whatISaidCodexDelivery.ts",
@@ -2106,12 +2156,17 @@
         "tests/what-i-said-codex-delivery.test.ts",
         "tests/what-i-said-prompt-origin.test.ts",
         "tests/what-i-said-transcript-collector.test.ts",
-        "tests/prompt-guide-suggestions.test.ts"
+        "tests/prompt-guide-suggestions.test.ts",
+        "src/whatISaidExplicitBackfill.ts",
+        "src/WhatISaidPanel.tsx",
+        "tests/what-i-said-*"
       ],
       "covers": [
         "Scheduled Codex delivery uses exact producer metadata, turn, full-text and time binding; quoted XML remains a user message",
         "Missing or mismatched provenance stays unknown and scheduled instructions do not enter guide suggestions",
-        "Incremental scan restart preserves bounded evidence, originals and deduplication without reclassifying existing rows"
+        "Incremental scan restart preserves bounded evidence, originals and deduplication without reclassifying existing rows",
+        "An explicit past-conversation import finishes across requests even when Codex first-line headers exceed half the scan budget, never moves the ordinary cursor or imports pre-consent rows",
+        "A multi-memory sync answers within one request deadline, continues only memories it did not start, and shows localized failure reasons"
       ]
     },
     {
@@ -2275,7 +2330,7 @@
         "./tests/onboarding-cloud-configuration.test.ts",
         "./tests/supabase-proxy-local-web-integration.test.ts",
         "./tests/mobile-google-setup.test.ts",
-        "./tests/google-workspace-steps.test.ts"
+        "./tests/google-workspace-steps.test.ts", "./tests/helpdesk-assist.test.ts", "./tests/helpdesk-assist-control-races.test.ts"
       ],
       "timeoutSeconds": 120,
       "kind": "contract",
@@ -2317,7 +2372,9 @@
         "Mobile help distinguishes CLI, configured storage, email/Auth membership, optional Google Web OAuth and real iPhone QR results; partial status failures are unknown",
         "Google provider changes require a redacted review and explicit consent for the exact configured Supabase project and verified account",
         "A lost Google setup response survives restart and can only be read back without replaying PATCH",
-        "Ten Console API links reuse the selected project; Desktop JSON and Web OAuth clients stay distinct"
+        "Ten Console API links reuse the selected project; Desktop JSON and Web OAuth clients stay distinct",
+        "Assisted help acts only on reviewed addresses and observed elements, never reads sign-in or secret pages, and a late or cancelled step never resumes a run",
+        "Assist verification keeps client, sign-in and real CLI checks separate per service and scope; AI CLIs prove sign-in status only"
       ]
     },
     {
@@ -2358,7 +2415,9 @@
         "A newcomer creates the dedicated cloud schema with fixed runtime actions, no pasted SQL or keys",
         "Local first-project navigation needs no service account, installation or AI call",
         "Mobile help distinguishes CLI, configured storage, email/Auth membership, optional Google Web OAuth and real iPhone QR results; partial status failures are unknown",
-        "Google Workspace newcomer uses explicit-email login rather than unsupported automatic email discovery"
+        "Google Workspace newcomer uses explicit-email login rather than unsupported automatic email discovery",
+        "헬프데스크 도움받기 starts only after the person confirms browser, AI and scope; pause, take, cancel and return keep the original screen",
+        "Assisted Google setup prepares the reviewed Console steps, hands sign-in and client JSON to the person, and completes only on a real connection check"
       ]
     },
     {
@@ -2367,7 +2426,12 @@
         "bun",
         "test",
         "./tests/user-memory-timeline.test.ts",
+        "./tests/unsaved-session-memory.test.ts",
+        "./tests/memory-save-notice-recovery.test.ts",
         "./tests/user-memory-recall.test.ts",
+        "./tests/user-memory-history-body.test.ts",
+        "./tests/what-i-said-collection-receipt.test.ts",
+        "./tests/unfinished-work-skill.test.ts",
         "./tests/control-profile-api.test.ts",
         "./tests/user-memory-outcomes-api.test.ts",
         "./tests/project-memory-activity.test.ts",
@@ -2379,6 +2443,7 @@
       "kind": "contract",
       "paths": [
         "src/userMemory*",
+        "src/unfinishedWorkSkill.ts",
         "src/agentstozUseControl.ts",
         "agentstoz-use-mcp-server.ts",
         "api-server.ts",
@@ -2390,6 +2455,7 @@
       "covers": [
         "Authenticated project-local recall preserves provenance and bounds history without capture or policy changes",
         "Result windows preserve all instructions and report unavailable or partial reads honestly",
+        "Dated request bodies reconstruct losslessly across bounded pages and finalized collection receipts survive restart without importing history during reads",
         "Locally encrypted user-confirmed preferences stay separate from historical instructions and OPS memory",
         "Inactive and other-project preferences are withheld from bounded authenticated recall; stale writes and key loss preserve existing data"
       ]
@@ -2456,12 +2522,17 @@
       "argv": [
         "bun",
         "scripts/check-maintainer-web.ts",
+        "tests/voice-dock-viewport.e2e.mjs",
+        "src/cornerFloatClearance.ts",
+        "src/components/WorkspaceTools.tsx",
+        "src/components/AgentsToZVoiceDock*",
+        "src/uiZoom.ts",
         "first-project"
       ],
       "requires": [
         "node_modules"
       ],
-      "timeoutSeconds": 240,
+      "timeoutSeconds": 360,
       "kind": "screen",
       "evidence": "production-App-build-Chromium-isolated-API-no-live-write",
       "paths": [
@@ -2654,7 +2725,12 @@
         "mobile/ios/App/RemoteHomeView.swift",
         "mobile/ios/AgentsToZCore/Sources/AgentsToZCore/WorkroomShell.swift",
         "tests/ios-shell-contract.test.ts",
-        "tests/phone-connect-link.test.ts"
+        "tests/phone-connect-link.test.ts",
+        "mobile/ios/App/ScreenMacsSection.swift",
+        "mobile/ios/App/ScreenRegistrationSheet.swift",
+        "mobile/ios/App/Info.plist",
+        "native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift",
+        "native/screen-control/Sources/ScreenControlCore/Registration.swift"
       ]
     },
     {
@@ -2837,23 +2913,15 @@
       "id": "native-workflow-foundations",
       "argv": [
         "bun",
-        "test",
-        "./tests/read-tool-bundle.test.ts",
-        "./tests/work-pack.test.ts",
-        "./tests/work-pack-store.test.ts",
-        "./tests/workroom-thread-read-execution.test.ts",
-        "./tests/read-tool-batch-client.test.ts",
-        "./tests/read-tool-batch-host.test.ts",
-        "./tests/read-tool-batch-http.test.ts",
-        "./tests/work-pack-host.test.ts",
-        "./tests/work-pack-http.test.ts"
+        "scripts/check-native-workflow.ts"
       ],
       "requires": [
-        "node_modules"
+        "node_modules",
+        "node_modules/node-api-headers/include/node_api.h"
       ],
-      "timeoutSeconds": 180,
+      "timeoutSeconds": 300,
       "kind": "contract",
-      "evidence": "typed-read-plans-batch-host-receipts-and-work-pack-host-with-isolated-encrypted-stores",
+      "evidence": "typed-host-contracts-compiled-inherited-fd-swift-core-and-exact-AX-engine-with-isolated-chromium-webkit-ui-no-installed-grants",
       "paths": [
         "src/readToolBatch*",
         "src/readToolBundle.ts",
@@ -2863,14 +2931,64 @@
         "tests/read-tool-batch*",
         "tests/read-tool-bundle.test.ts",
         "tests/work-pack*",
-        "tests/workroom-thread-read-execution.test.ts"
+        "tests/workroom-thread-read-execution.test.ts",
+        "src/computerUse*.ts",
+        "src/desktopSessionEffort.ts",
+        "native/computer-use/*",
+        "tests/computer-use*",
+        "tests/fixtures/computer-use-approval-swift-vector.json",
+        "scripts/computerUseControlBundle.ts",
+        "scripts/build-computer-use-control-app.ts",
+        "scripts/check-computer-use-control.ts",
+        "src/computerUse*",
+        "src/ComputerUsePanel.tsx",
+        "src/dialogFocus.ts",
+        "src-tauri/native/computer-use/**",
+        "src-tauri/src/computer_use_bridge.rs",
+        "scripts/computerUse*",
+        "scripts/check-native-workflow.ts",
+        "agentstoz-use-mcp-server.ts",
+        "src/workroomSchedule*",
+        "src/WorkroomScheduleCard.tsx",
+        "src/desktopEffort*",
+        "src/DesktopEffortPanel.tsx",
+        "tests/workroom-schedule*",
+        "tests/desktop-effort-native.test.ts",
+        "scripts/computerUseSigningProfile.ts"
       ],
       "covers": [
         "Read plans reject unknown operations authority overrides cycles and invalid typed references",
         "Append-only existing-thread receipts preserve owner binding CAS results restart uncertainty and pre-v4 encrypted backup",
         "Reviewed pack definitions and encrypted local sidecars preserve source body identity key lifecycle and stale orphan guards",
         "A pack binds to a local standard command body; a changed body stales it, a deleted command orphans it and a pin or reorder keeps it",
-        "Batch and pack runs keep the original request ID; a known ID reads its receipt and never starts again"
+        "Batch and pack runs keep the original request ID; a known ID reads its receipt and never starts again",
+        "Native v1 controls one exact window; separately signed v2 consent selects whole Mac or one actual running app across windows, while authentication surfaces remain protected",
+        "Team members serialize native writes within an application and stale observations never queue input",
+        "Unknown delivery persists across restart and blocks overlapping v1/v2 scopes; completed event dispatch requires a new observation and never replays an action ID",
+        "External desktop Auto requires explicit bound-session consent and verified native effective effort without changing model account defaults or other sessions",
+        "Pinned Max and xhigh minimum remain fixed and unsupported adapters only recommend",
+        "Only a helper-signed one-time human approval bound to the exact target caller and expiry becomes a native grant; a boolean never does",
+        "Native grants belong to the authenticated Workroom session and lane; a leaked grant secret changes nothing for another lane",
+        "Native actions of unknown result are durable before dispatch and block that app across restarts until a person reviews them",
+        "Refusals before dispatch are not unknown; changed values beyond displayed excerpts, failed subroles, late permission changes and stale windows refuse input; human movement voids an observation",
+        "Legacy window control excludes AgentsToZ, agent apps, shells and security surfaces; v2 control needs native scope consent, acts only on the accessibility hit-test owner, keeps Control and system prompts protected; Swift and TS share one golden list",
+        "A worker is created only after the approval signature check, for the redeemed approval, caller credential and exact target; a deferred helper key is read only at that check",
+        "An ended or expired caller credential, a session ended while a grant is prepared, and a second host racing for the same app create no grant or action",
+        "AgentsToZ Control accepts only the closed agent and management operations of the verified main app process generation",
+        "Only the agent path reaches the engine; the window catalog and approval list are management-only",
+        "disconnect-owner and revoke-session only revoke within the requesting main process generation; a restarted main app or reused PID revives nothing",
+        "One human approval opens one grant once; changes are ordered per app process and other processes stay parallel",
+        "MCP instances receive no target control before native human approval; no body caller or leaked grant crosses connections",
+        "Connection heartbeats never renew ten-minute grants; input is never queued or replayed, revocations have a bounded priority queue",
+        "Main inherited sockets are protected before provider spawn; signed XPC channels separate agent operations from human management",
+        "Chromium and WebKit fixtures verify desktop/app/window selection, actual app identity, native-only pending approval, revocation, direct recovery review, IME and narrow layout",
+        "Expired or restarted native grants revoke idempotently without closing other connections",
+        "A known pre-dispatch bind refusal retains the same approval and simultaneous binds consume it only once",
+        "Host-issued connection codes match AI status app selection and native approval without client-chosen hash aliases",
+        "Scheduled Workroom runs require consent, durable per-conversation leases, empty input and unchanged model and account; same-host restore also verifies exact conversation and completed transcript",
+        "Unknown scheduled delivery blocks later runs across owner restart until human review and separate re-enable; sleep coalesces due work without replay",
+        "External desktop effort management cannot register a fake native adapter; native view and policy CAS witnesses are independently required",
+        "Owned Chromium and WebKit fixtures verify schedule consent, pause, unknown-result review, narrow layout, session effort consent and honest unsupported states"
       ]
     },
     {
@@ -2938,7 +3056,26 @@
         "./tests/dock-notices-sessions.test.ts",
         "./tests/claude-md-size.test.ts",
         "./tests/automatic-save-notices.test.ts",
-        "./tests/voice-dock.test.ts"
+        "./tests/voice-dock.test.ts",
+        "./tests/context-session-cleanup.test.ts",
+        "./tests/context-session-command.test.ts",
+        "./tests/context-session-command-availability.test.ts",
+        "./tests/context-orca-command.test.ts",
+        "./tests/orca-profile-state.test.ts",
+        "./tests/orca-session-lookup.test.ts",
+        "./tests/context-session-visibility.test.ts",
+        "./tests/unsaved-session-memory.test.ts",
+        "./tests/weekly-usage.test.ts",
+        "./tests/weekly-usage-remote.test.tsx",
+        "./tests/weekly-usage-alerts.test.ts",
+        "./tests/voice-remote-benchmark.test.ts",
+        "./tests/weekly-usage-push-host.test.ts",
+        "./tests/screen-push-weekly-usage.test.ts",
+        "./tests/screen-push-protocol.test.ts",
+        "./tests/screen-push-sql.test.ts",
+        "./tests/context-command-outcome.test.ts",
+        "./tests/context-command-evidence.test.ts",
+        "./tests/corner-float-clearance.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -2952,13 +3089,46 @@
         "src/VoicePopoutApp.tsx",
         "src/NativeVoiceLauncher.tsx",
         "CLAUDE.md",
-        "docs/claude/*"
+        "docs/claude/*",
+        "src/context*",
+        "src/orcaProfileState.ts",
+        "src/orcaSessionLookup.ts",
+        "src/aiTerminalService.ts",
+        "tests/context-*.test.ts",
+        "tests/orca-profile-state.test.ts",
+        "src/weeklyUsage*",
+        "src/components/DockWeeklyUsage.tsx",
+        "src/RemoteWeeklyUsageCard.tsx",
+        "tests/weekly-usage*.test.ts*",
+        "src/voiceRemoteBenchmark.ts",
+        "benchmark-voice-remote.ts",
+        "tests/voice-remote-benchmark.test.ts",
+        "supabase/functions/screen-push/*",
+        "supabase/migrations/20261025010000_screen_push.sql",
+        "src/screenPushSql.ts",
+        "tests/screen-push-*.test.ts",
+        "tests/screenPushTestKit.ts",
+        "src/cornerFloatClearance.ts",
+        "src/components/WorkspaceTools.tsx",
+        "src/VoiceSessionPanel.css",
+        "src/workspaceDesign.css",
+        "tests/corner-float-clearance.test.ts"
       ],
       "evidence": "source-contracts-and-unit",
       "covers": [
         "자동 저장 알림은 페이지 배너가 아니라 「아젠투지 호출」 도크 위에 뜬다",
         "열린 AI 세션 목록은 펼쳤을 때만 지연 로딩·조회한다",
-        "CLAUDE.md가 Claude Code 크기 상한 아래에 있고 상세 노트 색인이 실제 파일과 맞는다"
+        "CLAUDE.md가 Claude Code 크기 상한 아래에 있고 상세 노트 색인이 실제 파일과 맞는다",
+        "Internal review sessions are excluded by source; display cleanup preserves active work and fresh activity reappears.",
+        "Native Claude /compact and /clear require the exact saved input revision, synced memory and an empty idle composer; unknown outcomes are never replayed.",
+        "An exactly bound Orca Claude terminal gets /compact or /clear only with saved+synced memory and an idle empty composer; unknown sends stay fenced until acknowledged; Orca 1.4's profile DB keeps live terminals visible.",
+        "Weekly allowance uses explicit provider windows and transparent opt-in statusline capture, preserving native output and unknown/stale states without transcripts or credentials.",
+        "Phone Home reads the Mac's weekly allowance read-only (`usage.weekly`) from a cached snapshot, hides on an older Mac and says offline; alerts say each 10-point boundary and 소진 once per window, never a reset or stale figure.",
+        "Precommitted paired trials retain omitted and failed attempts",
+        "Independent semantic evidence precedes paired latency statistics",
+        "CLI proxy never proves native product superiority",
+        "Hourly metadata is not correction efficacy",
+        "Bounded file reports contain no transcript or credential fields"
       ]
     },
     {
@@ -2976,14 +3146,21 @@
         "src/components/AgentsToZVoiceDock*",
         "src/components/DockSessionsPanel.tsx",
         "tests/fixtures/voice/dock-sessions.tsx",
-        "scripts/check-voice-dock-sessions.ts"
+        "scripts/check-voice-dock-sessions.ts",
+        "src/components/DockWeeklyUsage.tsx",
+        "src/weeklyUsage.ts",
+        "src/weeklyUsagePush*.ts",
+        "src/contextCommandOutcome.ts",
+        "src/contextUsageReading.ts"
       ],
       "evidence": "chromium-webkit-synthetic-local-api",
       "covers": [
         "자동 저장 알림이 도크 바로 위에 최신순으로 쌓이고 펼치기·닫기·모두 지우기가 된다",
         "닫은 알림은 새로고침 뒤에도 다시 뜨지 않는다",
         "열린 프로젝트·AI 세션마다 컨텍스트 %와 로컬·백업 시각을 보고 지금 저장·동기화를 한 번씩 한다",
-        "접혀 있는 동안 세션 목록을 조회하지 않는다"
+        "접혀 있는 동안 세션 목록을 조회하지 않는다",
+        "Three weekly allowance tiles preserve missing data and offer explicit CLI statusline connection at desktop and narrow dock sizes.",
+        "An Orca Claude row names its memory until saved, survives bulk cleanup while live, and an unknown send is released only by an explicit acknowledgement."
       ]
     },
     {
@@ -3146,6 +3323,40 @@
         "The real compiled main app and pinned CEF framework assemble in a disposable bundle; five helpers sign inside out before the GUI entitlement-preserving signature, and deep strict verification passes without installation."
       ],
       "evidence": "real-compiled-main-app-CEF-disposable-bundle-ad-hoc-signature-no-install-no-notarization"
+    },
+    {
+      "id": "click-sweep-screen",
+      "argv": [
+        "bun",
+        "scripts/check-maintainer-web.ts",
+        "click-sweep"
+      ],
+      "kind": "screen",
+      "requires": [
+        "node_modules"
+      ],
+      "timeoutSeconds": 1800,
+      "evidence": "isolated-vite-build-synthetic-api-chromium-every-visible-target-no-live-sidecar",
+      "paths": [
+        "src/**",
+        "index.html",
+        "vite.config.ts",
+        "tests/click-sweep*",
+        "tests/click-sweep/**",
+        "scripts/check-maintainer-web.ts",
+        "scripts/agentstoz-click-sweep.mjs"
+      ],
+      "covers": [
+        "데스크톱 앱 화면에서 보이는 모든 버튼·탭·링크·클릭 가능한 행을 깊이 2까지 한 번씩 누른다(쓰기 요청은 가로채 실제로 실행되지 않는다).",
+        "누른 뒤 처리되지 않은 예외·앱 오류 화면·console.error가 새로 생기면 실패한다.",
+        "기준선에서 반응하던 대상이 무반응·못 누름·비활성이 되거나 사라지면 실패한다.",
+        "버튼 목록은 tests/click-sweep/desktop.json에 커밋되고 실행 요약은 .agentstoz/maintainer/click-sweep/history.jsonl에 쌓인다."
+      ],
+      "memoryQueries": [
+        "전수 클릭",
+        "버튼 회귀",
+        "click sweep"
+      ]
     }
   ],
   "limits": [
@@ -3154,6 +3365,7 @@
     "Personal internet relay, cellular handover, camera QR scan and 30-day expiry are not end-to-end verified by these fixture checks.",
     "Performance measures the isolated mobile initial page, not signed-in project workload or AI latency.",
     "The simulator's optional personal HTTPS test can be skipped when no personal origin is supplied; inspect native UI evidence.",
-    "AgentsToZ Screen's Swift core and status-file checks (`bun run test:screen-control`) run inside the ios-core check, since the iOS app links that package; the Mac app's capture, lock notifications and Face ID need a real Mac and iPhone (mobile/ios/DEVICE-CHECKLIST.md)."
+    "AgentsToZ Screen's Swift core and status-file checks (`bun run test:screen-control`) run inside the ios-core check, since the iOS app links that package; the Mac app's capture, lock notifications and Face ID need a real Mac and iPhone (mobile/ios/DEVICE-CHECKLIST.md).",
+    "AgentsToZ Control's Swift core checks (`bun scripts/check-computer-use-control.ts`) run inside native-workflow-foundations; the signed Control app, both XPC peer requirements, its LaunchAgent registration, the Accessibility permission and Secure Enclave approval need a signed build on a real Mac (native/computer-use/CONTRACT.md section 12)."
   ]
 }

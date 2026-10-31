@@ -1,3 +1,5 @@
+import {lastClaudeCompaction,type ClaudeCompaction} from './contextCommandEvidence';
+
 export type ContextSessionProjectMoveState = 'applied' | 'pending' | 'relocated' | 'unknown';
 
 export interface ContextSessionProjectHint {
@@ -16,6 +18,8 @@ export interface ContextSessionProjectHint {
 export interface ContextSessionMetadata {
   threadTitle: string | null;
   projectHint: ContextSessionProjectHint | null;
+  /** Claude only, when the transcript holds one: its newest compaction (src/contextCommandEvidence.ts). */
+  lastCompaction?: ClaudeCompaction;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -152,8 +156,10 @@ export function parseClaudeSessionMetadata(transcriptJsonl: string): ContextSess
     }
   }
 
+  const lastCompaction = lastClaudeCompaction(transcriptJsonl);
   return {
     threadTitle: threadTitle ?? agentName,
+    ...(lastCompaction ? { lastCompaction } : {}),
     projectHint: relocatedCwd
       ? {
         name: null,

@@ -6,6 +6,7 @@ import {
   REMOTE_CONTROL_MAX_SESSIONS,
   REMOTE_CONTROL_PROTOCOL_VERSION,
   REMOTE_CONTROL_LEGACY_FEATURE_LIMIT,
+  CODEX_NEW_RECEIPT_FEATURE,
   normalizeRemoteControlSupportedFeatures,
   type RemoteControlSupportedFeature,
 } from './remoteControlProtocol';
@@ -37,6 +38,8 @@ const ACTION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
 const INTERNAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export type RemoteControlReadAction =
+  | 'protocol.codex-new-v2'
+  | 'codex.thread.review.v2'
   | 'protocol.capabilities.extended'
   | 'protocol.capabilities'
   | 'ops.status'
@@ -44,10 +47,11 @@ export type RemoteControlReadAction =
   | 'projects.list'
   | 'project.status'
   | 'workspace-roots.list';
-export type RemoteControlMutationAction = RemoteControlProjectAction | 'project.create' | 'ops.open' | 'ops.memory.review';
+export type RemoteControlMutationAction = RemoteControlProjectAction | 'codex.thread.start.v2' | 'codex.thread.ack.v2' | 'codex.thread.cancel.v2' | 'project.create' | 'ops.open' | 'ops.memory.review';
 export type RemoteControlAction = RemoteControlReadAction | RemoteControlMutationAction;
 
 const REMOTE_CONTROL_ACTIONS = new Set<RemoteControlAction>([
+  'protocol.codex-new-v2', 'codex.thread.review.v2', 'codex.thread.start.v2', 'codex.thread.ack.v2','codex.thread.cancel.v2',
   'protocol.capabilities',
   'protocol.capabilities.extended',
   'ops.status',
@@ -82,6 +86,7 @@ const REMOTE_CONTROL_ACTIONS = new Set<RemoteControlAction>([
 ]);
 
 const MUTATING_ACTIONS = new Set<RemoteControlAction>([
+  'codex.thread.start.v2', 'codex.thread.ack.v2','codex.thread.cancel.v2',
   'ops.open',
   'ops.memory.review',
   'start',
@@ -147,10 +152,15 @@ export interface RemoteControlProjectDto {
 }
 
 export interface RemoteControlGatewayAction {
-  action: RemoteControlProjectAction;
+  action: RemoteControlProjectAction | 'codex.thread.start.v2' | 'codex.thread.ack.v2' | 'codex.thread.review.v2' | 'codex.thread.cancel.v2';
   target: RemoteControlRegisteredTarget;
   actionId: string;
   input?: string;
+  /** Derived by the host from the authenticated controller, never the DTO. */
+  controllerId?: string;
+  sessionExpiresAt?: string;
+  /** Host-only live session and target revalidation, never accepted over the wire. */
+  assertActive?: () => Promise<void>;
 }
 
 export interface RemoteControlWorkspaceRootTarget {
@@ -224,7 +234,7 @@ export interface RemoteControlOpsReviewAction {
  */
 export interface RemoteControlGateway {
   listRegisteredProjects(): readonly RemoteControlRegisteredTarget[] | Promise<readonly RemoteControlRegisteredTarget[]>;
-  executeRegisteredProjectAction(action: RemoteControlGatewayAction): void | Promise<void>;
+  executeRegisteredProjectAction(action: RemoteControlGatewayAction): void | {codexNewChatReceipt: {actionId:string; state:'started'|'completed'|'acknowledged'|'cancelled'} | null} | Promise<void | {codexNewChatReceipt: {actionId:string; state:'started'|'completed'|'acknowledged'|'cancelled'} | null}>;
   listWorkspaceRoots?(): readonly RemoteControlWorkspaceRootTarget[] | Promise<readonly RemoteControlWorkspaceRootTarget[]>;
   createProject?(action: RemoteControlCreateProjectAction): void | {internalId: string} | Promise<void | {internalId: string}>;
   readOpsStatus?(): RemoteControlOpsDto | Promise<RemoteControlOpsDto>;
@@ -303,6 +313,7 @@ export type RemoteControlSessionReady = {
 };
 
 export type RemoteControlActionResult =
+  | {type:'action.result';actionId:string;ok:true;codexNewChatReceipt:{actionId:string;state:'started'|'completed'|'acknowledged'|'cancelled'}|null}
   | {
       type: 'action.result';
       actionId: string;
@@ -508,7 +519,7 @@ export function parseRemoteControlClientMessage(value: unknown): RemoteControlCl
       || typeof value.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/.test(value.expectedRevision)) {
       throw new RemoteControlError('INVALID_ACTION', 'OPS 기억 검토에는 후보·기억 기준·사람 확인이 필요합니다.');
     }
-  } else if (action === 'workspace-roots.list' || action === 'protocol.capabilities' || action === 'protocol.capabilities.extended' || action === 'ops.status' || action === 'ops.memory.pending') {
+  } else if (action === 'workspace-roots.list' || action === 'protocol.capabilities' || action === 'protocol.capabilities.extended' || action === 'protocol.codex-new-v2' || action === 'ops.status' || action === 'ops.memory.pending') {
     if (value.controlId !== undefined || value.remoteConfirmed !== undefined
       || value.page !== undefined || value.input !== undefined || value.workspaceRootId !== undefined
       || value.candidateId !== undefined || value.expectedRevision !== undefined || value.accept !== undefined) {
@@ -546,6 +557,10 @@ export function parseRemoteControlClientMessage(value: unknown): RemoteControlCl
     if (action === 'project.status' && value.remoteConfirmed !== undefined) {
       throw new RemoteControlError('INVALID_ACTION', '상태 조회에는 실행 확인 값을 사용할 수 없습니다.');
     }
+    if (action === 'codex.thread.ack.v2' || action === 'codex.thread.cancel.v2') {
+      if (typeof value.input !== 'string' || !ACTION_ID_RE.test(value.input)) throw new RemoteControlError('INVALID_ACTION','확인할 새 대화 요청 ID가 올바르지 않습니다.');
+    }
+    if (action === 'codex.thread.review.v2' && value.input !== undefined && (typeof value.input !== 'string' || !ACTION_ID_RE.test(value.input))) throw new RemoteControlError('INVALID_ACTION','조회할 새 대화 요청 ID가 올바르지 않습니다.');
     const needsInput = action === 'git.commit' || action === 'worktree.add' || action === 'worktree.add.orca';
     if (needsInput) {
       if (typeof value.input !== 'string'
@@ -557,7 +572,7 @@ export function parseRemoteControlClientMessage(value: unknown): RemoteControlCl
           action === 'git.commit' ? '커밋 메시지는 한 줄 1~120자로 입력하세요.' : '브랜치 이름은 한 줄 1~120자로 입력하세요.',
         );
       }
-    } else if (value.input !== undefined) {
+    } else if (action !== 'codex.thread.ack.v2' && action !== 'codex.thread.cancel.v2' && action !== 'codex.thread.review.v2' && value.input !== undefined) {
       throw new RemoteControlError('INVALID_ACTION', '이 프로젝트 기능에는 추가 입력을 사용할 수 없습니다.');
     }
   }
@@ -639,6 +654,8 @@ type RandomBytes = (length: number) => Uint8Array;
 
 export interface RemoteControlCoreOptions {
   hostName: string;
+  /** LAN has room in the eight-item legacy response; Internet may not. */
+  codexFeatureInLegacy?: boolean;
   /** Bounded, additive protocol support; never an authorization grant. */
   supportedFeatures?: readonly RemoteControlSupportedFeature[];
   now?: () => number;
@@ -744,6 +761,7 @@ export class RemoteControlCore {
   readonly #gateway: RemoteControlGateway;
   #hostName: string;
   readonly #supportedFeatures: RemoteControlSupportedFeature[];
+  readonly #codexFeatureInLegacy: boolean;
   readonly #now: () => number;
   readonly #randomBytes: RandomBytes;
   readonly #pairingTtlMs: number;
@@ -762,6 +780,7 @@ export class RemoteControlCore {
     this.#gateway = gateway;
     this.#hostName = normalizedHostName(options.hostName);
     this.#supportedFeatures = normalizeRemoteControlSupportedFeatures(options.supportedFeatures ?? []);
+    this.#codexFeatureInLegacy = options.codexFeatureInLegacy === true;
     this.#now = options.now ?? Date.now;
     this.#randomBytes = options.randomBytes ?? ((length) => nodeRandomBytes(length));
     this.#pairingTtlMs = positiveDuration(options.pairingTtlMs, REMOTE_CONTROL_PAIRING_TTL_MS, 'pairingTtlMs');
@@ -1185,12 +1204,13 @@ export class RemoteControlCore {
     authority?: RemoteControlActionAuthority,
   ): Promise<RemoteControlActionResult> {
     try {
+      if (request.action === 'protocol.codex-new-v2') return {type:'action.result',actionId:request.actionId,ok:true,supportedFeatures:['codex-new-receipt-v1']};
       if (request.action === 'protocol.capabilities'||request.action==='protocol.capabilities.extended') {
         return {
           type: 'action.result',
           actionId: request.actionId,
           ok: true,
-          supportedFeatures: request.action==='protocol.capabilities.extended'?[...this.#supportedFeatures]:this.#supportedFeatures.filter(f=>f!=='device-memory-v1'&&f!=='goal-common-memory-v1'&&f!==COMMON_MEMORY_RPC_V2_FEATURE&&f!==WORKROOM_HISTORY_REMOTE_FEATURE&&f!==WORKROOM_RESTART_REMOTE_FEATURE&&f!==WORKROOM_ATTACH_FEATURE).slice(0,REMOTE_CONTROL_LEGACY_FEATURE_LIMIT),
+          supportedFeatures: request.action==='protocol.capabilities.extended'?[...this.#supportedFeatures]:this.#supportedFeatures.filter(f=>f!=='device-memory-v1'&&f!=='goal-common-memory-v1'&&f!==COMMON_MEMORY_RPC_V2_FEATURE&&f!==WORKROOM_HISTORY_REMOTE_FEATURE&&f!==WORKROOM_RESTART_REMOTE_FEATURE&&f!==WORKROOM_ATTACH_FEATURE&&(f!==CODEX_NEW_RECEIPT_FEATURE||this.#codexFeatureInLegacy)).slice(0,REMOTE_CONTROL_LEGACY_FEATURE_LIMIT),
         };
       }
       if (request.action === 'ops.status') {
@@ -1306,15 +1326,35 @@ export class RemoteControlCore {
       if (request.action === 'project.status') {
         return { type: 'action.result', actionId: request.actionId, ok: true, project: current };
       }
-      if (!current.actions.includes(request.action)) {
+      const isCodexV2 = request.action === 'codex.thread.start.v2' || request.action === 'codex.thread.ack.v2' || request.action === 'codex.thread.review.v2' || request.action === 'codex.thread.cancel.v2';
+      if (!current.actions.includes(isCodexV2 ? 'codex.thread.start' : request.action as RemoteControlProjectAction)) {
         throw new RemoteControlError('ACTION_NOT_AVAILABLE', '현재 프로젝트 상태에서는 이 기능을 실행할 수 없습니다.', 409);
       }
-      await this.#gateway.executeRegisteredProjectAction({
-        action: request.action,
+      const gatewayResult = await this.#gateway.executeRegisteredProjectAction({
+        action: request.action as RemoteControlGatewayAction['action'],
         target: currentTarget,
         actionId: request.actionId,
+        ...(isCodexV2 ? {controllerId:authority?.controllerId ?? `lan:${createHash('sha256').update(`agentstoz-lan-pairing-v1:${session.sessionToken}`).digest('hex')}`,
+          sessionExpiresAt:authority?.expiresAt ?? new Date(session.createdAt + this.#absoluteTtlMs).toISOString()} : {}),
+        ...(request.action === 'codex.thread.start' || request.action === 'codex.thread.start.v2' ? {assertActive:async()=>{
+          this.#assertSessionStillActive(session,delivery);
+          if(authority?.expiresAt && Date.parse(authority.expiresAt)<=this.#now()) throw new RemoteControlError('SESSION_EXPIRED','원격 연결이 만료되어 첫 메시지를 보내지 않았습니다.',401);
+          const latest=await this.#refreshProjectCards(session);
+          this.#assertSessionStillActive(session,delivery);
+          const target=latest.targetsByInternalId.get(internalId);
+          const card=latest.cards.find(entry=>entry.controlId===controlId);
+          if(session.internalIdsByControlId.get(controlId)!==internalId||!target||!card?.actions.includes('codex.thread.start')
+            ||target.kind!==currentTarget.kind||target.folderPath!==currentTarget.folderPath||target.worktreePath!==currentTarget.worktreePath) {
+            throw new RemoteControlError('PROJECT_NOT_FOUND','프로젝트 연결이 바뀌어 새 대화를 전송하지 않았습니다.',409);
+          }
+        }} : {}),
         ...(request.input ? { input: request.input.trim() } : {}),
       });
+      if (request.action === 'codex.thread.review.v2') {
+        if (!gatewayResult || !('codexNewChatReceipt' in gatewayResult)) throw new RemoteControlError('ACTION_NOT_AVAILABLE','새 대화 기록을 확인할 수 없습니다.',409);
+        this.#assertSessionStillActive(session, delivery);
+        return {type:'action.result',actionId:request.actionId,ok:true,codexNewChatReceipt:gatewayResult.codexNewChatReceipt};
+      }
       const refreshed = await this.#refreshProjectCards(session);
       if (request.action === 'worktree.add' || request.action === 'worktree.add.orca') {
         // Answer with the page the NEW card is on, not page 0. The controller
@@ -1494,6 +1534,10 @@ export class RemoteControlCore {
   #assertSessionStillActive(session: SessionState, delivery?: CapturedDelivery): void {
     if (!this.#enabled || this.#sessions.get(session.sessionToken) !== session) {
       throw new RemoteControlError('SESSION_EXPIRED', '원격 제어 연결이 Mac에서 종료되었습니다.', 401);
+    }
+    const now=this.#now();
+    if(now-session.createdAt>=this.#absoluteTtlMs||now-session.lastActiveAt>=this.#idleTtlMs) {
+      throw new RemoteControlError('SESSION_EXPIRED','원격 제어 연결이 만료되었습니다.',401);
     }
     // Checked on the same edges as session validity: every await inside #execute happens before a
     // side effect, so a connection that died while a lookup was in flight cancels the action

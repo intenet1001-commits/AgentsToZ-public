@@ -44,7 +44,7 @@ try{
       const google=panel.getByRole('region',{name:'브라우저 로그인',exact:true}),client=panel.getByRole('region',{name:'Google 클라이언트 준비',exact:true});
       await client.getByText('클라이언트 파일 필요',{exact:true}).waitFor();await google.getByLabel('연결할 이메일',{exact:true}).fill('intenet1001@gmail.com');assert.equal(await google.getByRole('button',{name:'브라우저로 계정 연결',exact:true}).isDisabled(),true);
       const beforeUpload=(await page.request.get(url+'test/state').then(r=>r.json())).accounts.length;
-      const setupHelp=client.getByRole('group',{name:'Google 설정부터 도움받기',exact:true});await setupHelp.getByRole('button',{name:'Codex 컴퓨터 사용 안내 복사',exact:true}).click();
+      const setupHelp=client.getByRole('group',{name:'Google 설정부터 도움받기',exact:true});await setupHelp.getByRole('button',{name:'대안 · Codex 컴퓨터 사용 안내 복사',exact:true}).click();
       const computerGuide=await setupHelp.getByLabel('Google 설정 컴퓨터 사용 인계문',{exact:true}).inputValue();
       assert.ok(computerGuide.includes('Desktop app'));assert.ok(computerGuide.includes('JSON을 열거나 파일·클립보드 내용을 읽지 마세요'));assert.ok(computerGuide.includes('Drive·Docs·Sheets·Slides·Gmail·Calendar·Forms·Tasks·People·Chat'));assert.ok(computerGuide.includes('사용자가 선택한 서비스만'));assert.ok(!computerGuide.includes('synthetic-client-secret'));assert.ok(!computerGuide.includes('intenet1001@gmail.com'),'Handoff contains no account data');
       assert.equal((await page.request.get(url+'test/state').then(r=>r.json())).accounts.length,beforeUpload,'Copying instructions neither authenticates nor creates an account');
@@ -53,7 +53,9 @@ try{
       const dropZone=client.getByRole('group',{name:'Google JSON 파일 첨부 영역',exact:true});
       await dropFiles(page,dropZone,[{name:'first.json',text:consoleJson('synthetic-project')},{name:'second.json',text:consoleJson('other-project')}]);await client.getByText('JSON 파일을 한 번에 하나만 넣어 주세요.',{exact:true}).waitFor();
       await dropFiles(page,dropZone,[{name:'client_secret_console.json',text:consoleJson('synthetic-project')}]);await client.getByText('클라이언트 파일을 준비했습니다. 아래에서 이메일을 입력하고 Google 로그인을 완료하세요.',{exact:true}).waitFor();assert.equal((await page.request.get(url+'test/state').then(r=>r.json())).accounts.length,beforeUpload,'Attaching a Console client is not account authentication');assert.equal(await client.getByLabel('Google Console 클라이언트 JSON',{exact:true}).inputValue(),'');assert.ok(!(await page.content()).includes('synthetic-client-secret'));
+      await client.getByText('첨부 완료: client_secret_console.json',{exact:true}).waitFor();
       await client.getByLabel('Google Console 클라이언트 JSON',{exact:true}).setInputFiles({name:'picked-client.json',mimeType:'application/json',buffer:Buffer.from(consoleJson('synthetic-picker'))});await client.getByRole('status').filter({hasText:'synthetic-picker'}).waitFor();
+      await client.getByText('첨부 완료: picked-client.json',{exact:true}).waitFor();
       await dropFiles(page,dropZone,[{name:'oversized.json',text:' '.repeat(16_385)}]);await client.getByText('16KB 이하의 Google 클라이언트 JSON을 선택하세요.',{exact:true}).waitFor();await client.getByRole('status').filter({hasText:'synthetic-picker'}).waitFor();
       await panel.getByLabel('계정 이메일',{exact:true}).fill('intenet1001@gmail.com');await panel.getByRole('button',{name:'기기 기본값 저장',exact:true}).click();await panel.getByText('이 기기의 기본 계정을 저장했습니다. 프로젝트에서 지정한 계정은 유지됩니다.',{exact:true}).waitFor();
       for(const email of ['intenet1001@gmail.com','intenet1002@gmail.com','intenet8821@gmail.com']){
@@ -76,7 +78,7 @@ try{
       await panel.getByLabel('프로젝트',{exact:true}).selectOption('project-one');await page.waitForFunction(id=>Array.from(document.querySelectorAll('fieldset select')).some(s=>s.value===id),company);
       const nativePage=await browser.newPage({viewport});
       try{
-        await nativePage.goto(url+'?native-drop');const nativePanel=nativePage.getByTestId('platform-cli-settings');await nativePanel.locator(':scope > summary').click();await nativePanel.getByLabel('CLI',{exact:true}).selectOption('google-workspace');
+        await nativePage.goto(url+'?native-drop&native-modal');const nativePanel=nativePage.getByTestId('platform-cli-settings');await nativePanel.locator(':scope > summary').click();await nativePanel.getByLabel('CLI',{exact:true}).selectOption('google-workspace');
         const nativeClient=nativePanel.getByRole('region',{name:'Google 클라이언트 준비',exact:true}),nativeZone=nativeClient.getByRole('group',{name:'Google JSON 파일 첨부 영역',exact:true});
         await nativeClient.getByRole('status').filter({hasText:'synthetic-picker'}).waitFor();await nativeZone.scrollIntoViewIfNeeded();await nativePage.waitForFunction(()=>window.__TAURI_INTERNALS__?.callbacks?.size>=4);
         const box=await nativeZone.boundingBox(),position={x:box.x+10,y:box.y+10};
@@ -84,6 +86,7 @@ try{
         assert.equal(await nativePage.evaluate(p=>window.__nativeGoogleDrop.owns(p),position),true,'Native JSON area owns the drop instead of a project or Workroom');
         await nativeDrop('/synthetic/oversized.json',{size:16_385,text:'unread'});await nativeClient.getByText('16KB 이하의 Google 클라이언트 JSON을 선택하세요.',{exact:true}).waitFor();assert.deepEqual(await nativePage.evaluate(()=>window.__nativeGoogleDrop.reads),[],'Oversized native files are not read');
         await nativeDrop('/synthetic/console-client.json',{text:consoleJson('synthetic-native')});await nativeClient.getByRole('status').filter({hasText:'synthetic-native'}).waitFor();assert.deepEqual(await nativePage.evaluate(()=>window.__nativeGoogleDrop.reads),['/synthetic/console-client.json']);
+        await nativeClient.getByText('첨부 완료: console-client.json',{exact:true}).waitFor();
         await nativePage.screenshot({path:new URL(id+'-native-json-drop.png',output).pathname,fullPage:true});
       }finally{await nativePage.close();}
       await page.getByRole('button',{name:'English',exact:true}).click();await panel.getByText('Project CLI accounts',{exact:true}).waitFor();await panel.getByLabel('Project',{exact:true}).waitFor();await page.getByRole('button',{name:'프로젝트 푸시',exact:true}).click();dialog=page.getByRole('dialog');await dialog.getByLabel('GitHub account').waitFor();await dialog.getByRole('button',{name:'Review destination',exact:true}).click();await dialog.getByText('Existing login · company',{exact:true}).waitFor();await page.screenshot({path:new URL(id+'-english-push.png',output).pathname,fullPage:true});await dialog.getByRole('button',{name:'Close',exact:true}).click();assert.equal((await page.request.get(url+'test/state').then(r=>r.json())).pushes.length,1);

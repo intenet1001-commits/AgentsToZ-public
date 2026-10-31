@@ -299,6 +299,11 @@ test('a 30-day pairing is accepted once per couple, then rooms open and auto-joi
       return from.perform(instance,request);
     };
     expect(await pair(one,three)).toMatchObject({state:'waiting-peer',acceptedByPeer:false});
+    // MCP readers see which side must accept: the SQL row says waiting-peer on both sides.
+    const pending=async(host:AgentDialogueHost)=>((await host.perform(instance,{operation:'pairings',source:ops})).pairings as any[])
+      .map(row=>[row.state,row.acceptedByMe,row.acceptedByPeer]);
+    expect(await pending(one)).toEqual([['waiting-peer',true,false]]);
+    expect(await pending(three)).toEqual([['waiting-me',false,true]]);
     expect(await pair(three,one)).toMatchObject({state:'active',acceptedByPeer:true});
     const listed=await one.perform(instance,{operation:'pairings',source:ops});
     expect((listed.pairings as any[]).map(row=>row.state)).toEqual(['active']);

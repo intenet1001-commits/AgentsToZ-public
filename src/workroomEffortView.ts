@@ -64,18 +64,28 @@ const levelWord = (level: string) => (TIERS as readonly string[]).includes(level
 export function workroomEffortBadgeText(session: WorkroomEffortSessionView | undefined): string | null {
   if (!session) return null;
   // A level without a tier is one the person pinned at launch (a 팀 작전 member): the Mac's mode does not apply to it.
-  if (session.level && !session.tier) return session.manual ? '에포트 직접 설정' : `에포트 고정 · ${WORKROOM_EFFORT_TIER_LABELS[session.level]}`;
+  if (session.level && !session.tier) {
+    if (session.manual) return '에포트 직접 설정';
+    const requested = `에포트 요청 · ${levelWord(session.level)}`;
+    return session.seen ? `${requested} · CLI 표시 ${levelWord(session.seen)}` : `${requested} · 적용 확인 전`;
+  }
   if (session.mode === 'off') return '에포트 미선택 · CLI 설정 사용';
   if (session.mode === 'recommend') return '에포트 추천제공';
   if (session.manual || session.skipped === 'manual') return MANUAL_TEXT;
   if (session.runtimeStatus === 'unconfirmed') return '에포트 자동 변경 · 확인 필요';
   if (session.runtimeStatus === 'deferred') return '에포트 자동 변경 · 입력 대기';
+  // Auto ON and the last request left the CLI at its current effort (neither pending nor unconfirmed): say the change was
+  // not made, never the earlier level as if Auto had just set it (2026-10-30). An override that forbids it keeps its reason.
+  if (notAdjusted(session) && session.skipped !== 'env-override') return '에포트 자동 · 이번 요청은 변경 안 함';
   if (session.level) {
     const seen = session.seen && session.seen !== session.level ? ` · CLI 표시 ${session.seen}` : '';
-    return `에포트 자동${session.origin === 'runtime' ? ' 변경' : ''} · ${WORKROOM_EFFORT_TIER_LABELS[session.level]}${reasonSuffix(session.reason)}${seen}`;
+    return `에포트 자동${session.origin === 'runtime' ? ' 변경' : ''} · ${levelWord(session.level)}${reasonSuffix(session.reason)}${seen}`;
   }
   return session.skipped ? SKIP_TEXT[session.skipped] : null;
 }
+
+/** Auto ON and advice left by the last request that is neither pending nor unconfirmed: Auto did not change the level. */
+const notAdjusted = (session: WorkroomEffortSessionView) => session.mode === 'auto' && !!session.advice && session.runtimeStatus !== 'deferred' && session.runtimeStatus !== 'unconfirmed';
 
 /** A later whole request seemed to need another level. Advice only: the CLI is never switched for the person. */
 export function workroomEffortAdviceText(session: WorkroomEffortSessionView | undefined): string | null {
@@ -83,6 +93,8 @@ export function workroomEffortAdviceText(session: WorkroomEffortSessionView | un
   const hint = CHANGE_HINT[session.agent];
   if (!hint) return null;
   const current = session.seen ?? session.level;
+  // Under Auto this states the effort only — whether the request itself was typed is its submission receipt's to say.
+  if (notAdjusted(session)) return `에포트는 지금${current ? ` ${levelWord(current)}` : ''} 그대로입니다 · 이번 요청의 권장 ${WORKROOM_EFFORT_TIER_LABELS[session.advice.tier]}${reasonSuffix(session.advice.reason)}으로 바꾸지 않았습니다 · ${hint}`;
   return `이번 요청은 ${WORKROOM_EFFORT_TIER_LABELS[session.advice.tier]}이 맞아 보입니다${reasonSuffix(session.advice.reason)}${current ? ` · 지금 ${levelWord(current)}` : ''} · ${hint}`;
 }
 
@@ -92,12 +104,14 @@ export function workroomEffortOptionsSuffix(supported: boolean | null, auto: boo
 }
 
 /** The host side: the record without what stays on the Mac (session id, advice time, the change-line baseline). */
-export function workroomEffortView(auto: boolean, record?: WorkroomEffortRecord, mode?: WorkroomEffortMode): WorkroomEffortView {
+export function workroomEffortView(auto: boolean, record?: WorkroomEffortRecord, mode?: WorkroomEffortMode, extended = false): WorkroomEffortView {
   if (!record) return {auto, ...(mode ? {mode} : {})};
   const session: WorkroomEffortSessionView = {agent: record.agent, manual: !!record.manual, ...(mode ? {mode} : {})};
   if (record.tier) session.tier = record.tier;
   if (record.reason) session.reason = record.reason;
-  if (record.level) session.level = record.level;
+  // Both legacy and v2 peers have strict low/medium/high readers. Until a newer protocol
+  // capability is negotiated, preserve their schema; the team status carries the exact pin.
+  if (record.level && (extended || (TIERS as readonly string[]).includes(record.level))) session.level = record.level;
   // An older phone has a strict reader: only the explicitly negotiated v2 response may carry new fields/enums.
   if (record.origin && (mode || record.origin !== 'runtime')) session.origin = record.origin;
   if (mode && record.runtimeStatus) session.runtimeStatus = record.runtimeStatus;
@@ -124,7 +138,7 @@ export function normalizeWorkroomEffortView(value: unknown): WorkroomEffortView 
   if (s.mode !== undefined && (!isWorkroomEffortMode(s.mode) || s.mode !== mode)) return fail();
   if (!(AI_TERMINAL_AGENTS as readonly unknown[]).includes(s.agent) || typeof s.manual !== 'boolean') return fail();
   if (s.tier !== undefined && !(TIERS as readonly unknown[]).includes(s.tier)) return fail();
-  if (s.level !== undefined && !(TIERS as readonly unknown[]).includes(s.level)) return fail();
+  if (s.level !== undefined && !['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(s.level as string)) return fail();
   if (s.reason !== undefined && !(REASONS as readonly unknown[]).includes(s.reason)) return fail();
   if (s.skipped !== undefined && !(SKIPS as readonly unknown[]).includes(s.skipped)) return fail();
   if (s.origin !== undefined && s.origin !== 'launch' && s.origin !== 'restart' && s.origin !== 'runtime') return fail();

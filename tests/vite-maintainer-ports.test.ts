@@ -9,7 +9,9 @@ test('screen fixtures coexist with an occupied port while ordinary development s
   const owner = Bun.serve({hostname: '127.0.0.1', port: 0, fetch: () => new Response('original owner')});
   const servers: Awaited<ReturnType<typeof createServer>>[] = [];
   try {
-    const options = {configFile: join(import.meta.dir, '../vite.config.ts'), root, cacheDir: join(root, '.cache'),
+    // Load the real project config without Vite's bundled-config temporary file: linked worktrees can share
+    // node_modules/.vite-temp with other active suites. The production development loader is unchanged.
+    const options = {configFile: join(import.meta.dir, '../vite.config.ts'), configLoader: 'runner' as const, root, cacheDir: join(root, '.cache'),
       logLevel: 'silent' as const, optimizeDeps: {noDiscovery: true, include: [], entries: []},
       server: {host: '127.0.0.1', port: owner.port!}};
     const fixture = await createServer({...options, mode: 'maintainer-test'}); servers.push(fixture);

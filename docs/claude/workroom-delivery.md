@@ -261,3 +261,10 @@ IndexedDB에 암호화해 둔다. 정본: `src/workroomDraftVault.ts`(보관)·`
   코드에서 실패한다. 「another target or AI: the plain start goes on」과 LAN 「a Mac that refuses snapshot reads」는 이번 수정이 넘치지 않는지 보는
   가드다(수정 전에도 통과). 통합 리뷰 w4: `tests/workroom-route-delivery.test.ts`의 「still unsettled and still recorded, where no new launch can be
   recorded now」(finding 3 — 수정 전 코드에서 실패).
+
+## 입력 제출도 쓰기 울타리 전 거절은 `rejected` (2026-10-30)
+
+launch 영수증만 「울타리 전 거절 = rejected」였다. 입력 제출은 `prepared`로 남아, 패널·LAN 페이지가 다시 보낼 수 없는 요청 위에 영원히 울타리를 쳤다.
+이제 입력 제출도 작성기가 `start` 전에 던지면 `rejected`다(`WorkroomSubmissions.refuseUnwritten`). 같은 id는 그 거절만 다시 답한다.
+클라이언트(`pendingAfterStatus`)는 rejected·held를 정리하되 **초안은 남긴다** — written처럼 비우지 않는다. 원인(에포트 자동의 60초 쓰기 전 대기)과
+검증은 [workroom.md](workroom.md) 「에포트 자동은 전송을 붙잡지 않는다」.

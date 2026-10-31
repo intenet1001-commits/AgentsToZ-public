@@ -127,7 +127,7 @@ function memberFrom(raw: unknown): TeamPanelMember | null {
   if (m.delivery !== undefined && !DELIVERIES.has(m.delivery as string)) return null;
   if (m.owned !== undefined && typeof m.owned !== 'boolean') return null;
   return {id, name, agent: m.agent as AiTerminalAgent, ...(text(m.model, 80) ? {model: m.model as string} : {}), ...(text(m.provider, 80) ? {provider: m.provider as string} : {}),
-    ...(m.effort === 'low' || m.effort === 'medium' || m.effort === 'high' ? {effort: m.effort} : {}), ...(m.role === 'reviewer' ? {role: 'reviewer' as const} : {}), ...(m.attached === true ? {attached: true as const} : {}), task, branch, state: m.state as TeamMemberState,
+    ...(m.effort === 'low' || m.effort === 'medium' || m.effort === 'high' || m.effort === 'xhigh' || m.effort === 'max' || m.effort === 'ultra' ? {effort: m.effort} : {}), ...(m.role === 'reviewer' ? {role: 'reviewer' as const} : {}), ...(m.attached === true ? {attached: true as const} : {}), task, branch, state: m.state as TeamMemberState,
     ...(surface ? {surface, launch: teamLaunchSummary({surface, ...(launchOptions ? {options: launchOptions} : {})})} : {}),
     ...(launchOptions ? {launchOptions} : {}), ...(effectiveSurface ? {effectiveSurface} : {}),
     ...(typeof m.owned === 'boolean' ? {owned: m.owned} : {}), ...(m.delivery !== undefined ? {delivery: m.delivery as TeamDelivery} : {}),

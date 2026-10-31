@@ -17,6 +17,9 @@ export const LABELS = {
   fetch: `${BASE} push fetch`,
   command: `${BASE} remote command`,
   result: `${BASE} remote command result`,
+  /** A weekly AI allowance alert the main AgentsToZ app handed to AgentsToZ Screen (src/weeklyUsagePushHost.ts). Its own
+   * label, so a signature over one never passes as a screen event; kinds 1–4 keep their layout byte for byte. */
+  usage: `${BASE} push weekly usage`,
 } as const;
 
 export const WIRE = { nonce: 16, key: 65, id: 32, signature: 64, maxDevices: 16, maxMessage: 4096, result: 32 + 1 + 64 } as const;
@@ -33,6 +36,9 @@ export const RATE_LIMITS = {
   fetch: { windowSeconds: 600, limit: 40 },
   command: { windowSeconds: 600, limit: 10 },
   result: { windowSeconds: 600, limit: 40 },
+  /** Weekly allowance alerts have a budget of their own, so they can never use up the screen notifications' (a connection or
+   * a new registration is a security notice). A week has at most 10 per provider; AgentsToZ Screen caps itself the same. */
+  usage: { windowSeconds: 3600, limit: 12 },
 } as const;
 export type RequestKind = keyof typeof RATE_LIMITS;
 
@@ -131,7 +137,7 @@ function name(data: Uint8Array): string {
 // MARK: messages
 
 export interface Registration { macKey: Bytes; deviceKey: Bytes; token: Bytes; environment: 'sandbox' | 'production'; topic: string; issuedAt: number; nonce: Bytes }
-export interface ScreenEvent { macKey: Bytes; kind: 'connected' | 'registered'; eventAt: number; macName: string; actorID: Bytes; actorName: string; recipients: Bytes[]; issuedAt: number; nonce: Bytes }
+export interface ScreenEvent { macKey: Bytes; kind: 'connected' | 'registered' | 'controllerConnected' | 'controllerRegistered'; eventAt: number; macName: string; actorID: Bytes; actorName: string; recipients: Bytes[]; issuedAt: number; nonce: Bytes }
 export interface CommandResult { commandID: Bytes; outcome: number; signature: Bytes; encoded: Bytes }
 export interface MacFetch { macKey: Bytes; deviceIDs: Bytes[]; results: CommandResult[]; issuedAt: number; nonce: Bytes }
 export interface RemoteCommand { macFingerprint: Bytes; deviceKey: Bytes; action: number; target: Bytes; issuedAt: number; nonce: Bytes }
@@ -149,9 +155,9 @@ export function decodeRegistration(data: Uint8Array): Registration {
 export function decodeEvent(data: Uint8Array): ScreenEvent {
   const f = decodeFields(data, LABELS.notify, 9);
   const macKey = field(f, 0), kind = byte(field(f, 1)), actorID = field(f, 4), recipients = ids(field(f, 6));
-  if (!isKey(macKey) || (kind !== 1 && kind !== 2) || actorID.length !== WIRE.id || recipients.some(id => equal(id, actorID))) throw malformed();
+  if (!isKey(macKey) || (kind !== 1 && kind !== 2 && kind !== 3 && kind !== 4) || actorID.length !== WIRE.id || recipients.some(id => equal(id, actorID))) throw malformed();
   return {
-    macKey, kind: kind === 1 ? 'connected' : 'registered', eventAt: uint64(field(f, 2)), macName: name(field(f, 3)), actorID,
+    macKey, kind: kind === 1 ? 'connected' : kind === 2 ? 'registered' : kind === 3 ? 'controllerConnected' : 'controllerRegistered', eventAt: uint64(field(f, 2)), macName: name(field(f, 3)), actorID,
     actorName: name(field(f, 5)), recipients, issuedAt: uint64(field(f, 7)), nonce: nonce(field(f, 8)),
   };
 }
@@ -177,6 +183,39 @@ export function decodeCommand(data: Uint8Array): RemoteCommand {
   return { macFingerprint, deviceKey, action, target, issuedAt: uint64(field(f, 4)), nonce: nonce(field(f, 5)) };
 }
 
+// MARK: weekly allowance alerts
+
+/** Provider byte → name, as src/weeklyUsage.ts spells it. */
+export const USAGE_PROVIDERS = { 1: 'claude', 2: 'codex', 3: 'agy' } as const;
+export type UsageProvider = typeof USAGE_PROVIDERS[keyof typeof USAGE_PROVIDERS];
+/** What a banner calls each provider: the names of the Mac dock and the phone Home card. */
+export const USAGE_PROVIDER_NAMES: Record<UsageProvider, string> = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity' };
+/** 90…10: remaining went under that boundary; 0: 소진 (src/weeklyUsageAlerts.ts `WeeklyUsageAlertMark` without 100). */
+export const USAGE_MARKS: readonly number[] = [90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
+/** The weekly window: the reset time keyed to the hour, or the ISO week when there is no reset time. */
+export const USAGE_WINDOW = /^(?:r\d{1,9}|w\d{4}-W\d{2})$/;
+/** How long after the main app saw it an alert is still news. AgentsToZ Screen drops older hand-offs unsent. */
+export const USAGE_MAX_AGE_MS = 2 * 3600_000;
+
+export interface WeeklyUsageEvent { macKey: Bytes; macName: string; provider: UsageProvider; mark: number; windowKey: string; observedAt: number; recipients: Bytes[]; issuedAt: number; nonce: Bytes }
+
+/** label ‖ Mac key ‖ Mac name ‖ provider ‖ mark ‖ window ‖ observed at ‖ recipients ‖ issued at ‖ nonce
+ * (WeeklyUsageEvent in PushCommands.swift). Nothing about the account: no name, email, token or exact figure. */
+export function decodeWeeklyUsage(data: Uint8Array): WeeklyUsageEvent {
+  const f = decodeFields(data, LABELS.usage, 9);
+  const macKey = field(f, 0), provider = USAGE_PROVIDERS[byte(field(f, 2)) as keyof typeof USAGE_PROVIDERS], mark = byte(field(f, 3));
+  const windowBytes = field(f, 4), windowKey = new TextDecoder().decode(windowBytes);
+  if (!isKey(macKey) || !provider || !USAGE_MARKS.includes(mark) || !USAGE_WINDOW.test(windowKey)
+    || encoder.encode(windowKey).length !== windowBytes.length) throw malformed();
+  return {
+    macKey, macName: name(field(f, 1)), provider, mark, windowKey, observedAt: uint64(field(f, 5)), recipients: ids(field(f, 6)),
+    issuedAt: uint64(field(f, 7)), nonce: nonce(field(f, 8)),
+  };
+}
+
+/** `<provider>:<windowKey>:<mark>`: the main app's alert key (src/weeklyUsageAlerts.ts), one per boundary per window. */
+export const weeklyUsageKey = (usage: Pick<WeeklyUsageEvent, 'provider' | 'windowKey' | 'mark'>) => `${usage.provider}:${usage.windowKey}:${usage.mark}`;
+
 /** What the Mac signs for a result: label ‖ Mac fingerprint ‖ command ID ‖ outcome (RemoteCommandResult.signedData). */
 export const resultSignedData = (macFingerprint: Uint8Array, result: CommandResult) =>
   encodeFields([encoder.encode(LABELS.result), macFingerprint, result.commandID, new Uint8Array([result.outcome])]);
@@ -198,9 +237,9 @@ export interface PushTarget { deviceID: string; token: string; environment: 'san
 
 /** Who gets the push: devices the Mac named in its signed event, holding a token for that Mac, for an app this relay
  * pushes to — never the device that acted, each once, at most 16. */
-export function pushTargets(rows: PushTarget[], event: ScreenEvent, allowedTopics: readonly string[]): PushTarget[] {
+export function pushTargets(rows: PushTarget[], event: { recipients: Uint8Array[]; actorID?: Uint8Array }, allowedTopics: readonly string[]): PushTarget[] {
   const named = new Set(event.recipients.map(hex));
-  const actor = hex(event.actorID);
+  const actor = event.actorID ? hex(event.actorID) : null;
   const seen = new Set<string>();
   return rows.filter(row => row.deviceID !== actor && named.has(row.deviceID) && allowedTopics.includes(row.topic)
     && /^[0-9a-f]{16,200}$/.test(row.token) && !seen.has(row.deviceID + row.token) && seen.add(row.deviceID + row.token))
@@ -209,17 +248,36 @@ export function pushTargets(rows: PushTarget[], event: ScreenEvent, allowedTopic
 
 /** The banner, from the Mac-signed fields only: no screen content, codes or keys. */
 export function notificationText(event: ScreenEvent): { title: string; body: string } {
+  const actor = event.kind === 'controllerConnected' || event.kind === 'controllerRegistered'
+    ? `Mac 컨트롤러 ‘${event.actorName}’` : `‘${event.actorName}’`;
   return {
     title: 'AgentsToZ Screen',
-    body: event.kind === 'connected'
-      ? `‘${event.actorName}’이(가) ‘${event.macName}’ 화면에 연결했습니다.`
-      : `‘${event.actorName}’이(가) ‘${event.macName}’에 새 기기로 등록되었습니다.`,
+    body: event.kind === 'connected' || event.kind === 'controllerConnected'
+      ? `${actor}이(가) ‘${event.macName}’ 화면에 연결했습니다.`
+      : `${actor}이(가) ‘${event.macName}’에 새 기기로 등록되었습니다.`,
   };
 }
 
 /** The APNs body: the banner and the signed event, so the app can offer 「이 기기 해지」 only for what the Mac said. */
 export function apnsPayload(event: ScreenEvent, message: Uint8Array, signature: Uint8Array): string {
   return JSON.stringify({ aps: { alert: notificationText(event), sound: 'default' }, screen: { m: base64(message), s: base64(signature) } });
+}
+
+/** A weekly allowance banner, from the Mac-signed fields only: the Mac's name, the provider and the boundary. It says the
+ * figure is what that Mac read, since the CLI account there may differ from the one open elsewhere. */
+export function weeklyUsageText(usage: Pick<WeeklyUsageEvent, 'macName' | 'provider' | 'mark'>): { title: string; body: string } {
+  const provider = USAGE_PROVIDER_NAMES[usage.provider];
+  return {
+    title: `${provider} 주간 사용량`,
+    body: usage.mark === 0
+      ? `‘${usage.macName}’에서 확인한 ${provider} 주간 사용량을 모두 썼습니다.`
+      : `‘${usage.macName}’에서 확인한 ${provider} 주간 잔여가 ${usage.mark}% 미만입니다.`,
+  };
+}
+
+/** The APNs body for a weekly alert: the banner only. No `screen` part, so the phone never offers a remote stop for it. */
+export function weeklyUsagePayload(usage: WeeklyUsageEvent): string {
+  return JSON.stringify({ aps: { alert: weeklyUsageText(usage), sound: 'default', 'thread-id': 'weekly-usage' } });
 }
 
 export interface ApnsResult { status: number; reason?: string }
@@ -344,6 +402,19 @@ export function createScreenPushHandler(deps: ScreenPushDeps): (request: Request
     if (!isFresh(issuedAt, now(), skew)) throw new ProtocolError('expired', 400);
   }
 
+  /** One APNs request per target; a token APNs calls dead is dropped. Returns how many Apple accepted. */
+  async function deliver(mac: string, targets: PushTarget[], payload: string, expiresAt: number, collapseID: string): Promise<number> {
+    if (encoder.encode(payload).length > 4096) throw malformed();
+    const results = await Promise.all(targets.map(async target => {
+      try {
+        const result = await deps.apns!.send(target, payload, expiresAt, collapseID);
+        if (isDeadToken(result)) await deps.rpc('portmgr_screen_push_drop_token', { p_mac: mac, p_device: target.deviceID, p_token: target.token });
+        return result.status === 200;
+      } catch { return false; }
+    }));
+    return results.filter(Boolean).length;
+  }
+
   const routes: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
     async register(body) {
       const { message, signature } = await signed(body);
@@ -380,16 +451,26 @@ export function createScreenPushHandler(deps: ScreenPushDeps): (request: Request
       const rows = (await deps.rpc('portmgr_screen_push_targets', { p_mac: mac, p_devices: event.recipients.map(hex) })) as PushTarget[];
       const targets = pushTargets(Array.isArray(rows) ? rows : [], event, deps.allowedTopics);
       const payload = apnsPayload(event, message, signature);
-      if (new TextEncoder().encode(payload).length > 4096) throw malformed();
       const collapseID = `screen-${event.kind}-${hex(event.actorID).slice(0, 16)}`;
-      const results = await Promise.all(targets.map(async target => {
-        try {
-          const result = await deps.apns!.send(target, payload, event.eventAt + 3600_000, collapseID);
-          if (isDeadToken(result)) await deps.rpc('portmgr_screen_push_drop_token', { p_mac: mac, p_device: target.deviceID, p_token: target.token });
-          return result.status === 200;
-        } catch { return false; }
-      }));
-      return json({ ok: true, sent: results.filter(Boolean).length });
+      return json({ ok: true, sent: await deliver(mac, targets, payload, event.eventAt + 3600_000, collapseID) });
+    },
+
+    /** A weekly allowance alert: signed by the Mac key like a screen event, for the devices the Mac named, under its own
+     * budget. The collapse ID is the main app's alert key, so a device shows each boundary of a window once. */
+    async 'weekly-usage'(body) {
+      if (!deps.apns) throw new ProtocolError('not_configured', 503);
+      const { message, signature } = await signed(body);
+      const usage = decodeWeeklyUsage(message);
+      await verified(usage.macKey, message, signature);
+      fresh(usage.issuedAt, FRESHNESS.mac);
+      // Seen by the main app before AgentsToZ Screen signed it, and not long before: an old hand-off is not news.
+      if (usage.observedAt > usage.issuedAt + FRESHNESS.mac || usage.issuedAt - usage.observedAt > USAGE_MAX_AGE_MS) throw new ProtocolError('expired', 400);
+      const mac = hex(await sha256(usage.macKey));
+      await admit(mac, 'usage', hex(usage.nonce));
+      const rows = (await deps.rpc('portmgr_screen_push_targets', { p_mac: mac, p_devices: usage.recipients.map(hex) })) as PushTarget[];
+      const targets = pushTargets(Array.isArray(rows) ? rows : [], { recipients: usage.recipients }, deps.allowedTopics);
+      const sent = await deliver(mac, targets, weeklyUsagePayload(usage), usage.observedAt + 6 * 3600_000, `weekly-${weeklyUsageKey(usage)}`);
+      return json({ ok: true, sent });
     },
 
     async fetch(body) {

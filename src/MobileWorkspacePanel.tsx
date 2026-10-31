@@ -3,8 +3,10 @@ import {ErrorVocActions} from './RemoteVocComposer';
 import {aiInitialPromptDraftError} from './aiInitialPrompt';
 import React,{useEffect,useRef,useState} from 'react';
 import type {QrRemoteControlProjectCard} from './qrRemoteControlContract';
+import {REMOTE_FEATURE_CHECKING} from './remoteFeatureAvailability';
 import {normalizeMobileWorkspaceResult,type MobileWorkspaceRequest,type MobileWorkspaceResult,type MobileWorkspaceDuty} from './mobileWorkspaceProtocol';
-export function MobileWorkspacePanel({mode,projects,available,online,transport,onDraft,visible=true,initialTarget,testerAvailable=false,onClose}: {
+export function MobileWorkspacePanel({mode,projects,available,checking=false,online,transport,onDraft,visible=true,initialTarget,testerAvailable=false,onClose}: {
+ /** The Mac's features are not confirmed yet (remoteFeatureAvailability): an absent one is not an old Mac. */checking?:boolean;
  onClose?:()=>void;testerAvailable?:boolean;mode:'records'|'manage'|'duty';projects:QrRemoteControlProjectCard[];available:boolean;online:boolean;visible?:boolean;initialTarget?:string;
  transport:(r:MobileWorkspaceRequest)=>Promise<MobileWorkspaceResult>;
  onDraft:(targetId:string,text:string)=>void;
@@ -39,7 +41,7 @@ export function MobileWorkspacePanel({mode,projects,available,online,transport,o
  return <section className="remote-panel mobile-workspace-panel">
   <div className="mobile-workspace-heading"><h2>{mode==='records'?'내가 한 말':mode==='duty'?'카카오톡 대직 (실험)':'프로젝트 작업 마무리'}</h2>{onClose&&<button type="button" className="mobile-workspace-close" data-testid="mobile-workspace-close" onClick={onClose}>닫기</button>}</div>
   {mode==='duty'&&<p>실험 중인 기능입니다. 승인된 대직 방의 상태를 보고 켜거나 끕니다.</p>}
-  {!online?<p>등록한 기기에 연결하면 Mac에서 보던 기록과 작업 상태를 확인할 수 있습니다.</p>:!available?<p>연결한 Mac 앱을 업데이트하면 기록 조회·세션 저장·대직 관리를 사용할 수 있습니다.</p>:<>
+  {!online?<p>등록한 기기에 연결하면 Mac에서 보던 기록과 작업 상태를 확인할 수 있습니다.</p>:!available?<p role="status">{checking?REMOTE_FEATURE_CHECKING:'연결한 Mac 앱을 업데이트하면 기록 조회·세션 저장·대직 관리를 사용할 수 있습니다.'}</p>:<>
    <label>프로젝트<select aria-label={mode==='records'?'발언 프로젝트':mode==='duty'?'대직 프로젝트':'관리 프로젝트'} value={target} onChange={e=>setTarget(e.target.value)} disabled={busy}><option value="">프로젝트 선택</option>{projects.map(p=><option key={p.controlId} value={p.controlId}>{p.name}</option>)}</select></label>
    {mode==='duty'?<div className="workspace-quick-actions">
     <button disabled={!selected||busy} onClick={()=>void send({action:'duty.status'})}>대직 현황</button>

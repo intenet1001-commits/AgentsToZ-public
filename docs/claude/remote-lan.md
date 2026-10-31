@@ -3,6 +3,151 @@
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
+## 네이티브 Screen: 근거리 기본과 선택형 인터넷 연결 (2026-10-26)
+
+사용자가 같은 공유기 없이 근거리 연결을 기본으로 하고 LTE 원격도 구현하도록 승인했다.
+기존 Screen 단계 1의 승인 공유기 전용 제약은 이 네이티브 화면 경로에서 대체된다.
+웹 워크룸 LAN의 bind/복원 정책은 별도이며 아래 설명 그대로다.
+설계와 검증 경계는 `docs/design/screen-control-2026-10-24/NEARBY-INTERNET.md`를 따른다.
+Mac이 Mac을 보는 **Mac 컨트롤러**(AgentsToZ Viewer, 폰 중개 등록·대상 Mac 승인, 1단계 근거리만)는
+`docs/design/mac-to-mac-2026-10-29/DESIGN.md`를 따른다 — 등록 QR v3·별도 키체인 항목 `controllers`·캡처의 Viewer 제외가 거기서 정해졌다.
+
+- `ScreenNearby`는 `_atzscreen._tcp` 서비스 endpoint + `includePeerToPeer`를 사용하며 특정 Wi-Fi/IP에 묶지 않는다.
+- QR v2는 근거리 서비스와 선택적 WSS 경로를 담는다. 기존 v1 QR·저장 Mac은 읽으며, 새 경로를 쓰려면 새 QR로 등록한다.
+- 인터넷은 Mac의 별도 Touch ID 활성화 + wss/443 + 정상 TLS 검증이다. relay 입장은 화면 인증이 아니다.
+- **화면에서는 WSS 중계를 접어 둔다(2026-11-01).** 배포된 중계 서버가 없고 밖에서는 Cloudflare 사설망이 같은 52741
+  리스너로 닿으므로, Mac 상태 창의 칸 제목은 「연결 — 근거리·인터넷(Cloudflare)」이고 중계 주소 칸·켜기 버튼은 기본으로 접힌
+  「고급 · 자체 중계 서버」 안에 있다. 중계를 저장한 Mac은 자동으로 펼쳐지고 접어도 제목에 「설정됨」이 붙는다. 메뉴 막대의
+  중계 상태 줄(「자체 중계: …」)도 중계가 저장된 때만 보인다. 휴대폰 경로 선택지는 「자체 중계 서버」로 이름만 바꿨다.
+  중계 코드·프로토콜·QR v2 필드는 그대로다 — 지우지 말 것.
+- 모든 경로에서 App Attest/QR/SAS 등록, 고정 Mac 키, 매 연결 생체 서명, AES-GCM을 유지한다.
+  경로를 열 때만 fallback하고 인증을 보낸 뒤에는 재전송하지 않는다.
+- iPad 캡처에서 실제 상태는 Wi-Fi **켜짐 / 연결 안 됨**, LTE였다. 초기 사용자 설명만으로 같은 Wi-Fi라고 단정하지 않는다.
+- `URLSessionWebSocketTask.maximumMessageSize`를 처음 16 KiB로 주고 나중에 올리자 macOS 26 실제 소켓 검사에서
+  128 KiB 영상이 EMSGSIZE로 실패했다. 초기 버퍼는 고정 8 MiB+25로 제한하고, `receive`는 인증 전 1 KiB/
+  등록 16 KiB/인증 뒤 레코드 한도를 별도로 검사한다. 서버에도 별도 인증 전·방·IP·쓰기 예산을 둔다.
+- 내장 포털 누락은 앱 설치 산출물로 허용하지 않는다. `copy-bundled-portal.sh`가 필수 문서와 자산을 확인해 실패하고,
+  공식 로컬 빌드/무서명 리허설/UI 러너가 먼저 실제 포털을 빌드한다. 기존 불완전 빌드에는 복구 안내를 보인다.
+
+## iPad 작업 홈과 Touch ID 연결을 따로 확인한다 (2026-10-26)
+
+1517.0.4의 USB iPad Air 5 캡처에서는 앱이 충돌한 것이 아니라 개인 작업 공간 미설정 상태의
+네이티브 첫 화면이었다. Mac의 **공개** Supabase 설정만 든 `agentstoz://connect#…` 링크를
+전달하고 사용자가 적용하자 내장 작업 홈과 탭이 열렸다. 사용자가 홈 진입을 확인했으며,
+1517.0.5 업데이트 뒤에도 저장된 작업 홈이 복원되는 것을 캡처했다. 이것이 로그인·모든 데이터
+조회나 Mac 제어 성공을 증명하는 것은 아니다.
+
+- Mac 화면 등록 QR은 화면 제어 기기를 등록할 뿐 작업 공간 설정을 넣지 않는다. 첫 실행의
+  주 동작은 「프로젝트·워크룸 연결 QR 스캔」, 데이터 전용 폰 연결 링크는 접지 않고 표시한다.
+  작업 공간 스캐너는 화면 등록 QR을 설명과 함께 거절한다. 화면 등록은 별도 「Mac 화면」에서 한다.
+  저장된 작업 공간이 있으면 처음 시작 안내 대신 저장본·다른 연결 동작을 표시한다.
+- 일반 폰 등록은 목적을 검증한 `deviceRegistrationText`로 v1/v2만 받고 Mac 컨트롤러용 v3 QR은
+  스캐너·전달 경로에서 거절한다. 등록 버튼도 키 생성·App Attest·연결 직전에 다시 검사한다.
+  범용 파서와 별도 중개 경로의 v3 지원은 유지하며 실제 카메라와 Mac 간 연결은 별도 검사다.
+- 새 Mac 호스트 1517.0.4를 실제 설치·실행한 뒤, 같은 공유기에 연결되지 않은 iPad에서
+  QR v2의 SAS와 Mac의 iPad 등록 완료(1대)를 확인했다. 등록 성공과 화면 스트리밍 성공은 별개다.
+- 그 다음 iPad에서 Touch ID 후 모든 `LAError`를 Face ID 실패로 표시하는 문제가 관찰됐다.
+  Face ID 종류만 허용하는 분기는 없었다. 원래 오류의 정확한 코드는 포착하지 못했으므로
+  키 재개설·승인 수명 중 어느 것이 실기 원인인지 단정하지 않는다.
+- 1517.0.5는 일반 LA 정책 승인 대신 `.privateKeyUsage + .biometryCurrentSet`으로 보호된
+  실제 SE 키에 새 LAContext를 결속하고, 독립 도메인과 자체 생성 32-byte 난수의 로컬 probe를
+  서명해 그 키 사용을 승인한다. probe 결과는 폐기하며 네트워크·저장소에 내보내지 않는다.
+  동일한 불변 키 참조와 context를 보관하고 이후 interaction을 금지한다. `Once`는 handshake의
+  transcript 서명 1회를 제한한다(로컬 probe는 별도). 사용 후·폐기 시 context를 무효화한다.
+  암호 대체 금지는 키의 `.biometryCurrentSet` ACL이 유지하며, 기기 잠금 해제 인증의 재사용 창을 늘리지 않는다.
+- UI는 실제 Touch ID/Face ID 호칭을 사용하고 lockout·미등록·비대화형/무효 context 오류를
+  구분한다. ACL 없는 SE 키의 자동 검사는 참조 수명과 1회성만 검증한다. 생체 ACL의 실제
+  승인 지속성과 영상·입력은 물리 iPad의 후속 검사이며 자동 검사 통과로 대체하지 않는다.
+- 1517.0.5의 실제 USB 디버깅에서 `com.apple.LocalAuthentication`, code **-8**
+  (`biometryLockout`)을 두 번 확인했다. 따라서 이 시도의 확정 원인은 OS 생체 잠김이며,
+  키 참조 수정으로 해결됐다고 주장하지 않는다. 사용자가 기기 암호로 iPad 잠금을 해제한
+  뒤 앱 연결에서 다시 생체 인증해야 한다. 앱 연결을 passcode 인증으로 대체하지 않는다.
+  Mac은 별도로 화면 기록·손쉬운 사용 권한이 필요하며 당시 시스템 설정의 잠금 해제 창에서
+  사람이 Mac 암호를 입력해야 하는 상태였다.
+- 사용자는 기기 잠금 해제 뒤에도 -8이라고 보고했다. 1517.0.6은 오류 화면에 명시적
+  「Touch ID/Face ID 잠김 해제」 동작을 제공한다. Apple의 lockout 복구 권고에 따라
+  별도 LAContext에서 `.deviceOwnerAuthentication`을 평가하고 반드시 폐기한다. 이 함수는
+  **Void**이며 키·승인·서명자를 접근하거나 반환하지 않는다. 복구 성공도 `ended` 상태와
+  실패한 연결의 무효화된 gate를 그대로 두고 `lastApproval = .failed`를 유지한다.
+  사용자가 닫고 Mac을 다시 선택해야 새 생체 ACL 승인·handshake가 시작된다.
+  물리 iPad에서 사용자가 복구 완료 안내를 확인했으며, 새 지문 연결·영상/입력 결과는 별도다.
+  `testLockoutRecoveryDoesNotReviveAFailedConnection`은 OS 복구 프롬프트의 inactive 전이와
+  복구 뒤에도 이전 연결을 재개하지 않는 실제 lifecycle/gate 상태 전이를 검증한다.
+  Mac의 화면 기록·손쉬운 사용 설정은 사용자 승인 뒤 호스트 재시작을 거쳐 둘 다 true,
+  power on인 상태까지 확인했다.
+
+- 1517.0.6의 복구 완료 안내 뒤에도 새 `LAContext.canEvaluatePolicy`가 **키 접근 없이**
+  false / Touch ID / `com.apple.LocalAuthentication -8`을 반환했고, 사용자는 기기 잠금 화면도
+  지문으로 열리지 않는다고 확인했다. 사용자가 지문을 다시 등록하자 같은 비대화형 검사가 true로
+  바뀌었다. 새 QR로 등록한 뒤 실제 protected-key 승인과 Mac handshake 완료를 디버거에서 확인했고,
+  사용자가 Mac 영상 표시를 확인했다. 이 결과를 이전 버전의 미포착 원인이나 원격 입력 성공과 섞지 않는다.
+- 1517.0.7은 owner 인증 성공 뒤 별도 새 context에서 생체 사용 가능 여부도 확인해야 복구 성공을
+  표시한다. 취소·실패·여전한 -8은 성공이 아니며, 복구 context를 Mac 승인에 쓰지 않는다.
+  `testLockoutRecoveryRequiresAvailableBiometry`는 owner 성공 + 생체 -8, owner 실패, 취소와 정상
+  사용 가능을 구분한다. 지문 변경 뒤 키의 `.biometryCurrentSet` 결속 때문에 새 QR 등록이 필요하다.
+- 1517.0.7은 첫 영상 연결 때 조작법을 열고 다시 여는 버튼, 이름이 있는 텍스트 입력 버튼과
+  입력 순서 안내, 별도의 네 방향 스크롤 버튼을 제공한다. 기존 터치/트랙패드·두 손가락 제스처도 유지한다.
+- 직접 실기 검사는 `UITests/PhysicalScreenControls.swift`를 별도 시험 프로젝트에 넣어 실행한다.
+  기본 onboarding 시험 대상에는 넣지 않는다. `scripts/ScreenControlFixture.swift`는 프로젝트·계정·
+  클립보드·네트워크 없이 Mac의 클릭/글자/스크롤을 독립 기록하는 전용 창이다. 실제 사람이 Touch ID를
+  승인하고, Mac fixture 영상과 활성 연결을 먼저 확인한 뒤 그 창에만 시험 입력을 보낸다.
+  **XCTest 탭 성공은 전달 성공이 아니다.** Mac receipt의 클릭 증가·정확한 한글 문자열·양축 좌표 변화가
+  함께 있어야 입력이 통과한다. 테스트 준비 중 실제 10분 유휴 종료도 관찰했으며 이를 늘려 피하지 않는다.
+- 손가락 탭과 마우스 우클릭 recognizer를 함께 둘 때 `buttonMaskRequired = .secondary`만으로
+  손가락을 제외할 수 없다. Apple SDK `UITapGestureRecognizer.h`는 이 속성을 **간접 입력에서만**
+  평가한다고 명시한다. 수정 전 실제 UIKit 시험에서 한 손가락 탭이 `left=0 right=1`을 만들었다.
+  1517.0.9는 우클릭 recognizer의 `allowedTouchTypes`를 `.indirectPointer`로 제한한다.
+  `check-ui.py --screen-gestures`는 별도 진입점의 빈 simulator에서 실제 production SurfaceView의
+  한 손가락 좌클릭·두 손가락 우클릭 이벤트를 검사한다. UI 문자열 grep으로 제스처 성공을 주장하지 않는다.
+- 실기 fixture의 앱 단독 캡처·CGWindow 좌표만으로 iPad 영상에서의 가시성을 확정할 수 없었다.
+  실제 영상에 버튼·입력칸이 모두 보이는 연결 캡처 후에만 입력 단계를 실행한다. fixture는 하나의
+  화면 기준으로 매 기록마다 목표 좌표를 재계산하고, 임의 창 이동을 반복해 강제하지 않는다.
+  1517.0.7의 input6에서는 네 방향 스크롤 receipt만 통과했고 클릭/문자열은 미도달이었다.
+- 1517.0.9의 수정 후 실제 UIKit 한 손가락/두 손가락 회귀 2건, 정규 native 프로필 3건과
+  기존 remote-controller 페르소나 검사는 통과했다. 서명·36개 내장 작업 홈 자산 일치를 확인해
+  USB iPad에 업데이트했다. 이 빌드의 실기 연결 시도는 실제 Touch ID 창을 기다리다 준비 시간 초과가
+  되었으며 아직 시험 클릭/문자열을 보내지 않았다. 이를 실기 입력 통과나 생체 인증 실패로 기록하지 않는다.
+
+## Mac 화면 등록 QR은 iPhone 카메라로도 연다 (2026-11-01)
+
+사용자가 「Mac 화면 기기 등록」 QR을 iPhone 카메라로 찍자 「사용 가능한 데이터가 없음」이 떴다. QR 글자
+(`agentstoz-screen:` + base64url, `RegistrationInvite.text`)는 형식상 URL인데 그 스킴을 등록한 앱이 없었다.
+Mac 창의 안내 한 줄은 「…」로 잘려 앱 안 스캐너를 쓰라는 말이 보이지 않았다.
+
+- 앱이 `agentstoz-screen` 스킴을 `CFBundleURLTypes`에 등록한다. QR 글자는 **바꾸지 않았다** — 이미 설치된 Mac의 QR도
+  새 iPhone 앱에서 카메라로 열리고, 옛 iPhone 앱의 앱 안 스캐너도 새 Mac QR을 그대로 읽는다.
+- **https 유니버설 링크로 바꾸지 않는다.** QR에는 일회용 코드 비밀이 들어 있어, 앱이 없을 때 웹 서버에 넘어간다.
+  사용자 지정 스킴은 같은 폰의 다른 앱이 가로챌 수 있지만, 그 위협은 「QR을 찍은 사람」과 같고 App Attest·Mac 앞 SAS·Touch ID 승인이 막는다.
+- 열린 URL은 `RegistrationInvite.text(openedURL:)` → 앱 안 스캔과 같은 `deviceRegistrationText`로 읽는다(v3 컨트롤러 QR 거절 포함).
+  등록 화면을 띄울 뿐이고, Mac에는 사람이 「이 기기 등록」을 누른 뒤에만 닿는다.
+- 작업 공간이 열려 있으면 **닫지 않는다**(`end(.disconnected)`는 페이지와 입력 중인 글을 버린다). 작업 공간의 「Mac 화면」 시트가
+  그 자리에서 등록으로 바뀐다. 홈에서는 「Mac 화면」 행으로 스크롤한 뒤 넘긴다 — List는 화면 밖 행의 onChange·sheet가 살아 있지 않다
+  (`onChange(..., initial: true)`로 행이 생길 때도 읽는다). 등록 시트가 떠 있는 동안 앱 복귀(`.active`)가 저장된 작업 공간으로 덮지 않는다.
+- 진행 중인(키 생성 뒤·Mac 응답 전) 등록은 다른 QR로 바꾸거나 닫지 않는다 — 결과를 모르는 요청이다. 끝났거나 실패한 등록 시트에
+  새 QR이 오면 `.id(invite.code.id)`로 새 상태에서 시작한다(예전에는 실패 화면이 새 QR 밑에 남았다).
+- Mac 창 안내는 `fixedSize(horizontal: false, vertical: true)`로 줄바꿈하고, 카메라와 앱 안 「Mac 화면 등록 · QR 스캔」 두 길을 모두 적는다.
+- 검증 경계: 스킴·파싱·라우팅은 Swift 검사(「registration QR is a URL the app opens」)와 소스 계약(`tests/phone-connect-link.test.ts`)이다.
+  **실제 iPhone 카메라가 이 스킴으로 「AgentsToZ에서 열기」를 띄우는지는 실기에서 확인하지 않았다** — 「사용 가능한 데이터가 없음」은
+  카메라가 글자를 URL로 읽었지만 열 앱이 없을 때의 문구라서 등록하면 열린다고 추론했다.
+
+## 기존 LAN 전용 Screen의 iPad 연결은 waiting을 실패로 읽지 않는다 (2026-10-26)
+
+USB iPad Air 5세대(iPadOS 26.2.1, 앱 1514)에서 로컬 네트워크 허용·같은 Wi-Fi·새 QR 즉시 등록도
+「Mac에 연결하지 못했습니다」로 끝났다. iPad Console의 등록 포트 연결 C2는 13:08:51.806에 생성,
+`.807612 waiting` → `.807859 preparing` → `.809714 cancelled`였다. 경로는
+`unsatisfied (Interface type 'cellular' is prohibited by parameters), interface: pdp_ip0[lte]`였다.
+Mac의 등록 요청 처리 전, 클라이언트의 `NWConnection.open`이 `.waiting`을 즉시 실패로 처리해 취소했다.
+
+- `ScreenClient.parameters()`는 iOS에서 `requiredInterfaceType = .wifi`를 지정한다. 셀룰러 금지만으로
+  현재 기본 LTE 경로 대신 Wi-Fi를 선택한다고 가정하지 않는다. 등록과 뷰어가 같은 파라미터를 쓴다.
+- `.waiting`은 경로 복구 대기다. `.failed`와 구분하고 기존 호출자의 마감(등록 10초, 뷰어 5초,
+  Mac 인증 전 gate 5초)과 취소가 종료한다. 새 인증 시도를 자동 생성하거나 보안 마감을 연장하지 않는다.
+- 이 절은 1517.0.1 LAN 전용 수정의 기록이다. 그 버전은 셀룰러·P2P 금지와 승인 네트워크를 유지했다. Mac의 이더넷·loopback 검사는
+  iOS 전용 Wi-Fi 제한을 받지 않는다.
+- `testConnectionWaitsForAUsablePathUntilCancelled`는 Mac에서 존재하지 않는 cellular 경로를 요구해 실제
+  Network.framework의 waiting을 발생시킨다. 수정 전 즉시 취소로 실패, 수정 후 대기·명시 취소로 통과한다.
+  이 검사는 실제 iPad의 LTE/Wi-Fi 전환과 등록 성공을 대신하지 않으므로 수정 앱 설치 뒤 실기 확인이 필요하다.
+
 ## LAN 원격은 주소가 바뀌면 다시 바인딩하되, 버릴 것이 있으면 사람에게 묻는다 (2026-10-06)
 
 저장된 bind 주소는 믿지 않는다 — DHCP 리스가 바뀌거나 네트워크를 옮기면 이 Mac은 그 주소를 더는 갖고
@@ -149,3 +294,12 @@ LAN 리스너는 모듈 변수 하나에 임시 포트로 떠 있어서, 앱을 
   ② 새 포트는 새 origin이라 폰이 가진 토큰이 통째로 고아가 되기 때문에 제거했다.
 - 부팅 시 바인드 주소를 **실제 인터페이스 목록과 대조**한다. Wi-Fi가 올라오기 전에 앱이 뜨면
   복구가 건너뛰어지는데, 그때는 운영자가 「켜기」를 누르면 **저장된 세션을 그대로 이어서** 켠다.
+
+## 「QR 원격제어 · 이 Mac」에서 꺼진 같은 Wi‑Fi 웹 원격은 접혀 있다 (2026-11-01)
+
+사용자 검토(「상단 Screen이 원격제어인데 하단 LAN은 필요 없는 것 아닌가」): 이 대화상자의 위쪽 「아이폰·아이패드로 이 Mac 보기」(AgentsToZ Screen)와
+「외부 인터넷 QR 원격제어」가 같은 일을 더 넓게 하므로, **꺼져 있는** 같은 Wi‑Fi 웹 원격은 한 줄(`qr-remote-control-lan-folded`)로 접고
+「같은 Wi‑Fi로 켜기…」(`qr-remote-control-lan-expand`)를 눌러야 예전 켜기 화면·주의문·하단 「이 Mac에서 켜고 QR 발급」이 나온다.
+켜져 있거나 멈춤(`status.stalled`)이면 쓰는 사람이므로 처음부터 펼친다(헤더 멈춤 배지가 이 대화상자를 연다).
+**기능은 지우지 않았다** — 인터넷 원격이 안 될 때·인터넷 없이 같은 공유기에서 쓰는 유일한 길이다. 인터넷 원격이 안정된 뒤 완전히 지울지는 사용자가 정한다.
+스모크(`tests/smoke.mjs`)와 `tests/work-mode-ui.mjs`는 펼친 뒤 켜기 버튼을 찾는다.

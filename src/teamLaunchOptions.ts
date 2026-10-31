@@ -20,6 +20,7 @@ import {opsLaunchBypassSupported} from './opsLaunchOptions';
 import {isClaudeBgAvailable, terminalAppChoices, terminalOptionDefaults, tmuxReach, type OrcaLaunchSurface, type TerminalApp} from './terminalDefaults';
 import {WORKROOM_APP_NAMES} from './workroomAppRoute';
 import {WORKROOM_EFFORT_AUTO_LEVELS, WORKROOM_EFFORT_SUPPORT, type WorkroomEffortLevel} from './workroomEffortPolicy';
+import {teamEffortLevels} from './teamEffortCatalog';
 
 export const TEAM_MAX_MEMBERS = 6;
 /** Host-only model choice for one launch (src/aiTerminalLaunchArgs.ts). Hermes alone also takes a provider. */
@@ -33,15 +34,15 @@ export function launchModelError(agent: AiTerminalAgent, choice: AiTerminalLaunc
 
 /**
  * A member's effort: absent is 「자동」 — this Mac's 에포트 자동 decides from the member's task, as for any Workroom (w16) —
- * and a level pins it for that member's session. Only the levels auto itself uses: every supported CLI accepts them,
- * while xhigh/max are refused by some models (Codex) and settings (Claude without thinking). Antigravity picks effort
- * with the model variant (`gemini-4-argon-high`), so it takes none.
+ * and a level pins it for that member's session. The selected model limits explicit levels separately from auto;
+ * agy's fixed level selects a known variant of the same model family.
  */
-export const TEAM_EFFORT_LEVELS: readonly WorkroomEffortLevel[] = WORKROOM_EFFORT_AUTO_LEVELS;
-export const teamEffortSupported = (agent: AiTerminalAgent) => WORKROOM_EFFORT_SUPPORT[agent] === 'launch';
-export function teamEffortError(agent: AiTerminalAgent, effort: unknown): string | null {
-  if (!(TEAM_EFFORT_LEVELS as readonly unknown[]).includes(effort)) return `effort는 ${TEAM_EFFORT_LEVELS.join('·')} 중 하나이거나 비웁니다(자동).`;
-  if (!teamEffortSupported(agent)) return 'Antigravity는 에포트를 모델 이름으로 고릅니다(예: gemini-4-argon-high). effort를 비우세요.';
+/** Superset for protocol schemas; use teamEffortLevels for a specific model. */
+export const TEAM_EFFORT_LEVELS: readonly WorkroomEffortLevel[] = [...WORKROOM_EFFORT_AUTO_LEVELS, 'xhigh', 'max', 'ultra'];
+export const teamEffortSupported = (agent: AiTerminalAgent) => WORKROOM_EFFORT_SUPPORT[agent] === 'launch' || agent === 'agy';
+export function teamEffortError(agent: AiTerminalAgent, effort: unknown, model?: string, surface?: TeamLaunchSurface, provider?: string): string | null {
+  if (!(teamEffortLevels(agent, model, surface, provider) as readonly unknown[]).includes(effort)) return '선택한 모델에서 확인된 에포트를 고르거나 비웁니다(자동).';
+  if (agent === 'agy' && !model?.endsWith(`-${effort}`)) return 'Antigravity 모델 변형과 에포트가 일치해야 합니다.';
   return null;
 }
 
@@ -96,7 +97,8 @@ export function teamLaunchSurfacesFor(windows: boolean): TeamLaunchSurface[] {
 
 /** What project open takes on a surface for an AI. False is «no such option there» — never a hidden default. */
 export interface TeamLaunchSupport {
-  /** Host-only model (and Hermes provider) and pinned effort ride a Workroom start only (src/aiTerminalLaunchArgs.ts). */
+  /** Host-only model (and Hermes provider) and a pinned effort ride a Workroom start (src/aiTerminalLaunchArgs.ts); Claude on
+   * Orca also takes a model and an effort, as a request whose application is not verified (src/teamExternalHost.ts). */
   model: boolean; provider: boolean; effort: boolean;
   /** A CLI account profile: Workroom start of Codex or Claude. */
   account: boolean;
@@ -116,8 +118,11 @@ function appModesOf(agent: AiTerminalAgent): TeamAppMode[] {
 }
 export function teamLaunchSupport(surface: TeamLaunchSurface, agent: AiTerminalAgent): TeamLaunchSupport {
   const internal = surface === 'internal', terminal = route(surface);
+  // Orca's public CLI starts this exact Claude argv in the member checkout. Its actual
+  // session setting is still unverified until observed, especially with env overrides.
+  const orcaClaude = agent === 'claude' && (surface === 'orca-floating' || surface === 'orca-worktree');
   return {
-    model: internal, provider: internal && agent === 'hermes', effort: internal && teamEffortSupported(agent),
+    model: internal || orcaClaude, provider: internal && agent === 'hermes', effort: (internal && teamEffortSupported(agent)) || orcaClaude,
     account: internal && (CLI_ACCOUNT_AGENTS as readonly string[]).includes(agent),
     // Every Workroom CLI has a bypass flag (src/aiTerminalLaunchArgs.ts). The terminal routes pass it for Claude, Codex and agy;
     // Hermes' cmux and terminal launches never do (App.tsx openHermesMain). Orca and the Claude app: src/opsLaunchOptions.ts.
@@ -192,12 +197,17 @@ export function teamLaunchManagement(surface: TeamLaunchSurface, agent: AiTermin
  * `accountId`, `bypassPermissions`, `surface` and `launchOptions`. Parsed members are canonical — `surface` is absent for
  * the Workroom (legacy absence means `internal`), `bypassPermissions` appears only as `true`, empty values are dropped —
  * so the same choice always reads and fingerprints the same.
+ *
+ * `computerUseApprovals` (desktop app members only, appears only as `true`): the person let the leader answer this app
+ * member's one-time approvals (folder trust for the team's own worktree, run once) with an application-scoped computer
+ * session. It is a leader permission, not a launch option: it starts nothing and never covers always-allow, bypass,
+ * network/full access, login or macOS system prompts, which stay with the person.
  */
 export interface TeamMemberSelection {
   agent: AiTerminalAgent; task?: string; name?: string; model?: string; provider?: string; effort?: WorkroomEffortLevel; role?: 'reviewer'; sessionId?: string;
-  accountId?: string; bypassPermissions?: boolean; surface?: TeamLaunchSurface; launchOptions?: TeamLaunchOptions;
+  accountId?: string; bypassPermissions?: boolean; surface?: TeamLaunchSurface; launchOptions?: TeamLaunchOptions; computerUseApprovals?: boolean;
 }
-export const TEAM_MEMBER_SELECTION_KEYS = ['agent', 'task', 'name', 'model', 'provider', 'hermesVariant', 'effort', 'role', 'sessionId', 'accountId', 'bypassPermissions', 'surface', 'launchOptions'] as const;
+export const TEAM_MEMBER_SELECTION_KEYS = ['agent', 'task', 'name', 'model', 'provider', 'hermesVariant', 'effort', 'role', 'sessionId', 'accountId', 'bypassPermissions', 'surface', 'launchOptions', 'computerUseApprovals'] as const;
 export const TEAM_LAUNCH_OPTION_KEYS = ['bgMode', 'tmuxMode', 'reuse', 'appMode'] as const;
 const unknownKeys = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).filter(key => !keys.includes(key));
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -223,7 +233,7 @@ export function parseTeamMemberSelection(raw: unknown, index = 0): TeamMemberSel
   if (raw.sessionId !== undefined) {
     if (typeof raw.sessionId !== 'string' || !TEAM_SESSION_ID.test(raw.sessionId)) fail('sessionId가 올바르지 않습니다.');
     // An open session joins with the settings it runs with: a fresh launch choice would silently not apply.
-    const launch = ['model', 'provider', 'hermesVariant', 'effort', 'accountId', 'bypassPermissions', 'launchOptions'].filter(key => raw[key] !== undefined);
+    const launch = ['model', 'provider', 'hermesVariant', 'effort', 'accountId', 'bypassPermissions', 'launchOptions', 'computerUseApprovals'].filter(key => raw[key] !== undefined);
     if (raw.surface !== undefined && raw.surface !== 'internal') launch.push('surface');
     if (launch.length) fail(`열린 세션(sessionId)은 그 세션의 설정 그대로 합류합니다. ${launch.join('·')}를 빼세요.`);
     return {...base, ...role, sessionId: raw.sessionId as string};
@@ -233,15 +243,15 @@ export function parseTeamMemberSelection(raw: unknown, index = 0): TeamMemberSel
   const support = teamLaunchSupport(surface, agent), where = teamSurfaceName(surface, agent);
   let model: AiTerminalLaunchModel | null = null;
   if (raw.model !== undefined) {
-    if (!support.model) fail(`${where}에서는 모델을 고르지 않습니다(워크룸에서만).`);
+    if (!support.model) fail(`${where}에서는 모델을 고르지 않습니다(워크룸과 Orca의 Claude에서만).`);
     if (typeof raw.model !== 'string' || raw.provider !== undefined && typeof raw.provider !== 'string') fail('model·provider는 글자입니다.');
     model = {model: raw.model as string, ...(raw.provider !== undefined ? {provider: raw.provider as string} : {})};
     const error = launchModelError(agent, model);
     if (error) fail(error);
   } else if (raw.provider !== undefined) fail('provider는 model과 함께 씁니다.');
   if (raw.effort !== undefined) {
-    if (surface !== 'internal') fail(`${where}에서는 에포트를 고르지 않습니다(워크룸에서만).`);
-    const error = teamEffortError(agent, raw.effort);
+    if (!support.effort) fail(`${where}에서는 에포트를 고르지 않습니다.`);
+    const error = teamEffortError(agent, raw.effort, model?.model, surface, model?.provider);
     if (error) fail(error);
   }
   if (raw.accountId !== undefined) {
@@ -250,10 +260,13 @@ export function parseTeamMemberSelection(raw: unknown, index = 0): TeamMemberSel
   }
   if (raw.bypassPermissions !== undefined && typeof raw.bypassPermissions !== 'boolean') fail('bypassPermissions는 true 또는 false입니다.');
   if (raw.bypassPermissions === true && !support.bypass) fail(`${where}의 ${agent}는 권한 우회를 받지 않습니다.`);
+  if (raw.computerUseApprovals !== undefined && typeof raw.computerUseApprovals !== 'boolean') fail('computerUseApprovals는 true 또는 false입니다.');
+  if (raw.computerUseApprovals === true && surface !== 'app') fail('컴퓨터 유즈 1회성 승인은 데스크톱 앱 팀원에만 켭니다(터미널 팀원은 키 입력으로 답합니다).');
   const launchOptions = raw.launchOptions === undefined ? {} : parseTeamLaunchOptions(raw.launchOptions, surface, agent, fail);
   return {...base, ...(model ?? {}), ...(raw.effort !== undefined ? {effort: raw.effort as WorkroomEffortLevel} : {}), ...role,
     ...(raw.accountId !== undefined ? {accountId: raw.accountId as string} : {}), ...(raw.bypassPermissions === true ? {bypassPermissions: true} : {}),
-    ...(surface !== 'internal' ? {surface} : {}), ...(Object.keys(launchOptions).length ? {launchOptions} : {})};
+    ...(surface !== 'internal' ? {surface} : {}), ...(Object.keys(launchOptions).length ? {launchOptions} : {}),
+    ...(raw.computerUseApprovals === true ? {computerUseApprovals: true} : {})};
 }
 
 function parseTeamLaunchOptions(raw: unknown, surface: TeamLaunchSurface, agent: AiTerminalAgent, fail: (message: string) => never): TeamLaunchOptions {
@@ -334,12 +347,14 @@ export function teamLaunchText(member: TeamMemberSelection, accountLabel?: strin
   if (member.sessionId) return '';
   const surface = member.surface ?? 'internal', options = member.launchOptions ?? {}, parts: string[] = [];
   if (surface !== 'internal') parts.push(`실행 위치 ${teamSurfaceName(surface, member.agent)}(${surface})`);
+  if (surface !== 'internal' && member.effort) parts.push(`에포트 ${member.effort} 요청 · 실제 적용 확인 필요`);
   if (member.accountId) parts.push(`계정 ${accountLabel ? `「${accountLabel}」` : ''}(accountId ${member.accountId})`);
   if (member.bypassPermissions) parts.push('권한 우회');
   if (options.bgMode !== undefined) parts.push(options.bgMode ? 'Claude --bg' : 'Claude --bg 끔');
   if (options.tmuxMode !== undefined) parts.push(options.tmuxMode ? 'tmux' : 'tmux 끔');
   if (options.reuse) parts.push(options.reuse === 'reuse-or-new' ? '기존 창 재사용' : '새 창');
   if (options.appMode) parts.push(APP_MODE_NAME[options.appMode]);
+  if (member.computerUseApprovals) parts.push('리더가 1회성 승인만 컴퓨터 유즈로 응답 가능');
   if (surface !== 'internal') {
     const {management, reason} = teamLaunchManagement(surface, member.agent, options);
     parts.push(`${TEAM_LAUNCH_MANAGEMENT_NAME[management]}: ${MANAGEMENT_REASON[reason]}`);

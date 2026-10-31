@@ -31,7 +31,8 @@ export function cliInfoFromScreen(agent: AiTerminalAgent, lines: readonly string
       if (e && !info.effort) info.effort = e[1]!.toLowerCase();
     } else if (agent === 'claude') {
       if (!info.effort) {
-        const e = new RegExp(`[◐◑◒◓○●◔◕]\\s+${EFFORT}\\s+·\\s+/effort`).exec(line) ?? new RegExp(`Set effort (?:level )?to ${EFFORT}\\b`).exec(line);
+        // The level is the word, never the glyph: 2.1.314 draws 「◉ xhigh · /effort」 (live, 2026-10-30).
+        const e = new RegExp(`[◐◑◒◓○●◔◕◉]\\s+${EFFORT}\\s+·\\s+/effort`).exec(line) ?? new RegExp(`Set effort (?:level )?to ${EFFORT}\\b`).exec(line);
         if (e) info.effort = e[1]!;
       }
       if (!info.model) {
@@ -73,6 +74,14 @@ export function workroomMemoryCommand(agent: AiTerminalAgent): string | null {
 }
 
 export interface SlashCommand {command: string; description: string}
+/**
+ * The unfinished-work skill (`agentstoz-unfinished-work`, installed globally by the invocation installer)
+ * is read-only: it reviews long-term memory and only drafts improvement instructions for the person to pick.
+ * Hermes registers a slash command for every skill under <HERMES_HOME>/skills by its frontmatter name;
+ * agy supports skill slash commands when the skill is present in its CLI home. Claude's entry sits after /agents because Enter on a typed prefix runs the
+ * first match, and `/agent` must keep meaning /agents.
+ */
+const UNFINISHED_WORK_DESCRIPTION = '장기기억으로 미처리 업무 조회';
 export const WORKROOM_SLASH_COMMANDS: Record<AiTerminalAgent, SlashCommand[]> = {
   claude: [
     {command: '/remember-session', description: '이 프로젝트의 기억 스킬 실행'},
@@ -85,12 +94,14 @@ export const WORKROOM_SLASH_COMMANDS: Record<AiTerminalAgent, SlashCommand[]> = 
     {command: '/resume', description: '이전 대화 이어가기'},
     {command: '/status', description: '상태'},
     {command: '/agents', description: '에이전트'},
+    {command: '/agentstoz-unfinished-work', description: UNFINISHED_WORK_DESCRIPTION},
     {command: '/mcp', description: 'MCP 서버'},
     {command: '/permissions', description: '권한'},
     {command: '/help', description: '도움말'},
   ],
   codex: [
     {command: '$remember-session', description: '이 프로젝트의 기억 스킬 실행'},
+    {command: '$agentstoz-unfinished-work', description: UNFINISHED_WORK_DESCRIPTION},
     {command: '/model', description: '모델·에포트 변경'},
     {command: '/status', description: '세션 상태·사용량'},
     {command: '/compact', description: '대화를 요약해 컨텍스트 줄이기'},
@@ -105,8 +116,9 @@ export const WORKROOM_SLASH_COMMANDS: Record<AiTerminalAgent, SlashCommand[]> = 
     {command: '/help', description: '도움말'},
     {command: '/omh-model', description: '모델'},
     {command: '/omh-status', description: '상태'},
+    {command: '/agentstoz-unfinished-work', description: UNFINISHED_WORK_DESCRIPTION},
   ],
-  agy: [{command: '/help', description: '도움말'}],
+  agy: [{command: '/help', description: '도움말'}, {command: '/agentstoz-unfinished-work', description: UNFINISHED_WORK_DESCRIPTION}],
 };
 
 /** A leading CLI `/token` or Codex skill `$token` before the cursor. */

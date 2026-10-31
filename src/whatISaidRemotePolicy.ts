@@ -78,6 +78,28 @@ export function whatISaidRemotePushAllowed(
   return !policy.excludedMemoryIds.includes(id);
 }
 
+/**
+ * A manual sync whose upload did not start before the request deadline: may it
+ * tell the user that uploads are still waiting? It is decided without the
+ * network, so it says so only when an upload is known to apply to this memory:
+ * a remote is configured on this host and the cached exclusion list (`null`
+ * when none is cached) does not exclude it. An unknown exclusion makes no
+ * claim, because an excluded memory never uploads.
+ */
+export function whatISaidUnstartedUploadPending(input: {
+  /** False on a host with no Supabase target at all or without a device id. */
+  remoteConfigured: boolean;
+  excludedMemoryIds: ReadonlySet<string> | null;
+  memoryId: string;
+  /** Rows were stored in this request, or the push gate cannot rule out rows not yet uploaded. */
+  mayHaveRowsToUpload: boolean;
+}): boolean {
+  const id = input.memoryId.trim();
+  if (!input.remoteConfigured || !input.excludedMemoryIds || !id) return false;
+  if (input.excludedMemoryIds.has(id)) return false;
+  return input.mayHaveRowsToUpload;
+}
+
 export function withWhatISaidProjectExcluded(
   policy: WhatISaidRemotePolicy,
   memoryId: string,

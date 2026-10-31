@@ -1,4 +1,4 @@
-import {unixActivityHookCommand} from './projectMemoryActivityHook';
+import {generatedHookSubpath,unixActivityHookCommand} from './projectMemoryActivityHook';
 export const RECOVERY_HOOK_MARKER='AGENTSTOZ_PRECOMPACTION_RECOVERY';
 export const RECOVERY_HOOK_REL='.agent-memory/recovery-hook.py';
 /** Metadata only; no provider stdout, prompt, tool result, token or secret is
@@ -38,6 +38,11 @@ export function recoveryHookCommand(agent:'codex'|'claude'|'agy',subpath:string,
     .replaceAll('AGENTSTOZ_PROJECT_MEMORY_ACTIVITY',RECOVERY_HOOK_MARKER)
     .replaceAll('.agent-memory/activity-hook.sh',RECOVERY_HOOK_REL)
     .replace(`/bin/sh "$hook" ${agent}`,`python3 "$hook" ${agent} ${event}`);
+}
+/** True only for a command recoveryHookCommand would have generated, byte for byte (any subpath). */
+export function isAgentsToZRecoveryHookCommand(command:string,agent:'codex'|'claude'|'agy',event:'pre-compaction'|'periodic'){
+  const subpath=generatedHookSubpath(command);
+  return subpath!==null&&command===recoveryHookCommand(agent,subpath,event);
 }
 
 export function withRecoveryHook(existing:Record<string,any>,agent:'codex'|'claude'|'agy',subpath:string):Record<string,any>{

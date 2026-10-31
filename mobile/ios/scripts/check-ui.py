@@ -14,6 +14,9 @@ The team comes from --team or the shared rule in signingTeam.ts.
 
 Optional AGENTSTOZ_IOS_PORTAL_URL enables anonymous HTTPS checks. Evidence can
 contain the personal origin/screens: keep it local, never upload it wholesale.
+
+--screen-gestures uses the real touch surface in an isolated simulator probe.
+It never connects to a Mac or replaces the production app's entry point.
 """
 import argparse
 import hashlib
@@ -37,7 +40,10 @@ parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--device", help="USB-connected iPhone identifier (xcrun devicectl list devices)")
 parser.add_argument("--team", help="10-character Apple Team ID for device signing")
 parser.add_argument("--plan", action="store_true", help="print the planned commands and exit")
+parser.add_argument("--screen-gestures", action="store_true", help="test the production touch surface in an isolated simulator probe")
 options = parser.parse_args()
+if options.screen_gestures and options.device:
+    parser.error("--screen-gestures only runs in an owned disposable simulator")
 if options.device is not None and not re.fullmatch(r"[0-9A-Fa-f-]{20,64}", options.device):
     parser.error("--device must be a connected device identifier")
 if options.team is not None and not re.fullmatch(r"[A-Z0-9]{10}", options.team):
@@ -73,7 +79,9 @@ team = ((options.team or PLAN_TEAM_PLACEHOLDER) if options.plan else resolve_tea
 
 
 def build_args(derived):
-    common = ["xcodebuild", "-project", "mobile/ios/AgentsToZMobile.xcodeproj",
+    project = (str(derived.parent / "GestureProject/AgentsToZMobile.xcodeproj")
+               if options.screen_gestures else "mobile/ios/AgentsToZMobile.xcodeproj")
+    common = ["xcodebuild", "-project", project,
               "-scheme", "AgentsToZMobile", "-configuration", "Debug", "-derivedDataPath", str(derived)]
     if not device:
         return common + ["-destination", "generic/platform=iOS Simulator",
@@ -134,6 +142,32 @@ report = {"actualIPhone": bool(device), "anonymousPortal": bool(portal), "state"
           "gitHead": head.stdout.strip() if head.returncode == 0 else None,
           "appBundleId": TEST_HOST_BUNDLE if device else "com.intenet.agentstoz.mobile",
           "sources": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
+if options.screen_gestures:
+    for relative in ("mobile/ios/UITests/Fixtures/ScreenGestureProbeApp.swift", "mobile/ios/UITests/ScreenGestureUITests.swift"):
+        report["sources"][relative] = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
+    report["mode"] = "screen-gestures"
+
+
+def prepare_gesture_project():
+    """Copy only the test host. The production app entry point and project stay unchanged."""
+    source = ROOT / "mobile/ios"
+    project = evidence / "GestureProject"
+    shutil.copytree(source / "AgentsToZMobile.xcodeproj", project / "AgentsToZMobile.xcodeproj")
+    shutil.copytree(source / "App", project / "App")
+    shutil.copy2(source / "UITests/Fixtures/ScreenGestureProbeApp.swift", project / "App/AgentsToZMobileApp.swift")
+    (project / "UITests").mkdir()
+    shutil.copy2(source / "UITests/ScreenGestureUITests.swift", project / "UITests/WorkspaceUITests.swift")
+    for name in ("Config", "ShareExtension", "scripts"):
+        (project / name).symlink_to(source / name, target_is_directory=True)
+    (project / "build").mkdir()
+    (project / "build/portal-web").symlink_to(source / "build/portal-web", target_is_directory=True)
+    pbx = project / "AgentsToZMobile.xcodeproj/project.pbxproj"
+    converted = subprocess.check_output(["plutil", "-convert", "xml1", "-o", "-", str(pbx)])
+    specification = plistlib.loads(converted)
+    for item in specification["objects"].values():
+        if item.get("isa") == "XCLocalSwiftPackageReference":
+            item["relativePath"] = str((source / item["relativePath"]).resolve())
+    pbx.write_bytes(plistlib.dumps(specification))
 
 
 def command(args, timeout=120, log=None, allow_failure=False):
@@ -150,6 +184,9 @@ def command(args, timeout=120, log=None, allow_failure=False):
 
 try:
     print(f"Private UI evidence: {evidence}", flush=True)
+    if options.screen_gestures:
+        prepare_gesture_project()
+    command(["bun", "mobile/ios/scripts/build-portal-web.ts"], timeout=300, log="portal-build.log")
     command(build_args(derived), timeout=900 if device else 600, log="build.log")
     run_files = list((derived / "Build/Products").glob("*.xctestrun"))
     if len(run_files) != 1:
@@ -166,7 +203,7 @@ try:
     targets = [target for target in candidates if target.get("BlueprintName") == "AgentsToZMobileUITests"]
     if len(targets) != 1:
         raise RuntimeError("Expected exactly one UI test target")
-    if portal:
+    if portal and not options.screen_gestures:
         targets[0].setdefault("EnvironmentVariables", {})["AGENTSTOZ_IOS_PORTAL_URL"] = portal
     run_file.write_bytes(plistlib.dumps(specification))
     if device:
@@ -200,7 +237,9 @@ try:
     command(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
              "--output-path", str(evidence / "attachments")], log="attachments.log")
     report.update(passed=summary["passedTests"], skipped=summary["skippedTests"], failed=summary["failedTests"])
-    if test_exit or summary["failedTests"] or summary["passedTests"] != (2 if portal else 1) or summary["skippedTests"] != (0 if portal else 1):
+    expected_passes = 7 if options.screen_gestures else (2 if portal else 1)
+    expected_skips = 0 if options.screen_gestures or portal else 1
+    if test_exit or summary["failedTests"] or summary["passedTests"] != expected_passes or summary["skippedTests"] != expected_skips:
         raise RuntimeError("Unexpected pass/fail/skip counts; inspect summary.json")
     report.update(state="passed", passed=summary["passedTests"], skipped=summary["skippedTests"])
     print(json.dumps({key: report[key] for key in ("state", "actualIPhone", "anonymousPortal", "passed", "skipped")}), flush=True)
@@ -224,3 +263,5 @@ finally:
     # Compilation products and the local portal environment are reproducible.
     # Keep only bounded-per-run logs, screenshots and the result bundle.
     shutil.rmtree(derived, ignore_errors=True)
+    if options.screen_gestures:
+        shutil.rmtree(evidence / "GestureProject", ignore_errors=True)

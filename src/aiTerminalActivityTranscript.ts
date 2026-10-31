@@ -17,6 +17,7 @@
  * regular file that was stat'ed (same dev/inode).
  */
 import {closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync, type Stats} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {claudeProjectSlugCandidates} from './sessionTranscript';
@@ -50,8 +51,32 @@ export interface WorkroomTranscriptSession {
 
 export interface WorkroomTurnSignals {
   /** New turn ends since the previous call for this session; `bytes` counts everything read (≤ `maxBytes`). */
-  poll(session: WorkroomTranscriptSession, maxBytes: number): Promise<{completions: WorkroomTurnCompletion[]; bytes: number}>;
+  poll(session: WorkroomTranscriptSession, maxBytes: number): Promise<{completions: WorkroomTurnCompletion[]; bytes: number; witness?:WorkroomTranscriptWitness}>;
   forget(sessionId: string): void;
+}
+/** Host-only. A witness exists only when a bounded complete transcript ends with this exact completion. */
+export interface WorkroomTranscriptWitness {path:string;agent:'claude'|'codex';key:string;digest:string;dev:number;ino:number;size:number}
+export const WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES=512*1024;
+export function readWorkroomTranscriptWitness(path:string,agent:'claude'|'codex',key:string,maxBytes=WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES,onRead?:(bytes:number)=>void):WorkroomTranscriptWitness|null {
+  const opened=openRegular(path);if(!opened)return null;
+  try{
+    const before=opened.stat,size=before.size;
+    if(size<=0||size>Math.min(maxBytes,WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES))return null;
+    const data=Buffer.alloc(size);let offset=0;
+    while(offset<size){const n=readSync(opened.fd,data,offset,size-offset,offset);if(n<=0)return null;offset+=n;onRead?.(n);}
+    const after=fstatSync(opened.fd),pathAfter=lstatSync(path);
+    if(!pathAfter.isFile()||pathAfter.isSymbolicLink()||after.dev!==before.dev||after.ino!==before.ino||pathAfter.dev!==before.dev||pathAfter.ino!==before.ino
+      ||after.size!==size||pathAfter.size!==size||after.mtimeMs!==before.mtimeMs||after.ctimeMs!==before.ctimeMs||data[size-1]!==10)return null;
+    const lines=data.toString('utf8').trimEnd().split('\n');const last=lines.at(-1);if(!last)return null;
+    const ends=parseWorkroomTurnCompletions(agent,last+'\n');if(ends.length!==1||ends[0]!.key!==key)return null;
+    return {path,agent,key,digest:createHash('sha256').update(data).digest('hex'),dev:before.dev,ino:before.ino,size};
+  }catch{return null;}finally{try{closeSync(opened.fd);}catch{}}
+}
+/** Compare to the history service's verified exact provider file, never a nearby/latest transcript. */
+export function verifyWorkroomTranscriptWitness(witness:WorkroomTranscriptWitness,verifiedPath:string):boolean {
+  if(witness.path!==verifiedPath)return false;
+  const now=readWorkroomTranscriptWitness(verifiedPath,witness.agent,witness.key);
+  return !!now&&now.dev===witness.dev&&now.ino===witness.ino&&now.size===witness.size&&now.digest===witness.digest;
 }
 
 interface Binding {path: string | null; dev: number; ino: number; offset: number; carry: string; lastLocateAt: number; agent: 'claude' | 'codex'}
@@ -257,7 +282,9 @@ export function createWorkroomTranscriptSignals(options: {
       const rest = lastNewline < 0 ? text : text.slice(lastNewline + 1);
       binding.carry = rest.length > maxBytes ? '' : rest;
       binding.offset = read.start + read.data.length; binding.dev = read.dev; binding.ino = read.ino;
-      return {completions: parseWorkroomTurnCompletions(binding.agent, complete), bytes: budget.used};
+      const completions=parseWorkroomTurnCompletions(binding.agent, complete),last=completions.at(-1);
+      const witness=last&&read.size<=budget.left?readWorkroomTranscriptWitness(binding.path,binding.agent,last.key,budget.left,bytes=>charge(budget,bytes)):null;
+      return {completions,bytes:budget.used,...(witness&&witness.dev===read.dev&&witness.ino===read.ino&&witness.size===read.size?{witness}:{})};
     },
   };
 }

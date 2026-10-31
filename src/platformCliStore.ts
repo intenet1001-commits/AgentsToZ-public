@@ -89,6 +89,8 @@ export class PlatformCliStore {
   account(id:string):PlatformCliAccount {const a=this.list().find(a=>a.id===id);if(!a)throw new PlatformCliError('선택한 CLI 계정을 사용할 수 없습니다.');return a;}
   binding(targetId:string,provider:PlatformCliProvider) {return this.read().bindings[this.key(targetId,provider)]??null;}
   deviceDefaults():PlatformCliDeviceDefaults {return this.read().deviceDefaults??{};}
+  /** Whether any project chose an account of its own (not 「this Mac」). */
+  hasProjectAccounts():boolean {return Object.values(this.read().bindings).some(b=>b.accountId!==PLATFORM_CLI_DEFAULT_ACCOUNT);}
   defaultAccountId(provider:PlatformCliProvider):string {
     const value=this.deviceDefaults()[provider];
     if(!value)return PLATFORM_CLI_DEFAULT_ACCOUNT;
@@ -96,6 +98,17 @@ export class PlatformCliStore {
     const a=this.account(value.accountId);
     if(a.provider!==provider||a.state!=='ready'||a.verifiedEmail!==value.email)throw new PlatformCliError('기기 기본 계정의 인증을 다시 확인하세요. 다른 계정으로 실행하지 않았습니다.');
     return a.id;
+  }
+  /** The Mac-wide login was switched to one with no connected account: app runs follow that login again. */
+  async clearDefault(provider:PlatformCliProvider,requestId:string) {
+    if(!platformCliProvider(provider))throw new PlatformCliError('지원하는 CLI를 선택하세요.');
+    await this.change('device-default-clear',requestId,provider,d=>{if(d.deviceDefaults)delete d.deviceDefaults[provider];return provider;});
+  }
+  /** The connected account whose stored credential is exactly this one — never a guess from a name. */
+  matchCredential(provider:PlatformCliProvider,secret:string):PlatformCliAccount|null {
+    let normalized:string;try{normalized=validatePlatformCliCredential(provider,secret);}catch{return null;}
+    const hash=platformCliHash(normalized),row=this.read().accounts.find(a=>!a.archived&&a.provider===provider&&a.credentialHash===hash);
+    if(!row)return null;const {credentialHash,archived,...account}=row;return account;
   }
   /** A null account reserves the user's intended email; it never means native fallback. */
   async setDefault(provider:PlatformCliProvider,emailValue:unknown,accountId:string|null,requestId:string) {

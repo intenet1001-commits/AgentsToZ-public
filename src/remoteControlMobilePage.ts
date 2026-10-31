@@ -1,5 +1,6 @@
 import {mountLanTester} from './mobileTesterLan';
 import {createProjectCreationIntentStore,projectCreationIntentFingerprint} from './projectLaunchIntent';
+import {createCodexNewConversationIntentStore} from './codexNewConversationIntent';
 import appearanceTokens from './appearanceTokens.css' with {type:'text'};
 import {LAN_XTERM_JS,LAN_XTERM_CSS} from './lanTerminalAssets';
 import { REMOTE_CONTROL_PROTOCOL_VERSION } from './remoteControlCore';
@@ -969,6 +970,8 @@ document.querySelector('#terminal-submission-status').onclick=async()=>{
     terminalSubmissions.write(sessionStorage,terminalSubmissionKey(pending.sessionId),next);
     if(terminalSelected===pending.sessionId)terminalPendingSubmission=next;
     if(next){terminalError.textContent='제출은 '+receipt.state+' 상태입니다. 터미널 결과를 확인하세요. 자동으로 다시 보내지 않습니다.';return;}
+    // Never ran (refused before the write fence, or prepared before a Mac restart): the record goes, the draft stays.
+    if(receipt.state!=='written'){terminalSubmittedDrafts.delete(pending.id);terminalError.textContent='앞선 요청은 터미널에 입력되지 않았습니다('+terminalStateLabel(receipt.state)+'). 작성 내용은 그대로이니 확인한 뒤 다시 보내세요.';return;}
     const field=document.querySelector('#terminal-line');
     const outcome=terminalDraftAfterWritten(terminalSubmittedDrafts.get(pending.id),field.value);terminalSubmittedDrafts.delete(pending.id);
     if(outcome.clear&&terminalSelected===pending.sessionId&&!terminalLineSending){field.value='';terminalLineGeneration++;}
@@ -992,7 +995,7 @@ let actionSequence = 0;
 let testerSupported=false;
 let testerCapabilityRequest='';
 function probeTester(){
-  testerSupported=false;testerCapabilityRequest=nextActionId();
+  testerSupported=false;codexNewSupported=null;testerCapabilityRequest=nextActionId();
   socket.send(JSON.stringify({type:'action.request',protocolVersion:PROTOCOL_VERSION,sessionToken,actionId:testerCapabilityRequest,action:'protocol.capabilities'}));
 }
 const lanTester=(${mountLanTester.toString()})(document.querySelector('#tester-panel'),request=>terminalRequest(request),()=>({online:connection.classList.contains('online'),owner:sessionToken,supported:testerSupported,projects}),phoneDate);
@@ -1030,6 +1033,11 @@ window.agentstozDisconnect=()=>{
 document.querySelector('[data-workspace-disconnect]').onclick=()=>void window.agentstozDisconnect();
 let inFlight = false;
 let inFlightTimer = null;
+let pendingActionId = null;
+let codexNewSupported = null;
+let currentCodexNewIntent = null;
+let currentCodexControlId = null;
+let codexAcknowledgingReview = false;
 /** Long enough for a slow git or a cold PTY, short enough that the phone is never permanently inert. */
 const ACTION_RESPONSE_TIMEOUT_MS = 90000;
 /** One host rate window plus a margin, so the resumed page is not refused for the same reason. */
@@ -1055,6 +1063,8 @@ const WORKSPACE_ROOT_FILTER_PREFIX = "root:";
 // or failed instead of a generic "요청을 처리했습니다".
 const projectIntentFingerprint = ${projectCreationIntentFingerprint.toString()};
 const projectIntentFactory = ${createProjectCreationIntentStore.toString()};
+const codexNewIntentFactory = ${createCodexNewConversationIntentStore.toString()};
+function codexNewIntentStore() { return codexNewIntentFactory(localStorage, () => 'cn-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte=>byte.toString(16).padStart(2,'0')).join(''), projectIntentFingerprint); }
 let currentProjectCreateIntent = null;
 function projectIntentStore() { return projectIntentFactory(localStorage, () => 'pc-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte=>byte.toString(16).padStart(2,'0')).join(''), projectIntentFingerprint); }
 let lastActionName = "";
@@ -1262,7 +1272,7 @@ const ACTION_GROUPS = [
   {
     heading: "새 대화",
     className: "first",
-    help: "처음 연결이면 프로젝트 연결용 대화를 준비하고 Mac의 Codex 앱에 열기를 요청합니다. 실제 작업은 Mac에서 이어서 진행하세요.",
+    help: "이 프로젝트의 새 Codex 대화를 요청합니다. Mac의 AgentsToZ를 최신으로 유지하고, 실제 대화는 Mac의 프로젝트에서 확인하세요.",
     actions: ["codex.thread.start"],
   },
   {
@@ -1294,6 +1304,7 @@ const ACTION_PROMPTS = {
 };
 
 const ACTION_CONFIRM_NOTES = {
+  "codex.thread.start": "\\n\\n고정된 안전 안내문과 짧은 응답을 저장하고 Mac의 Codex 앱에 열도록 요청합니다. 이전 요청의 결과가 확인되지 않았다면 그 요청을 먼저 복구할 수 있습니다. 파일 수정이나 임의 명령은 요청하지 않습니다.",
   "app.codex": "\\n\\n이 프로젝트에 정확히 연결된 가장 최근 Codex 대화만 엽니다. 기록이 없으면 실패합니다.",
   "app.hermes": "\\n\\n이 프로젝트에 정확히 연결된 가장 최근 Hermes 대화 열기를 요청합니다. Desktop 실행은 확인하지만 실제 대화 선택은 Mac의 앱에서 확인해야 합니다.",
   "agent.claude": "\\n\\n최초 동의·로그인 화면은 Mac의 Orca에서 직접 확인해야 합니다.",
@@ -1321,6 +1332,7 @@ function nextActionId() {
 
 function setBusy(value) {
   inFlight = value;
+  if (!value) pendingActionId = null;
   // A request the Mac never answers used to leave every button disabled for good while the
   // pill still read "연결됨" — the phone looked connected and was inert. Release the lock and
   // say the outcome is unknown, which is honest: the action may still have run.
@@ -1344,8 +1356,10 @@ function actionButton(action, label, project, disabled) {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.action = action;
+  button.textContent = action === 'codex.thread.start' && codexNewSupported === null ? 'Codex 새 대화 지원 확인' : label;
+  if (action === 'codex.thread.start' && project.kind === 'worktree') { disabled = true; button.title = '새 대화는 기본 프로젝트에서 사용하세요.'; }
+  if (action === 'codex.thread.start' && codexNewSupported === false) { disabled = true; button.title = '연결된 Mac의 AgentsToZ를 업데이트하세요.'; }
   button.dataset.available = disabled ? "false" : "true";
-  button.textContent = label;
   button.disabled = disabled || inFlight;
   button.addEventListener("click", () => sendAction(action, project.controlId, true));
   return button;
@@ -1363,7 +1377,9 @@ function appendActionGroup(card, project, group) {
   if (showHelp) {
     const help = document.createElement("p");
     help.className = "action-help";
-    help.textContent = group.help;
+    help.textContent = group.className === 'first' && project.kind === 'worktree'
+      ? '안전한 새 대화 생성은 기본 프로젝트에서 사용하세요. 워크트리는 현재 지원하지 않습니다.'
+      : group.help;
     card.append(help);
   }
   const actions = document.createElement("div");
@@ -1533,12 +1549,19 @@ document.querySelector('#create-project').onclick=()=>{
   try {
     // The opaque root control is HMAC-bound to this host pairing; no bearer is written to intent storage.
     currentProjectCreateIntent=projectIntentStore().reserve({hostId:location.host,controllerId:workspaceRootId,workspaceRootId,projectName:input});
-    lastActionCode='project.create';lastActionName='프로젝트 생성';setBusy(true);
+    lastActionCode='project.create';lastActionName='프로젝트 생성';pendingActionId=currentProjectCreateIntent.actionId;setBusy(true);
     socket.send(JSON.stringify({type:'action.request',protocolVersion:PROTOCOL_VERSION,sessionToken,actionId:currentProjectCreateIntent.actionId,action:'project.create',input,workspaceRootId,remoteConfirmed:true}));
   } catch(error) {setBusy(false);recordError('프로젝트 생성',error);notify(error.message);}
 };
 function sendAction(action, controlId, remoteConfirmed, page) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !sessionToken || inFlight) return;
+  if (action === 'codex.thread.start' && projects.find(candidate => candidate.controlId === controlId)?.kind === 'worktree') {
+    notify('안전한 새 대화 생성은 기본 프로젝트에서 사용하세요. 워크트리는 현재 지원하지 않습니다.'); return;
+  }
+  if (action === 'codex.thread.start' && codexNewSupported !== true) {
+    if (codexNewSupported === false) { notify('새 대화를 안전하게 만들려면 연결된 Mac의 AgentsToZ를 업데이트하세요.'); return; }
+    notify('이 Mac의 새 대화 지원 여부를 확인하고 있습니다.'); return;
+  }
   const targetName = action.indexOf("ops.") === 0 ? "아젠투지(OPS)" : projectName(controlId);
   if (remoteConfirmed && !confirm(hostName.textContent + "\\n‘" + targetName + "’\\n\\n" + actionConfirm(action) + (ACTION_CONFIRM_NOTES[action] || ""))) return;
   let input;
@@ -1553,12 +1576,26 @@ function sendAction(action, controlId, remoteConfirmed, page) {
       return;
     }
   }
+  let actionId = nextActionId(), wireAction = action;
+  if (action === 'codex.thread.start') {
+    const project = projects.find(candidate => candidate.controlId === controlId);
+    if (!project) { notify('현재 연결에서 프로젝트를 찾을 수 없습니다.'); return; }
+    try {
+      const descriptor = project.controlId;
+      // The factory stores only a SHA-256 fingerprint, never the bearer itself.
+      currentCodexNewIntent = codexNewIntentStore().reserve(location.host, sessionToken, descriptor);
+      currentCodexControlId = controlId;
+      codexAcknowledgingReview = false;
+      actionId = currentCodexNewIntent.actionId;
+      wireAction = 'codex.thread.start.v2';
+    } catch (error) { recordError('새 Codex 대화', error); notify(error.message); return; }
+  }
   const message = {
     type: "action.request",
     protocolVersion: PROTOCOL_VERSION,
     sessionToken,
-    actionId: nextActionId(),
-    action,
+    actionId,
+    action: wireAction,
   };
   if (controlId) message.controlId = controlId;
   if (remoteConfirmed) message.remoteConfirmed = true;
@@ -1567,16 +1604,56 @@ function sendAction(action, controlId, remoteConfirmed, page) {
   lastActionName = actionLabel(action) || action;
   lastActionCode = action;
   lastRequestedPage = action === "projects.list" && Number.isInteger(page) ? page : null;
+  pendingActionId = message.actionId;
   setBusy(true);
   socket.send(JSON.stringify(message));
 }
 
+function sendCodexFollowup(action, input) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !sessionToken || inFlight || !currentCodexControlId) return false;
+  const message = {type:'action.request', protocolVersion:PROTOCOL_VERSION, sessionToken,
+    actionId:nextActionId(), action, controlId:currentCodexControlId, remoteConfirmed:true};
+  if (input) message.input = input;
+  lastActionName = '새 Codex 대화 결과 확인'; lastActionCode = action; pendingActionId = message.actionId;
+  setBusy(true);
+  try { socket.send(JSON.stringify(message)); return true; }
+  catch (error) { setBusy(false); recordError(lastActionName,error); return false; }
+}
+
 function handleActionResult(message) {
+  // A timeout or reconnect can leave an old reply in flight. It must not
+  // unlock or report the result of the action the person is waiting for now.
+  if (!inFlight || !pendingActionId || message.actionId !== pendingActionId) return;
   setBusy(false);
   const context = lastActionName || "요청";
   // The portal's sentence for what the Mac did (remoteControlActionDone), not 「<button label> 완료」.
   const done = lastActionCode ? actionDone(lastActionCode) : "요청을 마쳤습니다.";
   if (message.ok) {
+    if (lastActionCode === 'codex.thread.start') {
+      if (!currentCodexNewIntent || message.actionId !== currentCodexNewIntent.actionId || !sendCodexFollowup('codex.thread.ack.v2', message.actionId)) {
+        recordError('새 Codex 대화', {code:'CODEX_NEW_ACK_UNKNOWN',message:'새 대화 결과 확인을 마치지 못했습니다. 같은 요청으로 다시 확인하세요.'});
+      }
+      return;
+    }
+    if (lastActionCode === 'codex.thread.review.v2') {
+      const receipt = message.codexNewChatReceipt;
+      if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).sort().join() !== 'actionId,state'
+        || typeof receipt.actionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(receipt.actionId) || !['started','completed'].includes(receipt.state)) {
+        recordError(context,{code:'CODEX_NEW_REVIEW_UNKNOWN',message:'이전 새 대화 요청의 결과를 확인하지 못했습니다. Mac에서 확인하세요.'}); return;
+      }
+      if (receipt.state !== 'completed') { recordError(context,{code:'CODEX_NEW_REVIEW_PENDING',message:'이전 요청의 결과가 아직 확인되지 않았습니다. Mac의 Codex 프로젝트에서 확인하세요.'}); return; }
+      if (!confirm(hostName.textContent + '\\n\\n이전 원격 새 대화 결과를 Mac의 Codex 프로젝트에서 확인했나요? 확인을 완료하면 다음 새 대화 요청을 허용합니다.')) return;
+      codexAcknowledgingReview = true;
+      if (!sendCodexFollowup('codex.thread.ack.v2', receipt.actionId)) recordError(context,{code:'CODEX_NEW_ACK_UNKNOWN',message:'이전 요청의 확인을 완료하지 못했습니다.'});
+      return;
+    }
+    if (lastActionCode === 'codex.thread.ack.v2') {
+      try { if (currentCodexNewIntent) codexNewIntentStore().complete(currentCodexNewIntent); currentCodexNewIntent = null; }
+      catch(error) { recordError(context,error); return; }
+      notify(codexAcknowledgingReview ? '이전 요청의 확인을 완료했습니다. 새 대화는 추가로 만들지 않았습니다.' : actionDone('codex.thread.start'));
+      codexAcknowledgingReview = false;
+      return;
+    }
     if (message.ops) {
       opsStatus.textContent=opsStatusLine(message.ops);
       notify(done);
@@ -1636,6 +1713,15 @@ function handleActionResult(message) {
     notify(lastActionCode === "app.hermes"
       ? "최근 Hermes 대화 열기 요청을 Mac에 전달했습니다. 실제 대화 선택은 Mac의 Hermes Desktop에서 확인하세요."
       : done);
+    return;
+  }
+  if (lastActionCode === 'codex.thread.start' && message.error && message.error.code === 'CODEX_NEW_CHAT_NOT_SENT'
+    && currentCodexNewIntent && message.actionId === currentCodexNewIntent.actionId) {
+    try { codexNewIntentStore().complete(currentCodexNewIntent); currentCodexNewIntent = null; }
+    catch (error) { recordError(context,error); return; }
+  }
+  if (lastActionCode === 'codex.thread.start' && message.error && message.error.code === 'CODEX_NEW_CHAT_REVIEW_REQUIRED') {
+    if (!sendCodexFollowup('codex.thread.review.v2')) recordError(context,{code:'CODEX_NEW_REVIEW_UNKNOWN',message:'이전 새 대화 요청을 확인하지 못했습니다.'});
     return;
   }
   // Keep the failure on screen; the toast alone vanished before it was useful.
@@ -1757,7 +1843,7 @@ function connect() {
       return;
     }
     if (message.type === "action.result") {
-      if(message.actionId===testerCapabilityRequest){testerSupported=message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('tester-v1');lanTester.update();return;}
+      if(message.actionId===testerCapabilityRequest){testerSupported=message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('tester-v1');codexNewSupported=!!message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('codex-new-receipt-v1');lanTester.update();renderProjects();return;}
       handleActionResult(message);
       return;
     }
@@ -1860,7 +1946,7 @@ function attemptReconnect() {
       return;
     }
     if (message.type === "action.result") {
-      if(message.actionId===testerCapabilityRequest){testerSupported=message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('tester-v1');lanTester.update();return;}
+      if(message.actionId===testerCapabilityRequest){testerSupported=message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('tester-v1');codexNewSupported=!!message.ok&&Array.isArray(message.supportedFeatures)&&message.supportedFeatures.includes('codex-new-receipt-v1');lanTester.update();renderProjects();return;}
       handleActionResult(message);
       return;
     }

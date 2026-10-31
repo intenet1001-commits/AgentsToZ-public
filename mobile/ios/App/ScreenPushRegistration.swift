@@ -143,7 +143,7 @@ final class ScreenPushCenter {
             }
             let token = try await deviceToken()
             let signer = try await FaceIDApprovedSigner.approve(dataRepresentation: mac.deviceKey,
-                                                                reason: "\(mac.macName) 화면 제어 알림을 받습니다")
+                                                                reason: "\(mac.macName) 화면 제어 알림을 받습니다", authentication: mac.authentication)
             let registration = try PushRegistration(mac: pinned, deviceKey: signer.publicKey, token: token,
                                                     environment: ScreenPushConfig.environment, topic: ScreenPushConfig.topic)
             try await ScreenPushConfig.client.register(registration, signer: signer)
@@ -152,7 +152,8 @@ final class ScreenPushCenter {
             ScreenPushTokens.save(tokens)
             subscribed.insert(mac.pushKey)
             stale.remove(mac.pushKey)
-            return "\(mac.macName)에 다른 기기가 연결하거나 새 기기가 등록되면 알려 드립니다."
+            // Weekly allowance alerts (that Mac's 「휴대폰 알림」) arrive through the same registration; tapping one just opens the app.
+            return "\(mac.macName)에 다른 기기가 연결하거나 새 기기가 등록되면 알려 드립니다. 그 Mac에서 「휴대폰 알림」을 켜면 주간 사용량 알림도 옵니다."
         } catch {
             return "알림을 켜지 못했습니다: \(Self.describe(error))"
         }
@@ -200,7 +201,7 @@ final class ScreenPushCenter {
         do {
             phase(.approving)
             let signer = try await FaceIDApprovedSigner.approve(dataRepresentation: mac.deviceKey,
-                                                                reason: "\(mac.macName)에 「\(Self.title(of: action))」을 보냅니다")
+                                                                reason: "\(mac.macName)에 「\(Self.title(of: action))」을 보냅니다", authentication: mac.authentication)
             phase(.sending)
             let command = try RemoteCommand(mac: pinned, deviceKey: signer.publicKey, action: action)
             try await ScreenPushConfig.client.send(command, signer: signer)
@@ -230,7 +231,7 @@ final class ScreenPushCenter {
 
     static func message(_ phase: RemoteStopPhase, action: RemoteStopAction) -> String {
         switch phase {
-        case .approving: "Face ID로 승인해 주세요."
+        case .approving: "기기 인증으로 승인해 주세요."
         case .sending: "보내는 중…"
         case .waiting: "Mac의 답을 기다리는 중… Mac은 화면 제어가 켜져 있는 동안 30초마다 확인합니다."
         case .answered(.applied):

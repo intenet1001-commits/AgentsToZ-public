@@ -96,6 +96,8 @@ export function createControlProfileConnections(options:ControlProfileConnection
  };
  return {
   list:()=>Promise.all((['codex','claude','hermes','agy'] as const).map(inspect)),
+  /** One AI's connection, read-only — 팀 작전 asks this before it tells a member to report with the team tool. */
+  inspect,
   install:async(agent:ControlProfileAgent)=>{
    if(!['codex','claude','hermes','agy'].includes(agent))throw new ControlProfileError('CONTROL_CONNECTION_AGENT_INVALID','지원하는 AI를 선택하세요.',400);
    if(!options.executable||!options.agents[agent])throw new ControlProfileError('CONTROL_CONNECTION_UNAVAILABLE','AI CLI 또는 AgentsToZ 제어 도구가 없습니다. 설치 후 다시 확인하세요.');

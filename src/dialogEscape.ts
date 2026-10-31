@@ -11,3 +11,12 @@ export function isDialogDismissKey(event: Pick<KeyboardEvent, 'key' | 'defaultPr
   if (event.isComposing || event.keyCode === 229) return false;
   return true;
 }
+
+/**
+ * Whether a pointer press landed on a modal layer: inside an aria-modal dialog, or on the scrim
+ * whose direct child is one. Such a press belongs to that dialog, not to a disclosure beneath it,
+ * so it must not count as an "outside click" for that disclosure.
+ */
+export function isModalLayerTarget(target: Pick<Element, 'closest' | 'querySelector'>): boolean {
+  return !!target.closest('[aria-modal="true"]') || !!target.querySelector(':scope > [aria-modal="true"]');
+}

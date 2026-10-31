@@ -12,6 +12,7 @@ export function memoryRecoveryRequestKind(path:string,body:unknown):'review'|'ex
 /** Exact explicit operations only; status/ordinary terminal requests stay short. */
 export function terminalRequestTimeoutMs(path:string,body:unknown):number {
   if(path === '/api/agent-runtime/voice')return 40_000;
+  if(path === '/api/agent-runtime/helpdesk-assist')return 150_000;
  // Workroom activity is a long-poll held up to 25 s on the host (the app proxy allows 30 s).
  if(path===AI_TERMINAL_PREFIX&&body&&typeof body==='object'&&'operation' in body&&body.operation==='activity')return 30_000;
  if(path==='/api/agent-runtime/voice-settings')return 35000;

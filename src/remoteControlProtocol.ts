@@ -1,5 +1,6 @@
 /** Browser-safe inner protocol identifier shared by LAN and Internet transports. */
 export const REMOTE_CONTROL_PROTOCOL_VERSION = 'agentstoz-local-v9' as const;
+export const CODEX_NEW_RECEIPT_FEATURE = 'codex-new-receipt-v1' as const;
 
 /**
  * Capabilities returned by the authenticated, encrypted

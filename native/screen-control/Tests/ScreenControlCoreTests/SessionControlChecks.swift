@@ -341,6 +341,38 @@ extension ScreenControlChecks {
         }
     }
 
+    func testDisplayChoiceRestartsIdleWithoutKeyframeRequestsExtendingIt() async throws {
+        let clock = ManualClock()
+        let backend = FakeDisplays([CaptureDisplay(id: 1, width: 1280, height: 720),
+                                    CaptureDisplay(id: 2, width: 800, height: 600)])
+        let pair = try await ConnectedPair.open()
+        defer { pair.listener.stop() }
+        let shop = EncoderShop()
+        let pump = VideoPump(connection: pair.mac, clock: clock.session, encoderFactory: shop.factory)
+        let capture = HostCapture(backend: backend, pump: pump)
+        try await capture.start()
+        let inbox = Inbox(pair.phone)
+        let running = Task { try await pump.run(features: SessionFeatures(capture: capture)) }
+        try await waitUntil { inbox.controls == [.displays(count: 2, current: 0)] }
+        clock.advance(by: .seconds(3500))
+        try await pair.phone.send(ControlMessage.selectDisplay(1))
+        try await waitUntil { inbox.controls.last == .displays(count: 2, current: 1) }
+        clock.advance(by: .seconds(100))
+        let beforeKeyframeRequest = shop.keyframeRequests
+        try await pair.phone.send(ControlMessage.requestKeyframe)
+        try await waitUntil { shop.keyframeRequests > beforeKeyframeRequest }
+        try check(pump.endReason == nil, "display selection keeps the session alive past the first hour")
+        clock.advance(by: .seconds(3499))
+        try await Task.sleep(for: .milliseconds(100))
+        try check(pump.endReason == nil, "alive 59:59 after display selection")
+        clock.advance(by: .seconds(1))
+        try await waitUntil { pump.endReason != nil }
+        try await within(3) { try await running.value }
+        try check(pump.endReason == .idle, "keyframe request did not extend the display selection's idle deadline")
+        await capture.stop()
+        pair.phone.close()
+    }
+
     func testDisplayChangeSendsAKeyframeWithNewParameterSets() async throws {
         let main = CaptureDisplay(id: 1, width: 1280, height: 720), side = CaptureDisplay(id: 2, width: 800, height: 600)
         let backend = FakeDisplays([main, side])

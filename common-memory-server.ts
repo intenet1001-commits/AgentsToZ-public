@@ -1,5 +1,6 @@
 import {commonMemoryWorkroomDraft,commonMemoryUpdateAdvice,commonMemoryTracking} from './src/commonMemoryFollowup';
-import {commonTopicCandidates,commonTopicProposalText,readCommonTopicEvidence,withCommonTopicEvidence} from './src/commonMemoryTopicEvidence';
+import {commonTopicDiscovery,commonTopicProposalText,readCommonTopicEvidence,withCommonTopicEvidence} from './src/commonMemoryTopicEvidence';
+import {COMMON_MEMORY_DISCOVERY_MAX_BYTES,COMMON_MEMORY_DISCOVERY_MAX_ENTRIES} from './src/commonMemoryLessonClusters';
 import {metaMemoryCreationId} from './src/metaCommonMemoryIdentity';
 import {validatePortableCommonKnowledge,portableKnowledgeView,commonKnowledgeForState,commonKnowledgeSummary,editPortableKnowledge,portableCommonMemory} from './src/commonMemoryPortableKnowledge';
 import {parseMetaMemoryRequest,validateMetaMemorySnapshot,metaMemoryApplies,type MetaMemoryProject,type MetaCommonMemory} from './src/metaCommonMemoryContract';
@@ -222,9 +223,10 @@ export function createCommonMemoryService(client:()=>any,assertActive:()=>void=(
   const topicCandidates=async(after:string|null=null,memoryIds?:string[])=>{
     const page=await catalogPage(after,true),ids=memoryIds?commonMemorySourceIds(memoryIds):page.sources.slice(0,8).map(source=>source.memoryId);
     const entries:CommonMemorySourceEntry[]=[],warnings:Array<{memoryId:string;message:string}>=[];let discoveryBytes=0;
-    for(const id of ids){try{const source=await sources([id]),bytes=Buffer.byteLength(JSON.stringify(source.entries));if(entries.length+source.entries.length>500||discoveryBytes+bytes>2000000){warnings.push({memoryId:id,message:'이번 분석의 500개 항목·2MB 근거 한도를 넘었습니다. 이 기억을 별도로 선택해 확인하세요.'});continue;}discoveryBytes+=bytes;entries.push(...source.entries);}catch(error){warnings.push({memoryId:id,message:error instanceof Error?error.message:'원본 조회를 완료하지 못했습니다.'});}}
-    const groups=await list();
-    return {candidates:commonTopicCandidates(entries).map(candidate=>({...candidate,evidence:candidate.evidence.map(entry=>({...entry,excerpt:[...entry.excerpt].slice(0,240).join(''),excerptTruncated:[...entry.excerpt].length>240})),existingGroups:groups.filter(group=>!group.state.archived&&(group.state.name===candidate.name||group.state.goal.objective===candidate.name)).map(group=>({id:group.state.id,name:group.state.name}))})),checkedMemoryIds:ids,warnings,scopeId:sb().commonMemoryScope,nextAfter:memoryIds?null:page.sources.length>8?ids.at(-1):page.nextAfter,scanComplete:!warnings.length&&!!memoryIds||!warnings.length&&page.sources.length<=8&&!page.nextAfter,method:'source-entry-topic-intersection',semanticDecisionRequired:true};
+    for(const id of ids){try{const source=await sources([id]),bytes=Buffer.byteLength(JSON.stringify(source.entries));if(entries.length+source.entries.length>COMMON_MEMORY_DISCOVERY_MAX_ENTRIES||discoveryBytes+bytes>COMMON_MEMORY_DISCOVERY_MAX_BYTES){warnings.push({memoryId:id,message:'이번 분석의 500개 항목·2MB 근거 한도를 넘었습니다. 이 기억을 별도로 선택해 확인하세요.'});continue;}discoveryBytes+=bytes;entries.push(...source.entries);}catch(error){warnings.push({memoryId:id,message:error instanceof Error?error.message:'원본 조회를 완료하지 못했습니다.'});}}
+    // Lesson clusters across these memories; keyword topics only when no lesson repeats (commonTopicDiscovery).
+    const groups=await list(),discovery=commonTopicDiscovery(entries);
+    return {candidates:discovery.candidates.map(candidate=>({...candidate,evidence:candidate.evidence.map(entry=>({...entry,excerpt:[...entry.excerpt].slice(0,240).join(''),excerptTruncated:[...entry.excerpt].length>240})),existingGroups:groups.filter(group=>!group.state.archived&&(group.state.name===candidate.name||group.state.goal.objective===candidate.name)).map(group=>({id:group.state.id,name:group.state.name}))})),checkedMemoryIds:ids,warnings,scopeId:sb().commonMemoryScope,nextAfter:memoryIds?null:page.sources.length>8?ids.at(-1):page.nextAfter,scanComplete:!warnings.length&&!!memoryIds||!warnings.length&&page.sources.length<=8&&!page.nextAfter,method:discovery.method,semanticDecisionRequired:true};
   };
   const analysisIds=(state:CommonMemory)=>[...new Set([...commonMemoryTracking(state).sourceMemoryIds,...(state.portableKnowledge?.current.members??[]).filter(m=>m.mode==='include').map(m=>m.memoryId)])];
   const inspect=async(id:string,offset?:number,itemOffset=0,analysis=false,pageSize=20)=>{

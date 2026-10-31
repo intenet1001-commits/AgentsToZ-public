@@ -238,6 +238,32 @@ export class WorkroomConversationJournal {
       return {...value,state:row.state};
     });
   }
+  /** A fence, not a recovery offer: every receipt of one owner digest and key scope that may have reached its target
+   *  (write_started · unknown) or is in flight in this boot (prepared), newest first, with no time window, minus the ones
+   *  a person acknowledged. Used by the dock's Orca context commands (src/contextOrcaCommand.ts). */
+  unsettledSubmissions(ownerDigest:string,scope:string,limit:number):StoredSubmission[] {
+    this.#validate();
+    const rows=this.#db.query("SELECT state,body FROM workroom_submissions WHERE (state IN ('write_started','unknown') OR state='prepared' AND boot_id=?) AND json_extract(body,'$.owner')=? AND COALESCE(json_extract(body,'$.scope'),json_extract(body,'$.sessionId'))=? AND json_extract(body,'$.acknowledgedAt') IS NULL ORDER BY rowid DESC LIMIT ?").all(this.bootId,ownerDigest,scope,Math.max(1,Math.min(32,limit))) as {state:StoredSubmission['state'];body:string}[];
+    return rows.map(row=>{
+      if(row.body.length>4096)throw Error('제출 기록을 확인하지 못했습니다.');
+      const value=JSON.parse(row.body) as StoredSubmission;
+      if(value.owner!==ownerDigest)throw Error('제출 기록을 확인하지 못했습니다.');
+      return {...value,state:row.state};
+    });
+  }
+  /** A person's acknowledgement of one unconfirmed receipt. The state is kept as it was (the outcome stays unknown);
+   *  only that receipt stops fencing its scope. Never automatic, and never for a receipt still in flight in this boot. */
+  acknowledgeSubmission(key:string):StoredSubmission {
+    return this.#transaction(()=>{
+      const record=this.submission(key);
+      if(!record)throw Error('확인할 전송 기록이 없습니다.');
+      if(record.acknowledgedAt)return record;
+      if(record.state!=='unknown'&&!(record.state==='write_started'&&record.bootId!==this.bootId))throw Error('결과가 미확정인 전송 기록만 해제할 수 있습니다.');
+      const body=JSON.stringify({...record,acknowledgedAt:this.now()});if(body.length>4096)throw Error('제출 기록의 크기 한도를 초과했습니다.');
+      this.#db.query('UPDATE workroom_submissions SET body=? WHERE key=? AND state=?').run(body,key,record.state);
+      return {...record,acknowledgedAt:JSON.parse(body).acknowledgedAt as string};
+    });
+  }
   correctionTaskSummary(targetId:string,memoryId:string){
     this.#validate();
     const rows=this.#db.query('SELECT state,body FROM workroom_submissions WHERE target_id=? ORDER BY rowid DESC LIMIT 129').all(targetId) as {state:string;body:string}[];

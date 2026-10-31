@@ -41,8 +41,15 @@ fn main() {
       .warnings(true)
       .warnings_into_errors(true)
       .compile("agentstoz_macos_runtime_client_bridge");
+    cc::Build::new()
+      .file("native/computer-use/ClientBridge/ComputerUseClientBridge.m")
+      .flag("-fobjc-arc").flag("-fmodules").warnings(true).warnings_into_errors(true)
+      .compile("agentstoz_computer_use_client_bridge");
+    println!("cargo:rerun-if-changed=native/computer-use/ClientBridge/ComputerUseClientBridge.m");
+    println!("cargo:rerun-if-changed=native/computer-use/ClientBridge/ComputerUseClientBridge.h");
     println!("cargo:rustc-link-lib=framework=Foundation");
     println!("cargo:rustc-link-lib=framework=Security");
+    println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=ServiceManagement");
     println!("cargo:rerun-if-changed=native/macos-runtime/ClientBridge/RuntimeBrokerClientBridge.h");
     println!("cargo:rerun-if-changed=native/macos-runtime/ClientBridge/RuntimeBrokerClientBridge.m");

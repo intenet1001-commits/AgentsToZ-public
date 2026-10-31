@@ -3,8 +3,11 @@ import {GOOGLE_WORKSPACE_APIS,googleSetupConsoleUrl} from './googleWorkspaceSetu
 import {GOOGLE_WORKSPACE_COMPUTER_USE_HANDOFF} from './googleWorkspaceOnboardingGuide';
 import {writeOnboardingClipboard} from './onboardingClipboard';
 import {openPreferredBrowser} from './openPreferredBrowser';
+import {openHelpdeskAssist} from './helpdeskAssistClient';
+import {ASSIST_BUTTON} from './helpdeskAssistProtocol';
 
-/** A separate guided page; navigation and self-reported progress never mean verified setup. */
+/** A separate guided page; navigation and self-reported progress never mean verified setup. Its 헬프데스크 도움받기 keeps it
+ * open under the helpdesk, except inside the helpdesk itself, where it closes so the help is not hidden behind it. */
 export function GoogleWorkspaceSetupWizard({projectId='',onClose}:{projectId?:string;onClose:()=>void}){
   const dialog=useRef<HTMLDialogElement>(null),[step,setStep]=useState(0),[project,setProject]=useState(projectId);
   const [consent,setConsent]=useState(false),[handoff,setHandoff]=useState(false),[copied,setCopied]=useState<boolean|null>(null);
@@ -25,6 +28,7 @@ export function GoogleWorkspaceSetupWizard({projectId='',onClose}:{projectId?:st
     </article>
     <div className="helpdesk-actions mt-4"><button type="button" className="helpdesk-button" disabled={step===0} onClick={()=>setStep(s=>s-1)}>이전</button><button type="button" className="helpdesk-button" disabled={step===4} onClick={()=>setStep(s=>s+1)}>다음 단계 보기</button></div>
     {error&&<p role="alert">{error}</p>}
-    <section className="mt-6 border rounded p-3 space-y-2" aria-label="Codex 컴퓨터 사용으로 도움받기"><h3>여전히 어렵다면 · Codex에게 화면 조작 도움받기</h3><p>설치된 컴퓨터 사용 도구로 Console 화면을 함께 진행합니다. 화면 내용은 AI에 보일 수 있습니다. 비밀번호·2단계 인증·최종 권한 승인·JSON 다운로드는 직접 처리하고 파일은 이 앱에만 첨부하세요.</p><label className="block min-h-[44px]"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> 이 범위를 확인했고 Codex에 보낼 안내를 준비합니다.</label><button type="button" className="helpdesk-button" disabled={!consent} onClick={()=>{setHandoff(true);void writeOnboardingClipboard(GOOGLE_WORKSPACE_COMPUTER_USE_HANDOFF).then(setCopied);}}>동의하고 Codex 컴퓨터 사용 안내 복사</button>{handoff&&<><p role="status">{copied===null?'안내 준비 중':copied?'복사했습니다. 컴퓨터 사용이 가능한 Codex 대화에 붙여넣으세요.':'복사를 못 했습니다. 아래 안내를 직접 복사하세요.'} 안내 준비만으로 AI나 설정 변경이 시작되지는 않습니다.</p><textarea className="w-full min-h-40" aria-label="Codex Google 설정 안내" readOnly value={GOOGLE_WORKSPACE_COMPUTER_USE_HANDOFF}/></>}</section>
+    <section className="mt-6 border rounded p-3 space-y-2" aria-label={ASSIST_BUTTON}><h3>여전히 어렵다면 · {ASSIST_BUTTON}</h3><p>에고라이트 또는 아젠투지브라우저에서 Console 화면 이동과 이름·이메일 입력을 함께 진행합니다. 시작 전에 브라우저·도움 AI·적용 범위를 직접 확인합니다.</p><button type="button" className="helpdesk-button helpdesk-primary" onClick={()=>{if(dialog.current?.closest('.helpdesk-shell'))onClose();openHelpdeskAssist({service:'google-workspace',goal:'connect',stage:'gws',scope:{kind:'account-add'},origin:'google-setup-wizard'});}}>{ASSIST_BUTTON} 열기</button></section>
+    <section className="mt-3 border rounded p-3 space-y-2" aria-label="Codex 컴퓨터 사용으로 도움받기"><h3>대안 · Codex에게 화면 조작 도움받기</h3><p>설치된 컴퓨터 사용 도구로 Console 화면을 함께 진행합니다. 화면 내용은 AI에 보일 수 있습니다. 비밀번호·2단계 인증·최종 권한 승인·JSON 다운로드는 직접 처리하고 파일은 이 앱에만 첨부하세요.</p><label className="block min-h-[44px]"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> 이 범위를 확인했고 Codex에 보낼 안내를 준비합니다.</label><button type="button" className="helpdesk-button" disabled={!consent} onClick={()=>{setHandoff(true);void writeOnboardingClipboard(GOOGLE_WORKSPACE_COMPUTER_USE_HANDOFF).then(setCopied);}}>동의하고 Codex 컴퓨터 사용 안내 복사</button>{handoff&&<><p role="status">{copied===null?'안내 준비 중':copied?'복사했습니다. 컴퓨터 사용이 가능한 Codex 대화에 붙여넣으세요.':'복사를 못 했습니다. 아래 안내를 직접 복사하세요.'} 안내 준비만으로 AI나 설정 변경이 시작되지는 않습니다.</p><textarea className="w-full min-h-40" aria-label="Codex Google 설정 안내" readOnly value={GOOGLE_WORKSPACE_COMPUTER_USE_HANDOFF}/></>}</section>
   </dialog>;
 }

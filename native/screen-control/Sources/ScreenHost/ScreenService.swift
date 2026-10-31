@@ -91,6 +91,29 @@ public final class ScreenService {
     private var registrationListener: RegistrationListener?
     private var registrationTask: Task<Void, Never>?
     private var pending: PendingRegistration?
+    public private(set) var internetRoute: ScreenRelayRoute?
+    public private(set) var internetNotice: String?
+    public enum InternetConnection: Int, Sendable {
+        case off = 0, connecting, waiting, authenticating, connected, retrying
+        public var label: String {
+            switch self {
+            case .off: "자체 중계: 꺼짐"
+            case .connecting: "자체 중계: 접속 중"
+            case .waiting: "자체 중계: 기기 접속 대기"
+            case .authenticating: "자체 중계: 기기 인증 중"
+            case .connected: "자체 중계: 기기 연결됨"
+            case .retrying: "자체 중계: 연결할 수 없음 · 재시도 대기"
+            }
+        }
+    }
+    public private(set) var internetConnection = InternetConnection.off
+    private var internetAttempt: UUID?
+    private var internetTask: Task<Void, Never>?
+    private var registrationInternetTask: Task<Void, Never>?
+    private var registrationWindow: RegistrationWindow?
+    private var registrationStarting = false
+    private var registrationGeneration = 0
+    private var registrationDecisionTask: Task<Void, Never>?
     /// 「로그인할 때 열기」 as the system last reported it; publishStatus reads it again, so the menu and window follow.
     public private(set) var loginItem: ScreenStatus.LoginItem = .off
     /// The last status the main app was given (ScreenStatusFile); nil after quitting removed it.
@@ -196,25 +219,40 @@ public final class ScreenService {
     public func turnOn() async {
         guard case .off = power else { return }
         power = .starting
+        let powerEpoch = epoch
         problem = nil
-        let now = await Self.readNetwork()
-        let newcomer = now.network.flatMap { seen in networks.contains { $0.identity == seen.identity } ? nil : seen }
         do {
-            // A full list cannot take it: the prompt then only turns on, and addNetwork says the list is full.
-            let reason = newcomer.flatMap { networks.count < NetworkApproval.limit ? $0 : nil }
-                .map { "Mac 화면 제어를 켜고 이 네트워크(\($0.label))를 승인합니다" } ?? "Mac 화면 제어를 켭니다"
-            guard try await Self.authenticate(reason) else { return power = .off(reason: nil) }
+            guard try await Self.authenticate("근거리에서 등록한 기기로 Mac 화면 제어를 켭니다") else { return power = .off(reason: nil) }
+            guard epoch == powerEpoch, case .starting = power else { return }
             let identity = try self.identity ?? store.identity()
             self.identity = identity
-            if let newcomer { addNetwork(ApprovedNetwork(identity: newcomer.identity, label: newcomer.label)) }
             gate = PreAuthGate()
             let keys = keys
-            handshake = MacHandshake(signer: identity, replay: NonceReplayCache()) { keys.key(for: $0) }
-            interface = now.interface
-            // While on — listening or waiting for an approved network — so a remote 「끄기」 reaches a Mac that is waiting too.
-            push?.started(service: self, identity: identity, keys: keys) // push hook: remote stop polls only while on
-            watchNetwork()
-            await reevaluate().value
+            let handshake = MacHandshake(signer: identity, replay: NonceReplayCache()) { keys.key(for: $0) }
+            self.handshake = handshake
+            let nearby = try ScreenListener(handshake: handshake, gate: gate, port: NWEndpoint.Port(rawValue: Self.screenPort)!,
+                                            nearbyServiceName: ScreenNearby.screenService(fingerprint: ScreenControlIdentity.fingerprint(of: identity.publicKey)))
+            _ = try await nearby.start()
+            guard case .starting = power else { nearby.stop(); return }
+            listener = nearby
+            power = .on(address: "근거리 직접 연결")
+            listening = Task { [weak self] in
+                for await incoming in nearby.sessions {
+                    guard let self, self.listener === nearby else { incoming.connection.close(); continue }
+                    self.accept(incoming)
+                }
+            }
+            // Internet access remains separately enabled at this Mac; starting the app alone never opens it.
+            do {
+                if let data = try store.read("internet-route") {
+                    internetRoute = try JSONDecoder().decode(ScreenRelayRoute?.self, from: data)
+                }
+            } catch {
+                internetRoute = nil
+                internetNotice = "저장된 자체 중계 설정을 읽지 못했습니다. 근거리 연결은 켜져 있습니다. 「고급 · 자체 중계 서버」에서 다시 설정해 주세요."
+            }
+            startInternetListener()
+            push?.started(service: self, identity: identity, keys: keys)
         } catch {
             stopListening()
             power = .off(reason: "켜지 못했습니다: \(Self.describe(error))")
@@ -237,6 +275,8 @@ public final class ScreenService {
     }
 
     private func stopListening() {
+        internetTask?.cancel(); internetTask = nil
+        internetAttempt = nil; internetConnection = .off
         epoch += 1
         evaluation?.cancel()
         evaluation = nil
@@ -289,6 +329,8 @@ public final class ScreenService {
     /// Evaluations run one at a time, in order: each reads the network, then binds, rebinds or stops listening.
     @discardableResult
     private func reevaluate() -> Task<Void, Never> {
+        // Legacy network approvals never replace an active nearby listener.
+        if isOn { return Task {} }
         let previous = evaluation
         let next = Task { [weak self] in
             await previous?.value
@@ -452,18 +494,28 @@ public final class ScreenService {
         }
         // A QR must never travel in the stream (SR-18).
         cancelRegistration()
-        let canControl = InputInjector.isAllowed
-        let deviceName = device.name
-        session = Session(deviceID: id, deviceName: device.name, since: Date(), canControl: canControl)
+        let localMonitor = InputInjector.isAllowed ? LocalInputMonitor() : nil
+        let canControl = localMonitor?.isRunning == true
+        let physicalInput: PhysicalInputProbe?
+        if let localMonitor { physicalInput = { localMonitor.snapshot() } } else { physicalInput = nil }
+        if canControl { problem = nil }
+        else {
+            problem = "Mac 입력 우선 보호가 준비되지 않아 화면만 보여줍니다. 손쉬운 사용·입력 모니터링 권한을 확인한 뒤 다시 연결하세요."
+        }
+        let deviceName = device.displayName
+        session = Session(deviceID: id, deviceName: device.displayName, since: Date(), canControl: canControl)
         lastEnded = nil
-        let task = Task { [weak self] in
+        let task = Task<Void, Never> { [weak self] in
             var reason: SessionEndReason?
             do {
                 // The main display first; a version-2 phone may choose another, and input follows it (HostCapture).
                 let injector = InputInjector(displayID: CGMainDisplayID())
-                let input = canControl ? InputReceiver { injector.inject($0) } : nil
-                let streamer = HostStreamer(connection: incoming.connection, input: input, onDisplay: { injector.setDisplay($0.id) },
-                                            localInput: canControl ? InputInjector.secondsSinceHIDEvent : nil)
+                let input = canControl ? InputReceiver(physicalInput: physicalInput,
+                    release: { injector.releaseHeld($0) },
+                    compound: { text, probe in injector.injectTextAndReturn(text, physicalInput: probe) }, inject: { injector.inject($0) }) : nil
+                let desktop = DesktopController(input: input, injector: injector)
+                let streamer = HostStreamer(connection: incoming.connection, input: input, onDisplay: { input?.releaseHeld(); injector.setDisplay($0.id) },
+                                            desktop: desktop, pointerPosition: { injector.currentPointerPosition() })
                 // Ended while starting: nothing was captured or injected, and the connection is closed.
                 guard await MainActor.run(body: { self?.attach(streamer, to: incoming) ?? false }) else { return }
                 try await streamer.run(lockStates: ScreenLock.states, turnOff: { [weak self] in
@@ -521,17 +573,52 @@ public final class ScreenService {
 
     /// A completed connection is a use: it starts the 90 days over (SR-13).
     private func touch(_ id: String) {
-        guard let index = devices.firstIndex(where: { $0.id == id }) else { return }
-        devices[index].lastConnectedAt = Date()
-        keys.set(devices)
-        try? store.save(devices)
+        do {
+            let next = try persistRegistrationMutation(read: { try store.devices() }, write: { try store.save($0) }) { rows in
+                if let index = rows.firstIndex(where: { $0.id == id }) { rows[index].lastConnectedAt = Date() }
+            }
+            devices = next
+            keys.set(next)
+        } catch { problem = "기기 사용 시각을 저장하지 못했습니다. 기존 등록은 유지했습니다." }
+    }
+
+    /// Renames a device at this Mac only. Nil when saved; otherwise what to tell the person, with the old name kept.
+    public func rename(_ device: RegisteredDevice, to text: String) -> String? {
+        let alias: String?
+        switch device.alias(from: text) {
+        case .clear: alias = nil
+        case .name(let typed): alias = typed
+        case .invalid: return "이름은 32자 이내의 글자·숫자·기호로 입력하세요."
+        }
+        do {
+            let next = try persistRegistrationMutation(read: { try store.devices() }, write: { try store.save($0) }) { rows in
+                if let index = rows.firstIndex(where: { $0.id == device.id }) { rows[index].alias = alias }
+            }
+            devices = next
+            keys.set(next)
+            if let current = session, current.deviceID == device.id, let renamed = next.first(where: { $0.id == device.id }) {
+                session = Session(deviceID: current.deviceID, deviceName: renamed.displayName, since: current.since,
+                                  canControl: current.canControl)
+            }
+            return nil
+        } catch {
+            return "이름을 저장하지 못했습니다. 이 Mac을 잠금 해제한 뒤 다시 시도하세요."
+        }
     }
 
     public func revoke(_ device: RegisteredDevice) {
-        devices.removeAll { $0.id == device.id }
-        keys.set(devices)
-        do { try store.save(devices) } catch { problem = "등록 목록을 저장하지 못했습니다: \(error)" }
-        if session?.deviceID == device.id { endSession(.revoked) }
+        do {
+            let next = try persistRegistrationMutation(read: { try store.devices() }, write: { try store.save($0) }) { rows in
+                rows.removeAll { $0.id == device.id }
+            }
+            devices = next
+            keys.set(next)
+            if session?.deviceID == device.id { endSession(.revoked) }
+        } catch {
+            // Do not report an in-memory deletion as durable revocation. Stop listening as well so the
+            // still-registered key cannot reconnect while the person resolves the Keychain error.
+            turnOff(reason: "등록 해지를 저장하지 못해 화면 제어를 중지했습니다. 기기는 아직 등록되어 있습니다. 이 Mac을 잠금 해제한 뒤 다시 해지하세요.")
+        }
     }
 
     // MARK: Registration
@@ -539,46 +626,54 @@ public final class ScreenService {
     /// Opens a QR for one device. Only while listening on an approved network, and never during a session: the QR would
     /// be in the stream (SR-18).
     public func startRegistration() async {
-        guard case .on(let address) = power, let bound = binding, active == nil, let identity else { return }
+        guard case .on = power, active == nil, let identity else { return }
+        guard !registrationStarting else { return }
+        switch registration { case .showing, .confirming: return; case .finished, nil: break }
+        registrationStarting = true
+        defer { registrationStarting = false }
+        let registrationEpoch = epoch
         cancelRegistration()
+        let generation = registrationGeneration
         let code = RegistrationCode.generate()
         let window = RegistrationWindow(code: code, signer: identity, openedAt: .now,
                                         attestationVerifier: AnyAppAttestVerifier(Self.attestationVerifiers))
         do {
-            let listener = try RegistrationListener(window: window, signer: identity, gate: gate, host: .init(address))
-            let port = try await listener.start()
-            // Checked again after starting: the Mac may have left that network, or a session may have begun, meanwhile.
-            guard power == .on(address: address), binding == bound, active == nil else {
-                listener.stop()
-                // Turned off meanwhile: turning off already closed the QR.
-                if isActive { finishRegistration(binding == bound ? "화면을 보는 기기가 있어 QR을 닫았습니다." : Self.networkChangedQR) }
-                return
-            }
+            let nearbyRegistration = ScreenNearby.registrationService(codeID: code.id)
+            let listener = try RegistrationListener(window: window, signer: identity, gate: gate,
+                                                    nearbyServiceName: nearbyRegistration, privacyCode: code)
+            _ = try await listener.start()
+            guard epoch == registrationEpoch, registrationGeneration == generation, case .on = power, active == nil else { listener.stop(); return }
             registrationListener = listener
+            registrationWindow = window
+            let fingerprint = ScreenControlIdentity.fingerprint(of: identity.publicKey)
+            let registrationRelay = try internetRoute.map { try ScreenRelayRoute(endpoint: $0.endpoint,
+                                                                                 room: ScreenRelayRoute.newRoom(fingerprint: fingerprint)) }
             let invite = try RegistrationInvite(
-                macFingerprint: ScreenControlIdentity.fingerprint(of: identity.publicKey), code: code,
-                macName: Self.macName, hostName: Self.hostName ?? "mac.local", address: address,
-                registrationPort: port.rawValue, screenPort: Self.screenPort)
+                macFingerprint: fingerprint, code: code, macName: Self.macName, hostName: Self.hostName ?? "mac.local",
+                nearbyRegistrationService: nearbyRegistration, nearbyScreenService: ScreenNearby.screenService(fingerprint: fingerprint),
+                registrationRelay: registrationRelay, screenRelay: internetRoute)
+            if let registrationRelay { startInternetRegistration(route: registrationRelay, window: window, identity: identity, code: code) }
             let until = Date().addingTimeInterval(Double(RegistrationCode.lifetime.components.seconds))
             registration = .showing(invite, until: until)
             registrationTask = Task { [weak self] in
                 let expiry = Task { [weak self] in
                     guard (try? await Task.sleep(for: RegistrationCode.lifetime)) != nil else { return }
                     await MainActor.run {
-                        guard let self, case .showing = self.registration else { return }
+                        guard let self, self.registrationGeneration == generation, case .showing = self.registration else { return }
                         self.finishRegistration("QR 시간이 지났습니다. 다시 시작해 주세요.")
                     }
                 }
                 defer { expiry.cancel() }
                 for await outcome in listener.outcomes {
+                    guard self?.registrationGeneration == generation, self?.registrationWindow === window else {
+                        if case .pending(let request) = outcome { await request.refuse() }
+                        return
+                    }
                     switch outcome {
                     case .pending(let request):
                         expiry.cancel()
                         await MainActor.run {
-                            self?.pending = request
-                            let record = request.acceptance.record
-                            self?.registration = .confirming(name: record.deviceName, model: record.deviceModel,
-                                                             sas: request.acceptance.sas)
+                            self?.presentPending(request)
                         }
                         return
                     case .failed(_, let error):
@@ -588,6 +683,7 @@ public final class ScreenService {
                 }
             }
         } catch {
+            guard epoch == registrationEpoch, registrationGeneration == generation else { return }
             registration = .finished("등록을 시작하지 못했습니다: \(Self.describe(error))")
         }
     }
@@ -597,14 +693,20 @@ public final class ScreenService {
         guard let pending, case .confirming(let name, _, _) = registration else { return }
         do {
             guard try await Self.authenticate("‘\(name)’을 화면 제어 기기로 등록합니다") else { return }
+            guard self.pending === pending, case .confirming = registration else { return }
             let registered = RegisteredDevice(record: pending.acceptance.record, attestationKeyID: pending.acceptance.attestation.keyID)
             // The same key approved again renews its registration (SR-13) instead of adding a second row.
-            devices.removeAll { $0.id == registered.id }
-            devices.append(registered)
-            try store.save(devices)
-            keys.set(devices)
+            let next = try persistRegistrationMutation(read: { try store.devices() }, write: { try store.save($0) }) { rows in
+                var renewed = registered
+                renewed.alias = rows.first { $0.id == registered.id }?.alias   // the person's name for it outlives renewal
+                rows.removeAll { $0.id == registered.id }
+                rows.append(renewed)
+            }
+            devices = next
+            keys.set(next)
             try await pending.approve()
-            push?.notify(.registered, by: registered, among: devices) // push hook: tells the Mac's other devices
+            // push hook: tells the Mac's other devices
+            push?.notify(.registered, by: next.first { $0.id == registered.id } ?? registered, among: devices)
             finishRegistration("‘\(name)’을 등록했습니다. 그 기기에서 「화면 보기」를 누르세요.")
         } catch {
             finishRegistration("등록하지 못했습니다: \(Self.describe(error))")
@@ -618,6 +720,11 @@ public final class ScreenService {
 
     /// Closes the QR and refuses any request still waiting.
     public func cancelRegistration() {
+        registrationGeneration += 1
+        registrationDecisionTask?.cancel(); registrationDecisionTask = nil
+        if let window = registrationWindow { Task { await window.close() } }
+        registrationWindow = nil
+        registrationInternetTask?.cancel(); registrationInternetTask = nil
         if let pending { Task { await pending.refuse() } }
         pending = nil
         registrationTask?.cancel()
@@ -633,6 +740,125 @@ public final class ScreenService {
     }
 
     private static let networkChangedQR = "네트워크가 바뀌어 QR을 닫았습니다. 승인된 네트워크에서 다시 시작해 주세요."
+
+    private func presentPending(_ request: PendingRegistration) {
+        guard case .showing = registration, pending == nil else { Task { await request.refuse() }; return }
+        pending = request
+        registrationDecisionTask = Task { [weak self, weak request] in
+            guard (try? await Task.sleep(for: .seconds(180))) != nil else { return }
+            guard let self, let request, self.pending === request else { return }
+            self.finishRegistration("승인 시간이 지났습니다. 새 QR로 다시 시작해 주세요.")
+        }
+        let record = request.acceptance.record
+        registration = .confirming(name: record.deviceName, model: record.deviceModel, sas: request.acceptance.sas)
+        registrationListener?.stop()
+    }
+
+    /// This is a local Mac approval, distinct from QR registration and screen permissions.
+    public func enableInternet(endpointText: String) async {
+        do {
+            guard case .on = power, let identity, let endpoint = URL(string: endpointText), ScreenRelayRoute.validEndpoint(endpoint) else {
+                internetNotice = "화면 제어를 켠 뒤 wss://서버/screen-relay 주소를 입력하세요."; return
+            }
+            let enablingEpoch = epoch
+            guard try await Self.authenticate("등록한 기기가 자체 중계 서버로 이 Mac의 화면에 연결하도록 허용합니다") else { return }
+            guard enablingEpoch == epoch, case .on = power else { return }
+            cancelRegistration()
+            let route = try ScreenRelayRoute(endpoint: endpoint, room: ScreenRelayRoute.newRoom(fingerprint: ScreenControlIdentity.fingerprint(of: identity.publicKey)))
+            try store.write("internet-route", JSONEncoder().encode(route))
+            internetRoute = route
+            internetTask?.cancel(); internetTask = nil
+            startInternetListener()
+            internetNotice = "자체 중계를 저장했습니다. 기기마다 새 QR로 다시 등록해야 이 경로를 씁니다. 실제 접속 상태는 위에 표시됩니다."
+        } catch { internetNotice = "자체 중계를 켜지 못했습니다: \(Self.describe(error))" }
+    }
+
+    public func disableInternet() {
+        // Close access before persisting the disabled state. Nearby registrations remain usable.
+        internetTask?.cancel(); internetTask = nil
+        internetAttempt = nil; internetConnection = .off
+        cancelRegistration()
+        endSession(.endedAtMac)
+        internetRoute = nil
+        do { try store.write("internet-route", Data("null".utf8)) }
+        catch { stop(reason: "자체 중계 해제를 저장하지 못했습니다. 화면 제어를 껐습니다."); return }
+        internetNotice = "자체 중계를 껐습니다. 근거리·Cloudflare로는 계속 연결할 수 있습니다."
+    }
+
+    private func startInternetListener() {
+        guard let route = internetRoute, let identity, let handshake, internetTask == nil else { return }
+        let epoch = epoch, gate = gate
+        internetTask = Task { [weak self] in
+            var retry = ScreenRelayRetry()
+            while !Task.isCancelled {
+                var transport: ScreenRelayTransport?
+                let attempt = UUID()
+                guard let self, self.epoch == epoch, self.internetRoute == route else { return }
+                self.internetAttempt = attempt; self.internetConnection = .connecting
+                do {
+                    let opened = try await ScreenRelayTransport.open(route: route, purpose: .screen, hostSigner: identity,
+                                                                    progress: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.epoch == epoch, self.internetRoute == route, self.internetAttempt == attempt else { return }
+                            let state: InternetConnection = switch progress {
+                            case .connecting: .connecting
+                            case .waiting: .waiting
+                            case .paired: .authenticating
+                            }
+                            // Delayed callbacks from the same attempt must not overwrite connected/retrying.
+                            if state.rawValue >= self.internetConnection.rawValue { self.internetConnection = state }
+                        }
+                    })
+                    transport = opened
+                    guard !Task.isCancelled, self.epoch == epoch, self.internetRoute == route else { opened.cancel(); return }
+                    let incoming = try await ScreenTransportHandshake.accept(over: opened, peer: PeerKey(relayEndpoint: route.endpoint), handshake: handshake, gate: gate)
+                    try await opened.authenticated()
+                    guard !Task.isCancelled, self.epoch == epoch, self.internetRoute == route else { incoming.connection.close(); return }
+                    self.accept(incoming)
+                    retry.reset()
+                    if self.active?.session.connection === incoming.connection { self.internetConnection = .connected }
+                    while !Task.isCancelled, self.active?.session.connection === incoming.connection {
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                } catch ScreenRelayError.peerWaitExpired {
+                    // A normal bounded peer wait is not a failed connection. Rejoin promptly, including v1 relays
+                    // which never acknowledged admission and therefore never entered the verified waiting state.
+                    retry.reset()
+                } catch { /* The relay cannot grant access. Rejoin with a fresh challenge while locally enabled. */ }
+                transport?.cancel()
+                guard !Task.isCancelled, self.epoch == epoch, self.internetRoute == route else { return }
+                if self.internetConnection == .waiting { retry.reset() }
+                self.internetConnection = .retrying
+                do { try await Task.sleep(for: retry.delay(randomUnit: Double.random(in: 0...1))) }
+                catch { return }
+            }
+        }
+    }
+
+    private func startInternetRegistration(route: ScreenRelayRoute, window: RegistrationWindow, identity: SecureEnclaveTranscriptSigner, code: RegistrationCode) {
+        let epoch = epoch, gate = gate
+        registrationInternetTask = Task { [weak self] in
+            while !Task.isCancelled, await window.isOpen(at: .now) {
+                var transport: ScreenRelayTransport?
+                do {
+                    let opened = try await ScreenRelayTransport.open(route: route, purpose: .registration, hostSigner: identity)
+                    transport = opened
+                    guard !Task.isCancelled, let self, self.epoch == epoch, self.registrationWindow === window else { opened.cancel(); return }
+                    let request = try await RegistrationHost.accept(over: opened, peer: PeerKey(relayEndpoint: route.endpoint), window: window, signer: identity, gate: gate, privacyCode: code)
+                    guard !Task.isCancelled, self.epoch == epoch, self.registrationWindow === window else { await request.refuse(); return }
+                    self.presentPending(request)
+                    return // PendingRegistration owns the connection until Mac approval/refusal.
+                } catch {
+                    transport?.cancel()
+                    if !(await window.isOpen(at: .now)) {
+                        if let self, self.registrationWindow === window { self.finishRegistration("등록하지 못했습니다. 새 QR로 다시 시작해 주세요.") }
+                        return
+                    }
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
 
     // MARK: Helpers
 
@@ -750,7 +976,7 @@ public final class ScreenService {
         let limits = SessionLimits.standard
         return switch reason {
         case .idle: "\(limits.idle.components.seconds / 60)분 동안 조작이 없어 연결을 끝냈습니다."
-        case .timeLimit: "연결한 지 \(limits.maximum.components.seconds / 60)분이 되어 끝냈습니다."
+        case .timeLimit: "연결 시간 제한에 도달해 끝냈습니다."
         case .endedAtMac, .turnedOff, .revoked, .replaced: "이 Mac에서 연결을 끝냈습니다."
         case .turnedOffFromDevice: "등록한 기기에서 화면 제어를 껐습니다. 다시 켜려면 이 Mac에서 켜세요."
         }

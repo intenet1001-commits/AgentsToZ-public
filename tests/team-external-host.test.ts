@@ -25,6 +25,7 @@ function fixture(extra: Partial<TeamExternalHostOptions> = {}) {
   const envelope = (result: unknown) => ({ok: true, result, _meta: {runtimeId: live.runtimeId}});
   const native = () => ({handle: 'term-exact', incarnationId: live.incarnationId, worktreeId: live.worktreeId, worktreePath: live.worktreePath,
     ptyId: 'pty-one', paneRuntimeId: 1, agentIdentity: live.agentIdentity, connected: live.connected, writable: live.writable, executionHostId: live.executionHostId});
+  let screenRevision = 0;
   const options: TeamExternalHostOptions = {
     journal: {read: async id => copy(records.get(id) ?? null), compareAndSet: async (id, revision, next) => {
       if ((records.get(id)?.revision ?? null) !== revision) return false; records.set(id, copy(next)); return true;
@@ -38,10 +39,10 @@ function fixture(extra: Partial<TeamExternalHostOptions> = {}) {
       if (argv[0] === 'status') return envelope({status: 'running'});
       if (argv[1] === 'create') {if (live.lostCreateReply) throw new Error('transport lost'); return envelope({terminal: native()});}
       if (argv[1] === 'show') return envelope({terminal: native()});
-      if (argv[1] === 'read') return envelope({terminal: {handle: 'term-exact', status: 'running', tail: ['member output', 'next line'], nextCursor: '20'}});
-      if (argv[1] === 'send') return envelope({send: {handle: 'term-exact', accepted: true, prompt: {processIncarnation: live.incarnationId,
+      if (argv[1] === 'read') return envelope({terminal: {handle: 'term-exact', status: 'running', tail: ['member output', 'next line', `❯ screen ${screenRevision}`], nextCursor: '20'}});
+      if (argv[1] === 'send') {if (/^\x1b\[[ABCD]$/.test(argv[argv.indexOf('--text') + 1] ?? '')) screenRevision++; return envelope({send: {handle: 'term-exact', accepted: true, prompt: {processIncarnation: live.incarnationId,
         provider: live.promptProvider, observation: live.promptProvider === 'unsupported' ? 'unsupported' : 'supported',
-        stages: ['input_accepted', ...(live.turnStarted ? ['turn_started'] : [])]}}});
+        stages: ['input_accepted', ...(live.turnStarted ? ['turn_started'] : [])]}}});}
       if (argv[1] === 'switch') return envelope({terminal: {handle: 'term-exact'}});
       if (argv[1] === 'close') return envelope({terminal: {handle: 'term-exact', closed: true}});
       throw new Error(`Unexpected fake CLI ${argv[0]} ${argv[1]}`);
@@ -83,6 +84,21 @@ test('Orca actual command preserves canonical model/permission/effort flags and 
   await fake.runtime.submit(receipt.executionRef, {operationId: 'second-send', text: request.prompt});
   expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
   expect(JSON.stringify(receipt)).not.toContain('/verified/claude'); expect(JSON.stringify(receipt)).not.toContain('--command');
+});
+
+test('Orca Claude Max reaches the exact launch command with default or selected model; argument evidence does not prove application', async () => {
+  for (const requested of [{effort:'max' as const}, {model:'claude-opus-5-5',effort:'max' as const}]) {
+    const fake = fixture();
+    const receipt = await fake.runtime.launch(input({requested}));
+    const create = fake.calls.find(call => call.args[1] === 'create')!.args;
+    const command = create[create.indexOf('--command') + 1]!;
+    expect(command).toContain("'--effort' 'max'");
+    if ('model' in requested) expect(command).toContain("'--model' 'claude-opus-5-5'");
+    else expect(command).not.toContain("'--model'");
+    expect(receipt.requested.effort).toBe('max');
+    expect(receipt.applied.effort).toEqual({mode:'automatic',evidence:'launch-argument'});
+    expect(receipt.state).toBe('awaiting-ack');
+  }
 });
 
 test('normal permissions are explicit and a CLI account with no daemon child-env seam is preserved without launching', async () => {
@@ -189,6 +205,47 @@ test('Codex reopen is preserved without forcing a new thread or submitting a pre
   expect(fresh.apps[0]?.task).toBe(input().prompt); expect(prefilled.instruction.status).toBe('prefill-requested'); expect(prefilled.state).toBe('awaiting-manual-join');
   const unavailable = fixture(); const waiting = await unavailable.runtime.launch(input({surface: 'app', agent: 'claude', requested: {launchOptions: {appMode: 'new'}}}));
   expect(waiting.state).toBe('awaiting-manual-join'); expect(unavailable.apps).toHaveLength(0);
+});
+
+test('Hermes project app launch remains manual and idempotent without claiming delivery or model verification', async () => {
+  const fake = fixture();
+  const request = input({surface: 'app', agent: 'hermes', requested: {model: 'opus-5.5', provider: 'anthropic', effort: 'high',
+    launchOptions: {appMode: 'open'}}});
+  const receipt = await fake.runtime.launch(request);
+  expect(fake.apps).toHaveLength(1);
+  expect(fake.apps[0]).toMatchObject({agent: 'hermes', mode: 'open', scope: {cwd: '/repo/member'}});
+  expect(fake.apps[0]?.task).toBeUndefined();
+  expect(receipt.management).toBe('manual');
+  expect(receipt.state).toBe('awaiting-manual-join');
+  expect(receipt.instruction.status).toBe('manual-transfer-ready');
+  expect(receipt.applied.model?.mode).toBe('manual-settings');
+  expect(receipt.applied.provider?.mode).toBe('manual-settings');
+  expect(receipt.applied.effort?.mode).toBe('manual-settings');
+  expect(receipt.executionRef.native).toBeNull();
+  expect(receipt.capabilities.submit).toBe(false);
+  expect(await fake.runtime.launch(request)).toEqual(receipt);
+  await fake.runtime.submit(receipt.executionRef, {operationId: 'retry-instruction', text: request.prompt});
+  expect(fake.apps).toHaveLength(1);
+  expect(fake.calls).toHaveLength(0);
+});
+
+test('Hermes team app opens a fresh worktree by default and preserves explicit reopen without duplicate launches', async () => {
+  const fresh = fixture();
+  const request = input({surface: 'app', agent: 'hermes', requested: {}});
+  const receipt = await fresh.runtime.launch(request);
+  expect(fresh.apps).toHaveLength(1);
+  expect(fresh.apps[0]).toMatchObject({agent: 'hermes', mode: 'open', scope: {cwd: '/repo/member'}});
+  expect(receipt.state).toBe('awaiting-manual-join');
+  expect(receipt.instruction.status).toBe('manual-transfer-ready');
+  expect(receipt.capabilities.submit).toBe(false);
+  expect(await fresh.runtime.launch(request)).toEqual(receipt);
+  expect(fresh.apps).toHaveLength(1);
+
+  const reopen = fixture();
+  const reopened = await reopen.runtime.launch(input({surface: 'app', agent: 'hermes', requested: {launchOptions: {appMode: 'reopen'}}}));
+  expect(reopen.apps).toHaveLength(1);
+  expect(reopen.apps[0]).toMatchObject({agent: 'hermes', mode: 'reopen'});
+  expect(reopened.instruction.status).toBe('manual-transfer-ready');
 });
 
 test('plain terminal launcher keeps bg/tmux and the actual member prompt, while delivery remains unverified', async () => {
@@ -299,4 +356,275 @@ test('a proven dead lock owner can be recovered without deleting its uncertain e
   const changed = copy(next); changed.revision = 3; changed.receipt.executionRef.cwd = '/different-member';
   await expect(journal.compareAndSet('execution-one', 2, changed)).rejects.toMatchObject({code: 'EXTERNAL_JOURNAL_REVISION_INVALID'});
   expect((await journal.read('execution-one'))?.receipt.executionRef.cwd).toBe('/repo/member');
+});
+
+
+test('a connected writable Orca PTY does not prove an idle composer',async()=>{
+  const f=fixture();const receipt=await f.runtime.launch(input());
+  expect(await f.host.probe(receipt.executionRef)).toMatchObject({connection:'connected',agentVerified:true,activity:'unknown'});
+  f.live.connected=false;
+  expect(await f.host.probe(receipt.executionRef)).toMatchObject({connection:'disconnected',activity:'exited'});
+});
+
+test('keys reach only a verified managed Orca worktree member, one raw send per key, and one requestId never types twice', async () => {
+  const fake = fixture({keyIntervalMs: 0}), receipt = await fake.runtime.launch(input());
+  const sends = () => fake.calls.filter(call => call.args[1] === 'send').map(call => call.args);
+  expect(sends()).toHaveLength(0);
+  const done = await fake.runtime.keys(receipt.executionRef, 'keys-request-one', ['down', 'enter']);
+  // Raw bytes, no --enter or --retry-request (Orca takes those only for a prompt), and the instruction receipt is untouched.
+  expect(sends()).toEqual([['terminal', 'send', '--terminal', 'term-exact', '--text', '\x1b[B', '--json'], ['terminal', 'send', '--terminal', 'term-exact', '--text', '\r', '--json']]);
+  expect(done.instruction).toEqual(receipt.instruction); expect(done.reason).toBe(receipt.reason);
+  expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'keys-request-one')).toMatchObject({kind: 'keys', status: 'settled', outcome: 'performed'});
+  await fake.runtime.keys(receipt.executionRef, 'keys-request-one', ['down', 'enter']);
+  expect(sends()).toHaveLength(2);
+  await expect(fake.runtime.keys(receipt.executionRef, 'keys-request-one', ['esc'])).rejects.toThrow('EXTERNAL_OPERATION_CONFLICT');
+  await expect(fake.runtime.keys(receipt.executionRef, 'keys-request-two', ['shift-tab'])).rejects.toThrow('EXTERNAL_KEYS_INVALID');
+  expect(sends()).toHaveLength(2);
+});
+
+test('a changed process, another agent, a floating terminal or an exit choice is never typed into', async () => {
+  const keyed = (fake: ReturnType<typeof fixture>) => fake.calls.filter(call => call.args[1] === 'send');
+  for (const change of [(live: ReturnType<typeof fixture>['live']) => {live.incarnationId = 'process-incarnation-two';}, (live: ReturnType<typeof fixture>['live']) => {live.agentIdentity = 'codex';}]) {
+    const fake = fixture({keyIntervalMs: 0}), receipt = await fake.runtime.launch(input());
+    change(fake.live);
+    expect((await fake.runtime.keys(receipt.executionRef, 'keys-binding-one', ['enter'])).reason).toBe('EXTERNAL_BINDING_UNVERIFIED');
+    expect(keyed(fake)).toHaveLength(0); expect(fake.records.get('execution-one')!.operations.some(op => op.kind === 'keys')).toBe(false);
+  }
+  const floating = fixture({keyIntervalMs: 0, observeOrcaExecution: async () => ({cwd: '/repo/member', agent: 'claude'})});
+  const loose = await floating.runtime.launch(input({surface: 'orca-floating'}));
+  expect(loose.management).toBe('managed');
+  expect((await floating.runtime.keys(loose.executionRef, 'keys-floating-one', ['enter'])).reason).toBe('EXTERNAL_KEYS_UNAVAILABLE');
+  expect(keyed(floating)).toHaveLength(0);
+  const app = fixture({keyIntervalMs: 0}), opened = await app.runtime.launch(input({surface: 'app', agent: 'codex'}));
+  expect((await app.runtime.keys(opened.executionRef, 'keys-app-one', ['enter'])).reason).toBe('EXTERNAL_KEYS_UNAVAILABLE');
+  // Claude's trust screen highlights 「No, exit」: Enter there is refused before anything is typed.
+  const exit = fixture({keyIntervalMs: 0}), trust = await exit.runtime.launch(input()), run = exit.options.runOrca;
+  exit.options.runOrca = async (executable, argv, settings) => argv[1] === 'read'
+    ? exit.envelope({terminal: {handle: 'term-exact', tail: ['Do you trust the files in this folder?', '  1. Yes, proceed', '❯ 2. No, exit'], nextCursor: '3'}}) : run(executable, argv, settings);
+  expect((await exit.runtime.keys(trust.executionRef, 'keys-exit-one', ['enter'])).reason).toBe('EXTERNAL_KEYS_WOULD_EXIT');
+  expect(exit.records.get('execution-one')!.operations.find(op => op.id === 'keys-exit-one')).toMatchObject({status: 'settled', outcome: 'not-sent'});
+  expect(keyed(exit)).toHaveLength(0);
+});
+
+test('an Enter or digit after an arrow is checked against the redrawn screen, so a moved highlight on 「No, exit」 is never chosen', async () => {
+  // The arrow moves Claude's trust highlight from 「Yes, proceed」 onto 「No, exit」; the Enter after it would end the member CLI.
+  const trustScreen = (onExit: boolean) => ['Do you trust the files in this folder?', `${onExit ? ' ' : '❯'} 1. Yes, proceed`, `${onExit ? '❯' : ' '} 2. No, exit`];
+  for (const [keys, unreadable] of [[['down', 'enter'], false], [['down', '2'], false], [['down', 'enter'], true]] as const) {
+    const fake = fixture({keyIntervalMs: 0, keyRedrawMs: 0}), receipt = await fake.runtime.launch(input()), run = fake.options.runOrca;
+    let onExit = false;
+    const typed: string[] = [];
+    fake.options.runOrca = async (executable, argv, settings) => {
+      if (argv[1] === 'read') {
+        if (unreadable && onExit) throw new Error('read lost');
+        return fake.envelope({terminal: {handle: 'term-exact', tail: trustScreen(onExit), nextCursor: '3'}});
+      }
+      if (argv[1] === 'send') {typed.push(argv[argv.indexOf('--text') + 1]!); if (argv.includes('\x1b[B')) onExit = true;}
+      return run(executable, argv, settings);
+    };
+    const result = await fake.runtime.keys(receipt.executionRef, 'keys-moved-exit', keys);
+    // Only the arrow was typed: the request is unknown (never typed again), and the reason names the withheld exit choice.
+    expect(typed).toEqual(['\x1b[B']);
+    expect(result.reason).toBe(unreadable ? 'EXTERNAL_KEYS_UNKNOWN' : 'EXTERNAL_KEYS_WOULD_EXIT');
+    expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'keys-moved-exit')).toMatchObject({kind: 'keys', status: 'settled', outcome: 'unknown'});
+    await fake.runtime.keys(receipt.executionRef, 'keys-moved-exit', keys);
+    expect(typed).toEqual(['\x1b[B']);
+  }
+  // Moving the highlight from exit to 「Yes, proceed」 lets the Enter through.
+  const safe = fixture({keyIntervalMs: 0, keyRedrawMs: 0}), started = await safe.runtime.launch(input()), base = safe.options.runOrca;
+  let safeOnExit = true;
+  safe.options.runOrca = async (executable, argv, settings) => {
+    if (argv[1] === 'read') return safe.envelope({terminal: {handle: 'term-exact', tail: trustScreen(safeOnExit), nextCursor: '3'}});
+    if (argv[1] === 'send' && argv.includes('\x1b[A')) safeOnExit = false;
+    return base(executable, argv, settings);
+  };
+  await safe.runtime.keys(started.executionRef, 'keys-moved-safe', ['up', 'enter']);
+  expect(safe.records.get('execution-one')!.operations.find(op => op.id === 'keys-moved-safe')).toMatchObject({status: 'settled', outcome: 'performed'});
+  expect(safe.calls.filter(call => call.args[1] === 'send')).toHaveLength(2);
+});
+
+test('delayed Orca redraw is observed before choosing, while unchanged screens time out without replay', async () => {
+  for (const changed of [true, false]) {
+    const fake = fixture({keyIntervalMs: 0, keyRedrawMs: changed ? 700 : 80}), receipt = await fake.runtime.launch(input()), run = fake.options.runOrca;
+    let arrowAt = 0, reads = 0;
+    const typed: string[] = [];
+    fake.options.runOrca = async (executable, argv, settings) => {
+      if (argv[1] === 'read') {
+        const exit = changed && arrowAt !== 0 && performance.now() - arrowAt >= 250;
+        // Unrelated output changes immediately; it must not count as the delayed highlight redraw.
+        return fake.envelope({terminal: {handle: 'term-exact', tail: [`Trust this folder? ${reads++}`, `${exit ? ' ' : '❯'} 1. Yes, proceed`, `${exit ? '❯' : ' '} 2. No, exit`]}});
+      }
+      if (argv[1] === 'send') {typed.push(argv[argv.indexOf('--text') + 1]!); arrowAt = performance.now();}
+      return run(executable, argv, settings);
+    };
+    const result = await fake.runtime.keys(receipt.executionRef, 'redraw-delayed', ['down', 'enter']);
+    expect(result.reason).toBe(changed ? 'EXTERNAL_KEYS_WOULD_EXIT' : 'EXTERNAL_KEYS_UNKNOWN');
+    expect(typed).toEqual(['\x1b[B']);
+    expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'redraw-delayed')).toMatchObject({status: 'settled', outcome: 'unknown'});
+    await fake.runtime.keys(receipt.executionRef, 'redraw-delayed', ['down', 'enter']);
+    expect(typed).toEqual(['\x1b[B']);
+  }
+});
+
+test('separate arrow and Enter requests wait for the selection redraw; uncertainty blocks new requests even after host restart', async () => {
+  for (const changed of [true, false]) {
+    const fake = fixture({keyIntervalMs: 0, keyRedrawMs: changed ? 700 : 80}), receipt = await fake.runtime.launch(input()), run = fake.options.runOrca;
+    let arrowAt = 0;
+    const typed: string[] = [];
+    fake.options.runOrca = async (executable, argv, settings) => {
+      if (argv[1] === 'read') {
+        const exit = changed && arrowAt !== 0 && performance.now() - arrowAt >= 250;
+        return fake.envelope({terminal: {handle: 'term-exact', tail: ['Trust this folder?', `${exit ? ' ' : '❯'} 1. Yes, proceed`, `${exit ? '❯' : ' '} 2. No, exit`]}});
+      }
+      if (argv[1] === 'send') {typed.push(argv[argv.indexOf('--text') + 1]!); arrowAt = performance.now();}
+      return run(executable, argv, settings);
+    };
+    const first = await fake.runtime.keys(receipt.executionRef, 'separate-arrow', ['down']);
+    expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'separate-arrow')?.outcome).toBe(changed ? 'performed' : 'unknown');
+    if (!changed) expect(first.reason).toBe('EXTERNAL_KEYS_UNKNOWN');
+    const restarted = createTeamExternalHostRuntime(fake.options);
+    const second = await restarted.keys(receipt.executionRef, 'separate-enter', ['enter']);
+    expect(second.reason).toBe(changed ? 'EXTERNAL_KEYS_WOULD_EXIT' : 'EXTERNAL_KEYS_NOT_SENT');
+    expect(typed).toEqual(['\x1b[B']);
+    await restarted.keys(receipt.executionRef, 'separate-arrow', ['down']);
+    await restarted.keys(receipt.executionRef, 'separate-enter', ['enter']);
+    expect(typed).toEqual(['\x1b[B']);
+    if (!changed) {
+      // Older settled records may omit the outcome; their uncertainty must also block new input.
+      delete fake.records.get('execution-one')!.operations.find(op => op.id === 'separate-arrow')!.outcome;
+      expect((await restarted.keys(receipt.executionRef, 'legacy-enter', ['enter'])).reason).toBe('EXTERNAL_KEYS_NOT_SENT');
+      expect(typed).toEqual(['\x1b[B']);
+    }
+  }
+});
+
+test('an ordinary prompt with no visible selected row refuses an arrow before typing and does not poison later requests', async () => {
+  for (const rows of [['Normal input prompt'], ['❯ ']]) {
+    const fake = fixture({keyIntervalMs: 0, keyRedrawMs: 0}), receipt = await fake.runtime.launch(input()), run = fake.options.runOrca;
+    fake.options.runOrca = async (executable, argv, settings) => argv[1] === 'read'
+      ? fake.envelope({terminal: {handle: 'term-exact', tail: rows}}) : run(executable, argv, settings);
+    const result = await fake.runtime.keys(receipt.executionRef, 'normal-arrow', ['down']);
+    expect(result.reason).toBe('EXTERNAL_KEYS_NOT_SENT');
+    expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'normal-arrow')?.outcome).toBe('not-sent');
+    expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+    await fake.runtime.keys(receipt.executionRef, 'normal-escape', ['esc']);
+    expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(1);
+  }
+});
+
+test('a key whose delivery is unclear makes the whole request unknown, drops the rest and is never typed again', async () => {
+  const fake = fixture({keyIntervalMs: 0}), receipt = await fake.runtime.launch(input()), run = fake.options.runOrca;
+  let sends = 0;
+  fake.options.runOrca = async (executable, argv, settings) => {
+    if (argv[1] === 'send' && ++sends === 2) throw new Error('transport lost');
+    return run(executable, argv, settings);
+  };
+  const unknown = await fake.runtime.keys(receipt.executionRef, 'keys-unknown-one', ['down', 'down', 'enter']);
+  expect(unknown.reason).toBe('EXTERNAL_KEYS_UNKNOWN'); expect(sends).toBe(2);
+  expect(fake.records.get('execution-one')!.operations.find(op => op.id === 'keys-unknown-one')).toMatchObject({status: 'settled', outcome: 'unknown'});
+  await fake.runtime.keys(receipt.executionRef, 'keys-unknown-one', ['down', 'down', 'enter']);
+  expect(sends).toBe(2);
+  // Refused by Orca before anything was typed is positive evidence of not-sent.
+  const refused = fixture({keyIntervalMs: 0}), started = await refused.runtime.launch(input()), base = refused.options.runOrca;
+  let attempts = 0;
+  refused.options.runOrca = async (executable, argv, settings) => argv[1] === 'send' ? (attempts++, refused.envelope({send: {handle: 'term-exact', accepted: false}})) : base(executable, argv, settings);
+  await refused.runtime.keys(started.executionRef, 'keys-refused-one', ['esc', 'enter']);
+  expect(refused.records.get('execution-one')!.operations.find(op => op.id === 'keys-refused-one')).toMatchObject({status: 'settled', outcome: 'not-sent'});
+  expect(attempts).toBe(1);
+});
+
+test('Orca follow-up is not typed into an approval screen, and unreadable screens are refused without losing earlier delivery', async () => {
+  for (const screen of ['approval', 'unreadable', 'empty'] as const) {
+    const fake = fixture(), initial = await fake.runtime.launch(input()), base = fake.options.runOrca;
+    const previous = copy(initial.instruction);
+    fake.options.runOrca = async (executable, argv, settings) => {
+      if (argv[1] === 'read') {
+        if (screen === 'unreadable') throw new Error('read lost');
+        const tail = screen === 'empty' ? [] : ['Do you trust the files in this folder?', '❯ 1. Yes, proceed', '  2. No, exit'];
+        return fake.envelope({terminal: {handle: 'term-exact', tail}});
+      }
+      return base(executable, argv, settings);
+    };
+    const result = await fake.runtime.submit(initial.executionRef, {operationId: `screen-${screen}`, text: '1'});
+    expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+    expect(result.instruction).toEqual(previous);
+    expect(result.reason).toBe(screen === 'approval' ? 'EXTERNAL_PROMPT_AWAITS_ANSWER' : 'EXTERNAL_SCREEN_UNAVAILABLE');
+    await fake.runtime.submit(initial.executionRef, {operationId: `screen-${screen}`, text: '1'});
+    expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+  }
+});
+
+test('Orca follow-up still types once on a readable ordinary composer screen', async () => {
+  const fake = fixture(), initial = await fake.runtime.launch(input());
+  const result = await fake.runtime.submit(initial.executionRef, {operationId: 'normal-screen-send', text: 'Inspect the project status.'});
+  expect(result.instruction).toMatchObject({status: 'written', operationId: 'normal-screen-send'});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(1);
+});
+
+test('a refused approval-screen instruction cannot replay the original and a fresh request can send after the screen clears', async () => {
+  const fake = fixture(), initial = await fake.runtime.launch(input()), base = fake.options.runOrca;
+  let approval = true;
+  fake.options.runOrca = async (executable, argv, settings) => {
+    if (argv[1] === 'read' && approval) return fake.envelope({terminal: {handle: 'term-exact', tail: ['Proceed with command?', '❯ 1. Yes', '  2. No']}});
+    return base(executable, argv, settings);
+  };
+  await fake.runtime.submit(initial.executionRef, {operationId: 'declined-send', text: '1'});
+  approval = false;
+  await fake.runtime.submit(initial.executionRef, {operationId: 'declined-send', text: '1'});
+  await fake.runtime.submit(initial.executionRef, {operationId: 'duplicate-original', text: input().prompt});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+  const sent = await fake.runtime.submit(initial.executionRef, {operationId: 'new-after-resolution', text: '1'});
+  expect(sent.instruction).toEqual({status: 'written', operationId: 'new-after-resolution'});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(1);
+});
+
+test('a changed Orca agent after screen read refuses the unsent follow-up', async () => {
+  const fake = fixture(), initial = await fake.runtime.launch(input()), base = fake.options.runOrca;
+  fake.options.runOrca = async (executable, argv, settings) => {
+    const result = await base(executable, argv, settings);
+    if (argv[1] === 'read') fake.live.agentIdentity = 'codex';
+    return result;
+  };
+  const result = await fake.runtime.submit(initial.executionRef, {operationId: 'agent-changed-after-read', text: 'Inspect the status.'});
+  expect(result.instruction).toEqual(initial.instruction);
+  expect(result.reason).toBe('EXTERNAL_BINDING_UNVERIFIED');
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+});
+
+test('a refused follow-up preserves the earlier working state and distinguishes stale questions from a live approval', async () => {
+  const fake = fixture(), initial = await fake.runtime.launch(input()), base = fake.options.runOrca;
+  fake.records.get('execution-one')!.receipt.state = 'working';
+  let screen = ['Do you trust the files in this folder?', '❯ 1. Yes, proceed', '  2. No, exit'];
+  fake.options.runOrca = async (executable, argv, settings) => argv[1] === 'read'
+    ? fake.envelope({terminal: {handle: 'term-exact', tail: screen}}) : base(executable, argv, settings);
+  const blocked = await fake.runtime.submit(initial.executionRef, {operationId: 'working-but-approval', text: 'Inspect status.'});
+  expect(blocked.state).toBe('working');
+  expect(blocked.reason).toBe('EXTERNAL_PROMPT_AWAITS_ANSWER');
+  expect(blocked.instruction).toEqual(initial.instruction);
+  screen = ['Do you trust the files in this folder?', '❯ 1. Yes, proceed', '  2. No, exit', '❯'];
+  const sent = await fake.runtime.submit(initial.executionRef, {operationId: 'old-answer-above-composer', text: 'Inspect status.'});
+  expect(sent.instruction).toMatchObject({status: 'written', operationId: 'old-answer-above-composer'});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(1);
+});
+
+test('a persisted unsent submit remains unsent after runtime restart and can be deliberately retried with a new ID', async () => {
+  const fake = fixture(), initial = await fake.runtime.launch(input()), base = fake.options.runOrca;
+  const path = join(mkdtempSync(join(tmpdir(), 'team-submit-refusal-')), 'journal.json');
+  const journal = createTeamExternalFileJournal(path);
+  const original = copy(fake.records.get('execution-one')!); original.revision = 1;
+  expect(await journal.compareAndSet(initial.executionRef.executionId, null, original)).toBe(true);
+  let approval = true;
+  fake.options.journal = journal;
+  fake.options.runOrca = async (executable, argv, settings) => argv[1] === 'read' && approval
+    ? fake.envelope({terminal: {handle: 'term-exact', tail: ['Do you trust the files in this folder?', '❯ 1. Yes', '  2. No']}})
+    : base(executable, argv, settings);
+  const first = createTeamExternalHostRuntime(fake.options);
+  await first.submit(initial.executionRef, {operationId: 'persisted-refusal', text: 'Inspect status.'});
+  expect((await journal.read('execution-one'))!.operations.find(op => op.id === 'persisted-refusal')).toMatchObject({status: 'settled', outcome: 'not-sent', reason: 'EXTERNAL_PROMPT_AWAITS_ANSWER'});
+  approval = false;
+  const restarted = createTeamExternalHostRuntime(fake.options);
+  await restarted.submit(initial.executionRef, {operationId: 'persisted-refusal', text: 'Inspect status.'});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(0);
+  const result = await restarted.submit(initial.executionRef, {operationId: 'deliberate-fresh-request', text: 'Inspect status.'});
+  expect(result.instruction).toMatchObject({status: 'written', operationId: 'deliberate-fresh-request'});
+  expect(fake.calls.filter(call => call.args[1] === 'send')).toHaveLength(1);
 });

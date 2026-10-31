@@ -1,3 +1,6 @@
+import {ComputerUsePanel} from './ComputerUsePanel';
+import {CodexRemoteReceiptReview} from './CodexRemoteReceiptReview';
+import {DesktopEffortPanel} from './DesktopEffortPanel';
 import {BrowserContextPanel} from './BrowserContextPanel';
 import {localBrowserContextRequest} from './browserContextClient';
 import {browserContextText} from './i18n';
@@ -5,7 +8,9 @@ import {confirmAction} from './confirmAction';
 import {HelpdeskPanel} from './HelpdeskPanel';
 import {WorkModeControl} from './WorkModeControl';
 import {OPEN_HELPDESK_EVENT,isMacHelpdeskSurface} from './helpdeskKnowledge';
+import {OPEN_HELPDESK_ASSIST_EVENT,parseAssistIntent,type AssistIntent} from './helpdeskAssistProtocol';
 import {pushWithPlatformAccount} from './PlatformGithubPushDialog';
+import {NewProjectCliAccounts,ProjectCliAccounts,applyNewProjectCliAccounts,type NewProjectCliChoice} from './PlatformAccountSwitcher';
 import {LaunchEffortControls} from './LaunchEffortControls';
 import {CommonMemoryFollowupNotice} from './CommonMemoryFollowupNotice';
 import {AutomaticSaveNotice} from './AutomaticSaveNotice';
@@ -36,7 +41,7 @@ import {ProjectTesterPanel} from './ProjectTesterPanel';
 import {MemoryTesterUpgrade} from './MemoryTesterUpgrade';
 import {CsDutyPanel} from './CsDutyPanel';
 import { buildPortUploadRow, portAutoUploadChangeKey, portAutoUploadTargetKey } from './portUploadPayload';
-import { portAutoUploadFailureMessage } from './portAutoUploadStatus';
+import { isPortAutoUploadTransientStop, portAutoUploadChipLabel, portAutoUploadFailureMessage } from './portAutoUploadStatus';
 import { findPortUploadMetadataConflicts, mergePortUploadFields, portUploadMetadataFromRemote,
   portUploadFieldDisplay, PORT_UPLOAD_FIELD_LABELS, PORT_UPLOAD_METADATA_SELECT,
   type PortUploadMetadataRow, type PortUploadMetadataConflict } from './portUploadConflict';
@@ -1353,12 +1358,12 @@ const API = {
    * 저장소를 새 폴더로 clone 한다. 폴더는 git 이 직접 만든다 — 미리 `createFolder` 로
    * 만들어 두면 clone 이 "이미 존재하는 폴더"로 거절한다.
    */
-  async cloneRepository(repositoryUrl: string, folderPath: string): Promise<{ success: boolean; path: string; error?: string }> {
+  async cloneRepository(repositoryUrl: string, folderPath: string, githubAccountId?: string): Promise<{ success: boolean; path: string; error?: string }> {
     const baseUrl = isTauri() ? 'http://localhost:3001' : '';
     const response = await fetch(`${baseUrl}/api/clone-repository`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repositoryUrl, folderPath }),
+      body: JSON.stringify({ repositoryUrl, folderPath, ...(githubAccountId ? { githubAccountId } : {}) }),
     });
     const payload = await response.json();
     // 서버가 이 엔드포인트를 모르면 기능 실패가 아니라 **서버가 오래된 것**이다.
@@ -2790,6 +2795,13 @@ function App() {
   const [showSetupWizard, setShowSetupWizard] = useState(false);
   const [showHelpdesk,setShowHelpdesk] = useState(false);
   useEffect(()=>{const open=()=>{if(!isMacHelpdeskSurface(isTauri(),navigator.platform))return;setShowSetupWizard(false);setShowHelpdesk(true);};window.addEventListener(OPEN_HELPDESK_EVENT,open);return()=>window.removeEventListener(OPEN_HELPDESK_EVENT,open);},[]);
+  // 헬프데스크 도움받기 from an account or setup screen: the helpdesk opens in that mode, and closing it returns focus there.
+  const [helpdeskAssist,setHelpdeskAssist]=useState<AssistIntent|null>(null);const helpdeskReturnFocus=useRef<HTMLElement|null>(null);
+  useEffect(()=>{const open=(e:Event)=>{if(!isMacHelpdeskSurface(isTauri(),navigator.platform))return;let intent:AssistIntent;try{intent=parseAssistIntent((e as CustomEvent).detail);}catch{return;}
+    // The calling screen stays mounted under the helpdesk (a first-setup wizard keeps what was typed); closing reveals it.
+    helpdeskReturnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;setHelpdeskAssist(intent);setShowHelpdesk(true);};
+    window.addEventListener(OPEN_HELPDESK_ASSIST_EVENT,open);return()=>window.removeEventListener(OPEN_HELPDESK_ASSIST_EVENT,open);},[]);
+  const closeHelpdesk=()=>{setShowHelpdesk(false);setHelpdeskAssist(null);const back=helpdeskReturnFocus.current;helpdeskReturnFocus.current=null;if(back?.isConnected)requestAnimationFrame(()=>back.focus());};
   const [setupInitialPage, setSetupInitialPage] = useState<'choose' | 'infrastructure'>('choose');
   const hasCheckedFirstRunSetup = useRef(false);
   const [showAiUsage, setShowAiUsage] = useState(false);
@@ -3220,6 +3232,10 @@ function App() {
   const [qaCategory, setQaCategory] = useState('');
   const [qaDescription, setQaDescription] = useState('');
   const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
+  // 기록 칸에 포커스가 있는 채 Esc 로 대화상자가 사라지면 blur 가 오지 않는다(WebKit 은 지워지는 요소에
+  // blur 를 보내지 않는다). 그대로 두면 다시 열었을 때 기존 단축키 대신 「키를 누르세요...」가 보였다
+  // (2026-10-31 v1603 Codex 클릭 QA). 닫히는 길이 여럿이라 닫힘 자체에서 기록 상태를 푼다.
+  useEffect(() => { if (!showShortcutModal) setIsRecordingShortcut(false); }, [showShortcutModal]);
   const [workspaceSidebarHost, setWorkspaceSidebarHost] = useState<HTMLDivElement | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showQrRemoteControl, setShowQrRemoteControl] = useState(false);
@@ -3599,6 +3615,10 @@ function App() {
   const [newProjectKind, setNewProjectKind] = useState<'project' | 'control-center'>('project');
   const [controlCenterSetupBusy, setControlCenterSetupBusy] = useState(false);
   const [showControlProfile, setShowControlProfile] = useState(false);
+  const [showComputerUse,setShowComputerUse]=useState(false);
+  const [showDesktopEffort,setShowDesktopEffort]=useState(false);
+  const desktopEffortOpenerRef=useRef<HTMLButtonElement>(null);
+  const computerUseOpenerRef=useRef<HTMLButtonElement>(null);
   const [showPersonalProfile,setShowPersonalProfile] = useState(false);
   const [showAgentDialogue,setShowAgentDialogue]=useState(false);
   const [opsBinding, setOpsBinding] = useState<{loaded: boolean; projectId: string | null}>({loaded:false, projectId:null});
@@ -3638,6 +3658,8 @@ function App() {
    * `github_url` 로 계보를 찾는다 — memoryId 를 손으로 옮길 필요가 없어진다.
    */
   const [newProjectGithubUrl, setNewProjectGithubUrl] = useState('');
+  /** GitHub·Supabase·Vercel accounts the new project uses; an unchosen one follows this Mac. */
+  const [newProjectCliChoice, setNewProjectCliChoice] = useState<NewProjectCliChoice>({});
   const [runNewProjectAfterCreate, setRunNewProjectAfterCreate] = useState(false);
   const [enableNewProjectMemory, setEnableNewProjectMemory] = useState(true);
   /** 비어 있으면 새 기억을 만들고, 채우면 그 ID의 기억에 합류한다 (src/projectMemoryJoin.ts). */
@@ -3653,6 +3675,7 @@ function App() {
   const [registerAsProject, setRegisterAsProject] = useState(true);
   const [projectModalTab, setProjectModalTab] = useState<'new' | 'existing' | 'common'>('new');
   const [existingFolderPath, setExistingFolderPath] = useState('');
+  const [existingCliChoice, setExistingCliChoice] = useState<NewProjectCliChoice>({});
   const [existingDetectedPort, setExistingDetectedPort] = useState<number | undefined>(undefined);
   const [existingProjectName, setExistingProjectName] = useState('');
   const [existingPort, setExistingPort] = useState('');
@@ -3812,6 +3835,10 @@ function App() {
   );
   const portalActionsRef = useRef<PortalActions | null>(null);
   const [autoPushStatus,setAutoPushStatus]=useState('자동 업로드 준비 확인 중');
+  const autoPushStatusRef = useRef(autoPushStatus);
+  autoPushStatusRef.current = autoPushStatus;
+  // Bumped to run the startup load (and its required Pull) again; see the recheck effect below it.
+  const [startupPullRun, setStartupPullRun] = useState(0);
   const autoPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autopushReady = useRef(false); // Supabase 푸시 전용 게이트 (pull 완료 후 true)
   const autoPushInitialPullTarget = useRef<string | null>(null);
@@ -6465,6 +6492,36 @@ function App() {
     };
     loadPortsData();
     return () => startupAbort.abort();
+  }, [startupPullRun]);
+
+  // A stop caused by the network or by a sidecar that was not ready yet used to last until the app was reopened:
+  // focus reloads only the local file, so the header chip stayed for days (2026-11-01). Run the same startup load
+  // again — what reopening does — when the window comes back or the network returns, at most every two minutes.
+  // Only those two causes: conflicts, sign-in, DB, locks and an upload whose result is unknown wait for the person.
+  const lastStartupPullRecheck = useRef(0);
+  useEffect(() => {
+    const recheck = () => {
+      if (!isPortAutoUploadTransientStop(autoPushStatusRef.current) || autoPushInFlight.current) return;
+      const now = Date.now();
+      if (now - lastStartupPullRecheck.current < 120_000) return;
+      lastStartupPullRecheck.current = now;
+      // The status stays until the load sets the new one; a load that fails before its Pull leaves it to the next try.
+      setStartupPullRun(run => run + 1);
+    };
+    window.addEventListener('online', recheck);
+    if (!isTauri()) {
+      window.addEventListener('focus', recheck);
+      return () => { window.removeEventListener('online', recheck); window.removeEventListener('focus', recheck); };
+    }
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      getCurrentWindow().listen('tauri://focus', recheck).then(fn => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    });
+    return () => { cancelled = true; unlisten?.(); window.removeEventListener('online', recheck); };
   }, []);
 
   useEffect(() => {
@@ -6870,6 +6927,12 @@ function App() {
   const escapeHandlerRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     escapeHandlerRef.current = () => {
+      // 도구 및 설정에서 여는 대화상자(z 9500)가 맨 위다. 여는 버튼에 포커스가 남아 있어도 닫혀야 한다
+      // (2026-10-31 실측: 넷 다 Esc로 닫히지 않았다 — 각자의 onKeyDown은 포커스가 안에 있을 때만 받는다).
+      if (showShortcutModal) { setShowShortcutModal(false); return; }
+      if (showChannelHealth) { setShowChannelHealth(false); return; }
+      if (showWorkspaceLeaseRecovery) { setShowWorkspaceLeaseRecovery(false); return; }
+      if (showAiUsage) { setShowAiUsage(false); return; }
       if (deleteConfirmId) { setDeleteConfirmId(null); return; }
       if (deleteRootConfirmId) { setDeleteRootConfirmId(null); return; }
       if (wslSetupStatus) { setWslSetupStatus(null); return; }
@@ -9434,6 +9497,12 @@ function App() {
     return result;
   };
 
+  /** Applies the accounts chosen before the project existed; a failure leaves it following this Mac, and says so. */
+  const newProjectCliAccountHint = async (targetId: string, choice: NewProjectCliChoice): Promise<string> => {
+    if (!Object.values(choice).some(Boolean)) return '';
+    const failed = await applyNewProjectCliAccounts(targetId, choice, lang === 'ko');
+    return failed.length ? ` · 계정 연결 확인 필요 (${failed.join(' / ')}) — 프로젝트 화면의 CLI 계정에서 다시 고르세요` : ' + 계정 연결';
+  };
   const handleCreateProjectFolder = async () => {
     const root = workspaceRoots.find(r => r.id === activeRootId);
     if (!root) { showToast('작업 루트를 찾을 수 없습니다', 'error'); return; }
@@ -9469,7 +9538,7 @@ function App() {
 
     try {
       const result = cloneRequest
-        ? await API.cloneRepository(cloneRequest.url, fullPath)
+        ? await API.cloneRepository(cloneRequest.url, fullPath, registerAsProject ? newProjectCliChoice.github : undefined)
         : await API.createFolder(fullPath);
       if (result.success) {
         // clone 은 이미 저장소이고 커밋도 있다. 그 위에 git init 을 다시 돌리지 않는다.
@@ -9490,6 +9559,7 @@ function App() {
         let commonMemoryHint = '';
         // The memory form needs the long-term memory in the cloud: a push or a restore in this flow puts it there.
         let newMemoryInCloud = false;
+        let cliAccountHint = '';
         if (registerAsProject) {
           const portNum = newProjectPort ? parseInt(newProjectPort) : undefined;
           const newId = crypto.randomUUID();
@@ -9498,6 +9568,7 @@ function App() {
           setPorts(updated);
           await API.savePorts([...updated, ...otherPlatformPortsRef.current]);
           setLastVisits(prev => ({ ...prev, [newId]: Date.now() }));
+          cliAccountHint = await newProjectCliAccountHint(newId, newProjectCliChoice);
         }
         if (enableNewProjectMemory) {
           try {
@@ -9569,9 +9640,10 @@ function App() {
           ? ' · 실행 명령이 없어 자동 실행 생략'
           : '';
         showToast(
-          `${cloneRequest ? '저장소 clone' : '폴더 생성'}${initializeNewProjectGit && !cloneRequest ? ' + Git 저장소' : ''}${registerAsProject ? ' + 프로젝트 등록' : ''}${enableNewProjectMemory ? ' + 장기기억' : ''} 완료: ${trimmed}${autoRunHint}${commonMemoryHint}`,
+          `${cloneRequest ? '저장소 clone' : '폴더 생성'}${initializeNewProjectGit && !cloneRequest ? ' + Git 저장소' : ''}${registerAsProject ? ' + 프로젝트 등록' : ''}${enableNewProjectMemory ? ' + 장기기억' : ''} 완료: ${trimmed}${autoRunHint}${commonMemoryHint}${cliAccountHint}`,
           'success'
         );
+        setNewProjectCliChoice({});
         setNewProjectName('');
         setNewProjectPort('');
         setNewProjectGithubUrl('');
@@ -9689,6 +9761,9 @@ function App() {
       setPorts(updated);
       await API.savePorts([...updated, ...otherPlatformPortsRef.current]);
       setLastVisits(prev => ({ ...prev, [registered.id]: Date.now() }));
+      const cliAccountHint = await newProjectCliAccountHint(registered.id, existingCliChoice);
+      setExistingCliChoice({});
+      if (cliAccountHint.includes('확인 필요')) showToast(`${name}${cliAccountHint}`, 'error');
       // 합류는 Pull이 본체다 — init은 빈 문서만 만들므로, 그대로 두면 다음 Push가
       // 다른 기기의 기억 위에 빈 문서를 올린다.
       const joinId = existingMemoryJoinId.trim();
@@ -12611,6 +12686,7 @@ function App() {
             {sel.folderPath&&<ProjectTesterSets key={sel.id} portId={sel.id} onOpen={()=>{setTesterOpenPort(sel.id);setTesterRevealKey(v=>v+1);}}/>}
 
             {!isDeployedWeb() && <CsDutyPanel key={`cs-duty:${sel.id}`} targetId={sel.id} projectName={sel.name}/> }
+            {!isDeployedWeb() && sel.folderPath && <ProjectCliAccounts key={`cli-accounts:${sel.id}`} targetId={sel.id} language={lang}/>}
             {sdkProjectIds.has(sel.id)&&<SdkProjectFolders key={`sdk-folders:${sel.id}`} projectId={sel.id} projectName={sel.name}/>}
 
             {/* 메타 정보 */}
@@ -12989,6 +13065,9 @@ function App() {
                   choice.appAvailable,
                 )}
               </p>
+              {choice.agent === 'codex' && !choice.worktreePath && !choice.item.worktreePath && (
+                <CodexRemoteReceiptReview key={choice.item.id} portId={choice.item.id} />
+              )}
               <div className="grid gap-2">
                 {launchChoices.includes('new') && (
                   <button
@@ -14022,7 +14101,24 @@ function App() {
           <div className="workspace-sidebar-host" ref={setWorkspaceSidebarHost} />
           <div className="workspace-sidebar-footer">
           <AppearanceSettings language={lang} onOpenData={()=>{setSetupInitialPage('infrastructure');setShowSetupWizard(true);}} projects={ports.filter(p=>p.folderPath).map(p=>({id:p.id,name:p.aiName||p.name}))} />
+            {/* 휴대폰 포털이 보낸 오류가 있을 때만 나타난다. 도착한 보고를
+                사용자가 찾지 못한 적이 있어(VOC 모드 -> 인박스 -> 섹션 3단계)
+                대기 중일 때 스스로 드러나게 했다. 없으면 툴바를 어지럽히지 않는다. */}
+            {portalErrorCount > 0 && (
+              <button
+                type="button"
+                data-testid="portal-errors-badge"
+                aria-label={`휴대폰 포털 오류 ${portalErrorCount}건 확인`}
+                onClick={() => { setVocMode(true); setGuideMode(false); }}
+                title={`휴대폰 포털에서 보낸 오류 ${portalErrorCount}건 — 열어서 확인하세요`}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30 transition-all"
+              >
+                <Smartphone className="w-3.5 h-3.5" aria-hidden="true" />
+                <span className="text-[11px] font-semibold leading-none">{portalErrorCount}</span>
+              </button>
+            )}
           <WorkspaceTools label={t(lang,'tools')}>
+            <button ref={desktopEffortOpenerRef} type="button" data-testid="desktop-effort-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowDesktopEffort(true)}>외부 앱 에포트</button>
           {isMacHelpdeskSurface(isTauri(),navigator.platform)&&<button type="button" data-testid="helpdesk-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm" onClick={()=>setShowHelpdesk(true)}>아젠투지 헬프데스크</button>}
           <div data-testid="top-toolbar-project-actions" className="workspace-project-tools">
             {primaryProject && (
@@ -14071,7 +14167,7 @@ function App() {
                 </button></>}
               </div>
             )}
-            <button type="button" data-testid="control-profile-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowControlProfile(true)}>아젠투지 설정</button><button type="button" data-testid="agent-dialogue-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowAgentDialogue(true)}>기기 간 대화</button>{/* One 아젠투지 voice: this opens the root panel the dock uses (VOC 2026-09-30), not a second instance. */}<button type="button" data-testid="ops-voice-settings-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_OPS_VOICE_EVENT))}>아젠투지 음성 창</button>{/* The app's 「아젠투지 호출」 is its own window; once closed, this (and the floating button) brings it back (VOC 2026-10-15). */}{isTauri()&&<button type="button" data-testid="voice-dock-reopen-tools" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_VOICE_DOCK_EVENT))}>아젠투지 호출 열기</button>}
+            <button ref={computerUseOpenerRef} type="button" data-testid="computer-use-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowComputerUse(true)}>컴퓨터 유즈</button><button type="button" data-testid="control-profile-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={event=>{event.currentTarget.focus();setShowControlProfile(true);}}>아젠투지 설정</button><button type="button" data-testid="agent-dialogue-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowAgentDialogue(true)}>기기 간 대화</button>{/* One 아젠투지 voice: this opens the root panel the dock uses (VOC 2026-09-30), not a second instance. */}<button type="button" data-testid="ops-voice-settings-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_OPS_VOICE_EVENT))}>아젠투지 음성 창</button>{/* The app's 「아젠투지 호출」 is its own window; once closed, this (and the floating button) brings it back (VOC 2026-10-15). */}{isTauri()&&<button type="button" data-testid="voice-dock-reopen-tools" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_VOICE_DOCK_EVENT))}>아젠투지 호출 열기</button>}
             {controlCenterProject ? <button
               type="button"
               data-testid="control-center-project-shortcut"
@@ -14389,21 +14485,6 @@ function App() {
             >
               <MessageSquarePlus className="w-3.5 h-3.5" /><span className="workspace-tool-label">오류 신고·개선 요청 <kbd>⌘⇧V</kbd></span>
             </button>
-            {/* 휴대폰 포털이 보낸 오류가 있을 때만 나타난다. 도착한 보고를
-                사용자가 찾지 못한 적이 있어(VOC 모드 -> 인박스 -> 섹션 3단계)
-                대기 중일 때 스스로 드러나게 했다. 없으면 툴바를 어지럽히지 않는다. */}
-            {portalErrorCount > 0 && (
-              <button
-                type="button"
-                data-testid="portal-errors-badge"
-                onClick={() => { setVocMode(true); setGuideMode(false); }}
-                title={`휴대폰 포털에서 보낸 오류 ${portalErrorCount}건 — 열어서 확인하세요`}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30 transition-all"
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold leading-none">{portalErrorCount}</span>
-              </button>
-            )}
             {/* 규격 명령 복사 버튼 — 「자주 쓰는 프롬프트」에서 고정한 규격 명령을 저장 순서대로 그린다.
                 예전의 VOC 전체 작업·깃허브 동기화 두 버튼은 기본 규격 명령이 되었고 같은 test id를 유지한다
                 (src/promptLibrary.ts). 사용자가 순서·내용·고정을 바꿀 수 있다. */}
@@ -14644,11 +14725,6 @@ function App() {
             {!isDeployedWeb()&&<section className="m-3 max-w-4xl rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="personal-profile-entry">
               {showPersonalProfile?<Suspense fallback={<p>{lang==='ko'?'내 프로필을 불러오는 중…':'Loading my profile…'}</p>}><UserProfilePanel language={lang==='ko'?'ko':'en'} request={requestUserProfile} onOpenUserMemory={()=>setActiveTab('what-i-said')}/></Suspense>:<><p>{lang==='ko'?'내 프로필 · 직접 확인한 선호와 적용 프로젝트를 관리합니다.':'My profile · Manage confirmed preferences and the projects they apply to.'}</p><button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={()=>setShowPersonalProfile(true)}>{lang==='ko'?'내 프로필 열기':'Open my profile'}</button></>}
             </section>}
-            <MemoryTesterUpgrade projects={ports.filter(p=>p.folderPath&&(!p.sourceDeviceId||p.sourceDeviceId===portalDeviceId)).map(p=>({id:p.id,name:p.name}))}/>
-            <div className="m-3 rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="memory-role-boundaries">
-              <p>{lang==='ko'?'내 프로필은 직접 확인한 나의 선호, 「내가 한 말」은 지시 원문과 결과 기록입니다. 아젠투지의 운영 방식은 OPS 기억에서, 설계·수정·검증 경험은 각 프로젝트 기억에서 관리합니다.':'My profile holds preferences I have confirmed. What I Said keeps original instructions and outcomes. OPS memory holds how AgentsToZ operates; each project’s memory holds its design, fixes and verification experience.'}</p>
-              <button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => setShowControlProfile(true)}>{lang==='ko'?'아젠투지 설정 열기':'Open AgentsToZ settings'}</button>
-            </div>
             <Suspense fallback={<div className="text-xs text-zinc-500">장기기억 현황판을 불러오는 중…</div>}>
               {memoryPortalCredentialsLoading ? (
                 <div className="text-xs text-zinc-500">Supabase 연결 정보를 확인하는 중…</div>
@@ -14665,7 +14741,7 @@ function App() {
                   onRenameDevice={isDeployedWeb()?undefined:renameThisDeviceFromMemoryTab}
                 />
               ) : (
-                <div className="m-6 max-w-lg rounded-xl bg-[var(--warn-soft)] p-5">
+                <div data-testid="memory-directory-needs-connection" className="m-6 max-w-lg rounded-xl bg-[var(--warn-soft)] p-5">
                   <div className="flex items-center gap-2 text-sm text-[var(--ink)]">
                     <Brain className="h-4 w-4 text-[var(--warn)]" />장기기억 현황판을 사용하려면 Supabase 연결이 필요합니다.
                   </div>
@@ -14679,6 +14755,11 @@ function App() {
                 </div>
               )}
             </Suspense>
+            <MemoryTesterUpgrade projects={ports.filter(p=>p.folderPath&&(!p.sourceDeviceId||p.sourceDeviceId===portalDeviceId)).map(p=>({id:p.id,name:p.name}))}/>
+            <div className="m-3 rounded-xl border border-[var(--line)] p-3 text-sm" data-testid="memory-role-boundaries">
+              <p>{lang==='ko'?'내 프로필은 직접 확인한 나의 선호, 「내가 한 말」은 지시 원문과 결과 기록입니다. 아젠투지의 운영 방식은 OPS 기억에서, 설계·수정·검증 경험은 각 프로젝트 기억에서 관리합니다.':'My profile holds preferences I have confirmed. What I Said keeps original instructions and outcomes. OPS memory holds how AgentsToZ operates; each project’s memory holds its design, fixes and verification experience.'}</p>
+              <button type="button" className="mt-2 min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => setShowControlProfile(true)}>{lang==='ko'?'아젠투지 설정 열기':'Open AgentsToZ settings'}</button>
+            </div>
           </div>
         )}
 
@@ -14898,7 +14979,8 @@ function App() {
         {showShortcutModal && (
           <div style={{position:'fixed',inset:0,background: 'var(--dialog-scrim)',zIndex:9500,display:'flex',alignItems:'center',justifyContent:'center'}}
             onClick={() => setShowShortcutModal(false)}>
-            <div style={{background:'var(--bg-card)',border:'1px solid rgb(var(--surface-highlight-rgb) / 0.12)',borderRadius:12,padding:24,width:360,display:'flex',flexDirection:'column',gap:16}}
+            <div role="dialog" aria-modal="true" aria-label="앱 열기 단축키" data-testid="global-shortcut-dialog"
+              style={{background:'var(--bg-card)',border:'1px solid rgb(var(--surface-highlight-rgb) / 0.12)',borderRadius:12,padding:24,width:360,display:'flex',flexDirection:'column',gap:16}}
               onClick={e => e.stopPropagation()}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <span style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>앱 열기 단축키</span>
@@ -14913,6 +14995,8 @@ function App() {
                 onFocus={() => setIsRecordingShortcut(true)}
                 onBlur={() => setIsRecordingShortcut(false)}
                 onKeyDown={e => {
+                  // 수식키 없는 Esc는 단축키가 아니다(조합은 2개 이상) — 막지 않고 대화상자를 닫게 둔다.
+                  if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) return;
                   e.preventDefault();
                   const isModifier = ['Meta','Control','Alt','Shift'].includes(e.key);
                   if (isModifier) return;
@@ -15611,11 +15695,13 @@ function App() {
         <AgentDialogueApprovalNotice paused={showAgentDialogue} onOpen={()=>setShowAgentDialogue(true)}/>
         {showAgentDialogue && <AgentDialoguePanel projects={ports.filter(port=>Boolean(port.folderPath||port.worktreePath)).map(port=>({id:port.id,name:port.name}))} opsProjectId={controlCenterProject?.id} deviceName={portalDeviceName} deviceId={portalDeviceId} onRenameDevice={renameThisDeviceFromMemoryTab} onClose={()=>setShowAgentDialogue(false)}/>}
         {showBrowserContext&&<BrowserContextPanel lang={lang} request={localBrowserContextRequest} projects={promptWorkroomProjects} defaultProjectId={v4SelectedId??promptWorkroom.defaultProjectId} onClose={()=>setShowBrowserContext(false)} onAttach={(targetId,text)=>{openWorkroomDraft(targetId,browserContextText(lang).title,text);setShowBrowserContext(false);}}/>}
-        {showControlProfile && <ControlProfilePanel onOpenUserProfile={isDeployedWeb()?undefined:()=>{setShowControlProfile(false);setShowPersonalProfile(true);setActiveTab('memory');}} onRestoreOps={controlCenterProject?undefined:()=>{setShowControlProfile(false);void handleOnboardingControlCenter('restore');}} restoreFrom={controlCenterProject?undefined:(opsRemoteCandidates.find(candidate=>candidate.memoryId)??opsRemoteCandidates[0])?.deviceName} onOpenUserMemory={()=>{setShowControlProfile(false);setActiveTab('what-i-said');}} onOpenProject={id=>{const p=ports.find(p=>p.id===id);if(!p){showToast('프로젝트 목록을 새로고침하세요.','warning');return;}setShowControlProfile(false);setActiveTab('ports');setSearchQuery('');setSidebarSection('all');setV4SelectedId(id);setTesterOpenPort(id);setTesterRevealKey(v=>v+1);}} onClose={()=>setShowControlProfile(false)} onOpenWork={()=>{setShowControlProfile(false);openOpsWorkroom();}} onOpened={result=>{
+        {showComputerUse&&<ComputerUsePanel returnFocusTo={computerUseOpenerRef.current} onClose={()=>setShowComputerUse(false)}/>}
+        {showDesktopEffort&&<DesktopEffortPanel returnFocusTo={desktopEffortOpenerRef.current} onClose={()=>setShowDesktopEffort(false)}/>}
+        {showControlProfile && <ControlProfilePanel onOpenUserProfile={isDeployedWeb()?undefined:()=>{setShowControlProfile(false);setShowPersonalProfile(true);setActiveTab('memory');}} onRestoreOps={controlCenterProject?undefined:()=>{setShowControlProfile(false);void handleOnboardingControlCenter('restore');}} restoreFrom={controlCenterProject?undefined:(opsRemoteCandidates.find(candidate=>candidate.memoryId)??opsRemoteCandidates[0])?.deviceName} onOpenUserMemory={()=>{setShowControlProfile(false);setActiveTab('what-i-said');}} onOpenMemoryStatus={()=>{setShowControlProfile(false);setActiveTab('memory');}} onOpenProject={id=>{const p=ports.find(p=>p.id===id);if(!p){showToast('프로젝트 목록을 새로고침하세요.','warning');return;}setShowControlProfile(false);setActiveTab('ports');setSearchQuery('');setSidebarSection('all');setV4SelectedId(id);setTesterOpenPort(id);setTesterRevealKey(v=>v+1);}} onClose={()=>setShowControlProfile(false)} onOpenWork={()=>{setShowControlProfile(false);openOpsWorkroom();}} onOpened={result=>{
           showToast([result.message,...result.warnings].join('\n'),result.warnings.length?'warning':'success');
           if(result.session){setShowControlProfile(false);setTerminalEntry({nonce:++runtimeEntryNonceRef.current,targetId:result.session.targetId,agent:result.session.agent,sessionId:result.session.id});setActiveTab('terminal');}
         }} />}
-        {showHelpdesk&&<HelpdeskPanel onCloudConnected={()=>{void refreshMemoryPortalCredentials().then(config=>{if(config)cachePortalConfig(config);});}} onClose={()=>setShowHelpdesk(false)} onAction={action=>{setShowHelpdesk(false);if(action==='setup'){setSetupInitialPage('infrastructure');setShowSetupWizard(true);}else if(action==='phone'){setShowInternetQrRemoteControl(true);}else if(action==='report'){setVocMode(true);setGuideMode(false);}else setActiveTab(action==='workroom'?'terminal':action==='memory'?'memory':'ports');}}/>}
+        {showHelpdesk&&<HelpdeskPanel assistIntent={helpdeskAssist} onCloudConnected={()=>{void refreshMemoryPortalCredentials().then(config=>{if(config)cachePortalConfig(config);});}} onClose={closeHelpdesk} onAction={action=>{setShowHelpdesk(false);setHelpdeskAssist(null);if(action==='setup'){setSetupInitialPage('infrastructure');setShowSetupWizard(true);}else if(action==='phone'){setShowInternetQrRemoteControl(true);}else if(action==='report'){setVocMode(true);setGuideMode(false);}else if(action==='computer'){setShowComputerUse(true);}else setActiveTab(action==='workroom'?'terminal':action==='memory'?'memory':'ports');}}/>}
         {showSetupWizard && (
           <Suspense fallback={null}>
           <SetupWizard
@@ -15918,9 +16004,14 @@ function App() {
                     stayed on a weeks-old snapshot and nobody saw why (2026-10-02). Say it where the count is. */}
                 {activeTab === 'ports' && /^자동 업로드 (중단|결과 확인 필요)/.test(autoPushStatus) && (
                   <button type="button" data-testid="ports-auto-upload-alert" title={autoPushStatus}
-                    onClick={() => { const tools = document.querySelector<HTMLDetailsElement>('details.workspace-tools'); if (tools) { tools.open = true; tools.scrollIntoView({ block: 'nearest' }); } }}
+                    onClick={() => {
+                      const tools = document.querySelector<HTMLDetailsElement>('details.workspace-tools');
+                      if (tools) { tools.open = true; tools.scrollIntoView({ block: 'nearest' }); }
+                      const conflicts = document.querySelector<HTMLDetailsElement>('[data-testid="ports-upload-conflicts"]');
+                      if (conflicts) conflicts.open = true;
+                    }}
                     style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 999, border: '1px solid rgb(var(--warn-rgb) / .45)', background: 'var(--warn-soft)', color: 'var(--warn)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    {autoPushStatus.includes('원격 상태가 변경') ? '동기화 충돌 · 확인' : '자동 업로드 중단 · 확인'}
+                    {portAutoUploadChipLabel(autoPushStatus, new Set(portMetadataReview.map(row => row.id)).size)}
                   </button>
                 )}
                 {/* 가로 스크롤이 아니라 줄바꿈이다. 스크롤바를 숨긴 채 넘치게 두면(실측
@@ -16452,6 +16543,7 @@ function App() {
                         className="accent-amber-500 w-3.5 h-3.5" />
                       <span className="text-xs text-zinc-400">생성 후 프로젝트 실행</span>
                     </label>
+                    {registerAsProject && !isDeployedWeb() && <NewProjectCliAccounts language={lang} value={newProjectCliChoice} onChange={setNewProjectCliChoice}/>}
                     <div className="rounded-lg border border-teal-500/20 bg-teal-500/5 p-3 space-y-2">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input type="checkbox" checked={enableNewProjectMemory} onChange={e => setEnableNewProjectMemory(e.target.checked)}
@@ -16683,6 +16775,7 @@ function App() {
                     <p className="m-0 text-[10px] text-amber-300/90">{existingMemoryJoinProblem}</p>
                   )}
                 </div>
+                {!isDeployedWeb() && <NewProjectCliAccounts language={lang} value={existingCliChoice} onChange={setExistingCliChoice}/>}
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input type="checkbox" checked={runExistingProjectAfterRegister} onChange={e => setRunExistingProjectAfterRegister(e.target.checked)}
                     className="accent-amber-500 w-3.5 h-3.5" />

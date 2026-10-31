@@ -178,17 +178,25 @@ func waitUntil(_ seconds: Double = 3, line: Int = #line, _ condition: @escaping 
 
 extension ScreenControlChecks {
     func testSessionTimerReasonsAndControlDirections() async throws {
-        try check(SessionLimits.standard == SessionLimits(idle: .seconds(600), maximum: .seconds(3600)), "결정 3: ten and sixty minutes")
+        try check(SessionLimits.standard == SessionLimits(idle: .seconds(3600)), "standard has one-hour idle timeout and no maximum")
         let start = ContinuousClock.now
         func at(_ seconds: Int) -> ContinuousClock.Instant { start + .seconds(seconds) }
-        var timer = SessionTimer(limits: .standard, started: start)
-        try check(timer.expired(at: at(599)) == nil && timer.expired(at: at(600)) == .idle, "ten minutes without input")
-        timer.noteInput(at: at(500))
+        var timer = SessionTimer(limits: .init(idle: .seconds(3600), maximum: .seconds(7200)), started: start)
+        try check(timer.expired(at: at(3599)) == nil && timer.expired(at: at(3600)) == .idle, "one hour without input")
+        timer.noteInput(at: at(3500))
         timer.noteInput(at: at(100))   // an older instant never moves it back
-        try check(timer.expired(at: at(1099)) == nil && timer.expired(at: at(1100)) == .idle, "input starts the ten minutes over")
-        for second in stride(from: 1000, through: 3500, by: 500) { timer.noteInput(at: at(second)) }
-        try check(timer.deadline.reason == .timeLimit && timer.expired(at: at(3599)) == nil
-                  && timer.expired(at: at(3600)) == .timeLimit, "sixty minutes however busy")
+        try check(timer.expired(at: at(7099)) == nil && timer.expired(at: at(7100)) == .idle, "input restarts a configurable idle limit")
+        timer.noteInput(at: at(7000))
+        try check(timer.deadline.reason == .timeLimit && timer.expired(at: at(7199)) == nil
+                  && timer.expired(at: at(7200)) == .timeLimit, "a configurable maximum still applies")
+        var standard = SessionTimer(limits: .standard, started: start)
+        try check(standard.expired(at: at(600)) == nil, "the old ten-minute timeout no longer ends a session")
+        standard.noteInput(at: at(3500))
+        try check(standard.expired(at: at(3600)) == nil && standard.expired(at: at(7099)) == nil
+                  && standard.expired(at: at(7100)) == .idle, "active session passes one hour and expires one hour after input")
+        standard.noteInput(at: at(7000))
+        try check(standard.expired(at: at(10599)) == nil && standard.expired(at: at(10600)) == .idle,
+                  "subsequent input extends the session beyond two hours")
 
         for reason in SessionEndReason.allCases {
             try check(SessionEndReason(closePayload: reason.encoded) == reason, "close reason \(reason) round trip")
@@ -251,6 +259,44 @@ extension ScreenControlChecks {
         }
     }
 
+    func testPhysicalInputWinsDuringSameKindInjectionAndHeldInput() async throws {
+        let now = ContinuousClock.now
+        var priority = LocalPriority()
+        for i in 0..<240 { priority.noteInjected(.pointer, at: now + .milliseconds(i)) }
+        try check(priority.updatePhysical(.init(available: true, lastEvent: now + .milliseconds(100)),
+                                         at: now + .milliseconds(101)) == .paused,
+                  "a real mouse move wins even inside a continuous remote pointer stream")
+        try check(priority.updatePhysical(.init(available: true, lastEvent: now, held: true),
+                                         at: now + .seconds(30)) == nil && priority.isPaused,
+                  "a held physical key/button blocks remote input beyond the three-second quiet window")
+        try check(priority.updatePhysical(.init(available: true, lastEvent: now + .seconds(30)),
+                                         at: now + .seconds(32)) == nil && priority.isPaused,
+                  "the quiet window begins at physical release")
+        try check(priority.updatePhysical(.init(available: true, lastEvent: now + .seconds(30)),
+                                         at: now + .seconds(33)) == .resumed, "resumes after release and quiet")
+        try check(priority.updatePhysical(.init(available: false), at: now + .seconds(60)) == .paused,
+                  "losing the passive monitor fails closed")
+    }
+
+    func testPhysicalTakeoverIsCheckedBeforeDispatchAndNotifiesTheViewer() async throws {
+        let now = ContinuousClock.now, injected = Collector<InputEvent>(), cleanups = Collector<InputEvent>()
+        let samples = Collector<PhysicalInputSnapshot>()
+        samples.add(.init(available: true))
+        let receiver = InputReceiver(physicalInput: { samples.all.last! }, release: { cleanups.add($0) }, inject: { injected.add($0) })
+        try receiver.receive(InputCodec.encode(.button(.left, isDown: true)), at: now)
+        try receiver.receive(InputCodec.encode(.key(code: 0x37, isDown: true, modifiers: .command)), at: now)
+        samples.add(.init(available: true, lastEvent: now + .milliseconds(1), held: true))
+        try receiver.receive(InputCodec.encode(.pointerMove(x: 0.1, y: 0.2)), at: now + .milliseconds(2))
+        try check(injected.all.count == 2 && cleanups.all.count == 2, "physical takeover releases held remote input before another dispatch")
+        try check(receiver.checkLocalInput(at: now + .milliseconds(250)) == .paused, "the polling loop still tells the viewer about immediate takeover")
+        try check(!receiver.performControlInput(at: now + .seconds(30)) {}, "held human input blocks IME and Spaces too")
+        samples.add(.init(available: true, lastEvent: now + .seconds(30)))
+        try check(receiver.checkLocalInput(at: now + .seconds(33)) == .resumed, "release plus quiet restores control")
+        samples.add(.init(available: false))
+        try check(!receiver.performControlInput(at: now + .seconds(34)) {}, "monitor loss refuses a control operation before dispatch")
+        try check(receiver.checkLocalInput(at: now + .seconds(35)) == .paused, "monitor loss is visible to the viewer")
+    }
+
     func testInputReceiverPausesForLocalInputAndLetsGo() async throws {
         let start = ContinuousClock.now
         let injected = Collector<InputEvent>()
@@ -277,17 +323,17 @@ extension ScreenControlChecks {
     }
 
     func testSessionLimitsEndTheSessionAndTellThePhone() async throws {
-        // Ten minutes without input. The phone's held button is let go and the phone hears why.
+        // One hour without input under the standard policy. Held input is released and the phone hears why.
         let clock = ManualClock()
         let idle = try await LoopbackSession.open(clock: clock)
         try await idle.send([.button(.left, isDown: true)], untilInjected: 1)
         // Only input counts. A phone that just watches still asks for keyframes; that is no one at the phone (DESIGN 3).
-        clock.advance(by: .seconds(300))
+        clock.advance(by: .seconds(1800))
         try await idle.handled()
-        clock.advance(by: .seconds(299))
+        clock.advance(by: .seconds(1799))
         try await idle.handled()
         try await Task.sleep(for: .milliseconds(100))
-        try check(idle.pump.endReason == nil && idle.viewer.endReason == nil, "alive after 9:59")
+        try check(idle.pump.endReason == nil && idle.viewer.endReason == nil, "alive after 59:59")
         clock.advance(by: .seconds(1))
         // Awaiting the session itself cannot be cut short; this fails instead of hanging if the session lives on.
         try await waitUntil { idle.pump.endReason != nil }
@@ -297,7 +343,7 @@ extension ScreenControlChecks {
         try check(idle.injected.all.last == .button(.left, isDown: false), "the held button is let go")
         await idle.close()
 
-        // Sixty minutes, however busy. Input every 500 s keeps the idle limit away.
+        // Activity keeps the standard session alive past one hour, then one hour of inactivity ends it.
         let busyClock = ManualClock()
         let busy = try await LoopbackSession.open(clock: busyClock)
         for round in 1...7 {
@@ -309,15 +355,22 @@ extension ScreenControlChecks {
         try await Task.sleep(for: .milliseconds(100))
         try check(busy.pump.endReason == nil, "alive at 59:59")
         busyClock.advance(by: .seconds(1))
+        try await busy.handled()
+        try check(busy.pump.endReason == nil && busy.viewer.endReason == nil, "active session survives its first hour")
+        try await busy.send([.key(code: 0x37, isDown: true, modifiers: [.command])], untilInjected: 9)
+        busyClock.advance(by: .seconds(3599))
+        try await busy.handled()
+        try check(busy.pump.endReason == nil, "alive 59:59 after latest input")
+        busyClock.advance(by: .seconds(1))
         try await within(3) { try await busy.running.value }
         try await within(3) { try await busy.pictures.value }
-        try check(busy.pump.endReason == .timeLimit && busy.viewer.endReason == .timeLimit, "ended at sixty minutes")
+        try check(busy.pump.endReason == .idle && busy.viewer.endReason == .idle, "ended one hour after latest input")
         try check(busy.injected.all.last == .key(code: 0x37, isDown: false, modifiers: []), "Command is let go")
 
         // Reconnecting is a new key exchange; the old session's input goes nowhere.
         busy.viewer.input(.button(.left, isDown: true))
         try await Task.sleep(for: .milliseconds(100))
-        try check(busy.injected.all.count == 9, "nothing injected after the end")
+        try check(busy.injected.all.count == 10, "nothing injected after the end")
         await busy.close()
     }
 
@@ -473,5 +526,98 @@ extension ScreenControlChecks {
 
         // Keyed by each key's own fingerprint, so a row can never lend its dates or key to another device.
         try check(keys.key(for: ScreenControlIdentity.fingerprint(of: SoftwareSigner().publicKey)) == nil, "unknown stays unknown")
+    }
+}
+
+extension ScreenControlChecks {
+    func testSecureInputAndViewOnlyReasonsCannotBeClearedByUnrelatedNotices() async throws {
+        let now = ContinuousClock.now
+        var priority = LocalPriority()
+        try check(priority.updatePhysical(.init(available: true, secureInput: true), at: now) == .paused,
+                  "secure input silence never counts as idle")
+        try check(priority.updatePhysical(.init(available: true, secureInput: true), at: now + .seconds(30)) == nil
+                  && priority.isPaused && priority.availability == .secureInput, "secure input stays paused past quiet window")
+        _ = priority.updatePhysical(.init(available: false), at: now + .seconds(31))
+        try check(priority.isPaused && priority.availability == .monitorUnavailable, "lost monitoring has a distinct reason")
+        var state = ScreenMacState()
+        state.hear(.inputAvailability(.permissionsRequired))
+        state.hear(.remoteInputResumed)
+        state.hear(.macUnlocked)
+        try check(!state.canSendInput, "resume or unlock does not override missing input permission")
+        state.hear(.inputAvailability(.secureInput))
+        try check(!state.canSendInput, "secure input blocks iPad input")
+        state.hear(.inputAvailability(.ready))
+        try check(state.canSendInput, "explicit ready restores controls")
+        state.hear(.remoteInputPaused)
+        try check(!state.canSendInput, "legacy pause still blocks ready controls")
+    }
+}
+
+extension ScreenControlChecks {
+    func testInputAvailabilityCrossesAuthenticatedSessionWhenOnlyItsReasonChanges() async throws {
+        let pair = try await ConnectedPair.open()
+        defer { pair.phone.close(); pair.mac.close(); pair.listener.stop() }
+        let samples = Collector<PhysicalInputSnapshot>()
+        samples.add(.init(available: true, secureInput: true))
+        let receiver = InputReceiver(physicalInput: { samples.all.last! }, inject: { _ in })
+        let pump = VideoPump(connection: pair.mac, input: receiver, encoderFactory: EncoderShop().factory)
+        let viewer = ScreenViewer(connection: pair.phone), notices = Collector<ScreenNotice>()
+        let hearing = Task { for await notice in viewer.notices { notices.add(notice) } }
+        let pictures = Task { for try await _ in viewer.pictures() {} }
+        let running = Task { try await pump.run(features: SessionFeatures(reportsInputAvailability: true)) }
+        defer { hearing.cancel(); pictures.cancel(); running.cancel() }
+        try await waitUntil { notices.all.contains(.inputAvailability(.secureInput)) && notices.all.contains(.remoteInputPaused) }
+        samples.add(.init(available: false))
+        try await waitUntil { notices.all.contains(.inputAvailability(.monitorUnavailable)) }
+        try check(receiver.isPaused, "reason changes while continuously paused are still delivered")
+        await viewer.close()
+        try await finished(running)
+
+        let viewOnly = try await ConnectedPair.open()
+        defer { viewOnly.phone.close(); viewOnly.mac.close(); viewOnly.listener.stop() }
+        let viewPump = VideoPump(connection: viewOnly.mac, encoderFactory: EncoderShop().factory)
+        let viewRunning = Task { try await viewPump.run(features: SessionFeatures(reportsInputAvailability: true)) }
+        defer { viewRunning.cancel() }
+        let first = try await viewOnly.phone.receive()
+        try check(first.type == .control && (try ControlMessage(decoding: first.payload, version: viewOnly.phone.version)) == .inputAvailability(.permissionsRequired),
+                  "view-only permissions are announced before the first picture")
+        try await viewOnly.phone.send(.close, Data())
+        try await finished(viewRunning)
+    }
+}
+
+extension ScreenControlChecks {
+    func testPointerResynchronizesBeforeLocalPriorityResume() async throws {
+        let pair = try await ConnectedPair.open()
+        defer { pair.phone.close(); pair.mac.close(); pair.listener.stop() }
+        let samples = Collector<PhysicalInputSnapshot>(), positions = Collector<ScreenPointerPosition>()
+        samples.add(.init(available: true, held: true))
+        positions.add(.init(x: 100, y: 200))
+        let input = InputReceiver(physicalInput: { samples.all.last! }, inject: { _ in })
+        let pump = VideoPump(connection: pair.mac, input: input, encoderFactory: EncoderShop().factory)
+        let viewer = ScreenViewer(connection: pair.phone), notices = Collector<ScreenNotice>()
+        let hearing = Task { for await notice in viewer.notices { notices.add(notice) } }
+        let pictures = Task { for try await _ in viewer.pictures() {} }
+        let running = Task { try await pump.run(features: SessionFeatures(reportsInputAvailability: true, pointerPosition: { positions.all.last })) }
+        defer { hearing.cancel(); pictures.cancel(); running.cancel() }
+        try await waitUntil { notices.all.contains(.remoteInputPaused) }
+        positions.add(.init(x: .max, y: 0)); samples.add(.init(available: true))
+        try await waitUntil { notices.all.contains(.remoteInputResumed) }
+        let events = notices.all
+        let position = events.firstIndex(of: .pointerPosition(.init(x: .max, y: 0)))
+        let resume = events.firstIndex(of: .remoteInputResumed)
+        try check(position != nil && resume != nil && position! < resume!, "fresh pointer arrives before resuming remote input")
+        var state = ScreenMacState()
+        state.hear(.pointerPosition(.init(x: .max, y: 0)))
+        try check(state.pointerPosition?.unitX == 1 && state.pointerPosition?.unitY == 0, "bounded pointer coordinates have exact corners")
+        await viewer.close(); try await finished(running)
+
+        let injected = Collector<InputEvent>()
+        let held = InputReceiver { injected.add($0) }
+        try held.receive(InputCodec.encode(.button(.left, isDown: true)))
+        held.releaseHeld()
+        try check(injected.all == [.button(.left, isDown: true), .button(.left, isDown: false)], "display selection releases a prior remote drag")
+        try held.receive(InputCodec.encode(.text("계속")))
+        try check(injected.all.last == .text("계속"), "release for display selection does not end the authenticated session")
     }
 }

@@ -155,6 +155,9 @@ test('prepare surface choices use the project-open platform catalog and capabili
     for (const choice of result.choices) {
       expect(choice.label).toBe(teamSurfaceName(choice.surface, agent));
       expect(choice.support).toEqual(teamLaunchSupport(choice.surface, agent));
+      expect(choice.supportScope).toBe('team');
+      if (agent === 'claude' && choice.surface.startsWith('orca-')) expect(choice.supportNote).toContain('단독 open_code_app에는 적용되지 않습니다');
+      else expect(choice.supportNote).toBeUndefined();
       expect(choice.executionRoutes).toContain(team);
       expect(choice.singleLaunch).toBe(['internal', 'app', 'orca-floating', 'orca-worktree'].includes(choice.surface));
       if (choice.surface === 'internal') expect(choice.executionRoutes).toEqual([start, team]);
@@ -172,7 +175,15 @@ test('every explicit supported ordinary launch is a nonexecuting ready draft, in
     expect(result).toMatchObject({success: true, ready: true, performed: false, selectionRequired: false, effect: 'agent-launch-prepared', draft, installation: 'not-checked', credentials: 'not-checked'});
     expect('launchModel' in result).toBe(false);
     if (!result.ready) throw new Error('Expected prepared draft');
-    expect(result.support.model).toBe(surface === 'internal');
+    const orcaClaude = agent === 'claude' && (surface === 'orca-floating' || surface === 'orca-worktree');
+    expect(result.supportScope).toBe('team');
+    expect(result.support.model).toBe(surface === 'internal' || orcaClaude);
+    expect(result.support.effort).toBe(surface === 'internal' || orcaClaude);
+    expect(result.support.provider).toBe(surface === 'internal' && agent === 'hermes');
+    if (orcaClaude) {
+      expect(result.note).toContain('단독 open_code_app에는 적용되지 않습니다');
+      expect(result.note).toContain('실제 적용은 별도로 확인');
+    }
     expect(result.executionRoutes).toContain(team);
     expect(result.singleLaunch).toBe(['internal', 'app', 'orca-floating', 'orca-worktree'].includes(surface));
     if (!['internal', 'app', 'orca-floating', 'orca-worktree'].includes(surface)) expect(result.executionRoutes).toEqual([team]);

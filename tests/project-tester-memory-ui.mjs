@@ -45,6 +45,16 @@ try {
     await page.getByText(project.name,{exact:false}).first().waitFor({timeout:20000});
     await page.locator('#tab-memory').click();
     const panel=page.getByTestId('memory-tester-upgrade');await panel.waitFor();
+    const directory=page.getByTestId('memory-directory-needs-connection');await directory.waitFor();
+    assert.ok(await page.evaluate(()=>{
+      const profile=document.querySelector('[data-testid="personal-profile-entry"]');
+      const directory=document.querySelector('[data-testid="memory-directory-needs-connection"]');
+      const tester=document.querySelector('[data-testid="memory-tester-upgrade"]');
+      const roles=document.querySelector('[data-testid="memory-role-boundaries"]');
+      const precedes=(a,b)=>a&&b&&Boolean(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);
+      return precedes(profile,directory)&&precedes(directory,tester)&&precedes(tester,roles);
+    }),'memory directory or its connection action precedes maintenance and role reference cards');
+
     // Works independently of Supabase / memory directory credentials.
     assert.ok(requests.every(r=>r.operation==='sets'),'Project summaries may read configuration; no tester execution/setup before selection');
     await panel.getByLabel('테스트 에이전트 관리 프로젝트').selectOption(project.id);

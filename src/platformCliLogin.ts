@@ -28,7 +28,7 @@ export const spawnPlatformLogin:PlatformLoginSpawn=(e,output)=>{
   const child=spawn([e.executable,...e.args],{cwd:e.cwd,env:e.env,detached:true,terminal:{cols:100,rows:30,data:(_terminal:unknown,data:Uint8Array)=>output(decoder.decode(data,{stream:true}))}});
   return {write:value=>{child.terminal!.write(value);},kill:()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},exited:child.exited.finally(()=>child.terminal?.close())};
 };
-interface Login {view:PlatformCliLoginView;discoverEmail?:boolean;directory:string;child?:PlatformLoginChild;timer?:ReturnType<typeof setTimeout>;tail:string;bytes:number;execution:PlatformCliExecution;profile:string;sentCode:boolean}
+interface Login {view:PlatformCliLoginView;discoverEmail?:boolean;/** A newcomer's first sign-in fills an unset device default; adding another account never does. */fillDefault:boolean;directory:string;child?:PlatformLoginChild;timer?:ReturnType<typeof setTimeout>;tail:string;bytes:number;execution:PlatformCliExecution;profile:string;sentCode:boolean}
 const TTL=10*60_000;
 /** Supabase's go-keyring macOS adapter encodes stored passwords; Bun returns the stored bytes. */
 export function supabaseKeyringToken(value:string):string {
@@ -55,12 +55,12 @@ export class PlatformCliLoginHost {
     const {id,provider,email,purpose,state,account,expiresAt,message}=job.view;
     writePrivateFileAtomically(this.host.store.root,join(this.host.store.root,'login-'+id+'.json'),JSON.stringify({id,provider,email,purpose,state,account,expiresAt,message}));
   }
-  async start(provider:PlatformCliProvider,emailValue:unknown,requestId:string,purposeValue?:PlatformCliAccountPurpose,discoverEmail=false) {
+  async start(provider:PlatformCliProvider,emailValue:unknown,requestId:string,purposeValue?:PlatformCliAccountPurpose,discoverEmail=false,fillDefault=true) {
     platformCliRequestId(requestId);if(requestId.length>128)throw new PlatformCliError('로그인 요청 ID가 너무 깁니다.');if(!platformCliProvider(provider)||discoverEmail&&provider==='google-workspace')throw new PlatformCliError('지원하는 CLI를 선택하세요.');const email=discoverEmail?'':platformCliEmail(emailValue),purpose=platformCliAccountPurpose(purposeValue,provider);
     this.host.store.ensureDirectory();
     return withOwnedPortalFileLock(join(this.host.store.root,'login-start.lock'),async()=>{
       for(const [id,job]of this.jobs)if(job.view.expiresAt<Date.now()&&!['waiting','checking'].includes(job.view.state))this.jobs.delete(id);
-      const existing=this.jobs.get(requestId);if(existing){if(existing.view.provider!==provider||!!existing.discoverEmail!==discoverEmail||!discoverEmail&&existing.view.email!==email||(existing.view.purpose??'project-cli')!==purpose)throw new PlatformCliError('같은 로그인 요청 ID를 다른 계정에 사용할 수 없습니다.');return this.public(existing);}
+      const existing=this.jobs.get(requestId);if(existing){if(existing.view.provider!==provider||!!existing.discoverEmail!==discoverEmail||existing.fillDefault!==fillDefault||!discoverEmail&&existing.view.email!==email||(existing.view.purpose??'project-cli')!==purpose)throw new PlatformCliError('같은 로그인 요청 ID를 다른 계정에 사용할 수 없습니다.');return this.public(existing);}
       const receipt=join(this.host.store.root,'login-'+requestId+'.json');
       if(pathEntryExists(receipt))throw new PlatformCliError('이 로그인 요청은 이미 시작되었습니다. 앱 재시작 전 결과를 확인하고 새로 로그인하세요. 자동 재실행하지 않았습니다.');
       // Bounded admission receipts; prune only terminal metadata after the retry window.
@@ -92,7 +92,7 @@ export class PlatformCliLoginHost {
         args=['auth','login','--scopes','https://www.googleapis.com/auth/drive.readonly'];
       }
       const view:PlatformCliLoginView={id:requestId,provider,email,purpose,state:'waiting',expiresAt:Date.now()+TTL};
-      const job:Login={view,discoverEmail,directory,execution:{executable,args,env,cwd:directory,account:{id:'login',provider,label:email,identity:null,state:'unchecked',revision:''}},profile,tail:'',bytes:0,sentCode:false};
+      const job:Login={view,discoverEmail,fillDefault,directory,execution:{executable,args,env,cwd:directory,account:{id:'login',provider,label:email,identity:null,state:'unchecked',revision:''}},profile,tail:'',bytes:0,sentCode:false};
       this.record(job);this.jobs.set(requestId,job);
       try{job.child=this.spawn(job.execution,value=>this.consume(job,value));liveChildren.add(job.child);job.timer=setTimeout(()=>void this.cancel(requestId).catch(()=>{}),TTL);job.timer.unref?.();void job.child.exited.then(code=>this.finish(job,code),()=>this.finish(job,1)).catch(()=>{}).finally(()=>liveChildren.delete(job.child!));}
       catch{view.state='failed';view.message='로그인 CLI를 시작하지 못했습니다.';this.cleanup(job);this.record(job);}
@@ -174,7 +174,7 @@ export class PlatformCliLoginHost {
       const checked=await this.host.check(account.id,job.view.id+'-check');
       job.view.account=await this.host.store.verified(checked,verifiedEmail,job.view.id+'-email');
       if(job.view.purpose!=='app-sync-account'){
-        if(job.discoverEmail)await this.host.store.attachOnboardingDefault(job.view.account,job.view.id+'-default');
+        if(job.discoverEmail&&job.fillDefault)await this.host.store.attachOnboardingDefault(job.view.account,job.view.id+'-default');
         else await this.host.store.attachVerifiedDefault(job.view.account,job.view.id+'-default');
       }job.view.state='completed';
     }catch{if(created&&!job.view.account)try{await this.host.store.archive(created.id,job.view.id+'-failed');}catch{}job.view.state='failed';job.view.message='로그인 또는 요청한 이메일 확인에 실패했습니다. 다른 계정으로 연결하지 않았습니다.';}

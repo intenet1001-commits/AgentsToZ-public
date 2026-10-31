@@ -7,6 +7,7 @@ import { metaMemoryRemoteRefusal } from './metaCommonMemoryRemoteHost';
 import { REMOTE_HISTORY_COMMUNITY_REFUSAL, REMOTE_HISTORY_SCOPE_LABELS, isRemoteHistoryAction, isRemoteRestartAction, remoteHistoryScopeFor, type RemoteHistoryResult, type RemoteHistoryScope } from './workroomHistoryRemoteProtocol';
 import { WORKROOM_ATTACH_COMMUNITY_REFUSAL, WORKROOM_ATTACH_RATE_PER_MINUTE, isWorkroomAttachAction } from './workroomRemoteAttachmentProtocol';
 import { MOBILE_WORKSPACE_SCOPE_LABELS, normalizeMobileWorkspaceRequest, normalizeMobileWorkspaceResult, workspaceScope, type MobileWorkspaceRequest, type MobileWorkspaceResult, type MobileWorkspaceScope } from './mobileWorkspaceProtocol';
+import { WEEKLY_USAGE_COMMUNITY_REFUSAL, WEEKLY_USAGE_REMOTE_ACTION, WEEKLY_USAGE_UPDATE_REQUIRED, type RemoteWeeklyUsageRow } from './weeklyUsageRemote';
 
 export function createMobileWorkspaceGateway(deps: {
   terminal: RemoteTerminalGateway;
@@ -25,6 +26,9 @@ export function createMobileWorkspaceGateway(deps: {
   opsRuntimeTargetId?():string|null;
   /** Hand one request to another community device and return its answer unchanged. */
   forward?(deviceRef:string,request:AiTerminalRequest|MobileWorkspaceRequest):Promise<AiTerminalResponse|MobileWorkspaceResult>;
+  /** `usage.weekly`: this Mac's weekly allowance per CLI, answered from a snapshot without holding the relay poll
+   *  (src/weeklyUsageRemoteHost.ts). Missing on a composition that does not offer it: the phone is told to update the Mac. */
+  weeklyUsage?():Promise<RemoteWeeklyUsageRow[]>;
 }):RemoteTerminalGateway {
   const reads=new Map<string,{since:number;count:number}>(),mediaReads=new Map<string,{since:number;count:number}>(),vocSubmits=new Map<string,{since:number;count:number}>(),attachReceives=new Map<string,{since:number;count:number}>(),metaTransfers=new Map<string,{since:number;count:number}>();
   return async (request,bindings,owner,transportActive=()=>true,device,receiptOwner) => {
@@ -39,6 +43,9 @@ export function createMobileWorkspaceGateway(deps: {
       if(request.operation==='workspace'&&isWorkroomAttachAction(request.workspace.action))throw new Error(WORKROOM_ATTACH_COMMUNITY_REFUSAL);
       // …and a submission naming them would only be refused there (its ids mean nothing on that Mac): say why here.
       if(request.operation==='submission'&&request.submission&&(request.submission.phase==='begin'||request.submission.phase==='single')&&request.submission.attachments?.length)throw new Error(WORKROOM_ATTACH_COMMUNITY_REFUSAL);
+      // The weekly allowance is the connected Mac's own read; a receiver runs only `workroom.*` and would refuse it with a
+      // sentence the phone could not tell from a failure.
+      if(request.operation==='workspace'&&request.workspace.action===WEEKLY_USAGE_REMOTE_ACTION)throw new Error(WEEKLY_USAGE_COMMUNITY_REFUSAL);
       if(!deps.forward||!deps.opsRuntimeTargetId)throw new Error('연결한 Mac 앱을 업데이트하면 다른 아젠투지를 제어할 수 있습니다.');
       const active=()=>deps.active(owner)&&transportActive();
       if(!active())throw new Error('등록한 기기에 다시 연결하세요.');
@@ -99,7 +106,18 @@ export function createMobileWorkspaceGateway(deps: {
     // The restart offer (w14) is about every project this phone may use; the one it is asked through is only a channel the
     // phone was shown. Its rows are still cut to the grant on the Mac (`controlIds` below), so naming another project gains nothing.
     const restart=isRemoteRestartAction(request.workspace.action);
-    if(!consent||!target||!restart&&!consent.targetIds.has(target.runtimeTargetId))throw new Error('Mac의 외부 인터넷 QR 원격제어에서 이 기기가 사용할 프로젝트 범위를 허용하세요.');
+    // `usage.weekly` is about this Mac, not a project: like the restart offer, the project it is asked through is only a channel
+    // the phone was shown — but the phone must hold at least one granted project here.
+    const weekly=request.workspace.action===WEEKLY_USAGE_REMOTE_ACTION;
+    if(!consent||!target||(weekly?!consent.targetIds.size:!restart&&!consent.targetIds.has(target.runtimeTargetId)))throw new Error('Mac의 외부 인터넷 QR 원격제어에서 이 기기가 사용할 프로젝트 범위를 허용하세요.');
+    if(weekly){
+      if(!deps.weeklyUsage)throw new Error(WEEKLY_USAGE_UPDATE_REQUIRED);
+      const allowed=()=>active()&&consent.isActive();
+      if(!allowed())throw new Error('모바일 작업 권한이 변경되었습니다.');
+      const weeklyUsage=await deps.weeklyUsage();
+      if(!allowed())throw new Error('모바일 작업 권한이 변경되었습니다. 결과를 다시 확인하세요.');
+      return normalizeMobileWorkspaceResult({kind:'workspace',action:WEEKLY_USAGE_REMOTE_ACTION,weeklyUsage});
+    }
     if(isRemoteHistoryAction(request.workspace.action)){
       const scopes=consent.historyScopes??[],needed=remoteHistoryScopeFor(request.workspace.action);
       // The restart offer to a phone without ‘워크룸 대화 기록 보기’ (w14 review): only how many sessions of its own projects a

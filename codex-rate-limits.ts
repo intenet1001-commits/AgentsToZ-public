@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export interface CodexRateLimitWindow {
   used_percent?: number;
@@ -18,6 +20,34 @@ export interface CodexRateLimits {
 export interface CodexLiveRateLimits {
   rateLimits: CodexRateLimits;
   checkedAt: string;
+}
+
+/** A recognized managed account home selects the host's default CLI login for
+ * this child. Its provider settings must not redirect that login's credentials.
+ * A non-managed home and its explicitly configured environment are preserved. */
+export function defaultCodexUsageEnvironment(source: NodeJS.ProcessEnv, appDataDir?: string): NodeJS.ProcessEnv {
+  const env = { ...source };
+  const configured = source.CODEX_HOME;
+  if (!configured || !isAbsolute(configured)) return env;
+  const accountHome = resolve(configured);
+  const home = source.HOME || source.USERPROFILE || homedir();
+  const orcaRoot = process.platform === 'darwin'
+    ? join(home, 'Library', 'Application Support', 'orca', 'codex-accounts')
+    : process.platform === 'win32' && source.APPDATA
+      ? join(source.APPDATA, 'orca', 'codex-accounts')
+      : join(source.XDG_CONFIG_HOME || join(home, '.config'), 'orca', 'codex-accounts');
+  const orcaParts = relative(orcaRoot, accountHome).split(sep);
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const managedOrca = orcaParts.length === 2 && new RegExp(`^${uuid}$`, 'i').test(orcaParts[0] ?? '') && orcaParts[1] === 'home';
+  const appParts = appDataDir && isAbsolute(appDataDir)
+    ? relative(join(appDataDir, 'cli-accounts-v1'), accountHome).split(sep) : [];
+  const managedApp = appParts.length === 1 && new RegExp(`^acct_${uuid}$`, 'i').test(appParts[0] ?? '');
+  if (managedOrca || managedApp) {
+    for (const key of Object.keys(env)) {
+      if (/^(?:OPENAI_|CODEX_)/i.test(key)) delete env[key];
+    }
+  }
+  return env;
 }
 
 const asRecord = (value: unknown): Record<string, any> | null =>
@@ -77,13 +107,14 @@ export function normalizeCodexRateLimits(payload: unknown): CodexRateLimits | nu
 export async function readCodexLiveRateLimits(
   codexPath: string,
   timeoutMs = 15_000,
+  appDataDir?: string,
 ): Promise<CodexLiveRateLimits> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(codexPath, ['app-server', '--stdio'], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: defaultCodexUsageEnvironment(process.env, appDataDir),
       });
     } catch (error) {
       reject(error);

@@ -8,6 +8,10 @@ import type {WorkspaceLease} from './workspaceLease';
 export const MEMORY_INPUT_LIMIT=48000, MEMORY_INPUT_TTL=7*24*60*60*1000;
 const FILE_LIMIT=70000,TOTAL_LIMIT=64*1024*1024;
 const writing=new WeakSet<WorkspaceLease>();
+/** Failures of the lease or the staging root (every #scope error) and errno codes of the process rather than of one
+ * file. The intent sweep rethrows these so the next tick looks again. EIO is not here: a read error of one file recurs,
+ * and rethrowing it would stop every later tick before the remaining intents and expirations. */
+const environmental=new WeakSet<object>(),PROCESS_ERRORS=new Set(['EMFILE','ENFILE','ENOMEM','EAGAIN','EINTR','EBUSY']);
 export interface MemoryInputBinding {
  saveId:string;memoryId:string;policyEpoch:number;coverageDigest:string;
  inputDigest:string;beforeHash:string;providerBindingDigest:string;
@@ -30,12 +34,15 @@ function same(a:Stats,b:Stats){return a.dev===b.dev&&a.ino===b.ino&&a.size===b.s
 export class MemorySaveInputStore {
  private readonly appStamp;
  private stagingIdentity:{dev:number;ino:number}|null=null;
+ private readonly created=new WeakMap<Header,Stats>();
  constructor(readonly appDataRoot:string,readonly lease:WorkspaceLease,readonly now=Date.now,
   private readonly namespace:'memory-save-inputs'|'precompaction-inputs'='memory-save-inputs'){
   if(!['memory-save-inputs','precompaction-inputs'].includes(namespace))throw new MemoryInputError('INVALID_INPUT');
   this.appStamp=lstatSync(appDataRoot);
  }
- #scope(create=false){
+ #scope(create=false){try{return this.#checkScope(create);}catch(e){
+  const error=e instanceof MemoryInputError?e:new MemoryInputError('UNAVAILABLE');environmental.add(error);throw error;}}
+ #checkScope(create:boolean){
   if(!this.lease.refresh()||this.lease.identity.canonicalWorkspacePath!==this.appDataRoot||realpathSync(this.appDataRoot)!==this.appDataRoot||!lstatSync(this.appDataRoot).isDirectory())throw new MemoryInputError('UNAVAILABLE');
   const current=lstatSync(this.appDataRoot);if(current.dev!==this.appStamp.dev||current.ino!==this.appStamp.ino)throw new MemoryInputError('UNAVAILABLE');
   const root=join(this.appDataRoot,this.namespace);
@@ -103,9 +110,9 @@ export class MemorySaveInputStore {
    let total=payload.length,count=1;const beforeScan=lstatSync(root);const dir=await opendir(root,{bufferSize:32});
    for await(const entry of dir){if(++count>4096)throw new MemoryInputError('BUDGET_PAUSED');const st=await lstat(join(root,entry.name));if(!st.isFile()||st.nlink!==1)throw new MemoryInputError('UNAVAILABLE');total+=st.size;if(total>TOTAL_LIMIT)throw new MemoryInputError('BUDGET_PAUSED');}
    if(!same(beforeScan,lstatSync(root)))throw new MemoryInputError('CONFLICT');
-   this.#scope();this.#time(header);const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
-   try{let offset=0;while(offset<payload.length){const n=writeSync(fd,payload,offset,payload.length-offset);if(!n)throw new MemoryInputError('UNAVAILABLE');offset+=n;}fsyncSync(fd);}finally{closeSync(fd);}
-   this.#sync(root);this.#scope();return header;
+   this.#scope();this.#time(header);const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);let stamp:Stats;
+   try{let offset=0;while(offset<payload.length){const n=writeSync(fd,payload,offset,payload.length-offset);if(!n)throw new MemoryInputError('UNAVAILABLE');offset+=n;}fsyncSync(fd);stamp=fstatSync(fd);}finally{closeSync(fd);}
+   this.#sync(root);this.#scope();if(!same(stamp,lstatSync(path)))throw new MemoryInputError('CONFLICT');this.created.set(header,stamp);return header;
   }finally{secret.fill(0);}
  })();}catch(e){if(e instanceof MemoryInputError)throw e;throw new MemoryInputError('UNAVAILABLE');}finally{writing.delete(this.lease);}
  }
@@ -126,5 +133,54 @@ export class MemorySaveInputStore {
    if(expired===null)this.#markExpired(root,b,secret,value.header.expiresAt);
    this.#scope();if(!same(value.stamp,lstatSync(value.path)))throw new MemoryInputError('CONFLICT');unlinkSync(value.path);this.#sync(root);return true;
   }finally{value.plain.fill(0);}}finally{secret.fill(0);}
+ });}
+
+ /** Caller may discard only a file created and fully flushed by this store
+  * instance, before starting any receipt transaction. Existing, partial or
+  * uncertain files remain untouched. No permanent expiry marker is created. */
+ discardCreated(header:Header,key:Uint8Array):boolean{return this.#safe(()=>{
+  const created=this.created.get(header);
+  if(this.namespace!=='precompaction-inputs'||writing.has(this.lease)||!created)return false;
+  const secret=this.#key(key);try{
+   const root=this.#scope(),binding=canonical(header.binding),value=this.#read(root,binding,secret);
+   try{
+    if(JSON.stringify(value.header)!==JSON.stringify(header)||!same(created,value.stamp))throw new MemoryInputError('CONFLICT');
+    this.#time(value.header,true);this.#scope();
+    if(!same(value.stamp,lstatSync(value.path)))throw new MemoryInputError('CONFLICT');
+    unlinkSync(value.path);this.created.delete(header);this.#sync(root);return true;
+   }finally{value.plain.fill(0);}
+  }finally{secret.fill(0);}
+ });}
+
+ /** Whether anything (a file of any type, partial or not) already occupies this binding's staging path. A
+  * pre-compaction capture records its write intent only when nothing is there yet, so the intent sweep below can
+  * never claim a file that another attempt created. Creates only the private staging directory, as stage would. */
+ exists(raw:MemoryInputBinding):boolean{return this.#safe(()=>{
+  if(writing.has(this.lease))throw new MemoryInputError('UNAVAILABLE');
+  const b=canonical(raw),path=this.#path(this.#scope(true),b);
+  try{lstatSync(path);return true;}catch(e:any){if(e?.code==='ENOENT')return false;throw e;}
+ });}
+
+ /** Write-intent sweep, pre-compaction only. The caller proves under the app-data lease that the capture which
+  * recorded an intent at `notBefore` is no longer in flight and never wrote a receipt. Only a file that authenticates
+  * as exactly this binding and was created no earlier than that intent is removed. An expiry marker, a partial,
+  * corrupt, linked or replaced file, or a clock rollback is 'retained' for manual recovery; no marker is written.
+  * Lease, staging-root and key problems, at any step, throw instead, as do errno codes of the process such as
+  * EMFILE, so the caller retries rather than giving up on the file. */
+ discardUnreceipted(raw:MemoryInputBinding,key:Uint8Array,notBefore:number):'removed'|'absent'|'retained'{return this.#safe(()=>{
+  if(this.namespace!=='precompaction-inputs'||writing.has(this.lease)||!saveInteger(notBefore))return 'retained';
+  const keep=(e:unknown):'retained'=>{if(environmental.has(e as object)||PROCESS_ERRORS.has((e as {code?:string}|null)?.code??''))throw e;return 'retained';};
+  const secret=this.#key(key);try{
+   const root=this.#scope(true);let b:MemoryInputBinding,value:{header:Header;plain:Buffer;stamp:Stats;path:string};
+   try{b=canonical(raw);if(this.#expiry(root,b,secret)!==null)return 'retained';}catch(e){return keep(e);}
+   try{lstatSync(this.#path(root,b));}catch(e:any){return e?.code==='ENOENT'?'absent':keep(e);}
+   try{value=this.#read(root,b,secret);}catch(e){return keep(e);}
+   try{
+    if(value.header.createdAt<notBefore)return 'retained';
+    try{this.#time(value.header,true);}catch(e){return keep(e);}
+    this.#scope();if(!same(value.stamp,lstatSync(value.path)))return 'retained';
+    unlinkSync(value.path);this.#sync(root);return 'removed';
+   }finally{value.plain.fill(0);}
+  }finally{secret.fill(0);}
  });}
 }

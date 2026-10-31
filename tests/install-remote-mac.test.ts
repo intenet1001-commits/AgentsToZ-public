@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { remoteInstallScript, remoteSessionProbeScript, validSshHost } from '../scripts/install-remote-mac';
+import { controlVersionWarning, remoteInstallScript, remoteSessionProbeScript, validSshHost } from '../scripts/install-remote-mac';
 
 // 3호 used to rebuild the same commit itself (~10 min, node missing over SSH, its own version number).
 describe('installing this Mac’s build on another Mac', () => {
@@ -35,6 +35,13 @@ describe('installing this Mac’s build on another Mac', () => {
     expect(launch).toContain('env -u SSH_CLIENT -u SSH_CONNECTION -u SSH_TTY open -b');
   });
 
+  test('an older or missing Control on the other Mac is called out, an equal or newer one is not', () => {
+    expect(controlVersionWarning('jumpremote', '1557.0.0', '1609.0.0')).toContain('v1557.0.0');
+    expect(controlVersionWarning('jumpremote', 'none', '1609.0.0')).toContain('설치되어 있지 않거나');
+    expect(controlVersionWarning('jumpremote', '1609.0.0', '1609.0.0')).toBeNull();
+    expect(controlVersionWarning('jumpremote', '1610.0.0', '1609.0.0')).toBeNull();
+    expect(controlVersionWarning('jumpremote', '1557.0.0', undefined)).toBeNull();
+  });
   test('both remote scripts are valid shell', () => {
     for (const script of [remoteSessionProbeScript(), remoteInstallScript('/tmp/agentstoz-install-627.0.0.zip')]) {
       expect(spawnSync('bash', ['-n'], { input: script }).status).toBe(0);
@@ -112,6 +119,7 @@ describe('installing this Mac’s build on another Mac', () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('installed=2.0.0');
       expect(result.stdout).toContain('sidecar=up');
+      expect(result.stdout).toContain('control=none');
       expect(t.installed()).toBe('2.0.0');
       expect(t.backups()).toHaveLength(1);
       expect(t.leftovers()).toEqual([]);

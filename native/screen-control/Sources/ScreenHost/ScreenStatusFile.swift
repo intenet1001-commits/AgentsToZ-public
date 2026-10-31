@@ -18,7 +18,7 @@ public struct ScreenStatus: Codable, Equatable, Sendable {
     public var devices: Int
     /// Screen recording is allowed.
     public var capture: Bool
-    /// Accessibility is allowed, which controlling needs.
+    /// Posting events and observing local takeover are both allowed, which controlling needs.
     public var control: Bool
     public var loginItem: LoginItem
     /// Milliseconds since 1970, when this was written.

@@ -34,6 +34,8 @@ export interface WorkroomTeamHostDependencies {
    * surface fails saying its runtime is not connected, and no Workroom is started in its place.
    */
   externalRuntime?: TeamExternalRuntime;
+  /** Whether an AI's CLI has the agentstoz_use connection (WorkroomTeamHost.teamTool), read from the app's connection settings. */
+  teamTool?: WorkroomTeamHost['teamTool'];
 }
 
 /** Paths the app keeps inside the primary checkout; they are not changes a member would miss. */
@@ -137,6 +139,7 @@ export function createWorkroomTeamHost(deps: WorkroomTeamHostDependencies): Work
     worktreeTargetId: (projectId, path) => deriveAgentRuntimeWorktreeTargetId(projectId, realpathSync(path)),
     // Passed straight through: this host neither reimplements an external surface nor decides what it may claim.
     ...(deps.externalRuntime ? {external: deps.externalRuntime} : {}),
+    ...(deps.teamTool ? {teamTool: deps.teamTool} : {}),
     async start(input) {
       // The account and the approval mode ride on the request itself, exactly as the app's own start sends them:
       // `accountId` goes through the same registered-profile launch and validation, and `bypassPermissions` is only

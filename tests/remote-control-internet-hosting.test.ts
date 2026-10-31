@@ -126,7 +126,7 @@ describe('provider-neutral hosted remote controller', () => {
     expect(labels).toContain("'app.codex': '최근 Codex 대화 다시 열기'");
     expect(labels).toContain("'app.hermes': '최근 Hermes 대화 열기 요청'");
     expect(labels).not.toContain("'claude.thread.start': 'Claude Code 처음 연결'");
-    expect(labels).toContain("'codex.thread.start': 'Mac의 Codex 앱에서 열기'");
+    expect(labels).toContain("'codex.thread.start': 'Mac의 Codex에서 새 대화 요청'");
     expect(labels).toContain("'worktree.add': '+ 표준 Git 워크트리'");
     expect(labels).toContain("'worktree.add.orca': '+ Orca 등록 워크트리'");
     expect(projectCard).toContain('두 버튼은 중복이 아닙니다');
@@ -143,7 +143,8 @@ describe('provider-neutral hosted remote controller', () => {
     expect(api).toContain('createCodexDesktopProjectConversation({');
     expect(api).toContain("prompt: CODEX_REMOTE_FIRST_MESSAGE");
     expect(api).toContain('waitForFreshChatGptProjectConversation(');
-    expect(api).toContain('prepareProjectCodexApp(workingPath, target.name)');
+    expect(api).toContain("prepareProjectCodexApp(workingPath, target.name, 'prepare-or-reopen', undefined, input.assertActive)");
+    expect(api).toContain("action === 'codex.thread.start.v2'");
     expect(api).toContain('new FileCodexFirstConversationPendingStore(APP_DATA_DIR)');
     expect(api).toContain('verifyRecoveredProjectCodexThread(folderPath, threadId)');
     expect(api).toContain('error instanceof CodexFirstConversationOpenError');

@@ -109,6 +109,23 @@ export interface HermesAdapterStatus {
 
 type MemoryResult = Record<string, any>;
 type ProjectMemoryConflictResolution = 'keep-local' | 'use-remote' | 'merged';
+/** `/api/project-memory/conflict-preview` (previewProjectMemoryConflict on the host). */
+export interface ProjectMemoryConflictPreview {
+  /** False when the two documents are byte-identical by now. */
+  conflict: boolean;
+  memoryId: string;
+  localContent: string;
+  localContentHash: string;
+  remoteContent: string;
+  remoteContentHash: string;
+  remoteRevisionId: string;
+  remoteCreatedAt: string | null;
+  remoteDeviceName: string | null;
+  remoteChangedSinceSync?: boolean;
+  localChangedSinceSync?: boolean;
+  baseRevisionId?: string | null;
+  baseContent?: string | null;
+}
 
 interface PrivateGitHubArchiveStatus {
   enabled: boolean;
@@ -277,6 +294,10 @@ export const projectMemoryApi = {
     preservePreferredAgent?: boolean;
   }) {
     return memoryRequest<MemoryResult>('/api/project-memory/session-end', input);
+  },
+  /** Read-only local ↔ Supabase comparison (plus the last agreed revision when the host can read it). Writes nothing. */
+  conflictPreview(input: { folderPath: string }) {
+    return memoryRequest<ProjectMemoryConflictPreview>('/api/project-memory/conflict-preview', input);
   },
   history(input: { folderPath: string; githubUrl?: string }) {
     return memoryRequest<{ revisions: MemoryResult[] }>('/api/project-memory/history', input);

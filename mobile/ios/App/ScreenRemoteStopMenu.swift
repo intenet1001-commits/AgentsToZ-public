@@ -14,7 +14,7 @@ struct ScreenRemoteStopMenu: View {
 
     var body: some View {
         if ScreenPushConfig.isEnabled {
-            Section("원격 차단 · Face ID") {
+            Section("원격 차단 · \(BiometricApproval.methodName)") {
                 Button(role: .destructive) { ask(.init(mac: mac, action: .endSession)) } label: {
                     Label { Text("지금 끊기"); Text("이 Mac에 연결된 화면 보기를 끝냅니다") } icon: { Image(systemName: "xmark.circle") }
                 }
@@ -29,7 +29,7 @@ struct ScreenRemoteStopMenu: View {
                 if center.subscribed.contains(mac.pushKey) && !center.stale.contains(mac.pushKey) {
                     Button("알림 끄기", systemImage: "bell.slash") { Task { notice(await center.unsubscribe(mac)) } }
                 } else {
-                    Button(center.stale.contains(mac.pushKey) ? "알림 다시 켜기 · Face ID" : "알림 받기 · Face ID", systemImage: "bell") {
+                    Button(center.stale.contains(mac.pushKey) ? "알림 다시 켜기 · \(BiometricApproval.methodName)" : "알림 받기 · \(BiometricApproval.methodName)", systemImage: "bell") {
                         Task { notice(await center.subscribe(mac)) }
                     }
                 }
@@ -57,7 +57,7 @@ private struct ScreenRemoteStopPresenter: ViewModifier {
             .confirmationDialog(request.map { "\($0.mac.macName)에 「\(ScreenPushCenter.title(of: $0.action))」" } ?? "",
                                 isPresented: Binding(get: { request.map { !$0.confirmed } ?? false }, set: { if !$0 { request = nil } }),
                                 titleVisibility: .visible, presenting: request) { pending in
-                Button("Face ID로 보내기", role: .destructive) {
+                Button("\(BiometricApproval.methodName)로 보내기", role: .destructive) {
                     request = nil
                     start(pending)
                 }
@@ -125,9 +125,9 @@ private struct ScreenPushTapPresenter: ViewModifier {
             .confirmationDialog(center.tapped.map(Self.title) ?? "",
                                 isPresented: Binding(get: { center.tapped != nil }, set: { if !$0 { center.tapped = nil } }),
                                 titleVisibility: .visible, presenting: center.tapped) { tapped in
-                Button("지금 끊기 · Face ID", role: .destructive) { choose(.endSession, tapped) }
-                Button("‘\(tapped.event.actorName)’ 해지 · Face ID", role: .destructive) { choose(.revokeDevice(tapped.event.actorID), tapped) }
-                Button("화면 제어 전체 끄기 · Face ID", role: .destructive) { choose(.turnOff, tapped) }
+                Button("지금 끊기 · \(BiometricApproval.methodName)", role: .destructive) { choose(.endSession, tapped) }
+                Button("‘\(tapped.event.actorName)’ 해지 · \(BiometricApproval.methodName)", role: .destructive) { choose(.revokeDevice(tapped.event.actorID), tapped) }
+                Button("화면 제어 전체 끄기 · \(BiometricApproval.methodName)", role: .destructive) { choose(.turnOff, tapped) }
                 Button("괜찮아요", role: .cancel) { center.tapped = nil }
             } message: { _ in
                 Text("본인이 한 일이 아니면 막을 수 있습니다. 화면 제어 전체 끄기는 다시 켜려면 Mac에서 켜야 합니다.")
@@ -145,6 +145,8 @@ private struct ScreenPushTapPresenter: ViewModifier {
         return switch tapped.event.kind {
         case .connected: "‘\(tapped.event.actorName)’이(가) \(tapped.mac.macName)에 연결했습니다 (\(time))"
         case .registered: "‘\(tapped.event.actorName)’이(가) \(tapped.mac.macName)에 새로 등록되었습니다 (\(time))"
+        case .controllerConnected: "Mac 컨트롤러 ‘\(tapped.event.actorName)’이(가) \(tapped.mac.macName)에 연결했습니다 (\(time))"
+        case .controllerRegistered: "Mac 컨트롤러 ‘\(tapped.event.actorName)’이(가) \(tapped.mac.macName)에 등록되었습니다 (\(time))"
         }
     }
 }

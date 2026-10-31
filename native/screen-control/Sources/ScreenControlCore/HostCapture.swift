@@ -98,10 +98,15 @@ public protocol CaptureControl: Sendable {
     func selectNext() async throws -> DisplayChoice
     /// Puts the Mac's cursor in the picture or leaves it out. Remembered for later displays.
     func setCursorVisible(_ visible: Bool) async throws
+    func setVideoQuality(_ quality: ScreenVideoQuality) async throws
+}
+
+extension CaptureControl {
+    public func setVideoQuality(_ quality: ScreenVideoQuality) async throws { throw HostCaptureError.unsupportedQuality }
 }
 
 public enum HostCaptureError: Error, Sendable {
-    case noDisplay
+    case noDisplay, unsupportedQuality
 }
 
 /// One session's capture: the display it shows, the encoder that matches it, and where input lands. A display change
@@ -111,9 +116,9 @@ public enum HostCaptureError: Error, Sendable {
 public actor HostCapture: CaptureControl {
     private let backend: any DisplayCapturing
     private let pump: VideoPump
-    private let sizing: CaptureSizing
-    private let framesPerSecond: Int
-    private let bitRate: Int
+    private var sizing: CaptureSizing
+    private var framesPerSecond: Int
+    private var bitRate: Int
     private let onDisplay: @Sendable (CaptureDisplay) -> Void
     private let observe: (@Sendable (CapturedPicture) -> Void)?
     private var displays: [CaptureDisplay] = []
@@ -171,6 +176,21 @@ public actor HostCapture: CaptureControl {
     public func stop() async {
         stopped = true
         await backend.stop()
+    }
+
+    public func setVideoQuality(_ quality: ScreenVideoQuality) async throws {
+        guard !stopped, let current else { throw CancellationError() }
+        let sizing = CaptureSizing.fitWidth(quality.maximumWidth)
+        guard self.sizing != sizing || framesPerSecond != quality.framesPerSecond || bitRate != quality.bitRate else { return }
+        let previous = (self.sizing, framesPerSecond, bitRate)
+        self.sizing = sizing; framesPerSecond = quality.framesPerSecond; bitRate = quality.bitRate
+        await backend.stop()
+        do { try await show(current) }
+        catch {
+            self.sizing = previous.0; framesPerSecond = previous.1; bitRate = previous.2
+            try? await show(current)
+            throw error
+        }
     }
 
     /// Reads the displays again (one may have come or gone), keeping the shown display's place by its ID. A list that

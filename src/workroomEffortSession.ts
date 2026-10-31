@@ -1,6 +1,8 @@
 import type {WorkroomEffortMode} from './workroomEffortMode';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
+import type {EffortRefusal} from './workroomEffortRuntime';
 import {cliInfoFromScreen} from './workroomCliCommands';
+import {teamHermesEffortLevels} from './teamEffortCatalog';
 import {
   WORKROOM_EFFORT_SUPPORT,
   classifyWorkroomEffort,
@@ -27,7 +29,7 @@ export type WorkroomEffortSkip =
   | 'restricted' // a restricted (CS duty) launch keeps its own rules
   | 'history-resume' // a conversation reopened from history
   | 'env-override' // CLAUDE_CODE_EFFORT_LEVEL in the launch environment wins over the flag
-  | 'model-unknown' // Codex: the model is not proven to offer the level (src/codexEffortModel.ts)
+  | 'model-unknown' // Codex: the model is not proven to offer the level (src/codexEffortModel.ts); Hermes: its chosen model drops it
   | 'manual'; // legacy peers may still report a manual pause
 
 export interface WorkroomEffortAdvice {tier: WorkroomEffortTier; reason: WorkroomEffortReason; at: string}
@@ -55,8 +57,13 @@ export interface WorkroomEffortState {
    * keeps it. Never reported — strict readers reject unknown keys; a record shows it as a level without a tier.
    */
   pinned?: WorkroomEffortLevel;
+  /**
+   * Host-only: where the CLI refused its native control (Claude's slider footer clipped at this size or smaller, Codex's
+   * shortcuts unavailable for this model). Auto types nothing there again; a larger screen or another model tries. Never reported.
+   */
+  effortRefusal?: EffortRefusal;
 }
-export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending' | 'pinned'> & {sessionId: string; agent: AiTerminalAgent};
+export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending' | 'pinned' | 'effortRefusal'> & {sessionId: string; agent: AiTerminalAgent};
 /** A host-only launch choice (team members): a pinned level, or the text auto classifies instead of the launch prompt. */
 export type WorkroomLaunchEffort = {pinned: WorkroomEffortLevel} | {requestText: string};
 
@@ -74,23 +81,37 @@ export interface WorkroomEffortPlanInput {
   envOverride: boolean;
   /** Codex only, asked lazily: the levels its model is proven to offer, or null when unproven. */
   codexAllowed?: () => readonly string[] | null;
+  /**
+   * Hermes only: the model and provider this launch chose (a team member, 「Hermes · Claude/Codex」). Its provider adapter
+   * silently drops a level it lacks — anthropic sends no reasoning for Haiku (src/teamEffortCatalog.ts) — so only a level
+   * that list carries is passed. Absent (Hermes's own configured model): unknown here, the level is passed as before.
+   */
+  hermesModel?: {model: string; provider?: string};
   /** A level the person chose for this launch. It is their explicit choice, so the off/recommend modes do not hold it back. */
   pinned?: WorkroomEffortLevel;
   /** What auto classifies instead of `prompt` (a team member's task, without the brief's shared rules). */
   requestText?: string;
 }
 
+/** The levels the launch's model is known to carry: Codex proven lazily (null = unproven), Hermes from a model it chose. */
+function launchAllowed(input: WorkroomEffortPlanInput): readonly string[] | null | undefined {
+  if (input.agent === 'codex') return input.codexAllowed?.() ?? null;
+  if (input.agent === 'hermes' && input.hermesModel) return teamHermesEffortLevels(input.hermesModel.model, input.hermesModel.provider);
+  return undefined;
+}
+
 /** The launch decision. `level` present ⇔ a flag is passed. */
 export function planWorkroomEffort(input: WorkroomEffortPlanInput): WorkroomEffortState {
   if (input.restricted) return {manual: false, skipped: 'restricted'};
   if (input.historyResume) return {manual: false, skipped: 'history-resume'};
-  if (WORKROOM_EFFORT_SUPPORT[input.agent] !== 'launch') return {manual: false, skipped: 'unsupported'};
   const restart = !!input.previous;
   const pinned = input.pinned ?? input.previous?.pinned;
+  if (input.agent === 'agy' && pinned) return {manual: false, pinned, level: pinned, origin: restart ? 'restart' : 'launch'};
+  if (WORKROOM_EFFORT_SUPPORT[input.agent] !== 'launch') return {manual: false, skipped: 'unsupported'};
   if (pinned) {
     const kept = {manual: false, pinned} as WorkroomEffortState;
     if (input.agent === 'claude' && input.envOverride) return {...kept, skipped: 'env-override'};
-    const allowed = input.agent === 'codex' ? input.codexAllowed?.() ?? null : undefined;
+    const allowed = launchAllowed(input);
     const level = allowed === null ? null : workroomEffortLevel(input.agent, pinned, allowed);
     if (!level) return {...kept, skipped: 'model-unknown'};
     return {...kept, level, origin: restart ? 'restart' : 'launch'};
@@ -111,7 +132,7 @@ export function planWorkroomEffort(input: WorkroomEffortPlanInput): WorkroomEffo
   const chosen = {...decision, manual: false} as WorkroomEffortState;
   if (input.mode === 'recommend') return {...chosen, skipped: 'recommend', advice: {...decision, at: new Date().toISOString()}};
   if (input.agent === 'claude' && input.envOverride) return {...chosen, skipped: 'env-override'};
-  const allowed = input.agent === 'codex' ? input.codexAllowed?.() ?? null : undefined;
+  const allowed = launchAllowed(input);
   if (allowed === null) return {...chosen, skipped: 'model-unknown'};
   const level = workroomEffortLevel(input.agent, decision.tier, allowed);
   if (!level) return {...chosen, skipped: 'model-unknown'};
@@ -180,6 +201,6 @@ export function noteWorkroomEffortRequest(state: WorkroomEffortState, agent: AiT
 }
 
 export function workroomEffortRecord(sessionId: string, agent: AiTerminalAgent, state: WorkroomEffortState | undefined): WorkroomEffortRecord {
-  const {phraseLines: _baseline, automaticPending: _pending, pinned: _pinned, ...rest} = state ?? {manual: false};
+  const {phraseLines: _baseline, automaticPending: _pending, pinned: _pinned, effortRefusal: _refused, ...rest} = state ?? {manual: false};
   return {sessionId, agent, ...rest, ...(rest.advice ? {advice: {...rest.advice}} : {})};
 }

@@ -31,6 +31,7 @@ struct ScreenViewerLifecycleChecks {
         try testASceneThatSlipsAwayBeforeTheFirstClaimDoesNotStart()
         try testLateKeyframeRenderIsRefusedAfterTheSessionEnded()
         try testCancelledConnectionApprovalKeepsTheNoticeAndStartsNothing()
+        try testLockoutRecoveryDoesNotReviveAFailedConnection()
         try testCancelledTurnOffDoesNotStrandALiveSession()
         try testANewFaceIDDropsTheEarlierWait()
         try testSceneThatStaysInactiveEndsWithinTheGrace()
@@ -234,6 +235,34 @@ struct ScreenViewerLifecycleChecks {
             // Leaving still ends it.
             try checkEqual(life.sceneChanged(to: .background), .endNow(.leftForeground))
         }
+    }
+
+    func testLockoutRecoveryDoesNotReviveAFailedConnection() throws {
+        var life = appeared()
+        var gate = ScreenViewerSessionGate()
+        try checkTrue(life.claimSessionStart(phase: .active).starts)
+        let failedAttempt = gate.start()
+        _ = life.authenticationStarted(for: .connection)
+        _ = life.authenticationFinished(.failed)
+        gate.invalidate()
+
+        // Recovery has its own OS prompt. Even a successful passcode recovery remains a failed Mac approval;
+        // no signer/context escapes recovery, no new gate attempt is started and the original start stays spent.
+        _ = life.authenticationStarted(for: .connection)
+        try checkEqual(life.sceneChanged(to: .inactive), .none)
+        guard case .armGrace(let token) = life.authenticationFinished(.failed) else { throw CheckFailure.failed("no recovery grace") }
+        try checkEqual(life.graceExpired(token: token), .none)
+        _ = life.sceneChanged(to: .active)
+        try checkTrue(!life.claimSessionStart(phase: .active).starts)
+        try checkTrue(!gate.owns(failedAttempt) && !gate.accepts(failedAttempt))
+        try checkTrue(gate.runningAttempt == nil)
+
+        // Only closing the failed view and explicitly selecting the Mac creates a new biometric connection.
+        _ = life.viewDisappeared()
+        var next = appeared()
+        try checkTrue(next.claimSessionStart(phase: .active).starts)
+        let freshAttempt = gate.start()
+        try checkTrue(freshAttempt != failedAttempt && gate.owns(freshAttempt))
     }
 
     /// A cancelled 「화면 제어 끄기」 happens on a *running* session, so the bounded wait must still end it.

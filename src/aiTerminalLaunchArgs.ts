@@ -2,6 +2,7 @@ import type {AiTerminalAgent} from './aiTerminalProtocol';
 import {aiTerminalPromptArgs} from './aiTerminalPromptArgs';
 import type {AiTerminalResume} from './aiTerminalResume';
 import {CODEX_HOOK_TRUST_FLAG} from './codexHookTrust';
+import {opsWorkerApprovalArgs} from './opsWorkerToolApproval';
 import {WORKROOM_EFFORT_SUPPORT, type WorkroomEffortLevel} from './workroomEffortPolicy';
 import {launchModelError, type AiTerminalLaunchModel} from './workroomTeamInstruction';
 
@@ -47,12 +48,18 @@ export function aiTerminalLaunchArgs(agent: AiTerminalAgent, sessionId: string, 
   codexHookTrust = false,
   /**
    * 「에포트 자동」 (w16, workroomEffortPolicy.ts): the level the host chose for this launch, passed with each CLI's own
-   * flag. Omitted or null: the arguments are byte-identical to before. Antigravity and restricted launches ignore it.
+   * flag. Omitted or null: the arguments are byte-identical to before. A restricted launch (profile) ignores it; Antigravity
+   * gets `--effort` only for a team member's pinned level, which names its model variant (auto never drives agy).
    */
   effort?: WorkroomEffortLevel | null,
   /** Host-only per-launch model (see AiTerminalLaunchModel). Omitted: byte-identical arguments. */
-  model?: AiTerminalLaunchModel | null): string[] {
-  const level = effort && !profile && WORKROOM_EFFORT_SUPPORT[agent] === 'launch' ? effort : null;
+  model?: AiTerminalLaunchModel | null,
+  /**
+   * Host-only: this launch is the worker for an OPS task another Mac handed over (opsWorkerToolApproval.ts). Only
+   * the AgentsToZ tools that handover needs are pre-approved; a bypass or restricted launch never takes them.
+   */
+  opsWorker = false): string[] {
+  const level = effort && !profile && (WORKROOM_EFFORT_SUPPORT[agent] === 'launch' || agent === 'agy') ? effort : null;
   // Hermes' configured TUI rejects --reasoning. Its classic CLI supports the
   // launch-only flag; leave the person's interface preference alone otherwise.
   const chosen = launchModelArgs(agent, model);
@@ -72,5 +79,6 @@ export function aiTerminalLaunchArgs(agent: AiTerminalAgent, sessionId: string, 
       : agent === 'claude' ? ['--permission-mode', 'default'] : []) : agent === 'codex'
     ? ['--dangerously-bypass-approvals-and-sandbox']
     : agent === 'claude' ? ['--permission-mode', 'bypassPermissions'] : ['--dangerously-skip-permissions'];
-  return [...identity, ...permission, ...chosen, ...(agent === 'claude' && level ? ['--effort', level] : []), ...(prompt ? aiTerminalPromptArgs(agent, prompt) : [])];
+  const preapproved = opsWorker && !bypassPermissions && !profile ? opsWorkerApprovalArgs(agent) : [];
+  return [...identity, ...permission, ...preapproved, ...chosen, ...((agent === 'claude' || agent === 'agy') && level ? ['--effort', level] : []), ...(prompt ? aiTerminalPromptArgs(agent, prompt) : [])];
 }

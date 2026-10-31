@@ -1,0 +1,27 @@
+{
+ "_note": "Golden lists of apps AgentsToZ Control never controls. Compared case-insensitively and as sets with RefusedTargets (ControlProtocol.swift) and src/computerUseProtocol.ts (window, v1) and with ScopedProtectedTargets.swift and src/computerUseScopeProtocol.ts (scope, v2) by the Swift checks and tests/computer-use-scope.test.ts. Any difference fails both. Window mode also refuses everything the scope protects. Bundle IDs were read from installed apps and code signatures on macOS 26.7 (2026-10-29).",
+ "scope": {
+  "bundles": ["com.intenet.agentstozbycs", "com.apple.systempreferences", "com.apple.keychainaccess", "com.apple.windowserver"],
+  "securitySurfaces": [
+   "com.apple.loginwindow", "com.apple.passwords", "com.apple.securityagent", "com.apple.securityagenthelper.arm64",
+   "com.apple.securityagenthelper.x86_64", "com.apple.authorizationhost", "com.apple.usernotificationcenter",
+   "com.apple.coreservices.uiagent", "com.apple.localauthentication.uiagent", "com.apple.localauthenticationremoteservice",
+   "com.apple.certificateassistant", "com.apple.escrowsecurityalert", "com.apple.security.keychain-circle-notification"
+  ],
+  "prefixes": ["com.intenet.agentstozbycs.", "com.apple.securityagent"]
+ },
+ "window": {
+  "bundles": [
+   "com.intenet.agentstozbycs", "com.openai.codex", "com.openai.atlas", "com.anthropic.claudefordesktop",
+   "com.nousresearch.hermes", "com.google.antigravity", "com.stablyai.orca", "com.cmuxterm.app", "com.googlecode.iterm2",
+   "com.apple.terminal", "com.apple.systempreferences", "com.apple.keychainaccess", "com.apple.passwords",
+   "com.apple.loginwindow", "com.apple.securityagent", "com.apple.securityagenthelper.arm64",
+   "com.apple.securityagenthelper.x86_64", "com.apple.authorizationhost", "com.apple.windowserver",
+   "com.apple.usernotificationcenter", "com.apple.coreservices.uiagent", "com.apple.localauthentication.uiagent",
+   "com.apple.localauthenticationremoteservice", "com.apple.certificateassistant", "com.apple.escrowsecurityalert",
+   "com.apple.security.keychain-circle-notification"
+  ],
+  "prefixes": ["com.intenet.agentstozbycs.", "com.apple.securityagent"],
+  "teams": ["DA8QKAQ2C9"]
+ }
+}

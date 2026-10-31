@@ -56,8 +56,8 @@ test('「에포트 자동」: the chosen level rides each CLI\'s own launch flag
   // Override only this launch's interface when supplying the supported classic flag.
   expect(aiTerminalLaunchArgs('hermes','session-fixture',prompt,false,null,null,false,'high')).toEqual(['chat','--cli','--reasoning','high','-q',prompt]);
   expect(aiTerminalLaunchArgs('hermes','session-fixture',prompt,true,null,null,false,'low')).toEqual(['chat','--cli','--reasoning','low','--yolo','-q',prompt]);
-  // Antigravity couples effort to a model variant: never passed.
-  expect(aiTerminalLaunchArgs('agy','session-fixture',prompt,true,null,null,false,'high')).toEqual(aiTerminalLaunchArgs('agy','session-fixture',prompt,true));
+  // An explicit team pin carries the matching model variant and CLI effort.
+  expect(aiTerminalLaunchArgs('agy','session-fixture',prompt,true,null,null,false,'high',{model:'gemini-4-argon-high'})).toContain('--effort');
   // A restricted (CS duty) launch keeps its own rules untouched.
   const profile={permissionMode:'dontAsk' as const,tools:['Read'],allowedTools:['Read(./**)'],disallowedTools:[]};
   expect(aiTerminalLaunchArgs('claude','session-fixture',prompt,false,null,profile,false,'high')).toEqual(aiTerminalLaunchArgs('claude','session-fixture',prompt,false,null,profile));

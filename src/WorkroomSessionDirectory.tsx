@@ -5,6 +5,7 @@ import {localAiTerminalTransport,localWorkroomTransport,type AiTerminalTransport
 import {createTerminalRequester} from './aiTerminalScheduling';
 import {communityTerminalTransport,communityWorkroomTransport,listCommunityControlDevices,loadCommunityRemoteProjects,type CommunityControlDevice} from './agentDialogueControlClient';
 import {COMMUNITY_BYPASS_UNAVAILABLE,communityDeviceLabel} from './workroomDeviceLabel';
+import {communityStaleDevices} from './communityDeviceLiveness';
 import {CommunityChatPanel} from './CommunityChatPanel';
 import {WorkroomConversationPanel} from './WorkroomConversationPanel';
 import {WorkroomRestartBanner} from './WorkroomRestartBanner';
@@ -304,6 +305,10 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
   const refreshing=deviceLoading||snapshots.some(snapshot=>snapshot.loading);
   const attention=workroomAttentionCount(activity.sessions.values());
   const now=useMinuteClock(visible);
+  // The same liveness as the Workroom 「기기」 tabs: a Mac that missed its heartbeats says so before its list times out
+  // (2026-10-31 click QA: 2호 here read 「확인 아직 확인하지 않음」, then a generic timeout). Still listed and refreshed.
+  const stale=useMemo(()=>communityStaleDevices(devices,now),[devices,now]);
+  const staleCount=Object.keys(stale).length;
   const onSavedSummary=useCallback((summary:{count:number;more:boolean;pending:number;loaded:boolean})=>setSavedSummary(summary),[]);
   // Seen = this window is visible and focused and its open dialog shows the session (critique item 29).
   useWorkroomSeen(activeSession?.id,visible&&viewOpen&&!!activeSnapshot?.device.local);
@@ -312,7 +317,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
     <header className="session-directory-header"><div><span className="session-directory-eyebrow">기기 전체의 AI 작업</span><h2>작업 세션</h2><p>진행 중인 대화를 확인하고, 필요한 작업을 이어가세요.</p></div>{props.onPrepareUse&&!props.remote&&<button type="button" className="session-directory-button" onClick={()=>props.onPrepareUse?.(view&&activeSnapshot?.device.local?view.entry.targetId:undefined)}>USE 준비</button>}<button type="button" className="session-directory-button session-directory-button--primary" onClick={()=>{const snapshot=snapshots.find(item=>sessionDirectoryDeviceKey(item.device)===filter)??snapshots.find(item=>item.device.local);if(snapshot)openDraft(snapshot);}} disabled={!snapshots.length}><Plus size={16}/>새 대화</button></header>
     <div className="session-directory-filters">
       <label className="session-directory-search"><Search size={16} aria-hidden="true"/><span>검색</span><input aria-label="대화 세션 검색" placeholder="프로젝트, AI, 기기 검색" value={query} onChange={event=>setQuery(event.target.value)}/></label>
-      <label>기기<select aria-label="대화 세션 기기" value={filter} onChange={event=>setFilter(event.target.value)}><option value="all">모든 기기</option>{snapshots.map(snapshot=><option key={sessionDirectoryDeviceKey(snapshot.device)} value={sessionDirectoryDeviceKey(snapshot.device)}>{snapshot.device.label}{snapshot.device.local?' (이 기기)':''}</option>)}</select></label>
+      <label>기기<select aria-label="대화 세션 기기" value={filter} onChange={event=>setFilter(event.target.value)}><option value="all">모든 기기</option>{snapshots.map(snapshot=><option key={sessionDirectoryDeviceKey(snapshot.device)} value={sessionDirectoryDeviceKey(snapshot.device)}>{snapshot.device.label}{snapshot.device.local?' (이 기기)':''}{!snapshot.device.local&&stale[snapshot.device.endpointId]?' · 응답 없음':''}</option>)}</select></label>
       <button type="button" className="session-directory-button" aria-label="대화 세션 새로고침" onClick={()=>refreshAll.current()}><RefreshCw size={15}/>{refreshing?'확인 중…':'새로고침'}</button>
     </div>
     <p className="session-directory-summary" data-testid="session-directory-summary">실행 중 {totalRunning}개{attention>0?` · 확인할 세션 ${attention}개`:''}{ended>0?` · 종료 ${ended}개`:''} · 조회 대상 기기 {snapshots.length}개</p>
@@ -322,9 +327,10 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
     {notice&&<p className="session-directory-notice" role="status" data-testid="session-directory-notice">{notice}</p>}
     {!snapshots.length&&<p role="status">대화 세션을 불러오는 중…</p>}
     {shown.map(snapshot=>{
-      const key=sessionDirectoryDeviceKey(snapshot.device);
-      return <section key={key} className="session-directory-device" data-testid="session-directory-device" data-device-key={key} data-device-owner={snapshot.device.deviceId}>
-        <header><h3><Monitor size={16} aria-hidden="true"/>{snapshot.device.label}{snapshot.device.local&&<small>이 기기</small>}</h3><span>{snapshot.loading?'확인 중 · ':''}확인 {observedLabel(snapshot.observedAt)}</span></header>
+      const key=sessionDirectoryDeviceKey(snapshot.device),lastSeen=snapshot.device.local?undefined:stale[snapshot.device.endpointId];
+      return <section key={key} className="session-directory-device" data-testid="session-directory-device" data-device-key={key} data-device-owner={snapshot.device.deviceId} data-stale={lastSeen?'true':undefined}>
+        <header><h3><Monitor size={16} aria-hidden="true"/>{snapshot.device.label}{snapshot.device.local&&<small>이 기기</small>}{lastSeen&&<small data-testid="session-directory-device-stale">응답 없음 · {lastSeen}</small>}</h3><span>{snapshot.loading?'확인 중 · ':''}확인 {observedLabel(snapshot.observedAt)}</span></header>
+        {lastSeen&&<p className="session-directory-notice" role="status" data-testid="session-directory-device-stale-note">{snapshot.device.label}이(가) 응답하지 않습니다({lastSeen}). 그 Mac이 잠들었거나 꺼졌을 수 있습니다 — 목록 확인이 시간 초과로 끝날 수 있습니다.</p>}
         {snapshot.error&&<p className="session-directory-notice" role="status">확인 실패: {snapshot.error}{snapshot.observedAt?' 이전 목록을 표시합니다.':''} <button type="button" className="session-directory-button" onClick={()=>void inventory.current?.refreshDevice(key)}>다시 확인</button></p>}
         {!snapshot.observedAt&&!snapshot.error&&<p role="status">프로젝트와 세션을 확인하고 있습니다…</p>}
         {/* Above the live list: the sessions an update (or a crash) ended, offered back once (w14). */}
@@ -338,7 +344,7 @@ export function WorkroomSessionDirectory(props:PanelProps&{onEntryConsumed?:(non
       </section>;
     })}
     <details className="session-directory-help"><summary>세션 상태와 대화 저장 안내</summary><p className="session-directory-footnote">작업 세션은 응답 필요 · 작업 중 · 완료 · 응답 멈춤 · 대기 · 실행 중 · 종료 순으로 보입니다. 「완료」는 AI의 대화 기록이 작업 끝을 알린 세션이고, 「응답 멈춤」은 화면이 조용해진 것만 본 세션입니다. 상태는 이 기기의 세션만 표시하며, 종료된 세션은 호스트가 정리할 때까지 「종료」에 남습니다. 창을 닫아도 실행은 계속되고, 앱 종료 후에는 저장된 대화에서 이어 열기를 검토할 수 있습니다.</p></details>
-    {devices.length>0&&<CommunityChatPanel visible={visible} unread={unread} label={`함께 있는 대상 ${devices.length}개`}/>}
+    {devices.length>0&&<CommunityChatPanel visible={visible} unread={unread} label={`함께 있는 대상 ${devices.length}개${staleCount?` · 응답 없음 ${staleCount}개`:''}`}/>}
     {view&&activeSnapshot&&<dialog ref={dialog} className="workroom-session-dialog" data-testid="session-directory-dialog" aria-label={`${activeSnapshot.device.label} 대화 창`} onCancel={event=>{if(event.target!==event.currentTarget)return;event.preventDefault();if(document.activeElement?.closest('[data-workroom-local-escape]'))return;closeView();}}>
       <header className="workroom-session-dialog-header"><div><strong>{activeSession?.id===view.entry.sessionId&&view.savedTitle?view.savedTitle:activeSession?.label||activeSnapshot.projects.find(project=>project.targetId===view.entry.targetId)?.label||'대화 세션'}</strong><span>{activeSnapshot.device.label}</span></div><button type="button" className="session-directory-button" data-testid="session-directory-dialog-close" aria-label="대화 창 닫기" onClick={closeView}><X size={18}/></button></header>
       {view.notice&&<p className="session-directory-notice" role="status">{view.notice}</p>}

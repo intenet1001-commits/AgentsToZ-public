@@ -6,6 +6,7 @@ import {teamMemberAwaiting,teamMemberDisplay,type TeamMemberDisplay,type TeamPan
 import {workroomTeamSurfaceCopy} from './workroomTeamSurfaceCopy';
 import {TEAM_AGENT_LABEL,teamEffortSupported} from './workroomTeamInstruction';
 import {TEAM_SURFACE_NAME,type TeamLaunchSurface} from './teamLaunchOptions';
+import {teamEffortIsRequest} from './teamEffortCatalog';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
 import {workroomTeamCopy,workroomTeamStatusCopy} from './i18n';
 import {useAppLanguage} from './useAppLanguage';
@@ -133,10 +134,15 @@ export function WorkroomTeamStatus({sessionId,visible,openable,onOpen,onConfirm,
       ...(options.tmuxMode!==undefined?[options.tmuxMode?'tmux':off('tmux')]:[]),...(options.reuse?[options.reuse==='new'?surfaceCopy.newWindow:teamCopy.reuse]:[]),
       ...(options.appMode?[options.appMode==='new'?teamCopy.appModeNew:options.appMode==='reopen'?teamCopy.appModeReopen:teamCopy.appModeOpen]:[])].join(' · ');
   };
-  const effortLabel:Record<WorkroomEffortLevel,string>={low:teamCopy.effortLow,medium:teamCopy.effortMedium,high:teamCopy.effortHigh};
+  // The builder's words for a pinned level (WorkroomTeamBuilder.tsx): 「고정 · 높음」, 「고정 · xhigh」.
+  const effortLabel:Record<WorkroomEffortLevel,string>={low:teamCopy.effortLow,medium:teamCopy.effortMedium,high:teamCopy.effortHigh,
+    xhigh:fill(teamCopy.effortPinned,{level:'xhigh'}),max:fill(teamCopy.effortPinned,{level:'max'}),ultra:fill(teamCopy.effortPinned,{level:'ultra'})};
+  // A Workroom start refuses a Claude or Codex pin it cannot apply, so those read as fixed. Claude on Orca (its shell environment
+  // is not observed) and Hermes everywhere (its provider adapter may move or drop the level) say it is a request (teamEffortIsRequest).
+  const effortText=(member:TeamPanelMember,level:WorkroomEffortLevel)=>`${teamCopy.effort} ${effortLabel[level]}${teamEffortIsRequest(member.agent,member.surface) ? ` · ${teamCopy.effortRequested}` : ''}`;
   // A member that joined from an open session keeps whatever it runs with; the strip does not guess its model.
   const modelLine=(member:TeamPanelMember)=>member.attached?`${TEAM_AGENT_LABEL[member.agent]} · ${copy.attachedModel}`:[TEAM_AGENT_LABEL[member.agent],member.model?(member.provider?`${member.provider}/${member.model}`:member.model):teamCopy.modelPlaceholder,
-    ...(teamEffortSupported(member.agent)?[member.effort?`${teamCopy.effort} ${effortLabel[member.effort]}`:teamCopy.effortAuto]:[])].join(' · ');
+    ...(teamEffortSupported(member.agent) && (member.agent !== 'agy' || member.effort)?[member.effort?effortText(member,member.effort):member.surface && member.surface !== 'internal' ? teamCopy.effortDefault : teamCopy.effortAuto]:[])].join(' · ');
   return <div className="workroom-team-status" data-testid="workroom-team-status">
    {shown.map(team=>{
     const folded=collapsed[team.id]??team.state==='closed',own=team.members.find(member=>member.id===team.memberId);

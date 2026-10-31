@@ -20,7 +20,13 @@ const origin=`http://127.0.0.1:${http.address().port}`,checks=[];
 const source=await fetch(`${origin}/src/AiTerminalPanel.tsx`).then(r=>r.text()),main=await fetch(`${origin}/src/main.tsx`).then(r=>r.text());
 const react=source.match(/"([^"\n]*\/node_modules\/\.vite\/deps\/react\.js[^"\n]*)"/)?.[1],reactDom=main.match(/"([^"\n]*\/node_modules\/\.vite\/deps\/react-dom_client\.js[^"\n]*)"/)?.[1];assert(react&&reactDom);
 const session={id:'session_layout',targetId:'project_layout',agent:'codex',state:'running',createdAt:'2026-10-24T00:00:00Z',exitCode:null,cols:100,rows:28};
-const page_html=(popout=false)=>`<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module">
+// The native QA's second running Workroom (tests/workroom-browser-native.mjs starts a sibling for profile isolation).
+const sibling={...session,id:'session_layout_sibling',createdAt:'2026-10-24T00:01:00Z'};
+// While set, the stubs answer as the native QA host does: two running sessions, an empty team ledger, its project
+// label, and an AiTerminalService without an account manager (whose refusal the head shows as an update notice).
+let nativeMirror=false;
+const NATIVE_LABEL='임시 실제 PTY 워크룸',NATIVE_ACCOUNT_REFUSAL='이 호스트는 계정 선택을 지원하지 않습니다. 호스트 앱을 업데이트하세요.';
+const page_html=(popout=false,label='배치 검증')=>`<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module">
 import RefreshRuntime from '/@react-refresh';import React from ${JSON.stringify(react)};import ReactDOM from ${JSON.stringify(reactDom)};
 RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;
 // Tauri: runtime requests go to the stubbed routes below; the embedded browser opens at once and records every
@@ -45,7 +51,7 @@ function Dialog(){const ref=React.useRef(null);React.useEffect(()=>{ref.current.
   React.createElement('header',{className:'workroom-session-dialog-header'},'이렇게만들었어요 · codex'),
   // The same wrapper as WorkroomSessionDirectory and the native QA: the panel is not the content's direct child.
   React.createElement('div',{className:'workroom-session-dialog-content'},React.createElement('fieldset',{className:'session-directory-view-controls'},
-   React.createElement(AiTerminalPanel,{popout:true,projects:[{targetId:'project_layout',label:'배치 검증'}],entry:{nonce:1,targetId:'project_layout',sessionId:'session_layout'},sessionScope:'browser-layout'}))));}
+   React.createElement(AiTerminalPanel,{popout:true,projects:[{targetId:'project_layout',label:${JSON.stringify(label)}}],entry:{nonce:1,targetId:'project_layout',sessionId:'session_layout'},sessionScope:'browser-layout'}))));}
 ${popout?`const {WorkroomPopoutApp}=await import('/src/WorkroomPopoutApp.tsx');
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(WorkroomPopoutApp,{route:{sessionId:'session_layout',targetId:'project_layout',agent:'codex',bypassPermissions:false}}));`
 :`ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Dialog));`}
@@ -73,9 +79,10 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   const page=await browser.newPage({viewport:{width:1512,height:982}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',async route=>{
    const req=route.request(),url=new URL(req.url());if(url.origin!==origin)return route.abort();
-   if(url.pathname==='/__layout')return route.fulfill({contentType:'text/html',body:page_html(url.searchParams.get('shell')==='popout')});
+   if(url.pathname==='/__layout')return route.fulfill({contentType:'text/html',body:page_html(url.searchParams.get('shell')==='popout',nativeMirror?NATIVE_LABEL:undefined)});
    if(!url.pathname.startsWith('/api/'))return route.continue();
    if(url.pathname==='/api/ports')return route.fulfill({json:[]});
+   if(nativeMirror&&url.pathname==='/api/agent-runtime/workroom-teams')return route.fulfill({json:{teams:[]}});
    if(url.pathname==='/api/agent-dialogue/control')return route.fulfill({json:{success:true,inside:false,deviceId:'layout-device',devices:[],unread:0,lastMessageAt:null}});
    if(url.pathname==='/api/agent-runtime/terminals/history')return route.fulfill({json:{protocolVersion:'workroom-history-v1',storeInstanceId:'layout-history-store-001',restart:null}});
    if(url.pathname==='/api/agent-runtime/workroom-browser'){const r=req.postDataJSON();
@@ -83,11 +90,12 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
     if(r.operation==='resume')workspace={...workspace,owner:'agent',observation:{id:'obs_layout',text:Array.from({length:60},(_,i)=>`[${i}] textbox draft`).join('\n')}};
     if(r.operation==='grant')return route.fulfill({json:{success:true,grant:'grant_layout',workspace}});
     return route.fulfill({json:{success:true,workspace}});}
-   if(url.pathname.endsWith('/targets'))return route.fulfill({json:{targets:[{targetId:'project_layout',label:'배치 검증'}],complete:true,protocolVersion:'agentstoz-tasks-v2'}});
+   if(url.pathname.endsWith('/targets'))return route.fulfill({json:{targets:[{targetId:'project_layout',label:nativeMirror?NATIVE_LABEL:'배치 검증'}],complete:true,protocolVersion:'agentstoz-tasks-v2'}});
    if(url.pathname.endsWith('/terminals')){const r=req.postDataJSON();
     if(r.operation==='activity'){await new Promise(resolve=>setTimeout(resolve,300));return route.fulfill({json:{activity:{bootId:'00000000-0000-4000-8000-000000000001',cursor:1,reset:!r.after,sessions:[],events:[]}}});}
-    if(r.operation==='list')return route.fulfill({json:{sessions:[session]}});
+    if(r.operation==='list')return route.fulfill({json:{sessions:nativeMirror?[session,sibling]:[session]}});
     if(r.operation==='read')return route.fulfill({json:{session,chunks:r.after===0?[{seq:1,text:'\x1b[H\x1b[2JWORKROOM_LAYOUT_TERMINAL_OK\r\n'}]:[],nextCursor:1,hasMore:false,truncated:false}});
+    if(r.operation==='accounts'&&nativeMirror)return route.fulfill({status:400,json:{success:false,error:NATIVE_ACCOUNT_REFUSAL}});
     if(r.operation==='accounts')return route.fulfill({json:{accounts:{agent:'codex',selectedAccountId:'host-default',items:[{id:'host-default',agent:'codex',label:'Test CLI',authState:'unknown',checkedAt:null,loginState:'idle'}]}}});
     if(r.operation==='workspace')return route.fulfill({status:400,json:{error:'Fixture workspace unsupported'}});
     return route.fulfill({json:{session}});}
@@ -187,6 +195,7 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   assert(Math.abs((await settled(page)).slot.height-manualHeight.slot.height)<=2,`${name}: collapsing and reopening preserves the chosen browser height`);
   for(const key of ['Home','End']){await heightHandle.focus();await page.keyboard.press(key);await settled(page);await assertDividerRange(heightHandle,`height ${key}`);}
   await heightHandle.dblclick();const automatic=await settled(page);assert(Math.abs(automatic.slot.height-beforeHeight.slot.height)<=2,`${name}: double-click restores the default page height`);
+  await assertDividerRange(heightHandle,'automatic height');
   assert.equal(await page.locator('.xterm').count(),1,`${name}: two-axis resize never remounts the retained terminal`);
   checks.push(`${name}: an 800px window supports useful horizontal and vertical pointer resize, preserves manual height across collapse and restores automatic sizing`);
   // K1: Escape in the address field belongs to the field. It restores the address and leaves, and the Workroom dialog
@@ -214,6 +223,54 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   assert.deepEqual(m.last.rect.map(Math.round),[m.slot.left,m.slot.top,m.slot.width,m.slot.height].map(Math.round),`${name}: the native page is placed exactly on its slot`);
   checks.push(`${name}: in the native QA window the page stays whole on screen through AI control and a long draft (${Math.round(m.slot.height)}px page)`);
   if(process.env.LAYOUT_DEBUG)console.error(name,JSON.stringify({slot:m.slot,panes:m.panes,stack:m.stack,browser:m.browser,composer:m.composer,overflow:m.overflow,viewport:m.viewport,scroll:await page.evaluate(()=>document.querySelector('.workroom-session-dialog-content').scrollTop),frameTop:await page.evaluate(()=>document.querySelector('.workroom-browser-frame').getBoundingClientRect().top),body:await page.evaluate(()=>[...document.querySelector('.ai-terminal-body').children].map(e=>e.className+':'+Math.round(e.getBoundingClientRect().height))),chain:await page.evaluate(()=>{const out=[];for(let e=document.querySelector('.workroom-browser-frame');e;e=e.parentElement){const r=e.getBoundingClientRect();out.push(`${e.tagName}.${String(e.className).split(' ')[0]} top=${Math.round(r.top)} h=${Math.round(r.height)} sh=${e.scrollHeight} ch=${e.clientHeight} st=${e.scrollTop}`);}return out;})}));
+  // The native QA's own chrome at its calibrated 800x814, mounted the way it mounts: a 16px font before the first paint,
+  // two running Workrooms, its project label, no team, the host's account refusal in the head, the person's draft and the
+  // composer's grant chip. The native page cannot scroll with the Workroom, so every box that clips it must hold the
+  // frame without scrolling; before 2026-10-28 this chrome overflowed the body by 31px and the restored native window
+  // left the page 29px over the trusted UI.
+  nativeMirror=true;workspace={...workspace,owner:'human',observation:null};
+  await page.evaluate(()=>{localStorage.removeItem('agentstoz.workroomBrowserHeight');localStorage.removeItem('agentstoz.workroomBrowserSplit');localStorage.setItem('portmanager-workroom-font-size','16');});
+  await page.setViewportSize({width:800,height:814});await page.goto(`${origin}/__layout`);
+  await page.waitForFunction(()=>document.querySelector('.xterm-rows')?.textContent?.includes('WORKROOM_LAYOUT_TERMINAL_OK'));await fontsLoaded(page);
+  await page.locator('[data-testid=cli-account-picker] [role=status]').first().waitFor();
+  assert.equal(await page.locator('[data-session-id]').count()>=2,true,`${name}: the native mirror lists both running Workrooms`);
+  await page.getByTestId('workroom-browser-toggle').click();await page.getByTestId('owned-browser-address').fill('https://www.example.com/');await page.getByTestId('owned-browser-address').press('Enter');
+  await page.getByTestId('workroom-command-composer').locator('textarea').fill('이 페이지에서 확인한 내용을 정리해 주세요. 아직 보내지 않은 사람의 초안');
+  await page.getByTestId('workroom-browser-handoff').click();await page.getByTestId('workroom-browser-handoff-chip').waitFor();
+  // Each part is checked against its own clipping ancestors' padding boxes and the viewport, and every scroller's excess.
+  const nativeChrome=async label=>{const m=await settled(page),state=await page.evaluate(()=>{
+   const box=e=>{const r=e.getBoundingClientRect();return {top:r.top,left:r.left,bottom:r.bottom,right:r.right};};
+   const parts={frame:'.workroom-browser-frame',panel:'[data-testid=workroom-browser-panel]',slot:'[data-testid=owned-browser-slot]',heightHandle:'[data-testid=workroom-browser-height-divider]'},outside=[];
+   for(const [part,selector] of Object.entries(parts)){const node=document.querySelector(selector);if(!node){outside.push(`${part} missing`);continue;}const r=box(node),clips=[{name:'viewport',top:0,left:0,bottom:innerHeight,right:innerWidth}];
+    for(let e=node.parentElement;e;e=e.parentElement){const s=getComputedStyle(e);if(s.display==='contents'||(s.overflowX==='visible'&&s.overflowY==='visible'))continue;const b=e.getBoundingClientRect(),top=b.top+e.clientTop,left=b.left+e.clientLeft;clips.push({name:`${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}`,top,left,bottom:top+e.clientHeight,right:left+e.clientWidth});}
+    for(const c of clips)if(r.top<c.top-.5||r.left<c.left-.5||r.bottom>c.bottom+.5||r.right>c.right+.5)outside.push(`${part} ${JSON.stringify(r)} outside ${c.name} ${JSON.stringify(c)}`);}
+   const scrollers=Object.fromEntries(['.workroom-session-dialog-content','.ai-terminal-panel','.ai-terminal-workspace','.ai-terminal-body'].map(s=>{const e=document.querySelector(s);return [s,e?{excess:e.scrollHeight-e.clientHeight,scrollTop:e.scrollTop}:null];}));
+   // One row: every visible header control overlaps every other one vertically.
+   const header=document.querySelector('.ai-terminal-body > .ai-terminal-current'),controls=[...(header?.querySelectorAll(':scope > *, :scope > .ai-terminal-view-controls > *')??[])].filter(e=>e.getClientRects().length&&!e.classList.contains('ai-terminal-view-controls')).map(e=>e.getBoundingClientRect());
+   return {outside,scrollers,headerRows:controls.length&&Math.max(...controls.map(r=>r.top))<Math.min(...controls.map(r=>r.bottom))?1:controls.length?2:0};});
+   assert(Object.values(state.scrollers).every(s=>s&&s.excess<=2),`${name}: ${label}: no Workroom box scrolls around the native page ${JSON.stringify(state.scrollers)}`);
+   assert.deepEqual(state.outside,[],`${name}: ${label}: the frame, page panel, slot and height handle stay inside every clipping box`);
+   assert(m.slot.height>=200,`${name}: ${label}: the page keeps its 200px floor (${Math.round(m.slot.height)}px)`);
+   assert.deepEqual(m.last.rect.map(Math.round),[m.slot.left,m.slot.top,m.slot.width,m.slot.height].map(Math.round),`${name}: ${label}: the native page is placed exactly on its slot`);
+   assert.equal(state.headerRows,1,`${name}: ${label}: with the page open the session header keeps one row`);
+   await assertDividerRange(page.getByTestId('workroom-browser-divider'),`${label} width`);await assertDividerRange(page.getByTestId('workroom-browser-height-divider'),`${label} height`);
+   return m;};
+  const nativeDefault=await nativeChrome('native QA default');
+  // The automatic height is the panel's unrounded height and its maximum a floor, so a fraction at or above .5 once put
+  // aria-valuenow one above aria-valuemax (965 > 964 in the native probe). A few window heights land on such fractions.
+  for(const height of [817,821,826,830,843]){await page.setViewportSize({width:800,height});await settled(page);await assertDividerRange(page.getByTestId('workroom-browser-height-divider'),`automatic height at 800x${height}`);}
+  await page.setViewportSize({width:800,height:814});await settled(page);
+  // The native fixture's resize round trip: a taller window, both keyboard axes, both double-click resets, then back.
+  await page.setViewportSize({width:800,height:1214});await nativeChrome('native QA expanded');
+  await page.getByTestId('workroom-browser-divider').focus();await page.keyboard.press('Home');
+  await page.getByTestId('workroom-browser-height-divider').focus();await page.keyboard.press('Home');await nativeChrome('native QA minimum manual height');
+  await page.keyboard.press('End');await nativeChrome('native QA maximum manual height');
+  await page.getByTestId('workroom-browser-divider').dblclick();await page.getByTestId('workroom-browser-height-divider').dblclick();
+  await page.setViewportSize({width:800,height:814});const nativeRestored=await nativeChrome('native QA restored');
+  assert(['top','left','width','height'].every(k=>Math.abs(nativeRestored.slot[k]-nativeDefault.slot[k])<=2),`${name}: the restored native QA window puts the page back where it was (${JSON.stringify({before:nativeDefault.slot,after:nativeRestored.slot})})`);
+  if(process.env.LAYOUT_DEBUG)console.error(name,'native mirror',JSON.stringify({slot:nativeDefault.slot,body:await page.evaluate(()=>[...document.querySelector('.ai-terminal-body').children].map(e=>e.className.split(' ')[0]+':'+Math.round(e.getBoundingClientRect().height)))}));
+  checks.push(`${name}: the native QA chrome at 800x814 (two Workrooms, account refusal, grant chip) fits every clipping box with a ${Math.round(nativeDefault.slot.height)}px page through the resize round trip`);
+  nativeMirror=false;
   // Installed standalone windows use WorkroomPopoutApp -> WorkroomDeviceSwitch -> its visible content div -> panel.
   // A direct dialog/fieldset panel cannot catch a missing flex-height link in this actual production wrapper stack.
   await page.setViewportSize({width:1120,height:780});
@@ -263,6 +320,46 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await page.setViewportSize({width:1120,height:780});await settled(page);await assertPopout('restored laptop standalone browser');
   assert.equal(await page.locator('.xterm').count(),1,`${name}: standalone window and browser resize keep one terminal mounted`);
   checks.push(`${name}: actual standalone popout grows vertically from laptop to 3440x1440, supports height drag/reset and returns with its native slot/composer on screen`);
+  // Keyboard focus through the view switch and the one-row session header. The switch sits above the page in the
+  // full-page view and heads the panes otherwise, so those moves remount it: focus must stay on the pressed view's
+  // button rather than fall to the document. The person's own Chrome has no address field to take it instead.
+  await page.setViewportSize({width:1280,height:900});
+  await page.evaluate(()=>{localStorage.removeItem('agentstoz.workroomBrowserHeight');localStorage.removeItem('agentstoz.workroomBrowserSplit');localStorage.removeItem('portmanager-workroom-font-size');});
+  workspace={...workspace,owner:'human',observation:null};
+  await page.goto(`${origin}/__layout`);await page.waitForFunction(()=>document.querySelector('.xterm-rows')?.textContent?.includes('WORKROOM_LAYOUT_TERMINAL_OK'));await fontsLoaded(page);
+  await page.getByTestId('workroom-browser-toggle').click();await page.getByTestId('workroom-browser-source-chrome').click();
+  await page.locator('[data-testid=workroom-browser-panel][data-source=chrome]').waitFor();
+  const viewButton={terminal:'workroom-browser-view-terminal',split:'workroom-browser-toggle',browser:'workroom-browser-only'};
+  const focusedId=()=>page.evaluate(()=>document.activeElement?.getAttribute('data-testid')??document.activeElement?.tagName??null);
+  const chooseByKeyboard=async view=>{await page.getByTestId(viewButton[view]).focus();await page.keyboard.press('Enter');
+   await page.waitForFunction(view=>document.querySelector('[data-testid=workroom-browser-frame]')?.getAttribute('data-layout')===view,view);
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));return focusedId();};
+  let from='split';
+  for(const view of ['browser','split','terminal','browser','terminal','split']){
+   assert.equal(await chooseByKeyboard(view),viewButton[view],`${name}: with the person's Chrome, Enter on the ${view} view from the ${from} view keeps keyboard focus on that button`);from=view;}
+  // The built-in browser still hands focus to its address field when a page view opens.
+  await page.getByTestId('workroom-browser-source-owned').click();await page.getByTestId('owned-browser-address').waitFor();
+  assert.equal(await chooseByKeyboard('browser'),'owned-browser-address',`${name}: the built-in browser's full-page view focuses its address field`);
+  assert.equal(await chooseByKeyboard('terminal'),viewButton.terminal,`${name}: leaving the full-page view keeps focus on the terminal view's button`);
+  assert.equal(await chooseByKeyboard('split'),'owned-browser-address',`${name}: the built-in browser's split view focuses its address field`);
+  await page.getByTestId('owned-browser-address').fill('https://www.example.com/');await page.getByTestId('owned-browser-address').press('Enter');
+  await page.locator('[data-testid=workroom-browser-panel]:not([data-owner=""])').waitFor();
+  // Each header control reached by keyboard (WebKit tabs to buttons with Option) shows its whole 2px ring and 2px
+  // offset inside the header's scrollport, both when the controls fit and when the 800px header scrolls sideways.
+  const headerRings=async()=>{const ids=await page.evaluate(()=>[...document.querySelectorAll('.ai-terminal-body > .ai-terminal-current .ai-terminal-view-controls button')].filter(e=>e.getClientRects().length&&!e.disabled).map(e=>e.getAttribute('data-testid')));
+   assert(ids.length>=3,`${name}: the session header shows its view controls (${ids.join(', ')})`);
+   const tab=name==='webkit'?'Alt+Tab':'Tab',back=name==='webkit'?'Alt+Shift+Tab':'Shift+Tab',out=[];
+   for(const id of ids){await page.getByTestId(id).focus();await page.keyboard.press(back);await page.evaluate(()=>{document.querySelector('.ai-terminal-body > .ai-terminal-current').scrollLeft=0;});await page.keyboard.press(tab);
+    out.push(await page.evaluate(id=>{const header=document.querySelector('.ai-terminal-body > .ai-terminal-current'),e=document.activeElement,b=header.getBoundingClientRect(),r=e.getBoundingClientRect(),s=getComputedStyle(e),ring=parseFloat(s.outlineWidth)+parseFloat(s.outlineOffset),left=b.left+header.clientLeft,top=b.top+header.clientTop;
+     return {id,active:e.getAttribute('data-testid'),keyboard:e.matches(':focus-visible'),ring,clip:[r.left-ring-left,left+header.clientWidth-r.right-ring,r.top-ring-top,top+header.clientHeight-r.bottom-ring].map(n=>Math.round(n*100)/100)};},id));}
+   return out;};
+  for(const viewport of [{width:1280,height:900},{width:800,height:814}]){
+   await page.setViewportSize(viewport);await settled(page);
+   for(const ring of await headerRings()){
+    assert(ring.active===ring.id&&ring.keyboard&&ring.ring>=4,`${name}: at ${viewport.width}px the keyboard reaches ${ring.id} with its focus ring ${JSON.stringify(ring)}`);
+    assert(ring.clip.every(n=>n>=-.5),`${name}: at ${viewport.width}px ${ring.id}'s whole focus ring shows inside the session header ${JSON.stringify(ring)}`);}
+  }
+  checks.push(`${name}: keyboard focus stays on the pressed view button across all six view changes, and every session header control shows its whole focus ring at 1280px and 800px`);
   assert.deepEqual(errors,[]);
   }catch(e){if(process.env.LAYOUT_SHOT)await page.screenshot({path:`${process.env.LAYOUT_SHOT}-${name}.png`}).catch(()=>{});console.error(errors,await page.evaluate(()=>window.nativeOps?.slice(-5)).catch(()=>null));throw e;}
  }finally{await browser.close();}

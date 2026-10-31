@@ -34,10 +34,20 @@ function rawKeys(mode: string) {
   return `#!/bin/sh
 stty raw -echo
 printf '${mode}KEYS_READY\\r\\n'
+if [ -f "$HOME/exit-screen" ]; then
+  if [ "$(cat "$HOME/exit-screen")" = redraw ] || [ "$(cat "$HOME/exit-screen")" = delayed ] || [ "$(cat "$HOME/exit-screen")" = unchanged ]; then printf '❯ 1. Yes\\r\\n';
+  elif [ "$(cat "$HOME/exit-screen")" = blank ]; then printf '\\033[2J\\033[H';
+  else printf '❯ 2. No, exit\\r\\n'; fi
+fi
 while :; do
   byte=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')
   [ -n "$byte" ] || exit 0
   printf 'KEY:%s\\r\\n' "$byte"
+  if [ "$byte" = 42 ]; then
+    if [ ! -f "$HOME/exit-screen" ]; then printf '❯ 1. Yes\\r\\n';
+    elif [ "$(cat "$HOME/exit-screen")" = redraw ]; then printf '\\033[2J\\033[H❯ 2. No, exit\\r\\n';
+    elif [ "$(cat "$HOME/exit-screen")" = delayed ]; then sleep 1; printf '\\033[2J\\033[H❯ 2. No, exit\\r\\n'; fi
+  fi
 done
 `;
 }
@@ -197,6 +207,79 @@ test('send_workroom_keys types only allow-listed keys, follows the cursor-key mo
     await f.call('close_workroom_session', {portId: 'plain-project', sessionId, requestId});
   }
 }, 60_000);
+
+test('send_workroom_keys refuses an exit choice and never resumes a partly sent request on retry', async () => {
+  writeFileSync(join(f.home, 'exit-screen'), 'fixture');
+  try {
+    const id = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'hermes', requestId: 'keys_exit_start1', foreground: false})).session.id;
+    await f.until('plain-project', id, 'No, exit');
+    const first = {portId: 'plain-project', sessionId: id, requestId: 'keys_exit_first1', keys: ['enter']};
+    expect(await f.call('send_workroom_keys', first)).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 0});
+    expect(await f.call('send_workroom_keys', {...first, requestId: 'keys_exit_number', keys: ['2']})).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 0});
+    const partial = {...first, requestId: 'keys_exit_partial', keys: ['down', 'enter']};
+    const concurrent = await Promise.all([f.call('send_workroom_keys', partial), f.call('send_workroom_keys', partial)]);
+    for (const result of concurrent) expect(result).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 1});
+    expect(await f.call('send_workroom_keys', partial)).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 1});
+    const seen = await f.until('plain-project', id, 'KEY:42');
+    expect([...seen.text.matchAll(/KEY:([0-9a-f]{2})/g)].map(match => match[1])).toEqual(['1b', '5b', '42']);
+    await f.call('close_workroom_session', {portId: 'plain-project', sessionId: id, requestId: 'keys_exit_close1'});
+    writeFileSync(join(f.home, 'exit-screen'), 'redraw');
+    const redrawn = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'hermes', requestId: 'keys_exit_redraw1', foreground: false})).session.id;
+    await f.until('plain-project', redrawn, '1. Yes');
+    expect(await f.call('send_workroom_keys', {portId: 'plain-project', sessionId: redrawn, requestId: 'keys_exit_redraw2', keys: ['down', 'enter']}))
+      .toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 1});
+    expect((await f.call('read_workroom_session', {portId: 'plain-project', sessionId: redrawn, view: 'screen'})).text).toContain('No, exit');
+    await f.call('close_workroom_session', {portId: 'plain-project', sessionId: redrawn, requestId: 'keys_exit_close2'});
+  } finally {
+    rmSync(join(f.home, 'exit-screen'), {force: true});
+  }
+}, 30_000);
+
+test('independent key requests for one Workroom wait for the preceding sequence before checking a selection', async () => {
+  writeFileSync(join(f.home, 'exit-screen'), 'redraw');
+  try {
+    const id = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'hermes', requestId: 'keys_queue_start1', foreground: false})).session.id;
+    await f.until('plain-project', id, '1. Yes');
+    const first = f.call('send_workroom_keys', {portId: 'plain-project', sessionId: id, requestId: 'keys_queue_first1', keys: [...Array(11).fill('y'), 'down']});
+    await f.until('plain-project', id, 'KEY:79');
+    const second = f.call('send_workroom_keys', {portId: 'plain-project', sessionId: id, requestId: 'keys_queue_second1', keys: ['enter']});
+    expect(await Promise.race([second.then(() => 'finished'), Bun.sleep(250).then(() => 'pending')])).toBe('pending');
+    expect(await first).toMatchObject({success: true, effect: 'sent-workroom-keys'});
+    expect(await second).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT', keysSent: 0});
+    await f.call('close_workroom_session', {portId: 'plain-project', sessionId: id, requestId: 'keys_queue_close1'});
+  } finally { rmSync(join(f.home, 'exit-screen'), {force: true}); }
+}, 30_000);
+
+test('slow redraw and unchanged selection never send Enter after navigation', async () => {
+  for (const mode of ['delayed', 'unchanged']) {
+    writeFileSync(join(f.home, 'exit-screen'), mode);
+    try {
+      const id = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'hermes', requestId: `slow_start_${mode}`, foreground: false})).session.id;
+      await f.until('plain-project', id, '1. Yes');
+      expect(await f.call('send_workroom_keys', {portId: 'plain-project', sessionId: id, requestId: `slow_arrow_${mode}`, keys: ['down']})).toMatchObject({success: true});
+      const request = {portId: 'plain-project', sessionId: id, requestId: `slow_enter_${mode}`, keys: ['enter']};
+      const results = await Promise.all([f.call('send_workroom_keys', request), f.call('send_workroom_keys', request)]);
+      for (const result of results) expect(result).toMatchObject({success: false, code: mode === 'delayed' ? 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT' : 'AGENTSTOZ_USE_WORKROOM_KEYS_SCREEN_UNCHANGED', keysSent: 0});
+      expect(await f.call('send_workroom_keys', request)).toMatchObject({success: false, keysSent: 0});
+      const read = await f.call('read_workroom_session', {portId: 'plain-project', sessionId: id});
+      expect(read.text).not.toContain('KEY:0d');
+      await f.call('close_workroom_session', {portId: 'plain-project', sessionId: id, requestId: `slow_close_${mode}`});
+    } finally { rmSync(join(f.home, 'exit-screen'), {force: true}); }
+  }
+}, 30_000);
+
+test('a blank Workroom screen never counts as a readable selection', async () => {
+  writeFileSync(join(f.home, 'exit-screen'), 'blank');
+  try {
+    const id = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'hermes', requestId: 'keys_blank_start1', foreground: false})).session.id;
+    await Bun.sleep(500); // Let the fixture clear the screen after startup.
+    const result = await f.call('send_workroom_keys', {portId: 'plain-project', sessionId: id, requestId: 'keys_blank_enter1', keys: ['enter']});
+    expect(result).toMatchObject({success: false, code: 'AGENTSTOZ_USE_WORKROOM_KEYS_SCREEN_UNAVAILABLE', keysSent: 0});
+    const screen = await f.call('read_workroom_session', {portId: 'plain-project', sessionId: id, view: 'screen'});
+    expect(screen.text).not.toContain('KEY:0d');
+    await f.call('close_workroom_session', {portId: 'plain-project', sessionId: id, requestId: 'keys_blank_close1'});
+  } finally { rmSync(join(f.home, 'exit-screen'), {force: true}); }
+}, 30_000);
 
 test('wait returns on quiet or exit, and close ends only that session and skips memory unless asked', async () => {
   const id = (await f.call('start_workroom_session', {portId: 'plain-project', agent: 'codex', requestId: 'wait_start_12345', foreground: false})).session.id;

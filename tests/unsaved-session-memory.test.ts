@@ -100,8 +100,10 @@ test('a busy host is skipped and stays unsaved; a conflict is a failure; the run
   await saveTargets([{folder:A,name:'앱',agent:'claude'},{folder:C,name:'블로그',agent:'claude'}]);
   const [busy,conflict]=peek().run!.items;
   expect(busy).toMatchObject({status:'skipped',message:'다른 기억 저장이 진행 중이라 시작하지 않았습니다 · 잠시 후 다시 저장하세요.'});
-  expect(conflict).toMatchObject({status:'failed',message:'로컬·Supabase가 모두 바뀌어 저장하지 않았습니다 · 프로젝트 화면에서 검토하세요.'});
+  expect(conflict).toMatchObject({status:'failed',problem:'conflict',message:'로컬·Supabase 기억이 모두 바뀌어 저장하지 않았습니다. 두 기억을 비교해 해결하세요.'});
   expect(calls.filter(c=>c.path==='/api/project-memory/session-end').length).toBe(2);
+  // A conflict ends the run: 「진행 중인 저장·동기화가 끝난 뒤」 must not stay up behind it, so the dock's 「비교·해결」 can act.
+  expect(peek().run!.running).toBe(false);
 });
 
 test('an unknown outcome is never resent, and the rest of the run does not start behind it',async()=>{
@@ -112,10 +114,20 @@ test('an unknown outcome is never resent, and the rest of the run does not start
   expect(peek().run!.items[0]!.message).toMatch(/다시 보내지 않았습니다/);
 });
 
+test('a provider failure never copies CLI headers, prompts, paths or secrets into the save notice',async()=>{
+  const secret='PRIVATE_MEMORY_PROMPT_DO_NOT_DISPLAY';
+  saveReply=async()=>json({error:`OpenAI Codex v0.163.0\nworkdir: /private/project\nuser\n${secret.repeat(2000)}\nERROR: connection failed`,code:'PROJECT_MEMORY_AGENT_FAILED'},500);
+  await saveTargets([{folder:A,name:'앱',agent:'codex'}]);
+  const item=peek().run!.items[0]!;
+  expect(item.status).toBe('failed');
+  expect(item.message?.includes(secret)).toBe(false);expect(item.message?.includes('/private/project')).toBe(false);
+  expect(item.message!.length).toBeLessThan(160);expect(item).toMatchObject({problem:'agent'});
+});
+
 test('a backup that failed after the local save still counts as saved, and says how to retry it',async()=>{
   saveReply=async()=>json({success:false,localSaved:true,remoteBackedUp:false,backupError:'네트워크'});
   await saveTargets([{folder:A,name:'앱',agent:'claude'}]);
-  expect(peek().run!.items[0]).toMatchObject({status:'saved',message:'로컬에 저장했습니다 · Supabase 백업은 「동기화」로 다시 시도하세요 (네트워크)'});
+  expect(peek().run!.items[0]).toMatchObject({status:'saved',problem:'backup',message:'로컬에 저장했습니다. Supabase 백업 상태를 확인하세요.'});
 });
 
 test('the dismissal key ignores order and changes when the set or a last save changes',()=>{

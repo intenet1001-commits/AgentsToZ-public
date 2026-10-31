@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Cable, RefreshCw, X } from 'lucide-react';
 import { isTauri } from '../lib/env';
+import { isDialogDismissKey } from '../dialogEscape';
 import type { ChannelHealth, ChannelHealthReport, ChannelHealthState } from '../channelHealth';
 
 /**
@@ -139,7 +140,7 @@ export function ChannelHealthDialog({ onClose, onToast }: {
   }, [onToast]);
 
   return <div role="dialog" aria-modal="true" aria-labelledby="channel-health-title" data-testid="channel-health-dialog"
-    onKeyDown={event => { if (event.key === 'Escape') onClose(); }}
+    onKeyDown={event => { if (isDialogDismissKey(event.nativeEvent)) { event.preventDefault(); onClose(); } }}
     style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div style={{ width: 'min(600px, 100%)', maxHeight: '85vh', overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--line)',

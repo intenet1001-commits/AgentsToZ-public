@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {useContextDismissals,withoutDismissedContextSessions} from '../contextSessionCleanup';
 import { ArrowUpRight, FolderOpen, Gauge, Loader2, RefreshCw, X } from 'lucide-react';
 import { isTauri } from '../lib/env';
 import { projectMemoryApi } from '../ProjectMemoryPanel';
@@ -21,6 +22,7 @@ import {
 } from '../contextApiVersion';
 import type { ContextProjectNavigationCandidate } from '../contextProjectNavigation';
 import { resolveContextSessionProjectBinding } from '../contextSessionProject';
+import { measuredContextPercent } from '../contextUsageReading';
 import {
   contextSessionMemoryPath,
   contextSessionProjectPath,
@@ -557,14 +559,16 @@ export function AiUsagePanel({
     return () => { cancelled = true; };
   }, []);
 
-  const visibleSessions = visibleContextSessions(ctx.sessions);
+  const dismissals = useContextDismissals();
+  const currentSessions = visibleContextSessions(ctx.sessions);
+  const visibleSessions = withoutDismissedContextSessions(currentSessions,dismissals);
   // AI usage normally hides stale context snapshots. A project-bound Codex
   // Voice chat is also the bridge to that project's durable memory, though, so
   // retain a bounded history row for it instead of making a moved Voice vanish
   // merely because ChatGPT stopped emitting usage counters.
   // A dead one older than a day moves to 「이전 기록」 (VOC 2026-09-24).
   const projectVoiceHistory = pinnedProjectVoiceHistory(ctx.sessions);
-  const historySessions = contextSessionHistory(ctx.sessions);
+  const historySessions = [...contextSessionHistory(ctx.sessions),...currentSessions.filter(session=>!visibleSessions.includes(session))];
   const extraHistory = historySessions.filter(session => !projectVoiceHistory.includes(session));
   const displayedSessions = [...visibleSessions, ...projectVoiceHistory, ...(showContextHistory ? extraHistory.slice(0, contextHistoryLimit) : [])];
   const hiddenUnverifiedSurfaceCount = hiddenUnverifiedContextSurfaceCount(ctx.sessions);
@@ -724,7 +728,9 @@ export function AiUsagePanel({
                   const isVoiceChat = s.sourceAgent === 'codex' && s.threadSource === 'realtime_voice';
                   const voiceBinding = isVoiceChat ? voiceBindingBadge(s.voiceBindingState) : null;
                   const voiceMemoryBlocked = voiceProjectMemoryIsBlocked(s);
-                  const warn = (s.usedPercent ?? 0) >= CONTEXT_WARNING_THRESHOLD;
+                  // Claude's zero reading before its first reply is 「not measured」, not 0% (src/contextUsageReading.ts).
+                  const measured = measuredContextPercent(s);
+                  const warn = (measured ?? 0) >= CONTEXT_WARNING_THRESHOLD;
                   const memoryState = memoryFolderPath ? memoryStatusByPath[memoryFolderPath] : undefined;
                   const memoryAction = voiceMemoryBlocked
                     ? 'unavailable'
@@ -810,7 +816,7 @@ export function AiUsagePanel({
                           marginLeft: 'auto', fontSize: 13, fontWeight: 700,
                           color:warn ? 'var(--ink-fbbf24)' : 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace",
                         }}>
-                          {typeof s.usedPercent === 'number' ? `${s.usedPercent}%` : '—'}
+                          {measured !== null ? `${s.usedPercent}%` : '—'}
                         </span>
                       </div>
                       <div
@@ -856,12 +862,14 @@ export function AiUsagePanel({
                           {s.modelName}
                           {s.usedTokens && s.windowSize
                             ? ` · ${compactTokens(s.usedTokens)}/${compactTokens(s.windowSize)}`
-                            : typeof s.usedPercent !== 'number'
-                              ? ' · 컨텍스트 수치 없음'
-                              : ''}
+                            : typeof s.usedPercent === 'number' && measured === null
+                              ? ' · 다음 응답 뒤 측정'
+                              : measured === null
+                                ? ' · 컨텍스트 수치 없음'
+                                : ''}
                         </span>
                       </div>
-                      <UsageBar percent={s.usedPercent} />
+                      <UsageBar percent={measured} />
                       {projectMovePending && (
                         <div
                           data-testid={`context-session-project-pending-${s.sessionId}`}

@@ -14,8 +14,12 @@ export type { ContextSurfacePresence } from './contextSessionPresence';
 
 export interface ContextSessionVisibilityCandidate {
   state: 'active' | 'idle' | 'stale';
+  threadSource?: string | null;
   surfacePresence?: ContextSurfacePresence | null;
 }
+
+/** Internal review/worker records are never human conversations, regardless of their title. */
+export const isInternalContextSessionSource=(source:unknown):boolean=>source==='guardian_review'||source==='subagent'||(!!source&&typeof source==='object');
 
 /** Treat an absent or forward-compatible value as a generic recent record.
  * Older API servers therefore retain their current behavior during rolling
@@ -40,7 +44,8 @@ export function visibleContextSessions<T extends ContextSessionVisibilityCandida
   sessions: readonly T[] | null | undefined,
 ): T[] {
   return (sessions ?? []).filter(session => (
-    session.state !== 'stale'
+    !isInternalContextSessionSource(session.threadSource)
+    && session.state !== 'stale'
     && !['gone', 'unverified'].includes(normalizeContextSurfacePresence(session.surfacePresence))
   ));
 }
@@ -59,7 +64,7 @@ export function hiddenUnverifiedContextSurfaceCount(
 /** Hidden rows remain inspectable as history, without claiming they are live. */
 export function contextSessionHistory<T extends ContextSessionVisibilityCandidate>(sessions: readonly T[] | null | undefined): T[] {
   const current = new Set(visibleContextSessions(sessions));
-  return (sessions ?? []).filter(session => !current.has(session));
+  return (sessions ?? []).filter(session => !isInternalContextSessionSource(session.threadSource)&&!current.has(session));
 }
 
 /** A runtime probe failure must never be painted as a live/active window. */

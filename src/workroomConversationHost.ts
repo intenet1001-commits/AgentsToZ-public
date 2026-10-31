@@ -1,5 +1,6 @@
 import type { AiTerminalSummary } from './aiTerminalProtocol';
 import type { AiTerminalResume } from './aiTerminalResume';
+import type { AiTerminalLaunchModel } from './aiTerminalLaunchArgs';
 
 /** Host-only facts. Never accepted from a wire request or returned to a client. */
 export interface WorkroomSessionContext {
@@ -25,6 +26,10 @@ export interface WorkroomHistoryLaunch {
   cwd: string;
   validate(context: WorkroomSessionContext): void | Promise<void>;
   launching(): void;
+  /** Internal scheduler-only evidence; never accepted from a history request. */
+  launchModel?: AiTerminalLaunchModel;
+  startGuard?: (context: WorkroomSessionContext) => void | (() => void) | Promise<void | (() => void)>;
+  startEffectGate?: import('./aiTerminalService').AiTerminalEffectGate;
 }
 export interface WorkroomHistoryObserver {
   started(context: WorkroomSessionContext, logicalConversationId?: string, previousSessionId?: string): void;

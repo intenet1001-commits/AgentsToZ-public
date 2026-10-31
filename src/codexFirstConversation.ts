@@ -10,6 +10,7 @@ type RpcId = number;
 type JsonRecord = Record<string, unknown>;
 
 export type CodexFirstConversationErrorCode =
+  | 'CODEX_DESKTOP_AUTHORITY_REVOKED'
   | 'CODEX_APP_SERVER_UNAVAILABLE'
   | 'CODEX_APP_SERVER_PROTOCOL_FAILED'
   | 'CODEX_DESKTOP_APP_OPEN_FAILED'
@@ -352,6 +353,8 @@ export async function finalizeCodexDesktopFirstConversation(input: {
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
   spawn?: SpawnCodexAppServer;
+  /** Recovery checks must not overwrite a title the user may have edited. */
+  readOnly?: boolean;
 }): Promise<CodexFirstConversationResult> {
   if (!UUID_RE.test(input.threadId)) {
     throw new CodexFirstConversationError(
@@ -406,7 +409,7 @@ export async function finalizeCodexDesktopFirstConversation(input: {
       if (UUID_RE.test(turnId) && latestTurn?.status === 'completed') {
         // Run the explicit name after completion so Codex's automatic title
         // generation cannot race and overwrite the stable remote label.
-        await rpc.request('thread/name/set', { threadId: input.threadId, name: title }, timeoutAt);
+        if (!input.readOnly) await rpc.request('thread/name/set', { threadId: input.threadId, name: title }, timeoutAt);
         await rpc.request('thread/unsubscribe', { threadId: input.threadId }, timeoutAt).catch(() => ({}));
         return { threadId: input.threadId, turnId, title };
       }

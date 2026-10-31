@@ -1,25 +1,39 @@
 import {test,expect} from 'bun:test';
-import {mkdtempSync,realpathSync,rmSync,readdirSync,readFileSync,writeFileSync,mkdirSync,symlinkSync,truncateSync} from 'node:fs';
+import {mkdtempSync,realpathSync,rmSync,readdirSync,readFileSync,writeFileSync,mkdirSync,symlinkSync,truncateSync,renameSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {Database} from 'bun:sqlite';
-import {PreCompactionRecovery,type RecoveryAgent} from '../src/preCompactionRecovery';
+import {PreCompactionRecovery,RECOVERY_INTENT_GRACE,type RecoveryAgent} from '../src/preCompactionRecovery';
 import {readRecoveryJsonl,readHermesRecovery} from '../src/preCompactionSources';
 import {readPreCompactionHookRequest} from '../src/preCompactionBridge';
 import {acquireWorkspaceDirectoryLease} from '../src/workspaceLease';
 import {MEMORY_INPUT_TTL,MemorySaveInputStore} from '../src/memorySaveInputStore';
 import {withRecoveryHook,recoveryHookScript} from '../src/projectMemoryRecoveryHook';
 
-async function fixture(run:(f:{host:PreCompactionRecovery;target:{id:string;root:string;memoryId:string;validate:()=>Promise<boolean>};root:string;setNow:(n:number)=>void;setValid:(b:boolean)=>void;source:(agent:RecoveryAgent,text?:string)=>Promise<any>})=>Promise<void>){
-  const root=realpathSync(mkdtempSync(join(tmpdir(),'recovery-checkpoint-'))),key=randomBytes(32);let now=1000,valid=true;
+async function fixture(run:(f:{host:PreCompactionRecovery;newHost:()=>PreCompactionRecovery;target:{id:string;root:string;memoryId:string;validate:()=>Promise<boolean>};root:string;setNow:(n:number)=>void;setValid:(b:boolean)=>void;source:(agent:RecoveryAgent,text?:string)=>Promise<any>;abandon:()=>void;setRefreshLimit:(n:number)=>void})=>Promise<void>){
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'recovery-checkpoint-'))),key=randomBytes(32);let now=1000,valid=true,refreshLimit=Infinity;
+  const held=new Set<any>();
   const d={path:join(root,'checkpoints.sqlite'),appDataRoot:root,supported:()=>true,now:()=>now,
-    acquire:()=>acquireWorkspaceDirectoryLease({workspacePath:root,appDataDir:root,attempts:1,deadOwnerRecoveryClass:'manual'}),
-    release:(lease:any)=>lease.release(),readKey:async()=>Buffer.from(key)};
+    acquire:async()=>{const real=await acquireWorkspaceDirectoryLease({workspacePath:root,appDataDir:root,attempts:1,deadOwnerRecoveryClass:'manual'});
+      // `setRefreshLimit(n)`: each lease acquired afterwards reports a lost lock from its n-th refresh on.
+      let refreshes=0;const limit=refreshLimit,lease=limit===Infinity?real:{identity:real.identity,lockPath:real.lockPath,refresh:()=>++refreshes<limit&&real.refresh(),release:()=>real.release()};
+      held.add(lease);return lease;},
+    release:(lease:any)=>{held.delete(lease);lease.release();},readKey:async()=>Buffer.from(key)};
   const host=new PreCompactionRecovery(d),target={id:'target-id',root,memoryId:'memory-id',validate:async()=>valid};
-  try{await run({host,target,root,setNow:n=>{now=n;},setValid:b=>{valid=b;},source:async(agent,text='synthetic current conversation')=>{
+  // `abandon` models a host process that died holding the app-data lock, after that lock was recovered.
+  try{await run({host,newHost:()=>new PreCompactionRecovery(d),target,root,setNow:n=>{now=n;},setValid:b=>{valid=b;},setRefreshLimit:n=>{refreshLimit=n;},abandon:()=>{for(const lease of [...held]){held.delete(lease);lease.release();}},source:async(agent,text='synthetic current conversation')=>{
     const bytes=Buffer.from(text);return {agent,sessionId:'session-id',bytes,sourceDigest:createHash('sha256').update(bytes).digest('hex'),start:0,end:bytes.length};
   }});}finally{key.fill(0);rmSync(root,{recursive:true,force:true});}
+}
+const encFiles=(root:string)=>readdirSync(join(root,'precompaction-inputs')).filter(n=>n.endsWith('.enc'));
+const intentRows=(root:string)=>{const db=new Database(join(root,'checkpoints.sqlite'),{readonly:true});try{return db.query('SELECT id,unresolved FROM checkpoint_intents').all() as {id:string;unresolved:number}[];}finally{db.close();}};
+/** Starts a capture whose 3rd validate (the check after a passed readback) never answers: a process dying before its receipt. */
+async function dieBeforeReceipt(host:PreCompactionRecovery,target:{id:string;root:string;memoryId:string;validate:()=>Promise<boolean>},source:()=>Promise<any>){
+  let checks=0;
+  void host.capture({...target,validate:()=>++checks<3?Promise.resolve(true):new Promise<boolean>(()=>{})},source);
+  for(let i=0;i<400&&checks<3;i++)await new Promise(r=>setTimeout(r,5));
+  expect(checks).toBe(3);
 }
 
 test('four agents share encrypted recovery, durable replay and a separate opt-in without claiming memory or backup completion',async()=>{
@@ -85,6 +99,194 @@ test('source changes, missing registration, expiry, stale settings and periodic 
     expect((await f.host.status(f.target)).receipts[0]?.expired).toBe(true);
     await expect(f.host.capture(f.target,()=>f.source('codex','x'.repeat(32_001)))).rejects.toThrow();
     expect((await f.host.status(f.target)).receipts).toHaveLength(1);
+  });
+});
+
+test('a rejected new capture cleans up only its own ciphertext; an existing receipt stays readable',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    const saved=await f.host.capture(f.target,()=>f.source('codex','already receipted'));
+    let checks=0;
+    const rejecting={...f.target,validate:async()=>++checks<3};
+    await expect(f.host.capture(rejecting,()=>f.source('claude','rejected after stage'))).rejects.toThrow();
+    const root=join(f.root,'precompaction-inputs');
+    expect(readdirSync(root).filter(n=>n.endsWith('.enc'))).toHaveLength(1);
+    checks=0;await expect(f.host.capture(rejecting,()=>f.source('codex','already receipted'))).rejects.toThrow();
+    expect((await f.host.read(f.target,saved.checkpointId!)).text).toBe('already receipted');
+    expect(readdirSync(root).filter(n=>n.endsWith('.enc'))).toHaveLength(1);
+    expect((await f.host.status(f.target)).receipts).toHaveLength(1);
+  });
+});
+
+test('repeated rejected captures leave no permanent expired markers or exhausted staging budget',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    for(let i=0;i<64;i++){
+      let checks=0;
+      await expect(f.host.capture({...f.target,validate:async()=>++checks<3},async()=>({...await f.source('codex','rejected-'+i),sessionId:'session-'+i}))).rejects.toThrow();
+    }
+    expect(readdirSync(join(f.root,'precompaction-inputs'))).toEqual([]);
+    expect((await f.host.capture(f.target,()=>f.source('codex','still has room'))).localCheckpointSaved).toBe(true);
+  });
+});
+
+test('a replaced ciphertext is never deleted using a stale stage ownership proof',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    let checks=0,path='';
+    const rejecting={...f.target,validate:async()=>{
+      if(++checks!==3)return true;
+      const root=join(f.root,'precompaction-inputs');path=join(root,readdirSync(root).find(n=>n.endsWith('.enc'))!);
+      const bytes=readFileSync(path);renameSync(path,path+'.original');writeFileSync(path,bytes,{mode:0o600});return false;
+    }};
+    await expect(f.host.capture(rejecting,()=>f.source('claude'))).rejects.toThrow();
+    expect(readFileSync(path)).toEqual(readFileSync(path+'.original'));
+  });
+});
+
+test('interrupted receipt before restart is preserved when ownership cannot be proved',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    const crash=await f.host.capture(f.target,()=>f.source('agy','interrupted after flush'));
+    const root=join(f.root,'precompaction-inputs'),name=readdirSync(root).find(n=>n.endsWith('.enc'))!;
+    const db=new Database(join(f.root,'checkpoints.sqlite'));
+    db.query('DELETE FROM checkpoints WHERE id=?').run(crash.checkpointId!);db.query('DELETE FROM checkpoint_budgets WHERE agent=?').run('agy');db.close();
+    let checks=0;
+    await expect(f.newHost().capture({...f.target,validate:async()=>++checks<3},()=>f.source('agy','interrupted after flush'))).rejects.toThrow();
+    expect(readdirSync(root)).toContain(name);
+    f.setNow(1000+MEMORY_INPUT_TTL);await f.newHost().maintenance();
+    expect(readdirSync(root)).toContain(name);
+  });
+});
+
+test('database loss followed by a newly initialized database never deletes existing ciphertext',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await f.host.capture(f.target,()=>f.source('codex'));
+    const root=join(f.root,'precompaction-inputs'),name=readdirSync(root).find(n=>n.endsWith('.enc'))!;
+    rmSync(join(f.root,'checkpoints.sqlite'));f.setNow(1000+MEMORY_INPUT_TTL);
+    const restarted=f.newHost();await restarted.setEnabled(f.target,0,true,1);await restarted.maintenance();
+    expect(readdirSync(root)).toContain(name);
+  });
+});
+
+test('a corrupt interrupted ciphertext is retained for recovery',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    const crash=await f.host.capture(f.target,()=>f.source('claude'));
+    const root=join(f.root,'precompaction-inputs'),name=readdirSync(root).find(n=>n.endsWith('.enc'))!;
+    const db=new Database(join(f.root,'checkpoints.sqlite'));db.query('DELETE FROM checkpoints WHERE id=?').run(crash.checkpointId!);db.close();
+    truncateSync(join(root,name),8);f.setNow(1000+MEMORY_INPUT_TTL);
+    await f.newHost().maintenance();expect(readdirSync(root)).toContain(name);
+  });
+});
+
+test('a receipt write that fails after a passed readback removes its own ciphertext instead of leaving it unreceipted',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    let checks=0,blocker:Database|undefined,error:any;
+    // Right after the readback check (3rd validate) another writer takes the lock, so the receipt write's schema
+    // bootstrap gets SQLITE_BUSY (busy_timeout=100ms) before any receipt transaction starts.
+    const blocked={...f.target,validate:async()=>{if(++checks===3){blocker=new Database(join(f.root,'checkpoints.sqlite'));blocker.run('BEGIN IMMEDIATE');}return true;}};
+    try{await f.host.capture(blocked,()=>f.source('codex','receipt write fails'));}catch(e){error=e;}
+    finally{blocker?.run('ROLLBACK');blocker?.close();}
+    expect(error?.code).toBe('SQLITE_BUSY');
+    expect(encFiles(f.root)).toEqual([]);
+    expect((await f.host.status(f.target)).receipts).toEqual([]);
+    // Deleting the intent hit the same lock; the sweep finds an intent without a file and only clears it.
+    expect(intentRows(f.root)).toHaveLength(1);
+    f.setNow(1000+RECOVERY_INTENT_GRACE);await f.newHost().maintenance();
+    expect(intentRows(f.root)).toEqual([]);
+    const saved=await f.host.capture(f.target,()=>f.source('codex','receipt write fails'));
+    expect((await f.host.read(f.target,saved.checkpointId!)).text).toBe('receipt write fails');
+  });
+});
+
+test('a capture that dies between staging and its receipt is reclaimed by the intent sweep, never while it may be in flight',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await dieBeforeReceipt(f.host,f.target,()=>f.source('claude','died before receipt'));
+    expect(encFiles(f.root)).toHaveLength(1);expect(intentRows(f.root)).toHaveLength(1);
+    // Still holding the app-data lock: the sweep cannot run at all.
+    f.setNow(1000+RECOVERY_INTENT_GRACE);await expect(f.newHost().maintenance()).rejects.toThrow();
+    expect(encFiles(f.root)).toHaveLength(1);
+    f.abandon();
+    // Lock recovered but the intent is younger than the grace age: kept.
+    f.setNow(1000+RECOVERY_INTENT_GRACE-1);await f.newHost().maintenance();
+    expect(encFiles(f.root)).toHaveLength(1);expect(intentRows(f.root)).toHaveLength(1);
+    f.setNow(1000+RECOVERY_INTENT_GRACE);await f.newHost().maintenance();
+    expect(readdirSync(join(f.root,'precompaction-inputs'))).toEqual([]); // no expiry marker either
+    expect(intentRows(f.root)).toEqual([]);
+    expect((await f.newHost().status(f.target)).receipts).toEqual([]);
+  });
+});
+
+test('a lock lost during the sweep\'s authenticated read stops that tick instead of giving up on the file',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await dieBeforeReceipt(f.host,f.target,()=>f.source('claude','lock lost mid-sweep'));
+    f.abandon();
+    // Refreshes: the loop's own check, the staging-root check, then the check inside the authenticated read reports a lost lock.
+    f.setNow(1000+RECOVERY_INTENT_GRACE);f.setRefreshLimit(3);
+    await expect(f.newHost().maintenance()).rejects.toThrow('UNAVAILABLE');
+    expect(encFiles(f.root)).toHaveLength(1);expect(intentRows(f.root)).toEqual([{id:expect.any(String),unresolved:0}]);
+    f.setRefreshLimit(Infinity);await f.newHost().maintenance();
+    expect(readdirSync(join(f.root,'precompaction-inputs'))).toEqual([]);expect(intentRows(f.root)).toEqual([]);
+  });
+});
+
+test('the intent sweep never removes a file that has a receipt',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await dieBeforeReceipt(f.host,f.target,()=>f.source('codex','replayed after a crash'));
+    f.abandon();
+    // The provider resends the same fragment: the replay adopts the staged file and its receipt clears the intent.
+    const host=f.newHost(),saved=await host.capture(f.target,()=>f.source('codex','replayed after a crash'));
+    expect(saved.localCheckpointSaved).toBe(true);expect(intentRows(f.root)).toEqual([]);
+    // An older app commits receipts without clearing intents: the sweep keeps the file and drops only the intent.
+    const db=new Database(join(f.root,'checkpoints.sqlite'));
+    const receipt=JSON.parse((db.query('SELECT receipt FROM checkpoints WHERE id=?').get(saved.checkpointId!) as {receipt:string}).receipt);
+    db.query('INSERT INTO checkpoint_intents (id,created_at,binding) VALUES (?,?,?)').run(saved.checkpointId!,1000,JSON.stringify(receipt.binding));db.close();
+    f.setNow(1000+RECOVERY_INTENT_GRACE);await f.newHost().maintenance();
+    expect(intentRows(f.root)).toEqual([]);
+    expect((await f.newHost().read(f.target,saved.checkpointId!)).text).toBe('replayed after a crash');
+  });
+});
+
+test('a crashed replay never claims a file it did not create',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    const earlier=await f.host.capture(f.target,()=>f.source('agy','receipt later lost'));
+    const name=encFiles(f.root)[0]!;
+    const db=new Database(join(f.root,'checkpoints.sqlite'));db.query('DELETE FROM checkpoints WHERE id=?').run(earlier.checkpointId!);db.query('DELETE FROM checkpoint_budgets').run();db.close();
+    await dieBeforeReceipt(f.newHost(),f.target,()=>f.source('agy','receipt later lost'));
+    f.abandon();
+    expect(intentRows(f.root)).toEqual([]);
+    f.setNow(1000+MEMORY_INPUT_TTL+RECOVERY_INTENT_GRACE);await f.newHost().maintenance();
+    expect(encFiles(f.root)).toEqual([name]);
+  });
+});
+
+test('an unreadable crashed ciphertext stays with its intent marked unresolved, and is not retried',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await dieBeforeReceipt(f.host,f.target,()=>f.source('hermes','corrupted after crash'));
+    f.abandon();
+    const name=encFiles(f.root)[0]!;truncateSync(join(f.root,'precompaction-inputs',name),8);
+    f.setNow(1000+RECOVERY_INTENT_GRACE);await f.newHost().maintenance();
+    expect(encFiles(f.root)).toEqual([name]);expect(intentRows(f.root)).toEqual([{id:expect.any(String),unresolved:1}]);
+    await f.newHost().maintenance();expect(encFiles(f.root)).toEqual([name]);
+  });
+});
+
+test('a database from before write intents still expires receipted ciphertext',async()=>{
+  await fixture(async f=>{
+    await f.host.setEnabled(f.target,0,true,1);
+    await f.host.capture(f.target,()=>f.source('codex'));
+    const db=new Database(join(f.root,'checkpoints.sqlite'));db.run('DROP TABLE checkpoint_intents');db.close();
+    f.setNow(1000+MEMORY_INPUT_TTL);await f.newHost().maintenance();
+    expect(encFiles(f.root)).toEqual([]);
+    expect((await f.host.status(f.target)).receipts[0]?.expired).toBe(true);
   });
 });
 

@@ -26,6 +26,8 @@ export interface ProjectMemoryConflict {
   localModifiedAt: string | null;
   lastSyncedHash: string | null;
   localContent: string | null;
+  /** False when Supabase still holds the revision this device last synced: only local work differs. Null from older hosts. */
+  remoteChangedSinceSync: boolean | null;
 }
 
 const asRecord = (value: unknown): Record<string, any> | null =>
@@ -69,10 +71,14 @@ export function projectMemoryConflictFromResult(
     localModifiedAt: asString(payload.localModifiedAt),
     lastSyncedHash: asString(payload.lastSyncedHash),
     localContent: asString(payload.localContent),
+    remoteChangedSinceSync: typeof payload.remoteChangedSinceSync === 'boolean' ? payload.remoteChangedSinceSync : null,
   };
 }
 
 export function projectMemoryConflictSummary(conflict: ProjectMemoryConflict): string {
+  if (conflict.remoteChangedSinceSync === false) {
+    return 'Supabase는 마지막 동기화 이후 바뀌지 않았고 로컬에만 백업하지 않은 변경이 있습니다. 「로컬 유지」를 고르면 로컬 기억을 그대로 Supabase에 올립니다.';
+  }
   if (conflict.origin === 'session-preflight') {
     return '세션 기억 AI는 시작되지 않았습니다. 먼저 로컬·원격 장기기억의 방향을 선택하세요.';
   }

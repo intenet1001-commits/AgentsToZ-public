@@ -71,7 +71,8 @@ writeFileSync(join(appPath, 'Contents', 'Info.plist'), `<?xml version="1.0" enco
   <key>CFBundleVersion</key><string>${bundleVersion === '0.2' ? '2' : bundleVersion}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSLocalNetworkUsageDescription</key><string>Your registered iPhone or iPad connects to this Mac over Wi‑Fi to view and control the screen.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Your registered iPhone or iPad connects to this Mac using nearby Wi‑Fi to view and control the screen.</string>
+  <key>NSBonjourServices</key><array><string>_atzscreen._tcp</string></array>
 ${pushEntry}</dict>
 </plist>
 `);

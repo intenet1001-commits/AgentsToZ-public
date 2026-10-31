@@ -47,6 +47,9 @@
 - **`portmgr_screen_push_*` 표 4개와 함수 8개는 마이그레이션만 있고 어디에도 적용하지 않았다**(2026-10-25, AgentsToZ Screen 알림·원격 차단 —
   `docs/design/screen-control-2026-10-24/DESIGN.md` 「6) 알림·원격 차단」).
   - 정본은 `src/screenPushSql.ts`이고 `supabase/migrations/20261025010000_screen_push.sql`과 글자까지 같다(`tests/screen-push-sql.test.ts`가 본다).
+  - 2026-11-01: 주간 사용량 알림(`weekly-usage`)이 속도 종류 `usage`를 더했다 — `portmgr_screen_push_requests.kind` check에 `'usage'`.
+    파일이 아직 어디에도 적용되지 않았으므로 같은 마이그레이션 파일을 고쳤다. ⚠️ 표는 `create table if not exists`라, 고치기 전 파일로 이미 적용한 DB에
+    다시 적용해도 check가 바뀌지 않는다 — 그런 DB는 `portmgr_screen_push_requests_kind_check`를 지우고 새 목록으로 다시 만든다([문턱 알림 푸시](remote-control.md)).
   - 다른 `portmgr_*`와 달리 **authenticated에도 아무것도 grant하지 않는다.** Supabase 함수 `screen-push`만 서비스 키로 쓰고, 앱·포털은 이 표를 읽지 않는다.
     RLS는 켜져 있고 정책이 없다(서비스 키 말고는 전부 거절). 함수는 security definer + `search_path` 고정 + 첫 줄의 `auth.role()` 확인이고, execute는 service_role에만 준다.
   - `PORTMGR_TABLES`(`src/schemaSql.ts`)에 넣지 않았다. 넣으면 마이그레이션을 적용하지 않은 DB에서 온보딩 클라우드 확인

@@ -1,6 +1,7 @@
 import {expect,test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {noticeTime} from '../src/AutomaticSaveNotice';
+import {dockSessionsMessages} from '../src/i18n';
 
 // 「아젠투지 호출」 dock extras (VOC 2026-10-24). Behaviour runs in scripts/check-voice-dock-sessions.ts (Chromium·WebKit);
 // these pin the wiring that a browser fixture cannot see.
@@ -32,15 +33,35 @@ test('the session list loads lazily and polls only while expanded',()=>{
   expect(panel).toContain("fetch(`${apiBase()}/api/context-usage`");expect(panel).toContain('clearInterval(timer)');
 });
 
+test('without Claude context capture the list says how to get Claude rows (the statusline hook writes them)',()=>{
+  expect(panel).toContain('setCaptureInstalled(json.captureInstalled!==false)');
+  expect(panel).toContain('{!captureInstalled&&<p className="az-sessions__hint" data-testid="voice-dock-sessions-capture">{copy.captureMissing}</p>}');
+  expect(dockSessionsMessages.ko.captureMissing).toBe('Claude 세션은 위의 Claude 「사용량 연결」을 켠 뒤 다음 Claude 활동부터 이 목록에 보입니다.');
+  for(const copy of Object.values(dockSessionsMessages))expect(copy.captureMissing.length).toBeGreaterThan(10);
+});
+
 test('save and sync follow the existing memory rules: own agent, preferred agent kept, conflicts never overwritten',()=>{
   expect(panel).toContain('sessionMemoryAction(folder,state)');
   expect(panel).toContain('agent:s.sourceAgent');expect(unsaved).toContain('preservePreferredAgent:true');
   // A conflicted row offers no save; the host's own preflight refuses one that turns conflicted meanwhile.
-  expect(panel).toContain("action!=='conflict'");expect(unsaved).toContain('data.preflightConflict?');
+  expect(panel).toContain("action!=='conflict'");expect(unsaved.includes('memorySaveProblem(data)')).toBe(true);
   expect(panel).toContain('voiceProjectMemoryIsBlocked(s)');
   // A new memory only for a registered project or its worktree, never a stray folder.
   expect(panel).toContain("const canSave=action==='start'?registered:");expect(panel).toContain("allowStart:action==='start'&&registered");
   expect(unsaved).toContain("if(!memory.exists&&!item.allowStart)return {status:'skipped'");
+});
+
+test('a conflicted row can be resolved from the dock: 「비교·해결」 lives in the lazy list, under the row lock, one request per choice',()=>{
+  const review=read('src/components/DockMemoryConflictReview.tsx');
+  expect(panel).toContain("import {DockMemoryConflictReview} from './DockMemoryConflictReview';");
+  // Only the lazy list may pull the comparison and the project-memory client in.
+  for(const source of [dock,unsaved,notice])expect(source).not.toContain('DockMemoryConflictReview');
+  expect(panel).toContain('data-testid="voice-dock-session-conflict-review"');expect(panel).toContain('onLock={lockFor(s)}');
+  // Comparing is a read-only preview; a choice goes once to the existing resolver with the compared hashes and is never resent.
+  expect(review).toContain('projectMemoryApi.conflictPreview({folderPath:folder})');
+  expect(review).toContain('expectedLocalHash:preview.localContentHash,expectedRemoteRevisionId:preview.remoteRevisionId,expectedRemoteContentHash:preview.remoteContentHash');
+  expect(review.match(/\/api\/project-memory\/resolve-conflict/g)?.length).toBe(1);expect(review).not.toContain('memoryRequest');
+  expect(review).toContain("if(outcome.state==='unknown'){setUnknown(true);");
 });
 
 test('unsaved work reaches the folded dock without the lazy project-memory client',()=>{

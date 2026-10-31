@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { screenPushEndpoint, screenPushPlistEntry } from '../scripts/screenPushEndpoint';
+import { screenBundleChildEnvironment } from '../stageScreenControlBundle';
 
 // AgentsToZ Screen notifications and remote stop are OFF unless configured (DESIGN 「알림·원격 차단」): no endpoint
 // means the Mac sends and polls nothing, and the phone asks for no notification permission and registers nothing.
@@ -30,6 +31,24 @@ test('the Mac app gets an endpoint only from AGENTSTOZ_SCREEN_PUSH_URL, and only
     .toBeLessThan(build.indexOf("run(['swift', 'build'"));
   expect(build).toContain('${pushEntry}</dict>');
   expect(read('native/screen-control/Sources/ScreenHost/ScreenPush.swift')).toContain('bundle.object(forInfoDictionaryKey: "AgentsToZScreenPushURL")');
+});
+
+test("the Screen bundled in the main app gets an endpoint only when this Mac's build passes one explicitly", () => {
+  // The main app reinstalls its bundled Screen over any other whose signature differs (src-tauri/src/screen_helper.rs),
+  // so a separately built push-enabled Screen would be replaced on the next launch: the bundle must carry the endpoint.
+  const url = 'https://project.supabase.co/functions/v1/screen-push';
+  const inherited = { HOME: '/home/builder', PATH: '/bin', AGENTSTOZ_SCREEN_PUSH_URL: url, SECRET: 'not-inherited' };
+  expect(screenBundleChildEnvironment(inherited, {})).toEqual({ HOME: '/home/builder', PATH: '/bin' }); // never inherited
+  expect(screenBundleChildEnvironment(inherited, { pushEndpoint: null, signingIdentity: 'ABC' })).toEqual({ HOME: '/home/builder', PATH: '/bin', SCREEN_SIGN_IDENTITY: 'ABC' });
+  expect(screenBundleChildEnvironment({ PATH: '/bin' }, { pushEndpoint: ` ${url} ` })).toEqual({ PATH: '/bin', AGENTSTOZ_SCREEN_PUSH_URL: url });
+  expect(() => screenBundleChildEnvironment({}, { pushEndpoint: 'http://project.supabase.co/x' })).toThrow('AGENTSTOZ_SCREEN_PUSH_URL');
+  const stage = read('stageScreenControlBundle.ts');
+  // Validated before the long build; after it, the bundled Info.plist must say exactly what was asked (or nothing).
+  expect(stage.indexOf('const env = screenBundleChildEnvironment(process.env, options);')).toBeLessThan(stage.indexOf('Bun.spawn(args'));
+  expect(stage).toContain("if (builtEndpoint !== (env.AGENTSTOZ_SCREEN_PUSH_URL ?? null)) throw Error('Bundled Screen push endpoint differs from the one requested');");
+  // Only this Mac's own build passes one; the public Developer ID base pipeline never does.
+  expect(read('build-macos.ts')).toContain('pushEndpoint: process.env.AGENTSTOZ_SCREEN_PUSH_URL,');
+  expect(read('src/macOSBaseAppPipeline.ts')).not.toMatch(/pushEndpoint|AGENTSTOZ_SCREEN_PUSH_URL/);
 });
 
 test('the iPhone app: no endpoint and no push entitlement unless a build asks for both', () => {

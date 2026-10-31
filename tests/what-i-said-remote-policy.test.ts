@@ -6,6 +6,7 @@ import {
   whatISaidRemotePushAllowed,
   whatISaidRemoteUploadEnabled,
   whatISaidRemoteRow,
+  whatISaidUnstartedUploadPending,
   withWhatISaidProjectExcluded,
 } from '../src/whatISaidRemotePolicy';
 import {
@@ -227,7 +228,60 @@ describe('what-i-said remote upload surface', () => {
   test('a failed upload never rolls back the local capture', () => {
     expect(server).toContain('[WhatISaidRemote] push failed');
     expect(server).toContain('const push = await whatISaidRemoteMutations.run(');
-    expect(server).toContain('() => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project))');
+    // The background push keeps the unbounded queue and lock wait.
+    expect(server).toContain('() => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project)),');
+    // A push with a request deadline (2026-10-28) still runs inside the mutation queue and file lock,
+    // and both waits end at that deadline.
+    expect(server).toContain(': await pushWhatISaidRemoteBefore(project, { deadlineAt });');
+    expect(server).toContain('() => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project, options), options.deadlineAt),');
+  });
+
+  // Review 2026-10-28 (C-R1): the deadline was checked only before the explicit
+  // upload. Unbounded waits, the remote reads and the hourly cleanup after it
+  // could carry a manual sync past the desktop proxy's 35 s read timeout.
+  test('a deadline-bound upload stops before reading the remote and skips upkeep past the deadline', () => {
+    const start = server.indexOf('async function pushWhatISaidRemote(');
+    const body = server.slice(start, server.indexOf('\n}\n', start));
+    const deadlineCheck = body.indexOf('if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) return { ...idle, notStarted: true };');
+    expect(deadlineCheck).toBeGreaterThan(-1);
+    expect(deadlineCheck).toBeLessThan(body.indexOf('await whatISaidRemoteCursor('));
+    expect(body).toContain('if ((options.deadlineAt === undefined || Date.now() < options.deadlineAt) && whatISaidRemoteCleanupGate.tryEnter()) {');
+    const wrapper = server.slice(server.indexOf('async function pushWhatISaidRemoteBefore('), server.indexOf('async function pushWhatISaidAfterCapture('));
+    expect(wrapper).toContain('if (Date.now() >= options.deadlineAt) return null;');
+    expect(wrapper).toContain('return push.notStarted ? null : push;');
+  });
+
+  // Review 2026-10-28 (C-R2): an upload that never started was always called
+  // unfinished, even for a memory that never uploads.
+  test('an upload that did not start is called unfinished only when an upload is known to apply', () => {
+    const base = { remoteConfigured: true, excludedMemoryIds: new Set<string>(), memoryId: 'm', mayHaveRowsToUpload: true };
+    expect(whatISaidUnstartedUploadPending(base)).toBe(true);
+    // A host with no Supabase target, or without a device id, never uploads.
+    expect(whatISaidUnstartedUploadPending({ ...base, remoteConfigured: false })).toBe(false);
+    // An excluded memory never uploads; an exclusion that is not known makes no claim.
+    expect(whatISaidUnstartedUploadPending({ ...base, excludedMemoryIds: new Set(['m']) })).toBe(false);
+    expect(whatISaidUnstartedUploadPending({ ...base, excludedMemoryIds: null })).toBe(false);
+    expect(whatISaidUnstartedUploadPending({ ...base, mayHaveRowsToUpload: false })).toBe(false);
+    expect(whatISaidUnstartedUploadPending({ ...base, memoryId: '  ' })).toBe(false);
+
+    const sync = server.slice(server.indexOf('async function syncRegisteredWhatISaid('), server.indexOf('function whatISaidErrorStatus('));
+    expect(sync).toContain('const remote = await pushWhatISaidRemoteBefore(project, { explicit: true, deadlineAt: window.pushDeadlineAt });');
+    expect(sync).toContain('if (remote) recordWhatISaidPushOutcome(project.location.memoryId, localMaxSeq, remote);');
+    expect(sync).toContain(': whatISaidUnstartedUploadPending({');
+    expect(sync).toContain('remoteConfigured: !whatISaidLocalOnlyConfiguration() && whatISaidDeviceIdentity().deviceId !== null,');
+    expect(sync).toContain('excludedMemoryIds: whatISaidRemoteExclusionsCache.peek() ?? null,');
+    expect(sync).not.toContain('remote === null ||');
+  });
+
+  // A host with no Supabase target at all reported every manual sync as an
+  // upload failure (WHAT_I_SAID_EXCLUSIONS_UNAVAILABLE): the cloud exclusion
+  // list was read before checking that there is anywhere to upload.
+  test('a host with no Supabase target skips the upload before reading cloud exclusions', () => {
+    const start = server.indexOf('async function pushWhatISaidRemote(');
+    const body = server.slice(start, server.indexOf('\n}\n', start));
+    const localOnly = body.indexOf("if (whatISaidLocalOnlyConfiguration()) return { ...idle, skipped: 'no-credentials' };");
+    expect(localOnly).toBeGreaterThan(-1);
+    expect(localOnly).toBeLessThan(body.indexOf('await readWhatISaidRemoteExclusions()'));
   });
 
   // 제외/삭제가 원격까지 가지 않으면 "제외했다"와 "삭제했다"가 둘 다 거짓이 된다.

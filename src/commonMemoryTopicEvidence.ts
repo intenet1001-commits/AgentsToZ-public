@@ -1,4 +1,5 @@
-import {commonMemoryId, commonMemoryText, CommonMemoryError, type CommonMemorySourceEntry} from './commonMemory';
+import {COMMON_MEMORY_LIMITS, commonMemoryId, commonMemoryText, CommonMemoryError, type CommonMemorySourceEntry} from './commonMemory';
+import {clusterCrossMemoryLessons} from './commonMemoryLessonClusters';
 
 /** Kept in the existing body so older schema-1 clients preserve provenance on a round trip. */
 const marker = '\n\n<!-- agentstoz-topic-evidence-v1:';
@@ -53,14 +54,55 @@ const topics = [
   {key: 'ios', name: 'iOS 앱 개발', category: '모바일', matches: /\b(?:ios|iphone|swiftui|xcode)\b|아이폰|스위프트/i},
   {key: 'game', name: '게임·상호작용', category: '게임', matches: /\b(?:game|unity|unreal)\b|게임|레이싱|게임 조작/i},
 ] as const;
-export type CommonTopicCandidate = {key: string; name: string; category: string; sourceMemoryIds: string[]; evidence: CommonMemorySourceEntry[]; method: 'source-entry-topic-intersection'; needsSemanticReview: true};
-/** Actual entry overlap is a discovery hint; it never asserts the rules are interchangeable. */
+/**
+ * How a candidate was found: the same lesson written in two or more memories (clusters of near-duplicate entries,
+ * src/commonMemoryLessonClusters.ts), or, only when a scan has no such lesson, a broad topic that two or more
+ * memories mention (the keyword topics above).
+ */
+export type CommonTopicDiscoveryMethod = 'cross-memory-lesson-cluster' | 'source-entry-topic-intersection';
+export type CommonTopicCandidate = {key: string; name: string; category: string; sourceMemoryIds: string[]; evidence: CommonMemorySourceEntry[]; method: CommonTopicDiscoveryMethod; needsSemanticReview: true};
+const CANDIDATE_LIMIT = 7;
+const LESSON_CATEGORY = '공통 교훈';
+/**
+ * Discovery for one scan. Lesson clusters come first and alone: a concrete shared lesson is the useful hint, and
+ * broad topics would push it out of the same seven places. Only a scan without one falls back to the keyword topics,
+ * so a page of memories with no shared lesson still shows what they have in common.
+ */
+export function commonTopicDiscovery(entries: CommonMemorySourceEntry[]): {candidates: CommonTopicCandidate[]; method: CommonTopicDiscoveryMethod} {
+  const lessons = commonLessonCandidates(entries);
+  return lessons.length ? {candidates: lessons, method: 'cross-memory-lesson-cluster'} : {candidates: commonKeywordTopicCandidates(entries), method: 'source-entry-topic-intersection'};
+}
+/** Similar entries are a discovery hint; they never assert that the rules are interchangeable. */
 export function commonTopicCandidates(entries: CommonMemorySourceEntry[]): CommonTopicCandidate[] {
+  return commonTopicDiscovery(entries).candidates;
+}
+/** One candidate per cross-memory lesson cluster, its evidence led by each memory's closest entry. */
+export function commonLessonCandidates(entries: CommonMemorySourceEntry[]): CommonTopicCandidate[] {
+  return clusterCrossMemoryLessons(entries).slice(0, CANDIDATE_LIMIT).map(cluster => {
+    // Round-robin over memories so every memory in the cluster is represented before any gives a second entry.
+    const byMemory = cluster.memoryIds.map(id => cluster.members.filter(member => member.entry.memoryId === id).map(member => member.entry));
+    const evidence: CommonMemorySourceEntry[] = [];
+    for (let round = 0; evidence.length < COMMON_MEMORY_LIMITS.evidencePerItem && byMemory.some(list => list.length > round); round++)
+      for (const list of byMemory) if (list[round] && evidence.length < COMMON_MEMORY_LIMITS.evidencePerItem) evidence.push(list[round]!);
+    return {key: cluster.key, name: cluster.title, category: lessonCategory(cluster.members.map(member => member.entry)), sourceMemoryIds: cluster.memoryIds, evidence, method: 'cross-memory-lesson-cluster' as const, needsSemanticReview: true as const};
+  });
+}
+/** The keyword topic most members mention labels the lesson; otherwise it is a shared lesson without a category. */
+function lessonCategory(members: CommonMemorySourceEntry[]): string {
+  let best: {category: string; count: number} | null = null;
+  for (const topic of topics) {
+    const count = members.filter(entry => topic.matches.test(`${entry.title} ${entry.excerpt}`)).length;
+    if (count > (best?.count ?? 0)) best = {category: topic.category, count};
+  }
+  return best && best.count * 2 >= members.length ? best.category : LESSON_CATEGORY;
+}
+/** Keyword topics two or more memories mention: the fallback when a scan has no shared lesson. */
+export function commonKeywordTopicCandidates(entries: CommonMemorySourceEntry[]): CommonTopicCandidate[] {
   return topics.flatMap(topic => {
     const matching = entries.filter(entry => topic.matches.test(`${entry.title} ${entry.excerpt}`));
     const sourceMemoryIds = [...new Set(matching.map(entry => entry.memoryId))].sort();
     if (sourceMemoryIds.length < 2) return [];
     const evidence = sourceMemoryIds.flatMap(id => matching.filter(entry => entry.memoryId === id).slice(0, 2)).slice(0, 16);
     return [{key: topic.key, name: topic.name, category: topic.category, sourceMemoryIds, evidence, method: 'source-entry-topic-intersection' as const, needsSemanticReview: true as const}];
-  }).sort((a, b) => b.sourceMemoryIds.length - a.sourceMemoryIds.length || a.name.localeCompare(b.name)).slice(0, 7);
+  }).sort((a, b) => b.sourceMemoryIds.length - a.sourceMemoryIds.length || a.name.localeCompare(b.name)).slice(0, CANDIDATE_LIMIT);
 }

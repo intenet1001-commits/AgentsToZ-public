@@ -1,4 +1,5 @@
-import {afterEach,expect,test} from 'bun:test';
+import {afterEach,expect,spyOn,test} from 'bun:test';
+import * as fs from 'node:fs';
 import {mkdtempSync,mkdirSync,realpathSync,rmSync,readFileSync,writeFileSync,readdirSync,lstatSync,symlinkSync,linkSync,truncateSync,renameSync,unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -96,6 +97,48 @@ test('large inventory yields the event loop and one lease cannot run two staging
  try{const pending=f.store.stage(f.binding,f.input,f.key);const other=new MemorySaveInputStore(f.app,f.lease,()=>1000);
   await expect(other.stage(f.binding,f.input,f.key)).rejects.toThrow('UNAVAILABLE');await pending;expect(ticks).toBeGreaterThan(0);
  }finally{clearInterval(timer);}
+});
+
+test('the pre-compaction intent sweep removes only an authenticated file created at or after its intent',async()=>{
+ const f=await fixture(),store=new MemorySaveInputStore(f.app,f.lease,()=>1000,'precompaction-inputs');
+ const dir=join(f.app,'precompaction-inputs'),path=join(dir,saveDigest(f.binding.saveId)+'.enc');
+ expect(store.exists(f.binding)).toBe(false);expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('absent');
+ await store.stage(f.binding,f.input,f.key);expect(store.exists(f.binding)).toBe(true);const bytes=readFileSync(path);
+ // AI-memory staging is never swept.
+ await f.store.stage(f.binding,f.input,f.key);expect(f.store.discardUnreceipted(f.binding,f.key,0)).toBe('retained');expect(readFileSync(f.path).length).toBeGreaterThan(0);
+ // Older than the intent, another binding at the same path, a wrong key, an earlier clock: not this attempt's file.
+ expect(store.discardUnreceipted(f.binding,f.key,1001)).toBe('retained');
+ expect(store.discardUnreceipted({...f.binding,coverageDigest:saveDigest('other')},f.key,1000)).toBe('retained');
+ expect(store.discardUnreceipted(f.binding,randomBytes(32),1000)).toBe('retained');
+ expect(new MemorySaveInputStore(f.app,f.lease,()=>999,'precompaction-inputs').discardUnreceipted(f.binding,f.key,1000)).toBe('retained');
+ writeFileSync(path,bytes.subarray(0,10));expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('retained');writeFileSync(path,bytes);
+ renameSync(path,path+'.kept');symlinkSync(path+'.kept',path);expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('retained');
+ expect(readFileSync(path+'.kept')).toEqual(bytes);unlinkSync(path);renameSync(path+'.kept',path);
+ expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('removed');
+ expect(readdirSync(dir)).toEqual([]); // no expiry marker: the same fragment may be staged again
+ expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('absent');
+ await store.stage(f.binding,f.input,f.key);
+ // A lost lease is not a property of the file: it throws so the caller retries instead of giving up on it.
+ f.lease.release();expect(()=>store.discardUnreceipted(f.binding,f.key,1000)).toThrow('UNAVAILABLE');expect(lstatSync(path).isFile()).toBe(true);
+});
+
+test('the intent sweep throws instead of keeping the file when the lease or the process fails part-way through',async()=>{
+ const f=await fixture(),store=new MemorySaveInputStore(f.app,f.lease,()=>1000,'precompaction-inputs');
+ const path=join(f.app,'precompaction-inputs',saveDigest(f.binding.saveId)+'.enc');await store.stage(f.binding,f.input,f.key);
+ // The lease stops refreshing after the sweep's first staging-root check, i.e. at the check inside the authenticated read.
+ let refreshes=0;const losing={identity:f.lease.identity,lockPath:f.lease.lockPath,refresh:()=>++refreshes<2&&f.lease.refresh(),release:()=>f.lease.release()};
+ expect(()=>new MemorySaveInputStore(f.app,losing,()=>1000,'precompaction-inputs').discardUnreceipted(f.binding,f.key,1000)).toThrow('UNAVAILABLE');
+ expect(refreshes).toBeGreaterThan(1);expect(lstatSync(path).isFile()).toBe(true);
+ // Out of descriptors while opening the expiry marker or the file: a condition of the process, so the caller retries.
+ const real=fs.openSync;
+ const failing=(suffix:string,code:string)=>spyOn(fs,'openSync').mockImplementation(((p:fs.PathLike,...rest:unknown[])=>{
+  if(String(p).endsWith(suffix))throw Object.assign(new Error(`${code}: synthetic`),{code});return (real as (...a:unknown[])=>number)(p,...rest);}) as typeof fs.openSync);
+ for(const suffix of ['.enc.expired','.enc']){const spy=failing(suffix,'EMFILE');
+  try{expect(()=>store.discardUnreceipted(f.binding,f.key,1000)).toThrow('UNAVAILABLE');}finally{spy.mockRestore();}
+  expect(lstatSync(path).isFile()).toBe(true);}
+ // A read error of this one file would recur on every tick and stop the sweeps after it, so it stays a file condition.
+ const spy=failing('.enc','EIO');try{expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('retained');}finally{spy.mockRestore();}
+ expect(store.discardUnreceipted(f.binding,f.key,1000)).toBe('removed');
 });
 
 test('directory replacement during asynchronous inventory cannot publish into a new staging root',async()=>{

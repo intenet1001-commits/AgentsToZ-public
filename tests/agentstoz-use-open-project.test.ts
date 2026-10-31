@@ -3,7 +3,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {initializeProjectMemory} from '../project-memory-server';
-import {AGENTSTOZ_USE_MCP_TOOLS, agentsToZUseMcpActionForTool, handleAgentsToZUseMcpRequest} from '../agentstoz-use-mcp-server';
+import {AGENTSTOZ_USE_MCP_TOOLS, agentsToZUseDashboardVisibility, agentsToZUseMcpActionForTool, handleAgentsToZUseMcpRequest} from '../agentstoz-use-mcp-server';
 import {parseAgentsToZUseActionRequest} from '../src/agentstozUseControl';
 import {AGENTSTOZ_USE_MCP_CONTRACT_VERSION} from '../src/agentstozUseMcpVersion';
 import {
@@ -31,6 +31,17 @@ describe('open_dashboard accepts a registered portId (contract 1.22.0)', () => {
     expect((tool.inputSchema as any).not).toEqual({required: ['target', 'portId']});
     expect(tool.description).toContain('portId');
     expect(tool.description).toContain('Navigation only');
+    expect(tool.description).toContain('does not confirm');
+  });
+  test('an older host launch does not prove its window or requested screen appeared', () => {
+    const legacy = {success: true, performed: true, effect: 'opened-local-app', message: '앱을 열었습니다.'};
+    expect(agentsToZUseDashboardVisibility({action: 'open-dashboard'}, legacy))
+      .toMatchObject({foregroundConfirmed: false, message: expect.stringContaining('확인되지 않았습니다')});
+    expect(agentsToZUseDashboardVisibility({action: 'open-dashboard', portId: 'study-id'}, legacy))
+      .toMatchObject({foregroundConfirmed: false, navigationConfirmed: false});
+    const verified = {...legacy, foregroundConfirmed: true, navigationConfirmed: true};
+    expect(agentsToZUseDashboardVisibility({action: 'open-dashboard', target: 'ops'}, verified)).toEqual(verified);
+    expect(agentsToZUseDashboardVisibility({action: 'other'}, legacy)).toBe(legacy);
   });
   test('the host parser keeps the portId and still refuses it next to target', () => {
     expect(parseAgentsToZUseActionRequest({action: 'open-dashboard', controllerPortId: 'controller-id', portId: 'study-id'}).portId).toBe('study-id');
@@ -140,10 +151,10 @@ describe('open_dashboard with a portId focuses that project through the real API
     return {home, plain, call, navigation, opens};
   }
 
-  test('sets a project navigation, brings the app forward, and never starts a Workroom', async () => {
+  test('requests project navigation without claiming the app is foregrounded or starting a Workroom', async () => {
     const f = await fixture();
     const opened = await f.call('open_dashboard', {portId: 'plain-project'});
-    expect(opened).toMatchObject({success: true, effect: 'opened-local-app', projectId: 'plain-project', projectName: 'plain-app', focusRequested: true});
+    expect(opened).toMatchObject({success: true, effect: 'opened-local-app', projectId: 'plain-project', projectName: 'plain-app', focusRequested: true, foregroundConfirmed: false, navigationConfirmed: false});
     expect(JSON.stringify(opened)).not.toContain(f.home);
     const served = await f.navigation();
     expect(served).toEqual({nonce: expect.any(String), projectId: 'plain-project'});
@@ -154,6 +165,16 @@ describe('open_dashboard with a portId focuses that project through the real API
     expect(await f.call('open_dashboard', {portId: 'not-registered-1'})).toMatchObject({success: false});
     expect(await f.navigation()).toEqual(served);
     expect(f.opens()).toBe(1);
+  }, 30_000);
+
+  test('plain and OPS requests do not claim foreground visibility', async () => {
+    const f = await fixture();
+    const plain = await f.call('open_dashboard');
+    expect(plain).toMatchObject({success: true, foregroundConfirmed: false});
+    expect(plain.message).toContain('확인되지 않았습니다');
+    const ops = await f.call('open_dashboard', {target: 'ops'});
+    expect(ops).toMatchObject({success: true, foregroundConfirmed: false, navigationConfirmed: false, focusRequested: true});
+    expect(await f.navigation()).toEqual({nonce: expect.any(String), panel: 'ops'});
   }, 30_000);
 
   test('two registrations of one folder each focus their own row (no false "outdated" error)', async () => {

@@ -1,0 +1,23 @@
+{
+ "_note": "Produced once by native/computer-use agentstoz-computer-use-approval-lab (Swift Security framework, in-memory P-256 key) on 2026-10-27; regenerate only with that lab.",
+ "payload": {
+  "approvalId": "abababababababababababababababababababababababababababababababab",
+  "target": {
+   "bundleId": "com.example.editor",
+   "teamId": "ABCDEFGHIJ",
+   "codeHash": "abababababababababababababababababababab",
+   "pid": 100,
+   "processStart": "9007199254740995",
+   "windowId": 321
+  },
+  "caller": {
+   "sessionId": "workroom_session_a",
+   "lane": "leader"
+  },
+  "issuedAt": 1761500000000,
+  "expiresAt": 1761500120000
+ },
+ "publicKey": "BHRq3+6oj1QofnKjXkSaL1na5iOJH1b+RPzZ/dHJpNcYTxlXWZT+hLfz1pm67pbpBDB9b1iBuPGeZsiQCuaktao=",
+ "signature": "MEUCIGQtFz8UPA+mv2KBqaOHq9k4967Kf1AmE5uaPYSsd9eXAiEAjwav7YuQSB25G12pwz44GhmZgUtTl4r8UoYnsfScWKU=",
+ "bytes": "YWdlbnRzdG96LWNvbXB1dGVyLXVzZS1hcHByb3ZhbC92MQphcHByb3ZhbD1hYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiCmJ1bmRsZT1jb20uZXhhbXBsZS5lZGl0b3IKdGVhbT1BQkNERUZHSElKCmNvZGU9YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYgpwaWQ9MTAwCnN0YXJ0PTkwMDcxOTkyNTQ3NDA5OTUKd2luZG93PTMyMQpzZXNzaW9uPXdvcmtyb29tX3Nlc3Npb25fYQpsYW5lPWxlYWRlcgppc3N1ZWQ9MTc2MTUwMDAwMDAwMApleHBpcmVzPTE3NjE1MDAxMjAwMDAK"
+}

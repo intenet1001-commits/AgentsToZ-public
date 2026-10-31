@@ -10,6 +10,8 @@ export async function submitCodexDesktopDraft(input: {
   submit: () => Promise<{ ok: true } | { ok: false; code: CodexDesktopComposerAutomationErrorCode; error: string }>;
   findCreatedThread: () => Promise<string | null>;
   retainCreatedThread: (threadId: string) => void;
+  /** A durable remote receipt must be confirmed before the submission fence clears. */
+  retainSubmissionFence?: boolean;
 }): Promise<{ threadId: string }> {
   if (input.store.load(input.projectKey)) {
     throw new CodexFirstConversationError(
@@ -35,6 +37,6 @@ export async function submitCodexDesktopDraft(input: {
     );
   }
   input.retainCreatedThread(threadId);
-  input.store.clear(input.projectKey);
+  if (!input.retainSubmissionFence) input.store.clear(input.projectKey);
   return { threadId };
 }

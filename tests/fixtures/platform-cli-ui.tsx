@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {PlatformCliSettings} from '../../src/PlatformCliSettings';
 import {pushWithPlatformAccount} from '../../src/PlatformGithubPushDialog';
@@ -30,4 +30,5 @@ if(new URLSearchParams(location.search).has('native-drop')){
   (window as any).__nativeGoogleDrop={files,reads,emit,owns:workroomOwnsDropAt};
 }
 function App(){const [message,setMessage]=useState(''),[language,setLanguage]=useAppLanguage();if(new URLSearchParams(location.search).has('first-wizard'))return <main className="fixture"><FirstSetupWizard onComplete={v=>setMessage(JSON.stringify(v))} onBack={()=>{}} onAdvanced={()=>{}}/><p data-testid="setup-result">{message}</p></main>;return <main className="fixture"><h1>프로젝트 CLI 연결</h1><button onClick={()=>setLanguage('en')}>English</button><PlatformCliSettings language={language} projects={[{id:'project-one',name:'회사 프로젝트'},{id:'project-two',name:'개인 프로젝트'}]}/><button onClick={()=>void pushWithPlatformAccount('project-one','FIXTURE').then(setMessage,e=>setMessage(e.message))}>프로젝트 푸시</button><p role="status" data-testid="push-result">{message}</p></main>;}
-createRoot(document.getElementById('root')!).render(<App/>);
+function ModalFixture(){const ref=useRef<HTMLDialogElement>(null);useEffect(()=>{ref.current?.showModal();},[]);return <dialog ref={ref}><App/></dialog>;}
+createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('native-modal')?<ModalFixture/>:<App/>);

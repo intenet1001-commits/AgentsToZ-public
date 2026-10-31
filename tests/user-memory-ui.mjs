@@ -108,6 +108,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
     assert.doesNotMatch(await panel.getByTestId('control-profile-pending').innerText(),/여기서 저장합니다/);
     assert.match(await savedMemory.innerText(),/기억해”라고 요청하면 여기에 보입니다/);
     assert.ok(!(await panel.innerText()).includes('TypeError'));
+    // 2026-10-26: the memory-kind map folds under 「기억 종류·호출 안내」 (its first line and the two buttons stay in sight).
+    await panel.getByRole('button',{name:'기억 종류·호출 안내',exact:true}).click();
     await panel.getByTestId('control-profile-memory-map').getByText('내 지시',{exact:true}).waitFor();
     await panel.getByRole('button',{name:'내 지시·결과 기록 보기',exact:true}).click();
     await panel.waitFor({state:'hidden'});await page.getByTestId('what-i-said-panel').waitFor();
@@ -124,3 +126,5 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 }
 // The same normal/persona user-memory check also covers the separate, user-confirmed profile panel.
 await import('./user-profile-panel.e2e.mjs');
+// …and 아젠투지 설정's layout (status and to-do first, candidate previews, details folded by purpose) on the same origin.
+await import('./control-profile-layout-ui.mjs');

@@ -41,7 +41,7 @@ describe('sidecar build plan', () => {
     expect(plan.commands[0]!.entrypoint).toBe('api-sidecar-entry.ts');
     expect(plan.commands[0]!.args).toContain('--no-compile-autoload-dotenv');
     expect(plan.commands[0]!.args).toContain('--no-compile-autoload-bunfig');
-    expect(plan.nativeCommands).toHaveLength(1);
+    expect(plan.nativeCommands).toHaveLength(2);
     expect(plan.nativeCommands[0]!.args).toContain('/usr/bin/clang');
     // `join` uses the host's separator, so a '/'-anchored suffix failed on a
     // Windows checkout even though the plan was correct. Naming the whole path
@@ -49,6 +49,9 @@ describe('sidecar build plan', () => {
     expect(plan.nativeCommands[0]!.outfile).toBe(
       join('/private/tmp/agentstoz-source', 'src-tauri', 'resources', 'agentstoz-codex-accessibility-helper'),
     );
+    expect(plan.nativeCommands[1]!.outfile).toBe(join('/private/tmp/agentstoz-source','src-tauri/resources/agentstoz-api-sidecar-control-link.node'));
+    expect(plan.nativeCommands[1]!.args).toContain('-bundle');
+    expect(plan.nativeCommands[1]!.args).not.toContain('-framework');
     expect(plan.commands.flatMap(command => command.args).join('\n'))
       .not.toContain('__AGENTSTOZ_MACOS_RUNTIME_PRODUCTION_TEAM_IDENTIFIER__');
   });
@@ -66,6 +69,7 @@ describe('sidecar build plan', () => {
     const marker = `__AGENTSTOZ_MACOS_RUNTIME_PRODUCTION_TEAM_IDENTIFIER__="${TEAM_ID}"`;
     expect(plan.productionTeamIdentifierEmbedded).toBeTrue();
     expect(plan.nativeCommands).toHaveLength(1);
+    expect(plan.staleNativeOutputs).toContain(join('/private/tmp/agentstoz-source','src-tauri/resources/agentstoz-api-sidecar-control-link.node'));
     expect(plan.commands[0]!.args).toContain('--define');
     expect(plan.commands[0]!.args).toContain(marker);
     expect(plan.commands[1]!.args).not.toContain(marker);

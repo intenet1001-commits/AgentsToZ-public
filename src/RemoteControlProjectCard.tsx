@@ -30,11 +30,13 @@ const GIT_ACTIONS: QrRemoteControlAction[] = [
 export function RemoteControlProjectCard(props: {
   project: QrRemoteControlProjectCard;
   busy: boolean;
+  codexNewSupported?: boolean | null;
+  onCheckCodexSupport?(): void;
   onWorkroom?(project: QrRemoteControlProjectCard): void;
   onManage?(project: QrRemoteControlProjectCard): void;
   onAction(project: QrRemoteControlProjectCard, action: QrRemoteControlAction): void;
 }) {
-  const { project, busy, onAction, onWorkroom, onManage } = props;
+  const { project, busy, codexNewSupported = null, onCheckCodexSupport, onAction, onWorkroom, onManage } = props;
   const [copyState,setCopyState]=useState<'idle'|'copied'|'failed'>('idle');
   const copyMention=async()=>{
     try{
@@ -101,16 +103,22 @@ export function RemoteControlProjectCard(props: {
       <details className="remote-mac-actions"><summary>Mac에서 앱·폴더 열기</summary>
       {project.actions.some(action => FIRST_CONVERSATION_ACTIONS.includes(action)) && <>
         <p className="remote-action-heading">새 대화</p>
-        <p className="remote-action-help">이 프로젝트·워크트리의 연결용 대화를 준비하고 Mac의 Codex 앱에 열기를 요청합니다. 실제 화면은 Mac에서 확인하세요.</p>
+        <p className="remote-action-help">{project.kind === 'worktree'
+          ? '안전한 새 대화 생성은 기본 프로젝트에서 사용하세요. 워크트리는 현재 지원하지 않습니다.'
+          : codexNewSupported === true
+          ? '이 프로젝트의 새 Codex 대화를 요청합니다. 실제 대화는 Mac의 프로젝트에서 확인하세요.'
+          : codexNewSupported === false
+            ? '새 대화를 안전하게 만들려면 연결된 Mac의 AgentsToZ를 업데이트하세요.'
+            : '먼저 이 Mac이 안전한 새 대화 생성을 지원하는지 확인합니다.'}</p>
         <div className="remote-actions remote-actions--first-conversation">
           {FIRST_CONVERSATION_ACTIONS.filter(action => project.actions.includes(action)).map(action => (
             <button
               type="button"
               key={action}
               data-action={action}
-              disabled={busy}
-              onClick={() => onAction(project, action)}
-            >{remoteControlActionLabel(action)}</button>
+              disabled={busy || project.kind === 'worktree' || codexNewSupported === false || (codexNewSupported === null && !onCheckCodexSupport)}
+              onClick={() => codexNewSupported === null ? onCheckCodexSupport?.() : onAction(project, action)}
+            >{codexNewSupported === null ? 'Codex 새 대화 지원 다시 확인' : remoteControlActionLabel(action)}</button>
           ))}
         </div>
       </>}

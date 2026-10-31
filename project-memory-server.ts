@@ -1,8 +1,10 @@
 import {correctionReview,CORRECTION_REVIEW_NOT_APPLICABLE} from './src/projectMemoryCorrectionReview';
+import {projectMemoryAgentOutput} from './src/projectMemoryAgentFailure';
 import {buildCorrectionTaskGuidance,type CorrectionTaskGuidance} from './src/projectMemoryCorrectionContext';
 import {normalizeServerSupabaseUrl} from './server-supabase-service';
 import {saveDigest} from './src/memorySaveContract';
 import {projectMemoryConflictIdentityIssues} from './src/projectMemoryConflict';
+import {readReviewedMemoryIdentity} from './src/projectMemoryReviewedIdentity';
 import {RECOVERY_HOOK_REL,recoveryHookScript,withRecoveryHook} from './src/projectMemoryRecoveryHook';
 import type { TerminalMemoryJob } from './src/terminalMemoryQueue';
 import { MemorySessionStore, MemorySessionRecoveryError, type MemorySessionPlan } from './src/memorySessionStore';
@@ -1682,6 +1684,22 @@ function initialMemory(projectName: string): string {
 
 <!-- Keep contradictory evidence visible until the user explicitly resolves it. -->
 `;
+}
+
+/** The template's per-project and per-day header values carry no memory, so they are compared as blanks. */
+const templateShape = (content: string) => content.replace(/\r\n?/g, "\n")
+  .replace(/^\*\*(Project|Created|Last Updated)\*\*:.*$/gm, "**$1**:").trim();
+const UNTOUCHED_TEMPLATE_SHAPE = templateShape(initialMemory(""));
+
+/**
+ * Whether a local memory document holds nothing anyone wrote: no bytes, or the initial template exactly as
+ * `initializeProjectMemory` seeds it (only its project name and dates may differ). Only such a document may be
+ * replaced by Supabase without a recorded agreement — that is first-time adoption on a new device or clone. Any other
+ * content, even one edited line, is someone's memory and is never overwritten without their choice.
+ */
+export function projectMemoryHoldsNoLocalWork(content: string): boolean {
+  const shape = templateShape(content);
+  return shape === "" || shape === UNTOUCHED_TEMPLATE_SHAPE;
 }
 
 const ACTIVITY_IGNORED_PATHS = [
@@ -4118,8 +4136,7 @@ async function runProjectMemoryAgent(
       prompt,
       { signal },
     );
-    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || "Claude 기억 업데이트 실패");
-    return result.stdout;
+    return projectMemoryAgentOutput(agent,result);
   }
 
   // Keep untrusted model output in the captured pipe until the output guard has
@@ -4142,8 +4159,7 @@ async function runProjectMemoryAgent(
     prompt,
     { signal },
   );
-  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || "Codex 기억 업데이트 실패");
-  return result.stdout;
+  return projectMemoryAgentOutput(agent,result);
 }
 
 /**
@@ -5055,6 +5071,22 @@ async function appendProjectMemoryRevisionCas(sb: any, revision: any): Promise<{
   };
 }
 
+/**
+ * Whether the Supabase head moved away from the revision this device last agreed on. Push refuses only then, and the
+ * session preflight uses the same rule: a Pull that finds local edits on top of an unchanged head is local work that is
+ * not backed up yet, not a conflict. (2026-11-01: that case stopped 「지금 저장」 with 「로컬·Supabase 기억이 모두
+ * 바뀌어」 although only the local side had changed.) No recorded agreement counts as moved, so the unknown case stays guarded.
+ */
+export function projectMemoryRemoteMovedSinceSync(
+  latest: { id?: unknown; content_hash?: unknown } | null | undefined,
+  config: { lastPulledRevisionId?: string | null; lastSyncedHash?: string | null },
+): boolean {
+  if (!latest) return false;
+  if (config.lastPulledRevisionId && latest.id === config.lastPulledRevisionId) return false;
+  if (config.lastSyncedHash && latest.content_hash === config.lastSyncedHash) return false;
+  return true;
+}
+
 /** The conflict response is deliberately rich enough for the UI to compare
  * versions before it offers a destructive-looking choice.  It is still
  * append-only: choosing local creates a new remote revision rather than
@@ -5067,16 +5099,21 @@ function projectMemoryConflictPayload(input: {
   localSaved?: boolean;
 }) {
   const remoteContent = typeof input.latest?.content === "string" ? input.latest.content : "";
+  const localContentHash = hashContent(input.localContent);
   return {
     conflict: true,
     localSaved: input.localSaved === true,
+    // Which side moved since the last agreement. `remoteChangedSinceSync: false` means Supabase still holds what this
+    // device last synced, so only local work differs (a Push keeps everything); the UI must not call it 「모두 바뀜」.
+    remoteChangedSinceSync: projectMemoryRemoteMovedSinceSync(input.latest, input.config),
+    localChangedSinceSync: !input.config.lastSyncedHash || localContentHash !== input.config.lastSyncedHash,
     remoteRevisionId: input.latest?.id ?? null,
     remoteCreatedAt: input.latest?.created_at ?? null,
     remoteContentHash: input.latest?.content_hash ?? (remoteContent ? hashContent(remoteContent) : null),
     remoteDeviceName: input.latest?.device_name ?? null,
     remoteParentRevisionId: input.latest?.parent_revision_id ?? null,
     remoteContent,
-    localContentHash: hashContent(input.localContent),
+    localContentHash,
     localModifiedAt: input.local.modifiedAt ?? null,
     lastSyncedHash: input.config.lastSyncedHash ?? null,
     localContent: input.localContent,
@@ -6319,12 +6356,7 @@ export async function pushProjectMemory(input: {
     });
     return { success: state.backupComplete, alreadySynced: true, revisionId: latest.id, contentHash, ...state, ...appendOnlySync, ...deviceStatus };
   }
-  if (
-    latest &&
-    !input.force &&
-    config.lastPulledRevisionId !== latest.id &&
-    latest.content_hash !== config.lastSyncedHash
-  ) {
+  if (latest && !input.force && projectMemoryRemoteMovedSinceSync(latest, config)) {
     const deviceStatus = await reportProjectMemoryDeviceStatus({
       sb, portal, memoryId: config.memoryId, contentHash, revisionId: config.lastPulledRevisionId, inSync: false, projectRoot: root,
     });
@@ -6468,7 +6500,14 @@ export async function pullProjectMemory(input: {
       ...deviceStatus,
     };
   }
-  const locallyChanged = !!config.lastSyncedHash && localHash !== config.lastSyncedHash;
+  // With no recorded agreement nothing shows the local bytes are already in Supabase: a first sync on this device, a
+  // state file lost or never written, or a lineage the identity claim just adopted (it clears the cursor). Then only a
+  // document with no memory in it may be replaced (first-time adoption); any other difference is a conflict for the
+  // person to resolve. (2026-11-01: this used to back up and replace such a document — and `/sync`, which reaches
+  // here for its `conflict` direction, still answered `conflict: true` over the replaced file.)
+  const locallyChanged = config.lastSyncedHash
+    ? localHash !== config.lastSyncedHash
+    : !projectMemoryHoldsNoLocalWork(localContent);
   if (locallyChanged && !input.force) {
     const deviceStatus = await reportProjectMemoryDeviceStatus({
       sb, portal, memoryId: latest.memory_id, contentHash: localHash, revisionId: config.lastPulledRevisionId, inSync: false, projectRoot: root,
@@ -6517,6 +6556,41 @@ export async function pullProjectMemory(input: {
  * the current local document has been copied to .agent-memory/backups.
  * `use-remote` likewise copies the local file before replacing it.
  */
+/** Read-only comparison: no claim, schema repair, pull, ledger sync or document write. */
+export async function previewProjectMemoryConflict(input: {folderPath:string;portalDataFile:string}) {
+  const local=detectProjectMemory(input.folderPath);
+  if(!local.exists||!local.config||!local.memoryPath)throw new Error('비교할 로컬 장기기억이 없습니다.');
+  const localContent=readMemoryDocument(local.projectRoot,local.memoryPath);
+  if(Buffer.byteLength(localContent,'utf8')>MAX_MEMORY_BYTES)throw new Error('장기기억 크기 한도를 넘습니다.');
+  const sb=memoryClient(loadPortalConfig(input.portalDataFile));
+  await readReviewedMemoryIdentity(sb,local.config.memoryId);
+  const latest=await latestRemoteRevision(sb,{memoryId:local.config.memoryId});
+  if(!latest)throw new Error('비교할 원격 장기기억을 찾지 못했습니다.');
+  if(latest.memory_id!==local.config.memoryId||typeof latest.id!=='string'||!/^[a-f0-9-]{36}$/.test(latest.id)||typeof latest.content_hash!=='string'||!/^[a-f0-9]{64}$/.test(latest.content_hash))throw new Error('원격 기억의 버전을 확인하지 못했습니다.');
+  verifiedRemoteMemoryContent(latest);
+  const comparison=projectMemoryConflictPayload({latest,local,config:local.config,localContent});
+  const base=await readProjectMemoryConflictBase(sb,{memoryId:local.config.memoryId,latest,config:local.config});
+  return {...comparison,remoteDeviceName:typeof latest.device_name==='string'?latest.device_name.slice(0,160):null,remoteCreatedAt:typeof latest.created_at==='string'?latest.created_at.slice(0,64):null,remoteParentRevisionId:null,conflict:comparison.localContentHash!==comparison.remoteContentHash,memoryId:local.config.memoryId,
+    baseRevisionId:base?.id??null,baseContent:base?.content??null};
+}
+
+/**
+ * The revision both sides last agreed on (this device's last Pull/Push), so an entry present on one side only can be
+ * told apart: added there, or deleted on the other side. Read-only and optional — a pruned, mismatched or unreadable
+ * base leaves the comparison two-way (and the dock then offers no automatic merge). Never trusted without its hash.
+ */
+async function readProjectMemoryConflictBase(sb:any,input:{memoryId:string;latest:any;config:ProjectMemoryConfig}):Promise<{id:string;content:string}|null>{
+  const {lastPulledRevisionId:id,lastSyncedHash:hash}=input.config;
+  if(!id||!hash||!/^[a-f0-9]{64}$/.test(hash))return null;
+  const verified=(row:any)=>row&&row.id===id&&row.memory_id===input.memoryId&&typeof row.content==='string'&&row.content_hash===hash
+    &&Buffer.byteLength(row.content,'utf8')<=MAX_MEMORY_BYTES&&hashContent(row.content)===hash?{id,content:row.content as string}:null;
+  if(input.latest?.id===id)return verified(input.latest);
+  try{
+    const {data,error}=await sb.from('portmgr_project_memory_revisions').select('id,memory_id,content,content_hash').eq('id',id).eq('memory_id',input.memoryId).limit(1);
+    return error?null:verified(Array.isArray(data)?data[0]:null);
+  }catch{return null;}
+}
+
 export async function resolveProjectMemoryConflict(input: {
   portalDataFile: string;
   folderPath: string;
@@ -6528,6 +6602,8 @@ export async function resolveProjectMemoryConflict(input: {
   expectedLocalHash: string;
   expectedRemoteRevisionId: string;
   expectedRemoteContentHash?: string | null;
+  /** Local OPS human review: preserve this exact identity without claim or schema repair. */
+  expectedMemoryId?: string;
 }) {
   if (input.strategy !== "keep-local" && input.strategy !== "use-remote" && input.strategy !== "merged") {
     throw new Error("알 수 없는 장기기억 충돌 해결 방식입니다.");
@@ -6542,7 +6618,11 @@ export async function resolveProjectMemoryConflict(input: {
   const localHash = hashContent(localContent);
   const portal = loadPortalConfig(input.portalDataFile);
   const sb = memoryClient(portal);
-  const { identity, latest } = await withProjectMemorySchemaRepair(async () => {
+  if(input.expectedMemoryId&&config.memoryId!==input.expectedMemoryId)throw new Error('비교한 기억 연결이 바뀌었습니다. 다시 비교하세요.');
+  const { identity, latest } = input.expectedMemoryId ? {
+    identity:await readReviewedMemoryIdentity(sb,input.expectedMemoryId),
+    latest:await latestRemoteRevision(sb,{memoryId:input.expectedMemoryId}),
+  } : await withProjectMemorySchemaRepair(async () => {
     const identity = await claimProjectMemoryIdentity(sb, root, config, input.githubUrl);
     const latest = await latestRemoteRevision(sb, { memoryId: identity.memoryId });
     return { identity, latest };
@@ -6661,6 +6741,16 @@ export async function resolveProjectMemoryConflict(input: {
   };
 }
 
+/**
+ * Whether the session save's preflight Pull must stop the save. Pull refuses to replace local edits whether or not
+ * Supabase moved; when the head is still the revision this device last synced there is nothing to adopt and nothing to
+ * lose, so the save goes on and its own Push re-checks the head before appending. Only a head that moved since the last
+ * agreement (or a payload that does not say) is a real conflict.
+ */
+export function sessionPreflightBlocksSave(preflight: { conflict?: unknown; remoteChangedSinceSync?: unknown } | null | undefined): boolean {
+  return preflight?.conflict === true && preflight.remoteChangedSinceSync !== false;
+}
+
 export async function sessionEndProjectMemory(input: {
   signal?: AbortSignal;
   sessionStore?: MemorySessionStore;
@@ -6689,6 +6779,9 @@ export async function sessionEndProjectMemory(input: {
   if (input.autoBackup !== false) {
     try {
       preflight = await pullProjectMemory(input);
+      if (preflight?.conflict && !sessionPreflightBlocksSave(preflight)) {
+        preflight = { localAheadOfRemote: true, remoteRevisionId: preflight.remoteRevisionId ?? null };
+      }
       if (preflight?.conflict) {
         return {
           success: false,

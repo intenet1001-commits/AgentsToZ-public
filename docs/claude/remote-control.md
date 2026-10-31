@@ -189,3 +189,101 @@ Codex 앱처럼 상단 탭으로 Mac을 갈아타며 쓰려면 **서로 다른 �
 하나 더하는 것도 버전 상승을 요구한다. **Mac 앱(DMG)과 Vercel 포털은 따로 배포되므로 스큐가 상시
 가능하다** — `main`에 push하면 포털만 먼저 새 버전이 된다. 배포 순서는 **커밋 → DMG 빌드·설치 →
 push** 다.
+
+## 기록 탭 — 기능 목록이 확인되기 전의 빈칸은 「구버전 Mac」이 아니다 (2026-11-01)
+
+휴대폰 「기록」의 공통기억(`goal-common-memory-v1`)·아젠투지별 기억(`device-memory-v1`)·v2 RPC는 **확장 기능 목록에만** 있다
+(레거시 답은 8개로 잘리고 이것들을 거른다 — `remoteControlCore.ts`). 그런데 패널은 「목록에 없음」만 보고 「연결한 Mac 앱을
+업데이트하면…」이라고 말했고, 확장 답이 한 번 빠지면(RATE_LIMITED·응답 지연·페이지가 두 답 사이에 닫힘 — iPhone 앱이 백그라운드로
+가면 흔하다) `capabilityProbeOwed()`가 레거시 목록만 보고 다시 묻지 않아 **그 연결 내내** 최신 Mac에 업데이트하라고 했다. 금고에서
+복원한 세션도 저장된 레거시 목록을 그대로 믿었다.
+
+- 판정은 `src/remoteFeatureAvailability.ts` 하나다: 목록에 있으면 ready, 목록 없음·조사 중·**확장 목록 미확인**이면 checking
+  (「연결한 Mac이 지원하는 기능을 확인하는 중입니다.」), 확인된 목록(또는 옛 Mac의 ACTION_NOT_ALLOWED 거절)에 없을 때만 update-required.
+  기록의 네 패널(`MobileWorkspacePanel`·`RemoteCommonMemoryPanel`·`RemoteDeviceMemoryPanel`·`RemoteMetaCommonMemoryPanel`)이 `checking` prop으로 받는다.
+- 컨트롤러: 거절이 아닌 이유로 실패한 확장 조사는 `EXTENDED_CAPABILITY_RETRY_MS`(30초) 뒤 다시 owed, 복원한 세션은 바로 owed다.
+  조회는 다시 물어도 안전하다(`READ_ONLY_RELAY_ACTIONS`) — 결과를 모르는 **변경** 요청 재전송 금지 규칙과 다르다. 매 1초 폴링마다 묻지 않는다.
+- 검증: `tests/remote-records-feature-availability.test.tsx`, `tests/remote-control-relay-controller.test.ts`(재시도·옛 Mac 거절·복원),
+  `bun tests/remote-copy-states.e2e.mjs <격리 빌드> [chromium|webkit] records-checking`(수정 전 빌드에서 「업데이트하면」으로 실패).
+- ⚠️ 같은 날의 실제 원인은 따로 있었다: **휴대폰이 옛 Supabase(`fvkmkq…`)에 로그인**해 있었고 이 Mac은 `agentstoz`(`yfbiv…`)였다.
+  Vercel 포털(= `DEFAULT_REMOTE_CONTROLLER_ORIGIN`) 빌드도 `VITE_SUPABASE_URL=fvkmkq…`였다. 둘이 다르면 릴레이·로그인이 서로
+  다른 DB로 가서 페어링 요청이 Mac에 닿지 않고(QR은 페이지가 `portalForeignPairing`/`bundledQrSupabaseMismatch`로 요청 전에 거절),
+  기록의 Mac 의존 패널은 전부 「연결하면」에 머물며, 장기기억은 옛 DB를 읽는다. 「휴대폰 기록 탭이 안 된다」면 **먼저 두 DB의 edge 로그에서
+  iPhone 요청이 어느 쪽에 찍히는지** 본다.
+
+## 휴대폰 홈 · 주간 잔여 — 연결한 Mac의 CLI 계정, 읽기 전용 (2026-10-29)
+
+휴대폰 홈 탭(`.workspace-home`) 끝의 카드(`src/RemoteWeeklyUsageCard.tsx`)가 **연결한 Mac**의 Claude·Codex·agy 주간 잔여를 보여 준다.
+공급자마다 가장 적게 남은 칸(도크와 같은 숫자)·초기화 시각(`phoneDateTime`)·Mac 이름이고, 오래된 값은 「이전 값 · N분 전」이다.
+숫자는 **그 Mac에서 조회한 CLI 계정** 기준이며, 카드에 열린 세션의 계정과 다를 수 있다고 적는다. Codex의 확인된 관리 프로필 상속은 기본 CLI 계정으로 격리해 조회하고, 관리 경로가 아닌 명시적 설정은 유지한다([도크 주간 잔여](voice-dock.md)).
+
+- ⚠️ **앞선 규칙을 뒤집었다.** `docs/claude/voice-dock.md`의 「사용량 연결」 줄(cfc50365 기준 106행) 끝 「원격·휴대폰에는 노출하지 않는다」는
+  **사용자 결정**(2026-10-29, 「카드 먼저, 푸시는 서버 중계」)으로 이 카드가 뒤집는다. 남는 선은 둘이다 — 휴대폰은 `usage.weekly`로 **읽기만** 하고,
+  「사용량 연결」(~/.claude·~/.gemini 설정을 고친다)은 여전히 **Mac에서만** 돈다. voice-dock.md는 진행 중인 작업이 고치고 있어 이 변경에서 손대지 않았다 —
+  그 작업이 들어갈 때 그 문장을 이 절을 가리키게 고친다. 그때까지 두 문서가 어긋나면 **이 절이 정본**이다: 그 문장을 근거로 휴대폰 경로를 지우지 말 것.
+- **통로: 기능 플래그도 버전 상승도 없다.** `workspace-v1`의 동작 `usage.weekly`(`WEEKLY_USAGE_REMOTE_ACTION`, 정본 `src/weeklyUsageRemote.ts` — 브라우저 안전)다.
+  `workroom.effort`와 같은 「물어보고 숨기기」다 — 옛 Mac의 엄격한 정규화기가 모르는 동작을 거절하면(`weeklyUsageUnsupported` = `workroomEffortUnsupported`와
+  같은 판정) 카드가 그 호스트에서만 숨는다. 카드 DTO·`AiTerminalSummary`에 키를 더하지 않으므로 `REMOTE_CONTROL_PROTOCOL_VERSION`도 그대로다.
+  ⚠️ 플래그를 만들지 않은 이유: 실제 `api-server.ts` 옵션으로 만든 확장 기능 목록이 **이미 15/16**이고, 17번째는 `RemoteControlCore` 생성자에서 throw해
+  인터넷 원격이 아예 뜨지 않는다. `tests/remote-control-core.test.ts`의 production-options 검사가 두 기동 지점의 옵션을 소스에서 읽어 이 상한을 지킨다.
+- **결과는 배타 키 `{kind, action, weeklyUsage}`뿐이다.** 행은 `{provider, buckets(≤8), checkedAt, source, connected}`, 순서 claude→codex→agy이고
+  정규화기가 모르는 키·순서·중복·라벨·ISO가 아닌 시각을 통째로 거절한다. `canConnect`는 싣지 않는다 — **「사용량 연결」은 Mac에서만 한다**(휴대폰은 읽기 전용).
+  연결 안 된 Claude/agy는 「Mac 호출창 → 열린 세션에서 「사용량 연결」」로 안내한다.
+- **게이트웨이**(`src/mobileWorkspaceGateway.ts`): 범위 `null`(사용량은 프로젝트가 아니라 Mac 것 — `/usage`·`/status`와 같다), 표준 읽기 예산, 동의 + 허용된
+  프로젝트 1개 이상, `targetId`는 휴대폰에 보여 준 어떤 권한이든(채널 전용 포함), `device`(다른 아젠투지)는 `WEEKLY_USAGE_COMMUNITY_REFUSAL`로 거절한다.
+  선택 의존성 `weeklyUsage()`가 없는 호스트는 「Mac 앱 업데이트 필요」로 답한다.
+- **호스트 폴링을 붙잡지 않는다.** 휴대폰 요청은 호스트의 단일 릴레이 폴링 안에서 돌고, 차가운 Codex 읽기는 `codex app-server`를 띄운다(최대 15초).
+  그래서 `createWeeklyUsageRemoteReader`(`src/weeklyUsageRemoteHost.ts`)가 **마지막 `status()` 스냅샷**으로 답하고, 30초(= Codex 캐시)보다 오래됐을 때만
+  새로 읽기 하나를 시작해 **최대 2초** 기다린다. 첫 읽기 전에는 빈 목록이고 카드는 「Mac이 아직 사용량을 읽는 중입니다」라고 말한다. 실패하면 이전 스냅샷을 둔다.
+  연결은 `api-server.ts`의 `createMobileWorkspaceGateway` 옵션 한 줄(`weeklyUsageHost.status()`)이다.
+- **릴레이 분류**(`src/remoteControlRelayController.ts`): 배경 읽기(`isBackgroundTerminalRequest` — 누름에 양보) + `readOnlyTerminalProbe`(옛 Mac의 거절이 릴레이 오류로 남지 않는다).
+- **카드는 마운트·화면 복귀·호스트 바뀜·수동 새로고침에만 읽는다.** 자동 읽기는 10초 안에 다시 하지 않는다. 주간 자료 없는 Codex 결과의 15분 경계에서는 로컬 일회성 타이머로 이전 확인 표시만 갱신하며 네트워크 조회는 하지 않는다.
+  effect는 호스트 id + 첫 `controlId` **문자열**에 건다 — `status.projects`는 1초마다 새 배열이다(`list` 폭주 선례). 읽기는 한 번에 하나이고 결과를 모르는 요청은
+  다시 보내지 않는다. 오프라인은 그대로 말한다(「휴대폰이 오프라인입니다」/「Mac이 응답하지 않습니다」). 문구는 카드 파일 안에 두고 색은 토큰만 쓴다.
+  도크 컴포넌트(`DockWeeklyUsage`)를 가져오지 않는다 — 휴대폰 번들에 Mac 모듈이 들어간다.
+- **배포**: 포털은 Vercel로 간다. **iPhone 앱은 포털을 번들하므로 새 TestFlight 빌드가 있어야 앱에서 보인다**(웹 모드 작업 공간은 Vercel 것을 쓴다).
+  새 DMG를 깔기 전의 Mac은 옛 Mac이라 카드가 숨는다.
+- **2호 = Windows**: statusline 캡처(「사용량 연결」)가 없어 Claude/agy는 연결 안 됨으로 남고 **Codex만 숫자가 나온다.** 휴대폰은 `canConnect`를 모르므로
+  Windows 호스트 카드에도 같은 연결 안내가 뜬다(알려진 한계).
+- 검증: `tests/weekly-usage-remote.test.tsx`(DTO 왕복·거절·프로토콜·게이트웨이·릴레이 분류·호스트 스냅샷·카드 읽기·화면·소스 계약),
+  `tests/remote-control-core.test.ts`(production-options 상한), `tests/weekly-usage-alerts.test.ts`(아래 문턱). 화면 e2e는 아직 없다.
+
+### 문턱 알림 푸시 — 구현됨(2026-11-01), 배포 전
+
+사용자 결정은 「카드 먼저, 푸시는 서버 중계」다. 알림 판정은 순수 함수다 — `src/weeklyUsageAlerts.ts`의 `stepWeeklyUsageAlerts(state, rows, now)` →
+`{nextState, alerts}`. 공급자마다 카드와 같은 최소 잔여로, 90/80/…/10 경계를 내려갈 때 창마다 한 번, 0에서 「소진」 한 번, 여러 칸을 건너뛰면 한 번이다.
+첫 관찰·새 주간 창·오래된/모르는 값은 말하지 않는다(오래된 값은 기준선을 그대로 둬, 그 창의 다음 신선한 값이 떨어진 것을 한 번 말한다).
+창은 초기화 시각을 시 단위로 둔 키이고, 초기화 시각이 없으면 ISO 주가 바뀌고 20포인트 이상 올랐을 때만 새 창이다.
+
+**받는 앱은 AgentsToZ iPhone 앱(`mobile/ios`)이다.** 등록부는 원격제어 페어링이 아니라 **AgentsToZ Screen 등록부**다 — 폰에서 그 Mac 행을 길게 눌러
+「알림 받기」를 켠 기기만 받는다(`mobile/ios/App/ScreenPushRegistration.swift`). 화면 제어 알림과 같은 등록이라 iOS 쪽은 표시를 위해 바꿀 것이 없고,
+누르면 앱만 열린다(탭 처리기는 `screen` 부분이 있는 알림만 다룬다). 「알림 받기」 성공 문구에만 주간 알림을 한 줄 더했다.
+
+- **경로: 메인 앱 → 넘김 파일 → AgentsToZ Screen → screen-push 중계 → APNs.** 메인 앱은 키도 중계 주소도 갖지 않는다.
+  - 메인 앱(`src/weeklyUsagePushHost.ts`): 「휴대폰 알림」이 켜져 있으면 `WeeklyUsageHost.status()`의 모든 읽기(도크 60초·휴대폰 카드·스스로 5분)가
+    `observe`로 간다. 다음 상태를 `<appData>/weekly-usage/push-alerts.json`(`{version:1, enabled, state}`)에 fsync까지 쓴 **뒤에** 알림마다 파일 하나를
+    `<appData>/weekly-usage/push-outbox/`에 둔다(`{"version":1,"provider","mark","windowKey","observedAt"}`, 0600, 임시 파일 → rename). 넘기기가 실패하면
+    로그만 남기고 다시 넘기지 않는다. 상태를 못 쓰면 아무것도 넘기지 않는다(다음 읽기가 그 알림을 한 번 말한다). 대기 파일은 16개까지, 2시간 넘은 것은 지운다.
+  - AgentsToZ Screen(`native/screen-control/.../ScreenPush.swift`, `WeeklyUsageOutbox.swift`): **화면 제어를 켜 둔 동안만**(승인 네트워크 대기 중 포함) 30초 폴링마다
+    파일을 읽고 **보내기 전에 지운다.** 화면 제어를 켤 때 Touch ID로 꺼낸 Mac 키로 서명해 보내고, 결과를 모르는 전송은 다시 보내지 않는다. Mac에서 시간당 12건.
+  - 중계(`supabase/functions/screen-push/protocol.ts`): 새 메시지 종류 `weekly-usage`(라벨 `… push weekly usage`, kind 1·2는 바이트 그대로).
+    서명 → 신선도(±120초, 관찰 시각은 발행 2시간 안) → 재전송·속도(`usage` 종류, Mac 키마다 **시간당 12** — 화면 알림의 10분 20과 따로) → 그 Mac이 등록한 기기 → APNs.
+    배너는 Mac이 서명한 필드로만 만든다: 제목 「Codex 주간 사용량」, 본문 「‘Mac 이름’에서 확인한 Codex 주간 잔여가 30% 미만입니다.」/「… 모두 썼습니다.」.
+    계정·이메일·토큰·정확한 숫자는 없다. collapse id는 `weekly-<provider>:<windowKey>:<mark>`, `thread-id`는 `weekly-usage`, 만료는 관찰 + 6시간.
+  - 넘김 파일은 권한이 아니다 — 같은 사용자의 프로세스가 파일을 꾸며도 그 Mac의 등록 기기로 정해진 문구 배너를 시간당 12건까지 보낼 뿐이다.
+- **켜기**: Mac마다, 기본 꺼짐. 도크 「열린 AI 세션」의 주간 잔여 아래 「휴대폰 알림 · 10%마다」 체크(`src/components/DockWeeklyUsage.tsx`, 문구 `src/weeklyUsagePush.ts`).
+  「같은 계정을 여러 Mac에서 쓰면 Mac 한 대에서만 켜세요」를 늘 보이게 둔다. 켜면 다음 읽기가 조용한 기준선이고, 끄면 상태와 대기 파일을 지운다.
+  켜 둔 동안 Screen 상태(실행 안 함·화면 제어 꺼짐·등록 기기 없음·N대)를 한 줄로 말한다. 요청은 같은 `/api/agent-runtime/weekly-usage`의
+  `{operation:'alerts', enabled?}`다 — **원격 DTO·기능 목록·`AiTerminalSummary`는 그대로**이고 휴대폰 포털은 이 스위치를 모른다. 옛 사이드카는 거절하고 도크는 스위치를 숨긴다.
+- **macOS만이다.** AgentsToZ Screen이 없는 Windows(2호)는 스위치를 거절·숨긴다(예전 메모의 「2호는 Codex만」은 이 경로로는 없다).
+- ⚠️ **Claude/agy 숫자는 statusline 캡처에서 온다** — 그 CLI가 돌 때만 갱신되므로 쉬는 동안은 알림이 늦거나 오래된 값이라 침묵한다. Codex만 능동 읽기다.
+- ⚠️ **Mac을 다시 켠 뒤 Touch ID로 화면 제어를 켜기 전에는 보내지 않는다.** 그동안의 알림은 대기 파일로 남았다가 2시간이 지나면 보내지 않고 버린다.
+- ⚠️ **메인 앱은 자기 안의 Screen을 서명이 다르면 덮어 설치한다**(`src-tauri/src/screen_helper.rs`). 그래서 `scripts/build-screen-app.ts`로 따로 만든 알림용 Screen은
+  다음 실행에 지워진다 — 설치본은 `AGENTSTOZ_SCREEN_PUSH_URL=… bun build-macos.ts …`로 만들어야 한다. `stageScreenControlBundle.ts`의 `pushEndpoint`는
+  명시 옵션만 받고(환경을 물려받지 않는다), 공개 base 파이프라인은 넘기지 않으며, 만든 뒤 Info.plist의 `AgentsToZScreenPushURL`이 요청과 같은지 확인한다.
+- 검증: `tests/screen-push-weekly-usage.test.ts`(계약 벡터·엄격 해석·문구·처리기 거절과 kind 1·2 예산), `tests/screen-push-protocol.test.ts`(e2e에 주간 알림 1건),
+  `tests/weekly-usage-push-host.test.ts`(보내기 전 저장·재전송 없음·쓰기 실패·끄기·넘김 파일 바이트 = `vectors.json` `weeklyUsage.handoff`·상한·도크 계약),
+  `tests/screen-push-config.test.ts`(Screen 동봉 주소), `bun run test:screen-control`(Swift 해석·예산·`WeeklyUsageOutboxTests`), `bun scripts/check-voice-dock-sessions.ts`(도크 스위치).
+- **배포 순서**(사람이 승인 뒤): ① `supabase/migrations/20261025010000_screen_push.sql`을 `yfbivsatsorbidfutkvb`에 적용 — ⚠️ `create table if not exists`라 **예전 파일로 이미 적용한 DB에는
+  `usage`가 들어가지 않는다.** 그런 DB는 `portmgr_screen_push_requests_kind_check`를 지우고 `usage`를 더해 다시 만든다(안 하면 주간 알림 admit이 check 위반 → 500) ② APNs 비밀 ③ 함수 `screen-push` 배포 ④ 주소를 넣은 메인 앱(동봉 Screen) ⑤ 주소·push entitlement를 넣은
+  iOS 빌드 ⑥ 폰 「알림 받기」 ⑦ 그 Mac 도크에서 「휴대폰 알림」. 함수를 먼저 배포해야 Screen의 `weekly-usage` 전송이 `malformed`가 되지 않는다.

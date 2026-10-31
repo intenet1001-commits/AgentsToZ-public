@@ -1,0 +1,26 @@
+.assist-note{color:var(--ink-2);font-size:12px;line-height:1.7;}
+.assist-start{display:flex;flex-direction:column;gap:14px;}
+.assist-start fieldset{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.assist-start legend{padding:0 6px;font-weight:700;}
+.assist-choice{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;}
+.assist-choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft);}
+.assist-choice:has(input:disabled){cursor:not-allowed;opacity:.72;}
+.assist-choice span{display:flex;flex-direction:column;gap:3px;font-size:12px;line-height:1.6;color:var(--ink-2);}
+.assist-choice strong{color:var(--ink);font-size:13px;}
+.assist-row{display:flex;flex-wrap:wrap;gap:14px;}
+.assist-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2);}
+.assist-field input{min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface,var(--bg));color:var(--ink);font-size:14px;}
+.assist-field input[aria-invalid=true]{border-color:var(--danger);}
+.assist-confirm{display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-weight:600;}
+.assist-headline span{color:var(--ink-2);font-size:12px;}
+.assist-steps,.assist-checks{display:grid;gap:6px;}
+.assist-steps li,.assist-checks li{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;}
+.assist-steps li[aria-current=step]{border-color:var(--accent);background:var(--accent-soft);}
+.assist-steps em,.assist-checks em{margin-left:auto;font-style:normal;font-size:12px;color:var(--ink-2);}
+.assist-checks li[data-state=ok] em{color:var(--accent);font-weight:700;}
+.assist-checks li[data-state=failed] em{color:var(--danger);}
+.assist-checks small{flex-basis:100%;color:var(--ink-2);font-size:11px;line-height:1.6;}
+.assist-app{flex-shrink:0;}
+.assist-browser{flex-shrink:0;height:440px;min-height:320px;border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
+.assist-browser-start{padding:16px;display:flex;flex-direction:column;gap:10px;}
+@media (max-width:640px),(pointer:coarse){.assist-field input{font-size:16px;}.assist-browser{height:360px;}}

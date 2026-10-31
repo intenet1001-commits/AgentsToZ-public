@@ -100,6 +100,12 @@ export class WhatISaidTtlCache<T> {
     return pending;
   }
 
+  /** 신선한 값만 돌려준다. 없으면 undefined — loader 를 부르지 않는다(네트워크 없이 판단할 때). */
+  peek(): T | undefined {
+    const cached = this.#value;
+    return cached && this.#now() - cached.at < this.#ttlMs ? cached.value : undefined;
+  }
+
   invalidate(): void {
     this.#generation += 1;
     this.#value = null;

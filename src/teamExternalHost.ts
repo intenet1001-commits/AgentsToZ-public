@@ -5,6 +5,8 @@ import {basename, dirname, join} from 'node:path';
 import {aiTerminalLaunchArgs} from './aiTerminalLaunchArgs';
 import {normalizeCodeAppTask, checkOpenCodeAppRequest, type OpenCodeAppMode} from './codeAppTask';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
+import {WORKROOM_KEY_INTERVAL_MS, workroomKeyChoosesExit, workroomKeySequence} from './workroomOrchestration';
+import {workroomScreenAwaitsAnswer} from './workroomRouteDelivery';
 import {createTeamExternalRuntime, TeamExternalRuntimeError, type TeamExternalApplication, type TeamExternalCapabilities,
   type TeamExternalCreatePlan, type TeamExternalJournal, type TeamExternalJournalRecord, type TeamExternalLaunchInput,
   type TeamExternalNativeRef, type TeamExternalOption, type TeamExternalPreparedPlan, type TeamExternalProbe,
@@ -56,6 +58,10 @@ export interface TeamExternalHostOptions {
   /** Current local Orca execution host, not inferred from a title or the requested cwd. */
   orcaExecutionHostId?: string;
   platform?: NodeJS.Platform; maxPreparedPlans?: number; submitObserveSeconds?: number;
+  /** Pause between two keys so a TUI reads each as its own event (default WORKROOM_KEY_INTERVAL_MS). */
+  keyIntervalMs?: number;
+  /** Maximum wait for an observable screen change after an arrow before sending the next key (default 2000ms). */
+  keyRedrawMs?: number;
   /** Connection-only adapter: a connected cmux may launch manually without claiming native process control. */
   cmuxConnection?(): Promise<boolean>;
   cmux?: {connected(): Promise<boolean>; create(plan: TeamExternalCreatePlan, launch: TeamExternalTerminalLaunchPlan): ReturnType<TeamExternalRuntimeDeps['create']>}
@@ -107,7 +113,9 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
     const cwd = observation?.cwd ?? (ref.surface === 'orca-worktree' ? live.worktreePath : null);
     if (cwd !== ref.cwd) return error('EXTERNAL_CWD_UNVERIFIED');
     return {shown: live, agentVerified: (observation?.agent ?? live.agent) === ref.agent,
-      activity: observation?.activity ?? (live.connected ? 'idle' : 'exited')};
+      // A connected PTY may be awaiting approval, collecting a draft or running a turn.
+      // Connection and writability alone cannot establish that the composer is idle.
+      activity: observation?.activity ?? (live.connected ? 'unknown' : 'exited')};
   }
   function takePlan(planId: string, scope: TeamExternalScope): PrivatePlan {
     const plan = plans.get(planId);
@@ -128,13 +136,16 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
       const plan: PrivatePlan = {scope, input: copy({...input, requested, prompt: normalizedPrompt}), executable: null, cli: null, runtimeId: null, kind: 'manual', sessionId: randomUUID()};
       if (input.surface === 'app') {
         for (const key of requestedEntries(requested)) applied[key] = {mode: 'manual-settings', reason: 'DESKTOP_APP_SETTINGS_REQUIRED'};
-        const mode = requested.launchOptions?.appMode;
+        // A team member normally starts in a fresh worktree with no Hermes
+        // conversation yet. Match the builder's first Hermes choice when an
+        // API caller omits appMode; keep an explicit reopen unchanged.
+        const mode = requested.launchOptions?.appMode ?? (input.agent === 'hermes' ? 'open' : undefined);
         // A requested reopen/open is never silently turned into a new Codex thread by its task-prefill helper.
         const task = input.agent === 'codex' && (mode === undefined || mode === 'new') ? normalizedPrompt : undefined;
         const checked = checkOpenCodeAppRequest({agent: input.agent, mode, task});
         if (checked.ok) {
           plan.app = {scope, requested, title: input.title, agent: input.agent, ...(checked.mode ? {mode: checked.mode} : {}), ...(checked.task ? {task: checked.task} : {})};
-          if (mode !== undefined) applied['launchOptions.appMode'] = {mode: 'automatic', evidence: 'launch-argument'};
+          if (requested.launchOptions?.appMode !== undefined) applied['launchOptions.appMode'] = {mode: 'automatic', evidence: 'launch-argument'};
         }
         caps.reveal = !!options.revealManual;
         result = {planId, kind: 'manual', readiness: checked.ok ? 'ready' : 'needs-setup', capabilityRevision: 'external-app-launch-v1', applied, capabilities: caps};
@@ -268,6 +279,22 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
       if (command.kind !== 'orca-target' || command.terminalHandle !== evidence.shown.handle || !evidence.agentVerified || !evidence.shown.connected || !evidence.shown.writable) return error('EXTERNAL_BINDING_UNVERIFIED');
       const text = normalizeCodeAppTask(command.text); if (!text) return error('EXTERNAL_PROMPT_INVALID');
       const cli = await options.resolveOrcaCli(); assertCurrent(command.executionRef); if (!cli) return error('EXTERNAL_CONNECTION_REQUIRED');
+      // The trailing Enter on a normal instruction would also answer a waiting trust/approval menu. Read this
+      // exact member before typing; an unreadable or empty screen is not evidence that the composer is safe.
+      let rows: string[] | null = null;
+      try {
+        const screen = envelope(await call(cli, ['terminal', 'read', '--terminal', command.terminalHandle, '--limit', '1000']));
+        const terminal = object(screen.body.terminal);
+        if (screen.runtimeId === evidence.shown.runtimeId && terminal?.handle === command.terminalHandle
+          && Array.isArray(terminal.tail) && terminal.tail.every(line => typeof line === 'string')
+          && terminal.tail.some(line => line.trim())) rows = terminal.tail as string[];
+      } catch {/* no text has been sent */}
+      if (!rows) return {outcome: 'not-sent', reason: 'EXTERNAL_SCREEN_UNAVAILABLE'};
+      if (workroomScreenAwaitsAnswer(rows)) return {outcome: 'not-sent', reason: 'EXTERNAL_PROMPT_AWAITS_ANSWER'};
+      try {
+        const current = await inspect(command.executionRef);
+        if (!current.agentVerified || !current.shown.connected || !current.shown.writable) return {outcome: 'not-sent', reason: 'EXTERNAL_BINDING_UNVERIFIED'};
+      } catch {return {outcome: 'not-sent', reason: 'EXTERNAL_BINDING_UNVERIFIED'};}
       const sent = envelope(await call(cli, ['terminal', 'send', '--terminal', command.terminalHandle, '--text', text, '--enter',
         '--wait-submit', String(Math.max(0, Math.min(10, options.submitObserveSeconds ?? 2)))]));
       const send = object(sent.body.send), prompt = object(send?.prompt);
@@ -275,6 +302,95 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
       if (send.accepted !== true) return {outcome: send.accepted === false ? 'not-sent' : 'unknown'};
       const stages = Array.isArray(prompt.stages) ? prompt.stages : [];
       return {outcome: 'written', turnStarted: stages.includes('turn_started') && prompt.provider === command.executionRef.agent && prompt.observation === 'supported'};
+    },
+    /**
+     * One raw `terminal send --text <key bytes>` per key (no --enter, no --retry-request: Orca takes those only for a
+     * prompt), each accepted by the same runtime and the same process incarnation it was verified on. Anything that
+     * fails before the first key was typed is `not-sent`; anything after it is `unknown`, and the rest is dropped.
+     */
+    async keys(command) {
+      // Only this member's own Orca worktree terminal: never the floating terminal, a cmux surface or another window.
+      if (command.kind !== 'orca-target' || command.executionRef.surface !== 'orca-worktree') return error('EXTERNAL_BINDING_MISMATCH');
+      // A prior uncertain key could still redraw after this request starts. The durable operation journal survives
+      // host restarts; without explicit reconciliation, never let a new request type on that uncertain screen.
+      try {
+        const record = await options.journal.read(command.executionRef.executionId);
+        if (!record || record.operations.some(op => op.kind === 'keys' && op.id !== command.operationId
+          && (op.status === 'reserved' || op.outcome === 'unknown' || op.outcome === undefined))) return {outcome: 'not-sent'};
+      } catch {return {outcome: 'not-sent'};}
+      let evidence: Awaited<ReturnType<typeof inspect>>, cli: string | null;
+      try {evidence = await inspect(command.executionRef); cli = await options.resolveOrcaCli(); assertCurrent(command.executionRef);}
+      catch {return {outcome: 'not-sent'};}
+      if (!cli || command.terminalHandle !== evidence.shown.handle || !evidence.agentVerified || !evidence.shown.connected || !evidence.shown.writable) return {outcome: 'not-sent'};
+      const orca = cli, pause = (ms: number) => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
+      /** The member's current tail from the same runtime and handle, or null when it cannot be read. */
+      const screen = async (): Promise<string[] | null> => {
+        try {
+          const read = envelope(await call(orca, ['terminal', 'read', '--terminal', command.terminalHandle, '--limit', '40']));
+          const terminal = object(read.body.terminal);
+          return read.runtimeId === evidence.shown.runtimeId && terminal?.handle === command.terminalHandle && Array.isArray(terminal.tail)
+            && terminal.tail.every(line => typeof line === 'string') ? terminal.tail as string[] : null;
+        } catch {return null;}
+      };
+      const selected = (rows: string[]) => rows.map(row => row.replace(/[│┃║╭╮╰╯─━═┌┐└┘├┤┬┴┼▌▐]/g, ' ').trim())
+        .filter(row => /^[❯›>▶➤]\s*\S/.test(row)).at(-1) ?? null;
+      let typed = 0;
+      for (let index = 0; index < command.keys.length; index++) {
+        const key = command.keys[index]!;
+        // Enter or a digit that would pick a row ending the CLI (「No, exit」 is highlighted on Claude's trust screen) is
+        // refused at any position, as for the voice dock (VOC 2026-09-30): an arrow before it moves the highlight, so the
+        // screen is read again right before that key, after the redraw. An unreadable screen refuses it too.
+        const choosing = key === 'enter' || /^[1-9]$/.test(key);
+        if (typed) {
+          await pause(options.keyIntervalMs ?? WORKROOM_KEY_INTERVAL_MS);
+          try {evidence = await inspect(command.executionRef);} catch {return {outcome: 'unknown'};}
+          if (!evidence.shown.connected || !evidence.shown.writable) return {outcome: 'unknown'};
+        }
+        if (choosing) {
+          const rows = await screen();
+          // Keys before this one were typed, so the request as a whole is unknown — never typed again.
+          if (!rows) return {outcome: typed ? 'unknown' : 'not-sent'};
+          if (workroomKeyChoosesExit(rows, key)) return {outcome: typed ? 'unknown' : 'not-sent', reason: 'EXTERNAL_KEYS_WOULD_EXIT'};
+        }
+        // A fixed delay cannot show that a TUI has processed an arrow. Capture the actual pre-key screen and
+        // require an observable change before sending any following key; a no-op or unreadable redraw fails closed.
+        const arrow = ['up', 'down', 'left', 'right'].includes(key);
+        const before = arrow ? await screen() : null;
+        // If no selected row is visible, do not send an arrow that cannot be verified afterwards.
+        if (arrow && (!before || !selected(before))) return {outcome: typed ? 'unknown' : 'not-sent'};
+        const bytes = workroomKeySequence(key);
+        let sent: ReturnType<typeof envelope>;
+        // A call that failed or timed out may still have typed.
+        try {sent = envelope(await call(orca, ['terminal', 'send', '--terminal', command.terminalHandle, '--text', bytes]));} catch {return {outcome: 'unknown'};}
+        const send = object(sent.body.send);
+        if (sent.runtimeId !== evidence.shown.runtimeId || send?.handle !== command.terminalHandle) return {outcome: 'unknown'};
+        if (send.accepted !== true) return {outcome: send.accepted === false && !typed ? 'not-sent' : 'unknown'};
+        if (send.bytesWritten !== undefined && send.bytesWritten !== Buffer.byteLength(bytes)) return {outcome: 'unknown'};
+        typed++;
+        if (before) {
+          const deadline = performance.now() + Math.max(0, options.keyRedrawMs ?? 2_000);
+          // A separate request can select immediately after this one, so a final arrow needs the same proof.
+          const selectingLater = index + 1 === command.keys.length || command.keys.slice(index + 1).some(next => next === 'enter' || /^[1-9]$/.test(next));
+          // On a selection path, unrelated output is not evidence that the selected row changed.
+          const beforeSelection = selectingLater ? selected(before) : null;
+          let changed = false;
+          do {
+            const rows = await screen();
+            if (!rows) return {outcome: 'unknown'};
+            const selection = selectingLater ? selected(rows) : null;
+            if (selectingLater ? !!beforeSelection && !!selection && selection !== beforeSelection : JSON.stringify(rows) !== JSON.stringify(before)) {changed = true; break;}
+            if (performance.now() >= deadline) break;
+            await pause(Math.min(50, Math.max(0, deadline - performance.now())));
+          } while (performance.now() <= deadline);
+          if (!changed) return {outcome: 'unknown'};
+          // A replacement process must never receive the following key, even if its screen changed.
+          try {evidence = await inspect(command.executionRef);} catch {return {outcome: 'unknown'};}
+          if (!evidence.agentVerified || !evidence.shown.connected || !evidence.shown.writable) return {outcome: 'unknown'};
+        }
+      }
+      // A process restart during the keys cannot lend them to this member's binding.
+      try {await inspect(command.executionRef);} catch {return {outcome: 'unknown'};}
+      return {outcome: 'performed'};
     },
     async reveal(command) {
       if (command.kind === 'manual-target' && options.revealManual) {assertCurrent(command.executionRef); return options.revealManual(copy(command.executionRef));}

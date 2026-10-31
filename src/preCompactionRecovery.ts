@@ -21,6 +21,10 @@ export interface RecoveryReceipt {
   verification?:RecoverySource['verification'];
 }
 const digest=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
+/** A write intent younger than this is never swept. Every capture also holds the app-data lease from before its
+ * intent until after its receipt, so the age is a second, clock-based margin for a capture still in flight. */
+export const RECOVERY_INTENT_GRACE=10*60*1000;
+type StagedHeader=Awaited<ReturnType<MemorySaveInputStore['stage']>>;
 
 /** Recovery bytes and canonical memory are separate outcomes. A synchronous
  * hook can retain an in-flight fragment without running AI or changing CORE.
@@ -48,6 +52,8 @@ export class PreCompactionRecovery {
           db.run('CREATE INDEX IF NOT EXISTS checkpoints_recent ON checkpoints(memory_id,created_at DESC)');
           db.run('CREATE INDEX IF NOT EXISTS checkpoints_global_recent ON checkpoints(created_at DESC)');
           db.run('CREATE TABLE IF NOT EXISTS checkpoint_budgets (memory_id TEXT, revision INTEGER, agent TEXT, session_id TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(memory_id,revision,agent,session_id))');
+          // Added without a version bump: an older app ignores it, and a sweep reads it only once it exists.
+          db.run('CREATE TABLE IF NOT EXISTS checkpoint_intents (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, binding TEXT NOT NULL, unresolved INTEGER NOT NULL DEFAULT 0)');
           if(version<2)db.run("INSERT OR REPLACE INTO checkpoint_budgets SELECT memory_id,json_extract(receipt,'$.binding.policyEpoch'),json_extract(receipt,'$.agent'),json_extract(receipt,'$.sessionId'),MAX(created_at) FROM checkpoints GROUP BY memory_id,json_extract(receipt,'$.binding.policyEpoch'),json_extract(receipt,'$.agent'),json_extract(receipt,'$.sessionId')");
           db.run('PRAGMA user_version=2');
         })();
@@ -123,27 +129,69 @@ export class PreCompactionRecovery {
         coverageDigest:saveDigest([value.agent,value.sessionId,value.start,value.end,value.sourceDigest]),inputDigest:value.sourceDigest,
         beforeHash:saveDigest([target.memoryId,target.root]),providerBindingDigest:saveDigest('precompaction-recovery-v1-no-ai')};
       const store=new MemorySaveInputStore(this.d.appDataRoot,lease,()=>this.#now(),'precompaction-inputs');
+      // Write-ahead intent, recorded only while nothing is staged at this binding: if the process dies before the
+      // receipt, the maintenance sweep can reclaim what this attempt created, and never a file it did not create.
+      if(!store.exists(binding))this.#db(true,db=>db.query('INSERT OR REPLACE INTO checkpoint_intents (id,created_at,binding,unresolved) VALUES (?,?,?,0)').run(id,this.#now(),JSON.stringify(binding)));
       const header=await store.stage(binding,value.bytes,key);
-      const readback=store.read(binding,key);
-      try{if(!readback.equals(value.bytes)||!await active())throw Error('복구 저장의 읽기 검증이 완료되지 않았습니다.');}finally{readback.fill(0);}
+      try{
+        const readback=store.read(binding,key);
+        try{if(!readback.equals(value.bytes)||!await active())throw Error('복구 저장의 읽기 검증이 완료되지 않았습니다.');}finally{readback.fill(0);}
+      }catch(error){
+        // The receipt transaction has not begun. Cleanup failure must not hide the original rejection.
+        this.#discardUnreceipted(store,header,key,id);
+        throw error;
+      }
       const receipt:RecoveryReceipt={id,projectId:target.id,...(target.name?{projectName:target.name.slice(0,160)}:{}),agent:value.agent,sessionId:value.sessionId,createdAt:header.createdAt,expiresAt:header.expiresAt,
         start:value.start,end:value.end,coverage:'fragment',binding,verification:value.verification};
-      this.#db(true,db=>db.transaction(()=>{
-        db.query('INSERT OR IGNORE INTO checkpoints (id,memory_id,created_at,receipt) VALUES (?,?,?,?)').run(id,target.memoryId,receipt.createdAt,JSON.stringify(receipt));
-        db.query('INSERT INTO checkpoint_budgets VALUES (?,?,?,?,?) ON CONFLICT(memory_id,revision,agent,session_id) DO UPDATE SET created_at=MAX(created_at,excluded.created_at)').run(target.memoryId,policy.revision,value!.agent,value!.sessionId,receipt.createdAt);
-      })());
+      try{
+        this.#db(true,db=>db.transaction(()=>{
+          db.query('INSERT OR IGNORE INTO checkpoints (id,memory_id,created_at,receipt) VALUES (?,?,?,?)').run(id,target.memoryId,receipt.createdAt,JSON.stringify(receipt));
+          db.query('INSERT INTO checkpoint_budgets VALUES (?,?,?,?,?) ON CONFLICT(memory_id,revision,agent,session_id) DO UPDATE SET created_at=MAX(created_at,excluded.created_at)').run(target.memoryId,policy.revision,value!.agent,value!.sessionId,receipt.createdAt);
+          db.query('DELETE FROM checkpoint_intents WHERE id=?').run(id);
+        })());
+      }catch(error){
+        // The schema bootstrap, the INSERT or the COMMIT failed (e.g. SQLITE_BUSY). A fresh read under the same lease
+        // decides: no receipt row means none committed, since a rollback journal never rolls forward. If that read
+        // cannot answer, the file and its intent stay for the sweep, which asks the same question later.
+        this.#discardUnreceipted(store,header,key,id);
+        throw error;
+      }
       return {localCheckpointSaved:true,memorySaved:false,remoteBackedUp:false,checkpointId:id,coverage:'fragment',expiresAt:header.createdAt+MEMORY_INPUT_TTL};
     }finally{value?.bytes.fill(0);key?.fill(0);if(lease)this.d.release(lease);this.#busy=false;}
   }
+  /** Cleanup after a certain pre-receipt failure. Only this invocation's newly created file can be discarded (a
+   * replay or a replaced file is retained), and only while a fresh read shows no receipt for this id. The intent row
+   * goes with the file; if deleting it fails, the sweep finds an intent without a file and just clears it. */
+  #discardUnreceipted(store:MemorySaveInputStore,header:StagedHeader,key:Buffer,id:string){
+    try{
+      const found=this.#db(false,db=>db.query('SELECT COUNT(*) AS count FROM checkpoints WHERE id=?').get(id)) as {count:number}|null;
+      if(found?.count===0&&store.discardCreated(header,key))this.#db(true,db=>db.query('DELETE FROM checkpoint_intents WHERE id=?').run(id));
+    }catch{}
+  }
   /** Existing host maintenance tick calls this even after opt-out. Expired
-   * ciphertext is authenticated before deletion; receipts remain as evidence. */
+   * ciphertext is authenticated before deletion; receipts remain as evidence.
+   * Write intents past the grace age are settled under the lease every capture holds from intent to receipt: a
+   * receipt keeps its file, a missing file only clears the intent, and an unreceipted file goes only when it
+   * authenticates as that intent's binding. Anything else stays and its intent is marked unresolved, never retried. */
   async maintenance(){
-    const rows=this.#db(false,db=>db.query('SELECT receipt FROM checkpoints WHERE expired=0 AND created_at<=? ORDER BY created_at LIMIT 24').all(this.#now()-MEMORY_INPUT_TTL)) as {receipt:string}[]|null;
-    if(!rows?.length)return;
+    const now=this.#now();
+    const intents=this.#db(false,db=>db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='checkpoint_intents'").get()
+      ?db.query('SELECT id,created_at FROM checkpoint_intents WHERE unresolved=0 AND created_at<=? ORDER BY created_at LIMIT 24').all(now-RECOVERY_INTENT_GRACE):[]) as {id:string;created_at:number}[]|null;
+    const rows=this.#db(false,db=>db.query('SELECT receipt FROM checkpoints WHERE expired=0 AND created_at<=? ORDER BY created_at LIMIT 24').all(now-MEMORY_INPUT_TTL)) as {receipt:string}[]|null;
+    if(!rows?.length&&!intents?.length)return;
     const lease=await this.d.acquire();let key:Buffer|undefined;
     try{
       key=await this.d.readKey();const store=new MemorySaveInputStore(this.d.appDataRoot,lease,()=>this.#now(),'precompaction-inputs');
-      for(const row of rows){const r=JSON.parse(row.receipt) as RecoveryReceipt;
+      for(const intent of intents??[]){
+        if(!lease.refresh())throw Error('복구 입력 보관 작업의 잠금이 바뀌었습니다.');
+        // Re-read under the lease: a capture that held it a moment ago may have committed and cleared this intent.
+        const row=this.#db(false,db=>db.query('SELECT binding,(SELECT COUNT(*) FROM checkpoints WHERE id=?) AS receipts FROM checkpoint_intents WHERE id=? AND created_at=? AND unresolved=0').get(intent.id,intent.id,intent.created_at)) as {binding:string;receipts:number}|null;
+        if(!row)continue;
+        let binding:MemoryInputBinding|null=null;try{binding=JSON.parse(row.binding);}catch{}
+        const outcome=row.receipts>0?'receipted':binding?.saveId===intent.id?store.discardUnreceipted(binding,key,intent.created_at):'retained';
+        this.#db(true,db=>db.query(outcome==='retained'?'UPDATE checkpoint_intents SET unresolved=1 WHERE id=? AND created_at=?':'DELETE FROM checkpoint_intents WHERE id=? AND created_at=?').run(intent.id,intent.created_at));
+      }
+      for(const row of rows??[]){const r=JSON.parse(row.receipt) as RecoveryReceipt;
         if(!lease.refresh())throw Error('복구 입력 보관 작업의 잠금이 바뀌었습니다.');
         if(store.expire(r.binding,key))this.#db(true,db=>db.query('UPDATE checkpoints SET expired=1 WHERE id=?').run(r.id));
       }

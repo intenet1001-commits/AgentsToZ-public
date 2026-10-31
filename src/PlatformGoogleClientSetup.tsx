@@ -8,11 +8,12 @@ import {GoogleWorkspaceSetupHelp} from './GoogleWorkspaceSetupHelp';
 
 type ClientFile=Pick<File,'name'|'size'|'text'>;
 
-export function PlatformGoogleClientSetup({ko,disabled,onReady}:{ko:boolean;disabled:boolean;onReady:(ready:boolean)=>void}) {
+export function PlatformGoogleClientSetup({ko,disabled,onReady,assist=true}:{ko:boolean;disabled:boolean;onReady:(ready:boolean)=>void;assist?:boolean}) {
   const [status,setStatus]=useState<PlatformGoogleClientStatus|null>(null),[busy,setBusy]=useState(true),[message,setMessage]=useState('');
   const epoch=useRef(0);
   const zone=useRef<HTMLDivElement>(null),uploading=useRef(false);
   const [dragging,setDragging]=useState(false);
+  const [attachedName,setAttachedName]=useState('');
   const live=useRef({disabled:disabled||busy,acceptFiles:(files:ClientFile[])=>{},acceptPaths:(paths:string[],total:number)=>{}});
   useLayoutEffect(()=>{
     const current=++epoch.current;onReady(false);setBusy(true);
@@ -31,7 +32,7 @@ export function PlatformGoogleClientSetup({ko,disabled,onReady}:{ko:boolean;disa
     try{
       const clientJson=await file.text();if(epoch.current!==current)return;
       const r=await terminalLocalRequest(PLATFORM_CLI_PATH,{operation:'google-client-save',clientJson});
-      if(epoch.current!==current)return;setStatus(r.googleClient);onReady(r.googleClient.ready);
+      if(epoch.current!==current)return;setStatus(r.googleClient);onReady(r.googleClient.ready);setAttachedName(file.name);
       setMessage(ko?'클라이언트 파일을 준비했습니다. 아래에서 이메일을 입력하고 Google 로그인을 완료하세요.':'Client file is ready. Enter an email below and complete Google sign-in.');
     }catch(error){if(epoch.current===current)setMessage(error instanceof Error?error.message:(ko?'파일을 준비하지 못했습니다. 다시 첨부하세요.':'Could not prepare the file. Attach it again.'));}
     finally{uploading.current=false;if(epoch.current===current)setBusy(false);}
@@ -67,15 +68,16 @@ export function PlatformGoogleClientSetup({ko,disabled,onReady}:{ko:boolean;disa
   return <section className="space-y-2 rounded-lg border border-[var(--line)] p-3" aria-label={ko?'Google 클라이언트 준비':'Google client setup'}>
     <h4 className="text-sm font-semibold">{ko?'1. Google 클라이언트 JSON 첨부':'1. Attach Google client JSON'}</h4>
     <p className="text-xs leading-5">{ko?'Google Cloud Console에서 받은 데스크톱 앱 OAuth 클라이언트 JSON을 선택하세요. 파일은 이 기기의 OS 자격 증명 저장소에 보관합니다. 파일 첨부만으로 계정이 연결되지는 않습니다.':'Choose the Desktop app OAuth client JSON downloaded from Google Cloud Console. It is stored in this device’s OS credential store. Attaching a file does not connect an account.'}</p>
-    {!status?.ready&&!busy&&<GoogleWorkspaceSetupHelp ko={ko}/>}
-    {status?.ready&&!busy&&<details><summary className="min-h-[44px] cursor-pointer">{ko?'기존 프로젝트의 API 설정 도움':'API setup for the existing project'}</summary><GoogleWorkspaceSetupHelp ko={ko} projectId={status.projectId}/></details>}
+    {!status?.ready&&!busy&&<GoogleWorkspaceSetupHelp ko={ko} assist={assist}/>}
+    {status?.ready&&!busy&&<details><summary className="min-h-[44px] cursor-pointer">{ko?'기존 프로젝트의 API 설정 도움':'API setup for the existing project'}</summary><GoogleWorkspaceSetupHelp ko={ko} projectId={status.projectId} assist={assist}/></details>}
     <div ref={zone} role="group" aria-label={ko?'Google JSON 파일 첨부 영역':'Google JSON attachment area'} aria-busy={busy} aria-disabled={disabled||busy}
       className={'rounded-lg border-2 border-dashed p-4 '+(dragging?'border-[var(--accent)] bg-[var(--accent-soft)]':'border-[var(--line)]')}
       onDragOver={e=>{e.preventDefault();e.stopPropagation();if(isTauri())return;const files=Array.from(e.dataTransfer.types).includes('Files');e.dataTransfer.dropEffect=files&&!disabled&&!busy?'copy':'none';setDragging(files&&!disabled&&!busy);}}
       onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))setDragging(false);}}
       onDrop={e=>{e.preventDefault();e.stopPropagation();setDragging(false);if(!isTauri())acceptFiles(Array.from(e.dataTransfer.files));}}>
       <p className="mb-2 text-sm">{ko?'JSON 파일을 여기에 끌어 놓거나 아래에서 선택하세요.':'Drop a JSON file here or choose one below.'}</p>
-      <label className="block text-xs">{ko?'Google Console 클라이언트 JSON':'Google Console client JSON'}<input type="file" accept=".json,application/json" className="mt-2 block max-w-full min-h-[44px] text-xs" disabled={disabled||busy} onChange={e=>{const files=Array.from(e.target.files??[]);e.target.value='';if(files.length)acceptFiles(files);}}/></label>
+      <label className="block text-xs">{ko?'Google Console 클라이언트 JSON':'Google Console client JSON'}<span className={'mt-2 flex min-h-[44px] w-fit items-center rounded border border-[var(--line)] px-3 focus-within:outline focus-within:outline-2 focus-within:outline-[var(--accent)] '+(disabled||busy?'opacity-50':'cursor-pointer')}><input type="file" aria-label={ko?'Google Console 클라이언트 JSON':'Google Console client JSON'} accept=".json,application/json" className="sr-only" disabled={disabled||busy} onChange={e=>{const files=Array.from(e.target.files??[]);e.target.value='';if(files.length)acceptFiles(files);}}/><span aria-hidden="true">{ko?'파일 선택':'Choose file'}</span></span></label>
+      {attachedName&&<p role="status" className="mt-2 break-all text-xs">{ko?'첨부 완료: ':'Attached: '}{attachedName}</p>}
     </div>
     <p className="text-xs" role="status">{busy?(ko?'클라이언트 준비 확인 중':'Checking client setup'):status?.ready?(ko?'클라이언트 준비됨 · 계정 로그인은 별도':'Client ready · account sign-in is separate'):(ko?'클라이언트 파일 필요':'Client file required')}{status?.ready&&status.projectId?' · '+status.projectId:''}{status?.source==='existing-cli'?(ko?' · 기존 gws 설정 사용':' · Using existing gws setup'):''}</p>
     <details className="text-xs leading-5"><summary className="cursor-pointer">{ko?'Google Console에서 파일 받는 방법':'How to get the file from Google Console'}</summary>

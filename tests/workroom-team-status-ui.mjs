@@ -53,6 +53,7 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   assert.match(await rows.nth(3).innerText(),/확인 불가 · 앱 재시작 전/,'a member from an earlier run of the app says so');
   const first=await rows.nth(0).innerText();
   for(const part of ['작업 중','m1-codex','Codex · gpt-6.1-sol · 에포트 고정 · 높음','마지막 출력 2분 전','m1-codex의 작업','커밋 2 · 파일 3 · +10 −1 · 병합 전'])assert.ok(first.includes(part),`${name}: row shows ${part}\n${first}`);
+  assert.ok(!first.includes('요청됨'),'a Codex Workroom pin is enforced at start (refused when its model cannot be proven), never shown as a request');
   assert.ok((await rows.nth(1).innerText()).includes('Hermes · anthropic/claude-opus-5-5 · 에포트 자동'),'Hermes shows provider/model and 자동');
   assert.deepEqual(await rows.locator('.workroom-team-status__tag:not(.workroom-team-status__tag--attached)').allInnerTexts(),['검토'],'only the reviewer is tagged');
   // A member that joined from an open session says so, and the strip does not guess its model or effort.
@@ -229,6 +230,18 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
    await active.getByTestId('workroom-team-status-refresh').click();
    await page.waitForFunction(expected=>document.querySelector('[data-member-id="m1"] .workroom-team-status__surface .workroom-team-status__tag')?.textContent===expected,label);
    assert.equal(await external.getByTestId('workroom-team-status-surface').locator('.workroom-team-status__tag').innerText(),label);
+  }
+  // A pinned level reads as the builder writes it (「고정 · xhigh」). A member outside the Workroom shows it as a request, and so
+  // does Hermes everywhere: its provider adapter moves or drops --reasoning and the Workroom start cannot refuse that.
+  for(const [surface,agent,model,effort,expected,request,provider] of [
+   ['orca-worktree','claude','claude-opus-5-5','xhigh','Claude Code · claude-opus-5-5 · 에포트 고정 · xhigh · 요청됨 · 실제 적용 확인 필요',true],
+   ['internal','codex','gpt-6.1-sol','max','Codex · gpt-6.1-sol · 에포트 고정 · max',false],
+   ['internal','hermes','claude-opus-5-5','max','Hermes · anthropic/claude-opus-5-5 · 에포트 고정 · max · 요청됨 · 실제 적용 확인 필요',true,'anthropic'],
+   [undefined,'hermes',undefined,'high','Hermes · 기본 모델 · 에포트 고정 · 높음 · 요청됨 · 실제 적용 확인 필요',true]]){
+   Object.assign(state.teams[0].members[0],{agent,surface,model,provider,effort,launchOptions:{}});
+   await active.getByTestId('workroom-team-status-refresh').click();
+   await page.waitForFunction(text=>document.querySelector('[data-member-id="m1"] .workroom-team-status__model')?.textContent?.startsWith(text),expected);
+   assert.equal((await external.locator('.workroom-team-status__model').innerText()).includes('요청됨'),request,`${surface}: ${expected}`);
   }
   assert.equal(await external.getByTestId('workroom-team-status-manual').count(),0,'internal Workroom members have no external manual controls');
   // A member sees the same team, marked as itself, with the leader one tap away and no 「열기」 on its own row.

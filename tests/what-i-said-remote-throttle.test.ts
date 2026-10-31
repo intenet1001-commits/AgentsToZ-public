@@ -54,6 +54,20 @@ describe('WhatISaidTtlCache', () => {
     expect(await cache.get(loader)).toBe(2);
   });
 
+  // A manual sync past its deadline decides "does an upload apply" without the network.
+  test('peek returns only a fresh value and never loads', async () => {
+    const c = clock();
+    const cache = new WhatISaidTtlCache<number>(60_000, c.now);
+    expect(cache.peek()).toBeUndefined();
+    expect(await cache.get(async () => 7)).toBe(7);
+    expect(cache.peek()).toBe(7);
+    c.advance(60_000);
+    expect(cache.peek()).toBeUndefined();
+    expect(await cache.get(async () => 8)).toBe(8);
+    cache.invalidate();
+    expect(cache.peek()).toBeUndefined();
+  });
+
   test('coalesces concurrent loads and never caches a failure', async () => {
     const cache = new WhatISaidTtlCache<string>(60_000);
     let calls = 0;

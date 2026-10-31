@@ -12,6 +12,12 @@ import XCTest
 
     func test00OnboardingAcceptsKoreanInputAndRejectsUnsupportedAddress() {
         let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["startConnectionQR"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["startConnectionQR"].isHittable, "First launch must offer a usable primary action.")
+        XCTAssertTrue(app.buttons["startConnectionQR"].label.contains("프로젝트·워크룸"), "The first action must name the workspace, separately from screen control registration.")
+        XCTAssertTrue(app.buttons["pasteConnectLink"].isHittable, "Data-only onboarding must be visible without expanding advanced address settings.")
+        XCTAssertFalse(app.webViews.firstMatch.exists, "Do not show an unconfigured, empty portal.")
+        app.buttons["showConnectionOptions"].tap()
         let field = app.textFields["connectionAddress"]
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         field.tap(); field.typeText("잘못된 연결 주소")
@@ -48,6 +54,10 @@ import XCTest
             throw XCTSkip("Personal HTTPS portal was not supplied; anonymous portal checks are separate from onboarding.")
         }
         let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["startConnectionQR"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["startConnectionQR"].isHittable, "First launch must offer a usable primary action.")
+        XCTAssertFalse(app.webViews.firstMatch.exists, "Do not show an unconfigured, empty portal.")
+        app.buttons["showConnectionOptions"].tap()
         let field = app.textFields["connectionAddress"]
         XCTAssertTrue(field.waitForExistence(timeout: 15)); field.tap(); field.typeText(portal)
         app.buttons["reviewConnectionAddress"].tap()

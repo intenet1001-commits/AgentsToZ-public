@@ -12,6 +12,7 @@ struct RemoteHomeView: View {
     @StateObject private var model = RemoteModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var scannedText = ""
+    @State private var showConnectionOptions = false
     @State private var pairing: LANPairing?
     @State private var showScanner = false
     @State private var requestedAction: RequestedAction?
@@ -38,16 +39,23 @@ struct RemoteHomeView: View {
     /// A registration QR read by the scanner sheet, held until that sheet has gone: 「Mac 화면」 opens its own sheet, and
     /// iOS drops a presentation made while another sheet is still being dismissed.
     @State private var pendingScreenInvite: String?
+    /// A registration QR the iPhone Camera opened the app with while the workspace was open: the workspace shows it in
+    /// its own 「Mac 화면」 sheet instead of closing (closing would end the page and its draft).
+    @State private var workroomScreenInvite: String?
+    /// 「Mac 화면」's registration sheet is up on this screen: coming back to the app must not cover it with the workspace.
+    @State private var screenRegistrationOpen = false
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroll in
             List {
-                ScreenMacsSection(scannedInvite: $screenInvite)
+                if model.snapshot == nil, LANWorkroomSession.savedWorkspaces.resumeTarget == nil { welcomeSection }
                 if let snapshot = model.snapshot {
                     projectSections(snapshot)
                 } else {
                     onboardingSections
                 }
+                ScreenMacsSection(scannedInvite: $screenInvite, registrationOpen: $screenRegistrationOpen)
                 if model.snapshot != nil, let notice = model.notice {
                     Section { Text(notice).font(.subheadline).accessibilityIdentifier("connectionNotice") }
                 }
@@ -59,6 +67,15 @@ struct RemoteHomeView: View {
                 }
                 if model.busy { ProgressView("확인 중") }
                 appInfoSection
+            }
+            .onChange(of: showConnectionOptions) { _, open in
+                if open { withAnimation { scroll.scrollTo("connectionAddress", anchor: .center) } }
+            }
+            // 「Mac 화면」 sits below the projects: bring its row on screen so the handed-over QR reaches a live row
+            // (rows off screen have no presentations).
+            .onChange(of: screenInvite) { _, text in
+                if text != nil { scroll.scrollTo(ScreenMacsSection.registerRowID, anchor: .center) }
+            }
             }
             .navigationTitle("AgentsToZ")
             .refreshable { await model.refresh() }
@@ -73,7 +90,8 @@ struct RemoteHomeView: View {
                 if !scanDelivered { resumeIfIdle() }
                 scanDelivered = false; scanFromWorkroom = false
                 if let invite = pendingScreenInvite { pendingScreenInvite = nil; screenInvite = invite }
-            }) { QRScannerSheet { value in
+            }) { QRScannerSheet(accepts: { !$0.hasPrefix(RegistrationInvite.prefix) },
+                                 rejectedHint: "Mac 화면 등록용 QR입니다. 프로젝트·워크룸을 열려면 Mac의 인터넷 원격제어 QR이나 폰 연결 링크를 사용하세요. 화면 제어 등록은 「Mac 화면」에서 진행합니다.") { value in
                 let returnable = scanFromWorkroom
                 scanDelivered = true; scanFromWorkroom = false; showScanner = false; review(value)
                 // A value the review could not use opened nothing: without this the phone stayed on the first screen,
@@ -128,6 +146,8 @@ struct RemoteHomeView: View {
                 if scanAfterWorkroom { scanAfterWorkroom = false; scanFromWorkroom = true; showScanner = true }
                 if let link = linkAfterWorkroom { linkAfterWorkroom = nil; connectLink = link }
                 if let other = openAfterWorkroom { openAfterWorkroom = nil; workroom = LANWorkroomSession.open(other) }
+                // A Camera QR the workspace closed before reading goes to this screen's 「Mac 화면」, not to a later workspace.
+                else if let invite = workroomScreenInvite { workroomScreenInvite = nil; screenInvite = invite }
             }) { session in
                 LANWorkroomView(session: session, onReconnect: { session.end(.disconnected); scanAfterWorkroom = true; workroom = nil }, onDone: {
                     // What 「이 앱의 연결 정보 지우기」 actually did — not what it was meant to do.
@@ -136,7 +156,7 @@ struct RemoteHomeView: View {
                 }, onOpenSaved: { other in
                     // The cover closes first; the other workspace opens once it has (onDismiss).
                     session.end(.disconnected); openAfterWorkroom = other; workroom = nil
-                })
+                }, screenInvite: $workroomScreenInvite)
                 // A notice from before (a cancelled scan, an ended LAN list) no longer describes anything once a workspace opens.
                 .onAppear { model.notice = nil }
             }
@@ -151,6 +171,8 @@ struct RemoteHomeView: View {
             // 「폰 연결 링크」 tapped in KakaoTalk/Messages. Only the `agentstoz` scheme; the OAuth callback
             // scheme is consumed by ASWebAuthenticationSession and never arrives here.
             .onOpenURL { url in
+                // The Mac's 「Mac 화면 기기 등록」 QR read by the iPhone Camera: its text is a URL in its own scheme.
+                if let invite = RegistrationInvite.text(openedURL: url) { return openScreenRegistration(invite) }
                 guard url.scheme == PhoneConnectLink.scheme else { return }
                 guard let link = parseConnectLink(url.absoluteString) else { return }
                 if let session = workroom {
@@ -177,7 +199,7 @@ struct RemoteHomeView: View {
                     // Not while a scan or its confirmation is open: a camera permission prompt makes the scene
                     // inactive, and reopening the saved workspace here would cover the scan the user asked for.
                     if workroom == nil, !showScanner, pairing == nil, browserAddress == nil, connectLink == nil, linkAfterWorkroom == nil,
-                       rejectedScan == nil, let resumed = LANWorkroomSession.resumeSaved() {
+                       rejectedScan == nil, !screenRegistrationPending, let resumed = LANWorkroomSession.resumeSaved() {
                         workroom = resumed
                     }
                     // A restored WK workspace is the sole connection owner.
@@ -229,6 +251,43 @@ struct RemoteHomeView: View {
         }
     }
 
+    /// A useful first-run home also appears when no personal workspace has been configured yet.
+    /// Installation and connection are separate states; never present an empty portal while waiting for a QR.
+    private var welcomeSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.largeTitle).foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AgentsToZ Mobile").font(.title2.bold())
+                        Text("Mac과 AI 작업을 이 기기에서").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Text("프로젝트·워크룸을 열려면 Mac의 인터넷 원격제어 QR이나 폰 연결 링크로 연결하세요. Mac 화면 제어는 아래에서 별도로 등록합니다. 연결한 작업 공간은 다음 실행에도 열립니다.")
+                    .font(.subheadline)
+                Button { showScanner = true } label: {
+                    Label("프로젝트·워크룸 연결 QR 스캔", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                }
+                .buttonStyle(.borderedProminent).accessibilityIdentifier("startConnectionQR")
+                Button("폰 연결 링크 붙여넣기", systemImage: "link") {
+                    if let link = parseConnectLink(UIPasteboard.general.string ?? "") { connectLink = link }
+                    else { showConnectionOptions = true }
+                }
+                .buttonStyle(.borderless).accessibilityIdentifier("pasteConnectLink")
+                Button("포털 주소 · 다른 연결 방법", systemImage: "slider.horizontal.3") { showConnectionOptions.toggle() }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("showConnectionOptions")
+                if !PortalSchemeHandler.isAvailable {
+                    Label("작업 화면 파일이 없는 빌드입니다. 앱을 업데이트하거나 「포털 주소 · 다른 연결 방법」에서 개인 포털 주소로 연결해 주세요.", systemImage: "exclamationmark.triangle")
+                        .font(.subheadline).foregroundStyle(.orange).accessibilityIdentifier("missingBundledPortal")
+                }
+            }
+            .padding(.vertical, 12)
+        }
+        .listRowBackground(Color.accentColor.opacity(0.07))
+    }
+
     @ViewBuilder private var onboardingSections: some View {
         // After 「돌아가기」 or a scan the app could not use, the saved workspace is still here: say so and open it.
         // Before this, only an app switch or a relaunch brought it back, and a bundled-portal user has no address to type.
@@ -239,19 +298,18 @@ struct RemoteHomeView: View {
                 ForEach(Array(saved.alternatives(to: target).enumerated()), id: \.offset) { _, other in
                     savedWorkspaceButton(other).accessibilityIdentifier("openOtherSavedWorkspace")
                 }
+                Button("다른 작업 공간 연결", systemImage: "link") { showConnectionOptions.toggle() }
+                    .accessibilityIdentifier("showConnectionOptions")
             } header: {
                 Text("저장된 작업 공간")
             } footer: {
-                Text("이 iPhone에 남아 있는 로그인·기기 연결로 다시 엽니다. 새 QR이 필요하지 않습니다.")
+                Text("이 기기에 남아 있는 로그인·기기 연결로 다시 엽니다. 새 QR이 필요하지 않습니다.")
             }
         }
-        Section {
-            Label("내 작업 공간", systemImage: "square.grid.2x2").font(.title2.bold())
-            Text(ConnectionInputGuidance.introduction(isMacCompatible: ProcessInfo.processInfo.isiOSAppOnMac))
-            Text("개인 포털에 로그인하면 프로젝트 현황과 공통 북마크를 볼 수 있습니다. 원격 작업은 작업 공간 안에서 기기를 등록한 뒤 시작합니다.").font(.subheadline).foregroundStyle(.secondary)
-        }
+        if showConnectionOptions {
         Section {
             TextField("https://내-개인-포털.example", text: $scannedText).accessibilityIdentifier("connectionAddress")
+                .id("connectionAddress")
                 .keyboardType(.URL)
                 .textContentType(.URL)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -268,11 +326,13 @@ struct RemoteHomeView: View {
         Section("QR로 연결") {
             Button("기기 연결 · QR 스캔", systemImage: "qrcode.viewfinder") { showScanner = true }.disabled(model.busy).accessibilityIdentifier("scanConnectionQR")
             Text("컴퓨터의 AgentsToZ에서 발급한 인터넷 연결 QR을 스캔하세요. 같은 Wi-Fi QR은 신뢰하는 개인 네트워크 안에서 직접 연결할 때 사용합니다.").font(.subheadline).foregroundStyle(.secondary)
-            Button("연결 링크 붙여넣기", systemImage: "link") {
+            Button("폰 연결 링크 붙여넣기", systemImage: "link") {
                 if let link = parseConnectLink(UIPasteboard.general.string ?? "") { connectLink = link }
-            }.disabled(model.busy).accessibilityIdentifier("pasteConnectLink")
+            }.disabled(model.busy).accessibilityIdentifier("pasteConnectLinkAdvanced")
             Text("Mac 앞이 아닐 때: Mac의 원격제어 창에서 복사한 「폰 연결 링크」를 카카오톡 「나와의 채팅」 등으로 받아 누르거나 복사해 여기에 붙여 넣으세요. 로그인하면 프로젝트 현황·북마크·기록을 볼 수 있습니다. Mac 제어는 나중에 Mac 앞에서 QR을 스캔하고 승인해야 합니다.").font(.subheadline).foregroundStyle(.secondary)
         }
+        }
+
     }
 
     private func savedWorkspaceButton(_ workspace: SavedWorkspace) -> some View {
@@ -360,7 +420,27 @@ struct RemoteHomeView: View {
     /// was already connected.
     private func resumeIfIdle() {
         if workroom == nil, scenePhase == .active, !showScanner, pairing == nil, browserAddress == nil, connectLink == nil, rejectedScan == nil,
-           let resumed = LANWorkroomSession.resumeSaved() { workroom = resumed }
+           !screenRegistrationPending, let resumed = LANWorkroomSession.resumeSaved() { workroom = resumed }
+    }
+
+    /// A Mac-screen registration QR is on its way to 「Mac 화면」 or its sheet is up.
+    private var screenRegistrationPending: Bool {
+        screenInvite != nil || pendingScreenInvite != nil || screenRegistrationOpen
+    }
+
+    /// The iPhone Camera read the Mac's registration QR and opened this app with it. Like a QR scanned in the app it
+    /// lands on the registration, where the person checks the Mac's name and taps 「이 기기 등록」; nothing reaches the
+    /// Mac before that. The text is read by the same strict parser (`deviceRegistrationText`) wherever it lands.
+    private func openScreenRegistration(_ text: String) {
+        if workroom != nil {
+            workroomScreenInvite = text
+        } else if showScanner {
+            // The workspace scanner is still up: hand the QR over once it has gone, as a scanned one is.
+            scanDelivered = true; pendingScreenInvite = text; showScanner = false
+        } else {
+            model.notice = nil
+            screenInvite = text
+        }
     }
 
     private func review(_ value: String, addressField: Bool = false) {

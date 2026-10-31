@@ -14,7 +14,9 @@ import AgentsToZCore
 final class PortalSchemeHandler: NSObject, WKURLSchemeHandler {
     static var bundleRoot: URL? {
         guard let root = Bundle.main.url(forResource: "web", withExtension: nil),
-              FileManager.default.fileExists(atPath: root.appendingPathComponent("remote/index.html").path) else { return nil }
+              FileManager.default.fileExists(atPath: root.appendingPathComponent("remote/index.html").path),
+              FileManager.default.fileExists(atPath: root.appendingPathComponent("portal.html").path),
+              FileManager.default.fileExists(atPath: root.appendingPathComponent("assets").path) else { return nil }
         return root
     }
     /// Builds without a bundled portal (the web folder is produced by a separate step) fall back to the web.

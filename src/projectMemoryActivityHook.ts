@@ -13,10 +13,14 @@ export function unixActivityHookCommand(agent: string, projectSubpath: string): 
   return `${ACTIVITY_HOOK_COMMAND_MARKER}=${agent}; WORKING_ROOT="$(pwd -P)"; PROJECT_TOP="$(git -C "$WORKING_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"; MEMORY_SUBPATH=${shellLiteral(projectSubpath)}; MEMORY_ROOT="$WORKING_ROOT"; if [ -n "$PROJECT_TOP" ]; then MAIN_TOP="$(git -C "$PROJECT_TOP" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -n 1)"; [ -n "$MAIN_TOP" ] || { cat >/dev/null 2>&1 || :; exit 0; }; MEMORY_ROOT="$MAIN_TOP"; [ -z "$MEMORY_SUBPATH" ] || MEMORY_ROOT="$MAIN_TOP/$MEMORY_SUBPATH"; fi; if [ ! -f "$MEMORY_ROOT/.agent-memory/config.json" ]; then cat >/dev/null 2>&1 || :; exit 0; fi; hook="$MEMORY_ROOT/${ACTIVITY_HOOK_REL}"; if [ -f "$hook" ]; then /bin/sh "$hook" ${agent}; else cat >/dev/null 2>&1 || :; fi`;
 }
 
+/** The project subpath a generated hook command carries, or null when it carries none. */
+export function generatedHookSubpath(command: string): string | null {
+  const match = /MEMORY_SUBPATH=('(?:[^']|'"'"')*'); MEMORY_ROOT=/.exec(command);
+  return match ? match[1]!.slice(1, -1).replaceAll(`'"'"'`, "'") : null;
+}
+
 /** True only for a command this module would have generated, byte for byte (any subpath). */
 export function isAgentsToZActivityHookCommand(command: string, agent: string): boolean {
-  const match = /MEMORY_SUBPATH=('(?:[^']|'"'"')*'); MEMORY_ROOT=/.exec(command);
-  if (!match) return false;
-  const subpath = match[1]!.slice(1, -1).replaceAll(`'"'"'`, "'");
-  return command === unixActivityHookCommand(agent, subpath);
+  const subpath = generatedHookSubpath(command);
+  return subpath !== null && command === unixActivityHookCommand(agent, subpath);
 }

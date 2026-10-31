@@ -15,9 +15,15 @@ export class WorkroomSubmissionUnsupportedError extends Error {constructor(){sup
  * to a plain `start` — an older forwarding Mac may still take submissions into a running session.
  */
 export class WorkroomLaunchUnsupportedError extends Error {constructor(){super(WORKROOM_SUBMISSION_UNSUPPORTED_NOTICE);this.name='WorkroomLaunchUnsupportedError';}}
-/** After a status check: a written receipt settles the request (nothing to decide about re-sending), anything else stays pending. */
+/**
+ * After a status check: a written receipt settles the request, and so does one that definitively never ran (`rejected`
+ * before the write fence, or `held` from before a host restart — see launchNeverStarted): that id can never be written,
+ * so fencing the composer on it only blocked every later request (2026-10-30). Anything else stays pending. Settling
+ * never re-sends anything; the caller keeps the draft of a request that never ran. Self-contained: the LAN phone page
+ * embeds its source (src/remoteControlMobilePage.ts).
+ */
 export function pendingAfterStatus(pending:PendingWorkroomSubmission,receipt:WorkroomSubmissionReceipt):PendingWorkroomSubmission|null{
- return receipt.state==='written'?null:{...pending,receipt};
+ return receipt.state==='written'||receipt.state==='rejected'||receipt.state==='held'?null:{...pending,receipt};
 }
 /**
  * A status check found the request written. The composer is cleared by the same rule as the direct written path — only

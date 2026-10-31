@@ -99,7 +99,9 @@ import {workroomSessionStateLabel} from './remoteControlScreenText';
 import {WorkroomTeamBuilder,type TeamOpenSession} from './WorkroomTeamBuilder';
 import {useTeamAccountChoices} from './teamAccountChoices';
 import {WorkroomTeamStatus} from './WorkroomTeamStatus';
+import {WorkroomScheduleCard} from './WorkroomScheduleCard';
 import {workroomTeamCopy} from './i18n';
+import {workroomUnfinishedWorkCopy} from './workroomUnfinishedWorkCopy';
 import {useAppLanguage} from './useAppLanguage';
 /** `keepDraft`: a session-only selection that leaves a draft in the new-task composer (and its target and AI) as it is. */
 export interface AiTerminalEntry {nonce:number;targetId:string;prompt?:string;title?:string;agent?:AiTerminalAgent;sessionId?:string;resumeLatest?:boolean;keepDraft?:boolean}
@@ -289,7 +291,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // 「에포트 자동」 (w16 Build B): this Mac's setting and the active session's record, through the workspace channel the footer
  // already uses. Asked when shown, on a project/session change, a window coming back and after the host could have noticed
  // something (below) — never on a timer. An older Mac refuses the action and the option and receipt simply stay away.
- const effort=useWorkroomEffort({transport:memoryTransport,targetId:activeSession?.targetId??(target||undefined),sessionId:activeSession?.id,visible,readOnly:!!effortReadOnly});
+ const effort=useWorkroomEffort({transport:memoryTransport,targetId:activeSession?.targetId??(target||undefined),sessionId:activeSession?.id,visible,readOnly:!!effortReadOnly,extended:!remote});
  const refreshEffort=effort.refresh;
  const effortRecord=activeSession&&effort.state.sessionId===activeSession.id?effort.state.session:null;
  // The host reads the effort the CLI shows (and a change the person made) from rows its sampler reads about a second after
@@ -313,6 +315,8 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  const [newTaskOpen,setNewTaskOpen]=useState(false);const [newTaskHelp,setNewTaskHelp]=useState(false);const [commandHelp,setCommandHelp]=useState(false);
  // 팀 작전 (src/workroomTeam.ts): this session's AI leads; the builder only fills the composer. Mac only — team tools are local MCP.
  const [teamOpen,setTeamOpen]=useState(false);const [appLang]=useAppLanguage();const teamCopy=workroomTeamCopy(appLang);
+ const [scheduleSession,setScheduleSession]=useState<string|null>(null);
+ const scheduleOpen=!!activeSession&&scheduleSession===activeSession.id;
  const browserCopy=workroomBrowserUiCopy(appLang);
  // Local composer attachment only: neither these maps nor their grant reach storage, summaries or remote drafts.
  // Keep separate session bindings so selecting another terminal cannot send this workspace's access there.
@@ -1154,7 +1158,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   // may only mean another receipt owner, so the queue never sends it again on its own evidence. A slow or failed seal
   // never blocks the send: it goes once anyway, before any seal, and the composer says it was not (or may not be) kept —
   // a notice about keeping only, since the submission it is shown with may still be refused (src/workroomDraftQueue.ts).
-  let sealNote='',handoffNotSent=false;
+  let sealNote='',handoffNotSent=false,checkAfter=false;
   const withSealNote=(message:string)=>{const safe=browserHandoff?redactWorkroomBrowserHandoff(message,browserHandoff):message;return sealNote?safe+' '+sealNote:safe;};
   // The seal can wait 1.5s. Check authority after that wait, immediately before single/begin, even if the browser is
   // collapsed and its normal polling is stopped. A failure keeps the chip without sending a submission.
@@ -1199,7 +1203,23 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
     // so this transport goes back to raw input. The draft stays; the user's next click sends it the old way.
     if(error instanceof WorkroomSubmissionUnsupportedError){forget();submittedDrafts.current.delete(id);submittedBrowserHandoffs.current.delete(id);try{remember(null);}catch{/* the banner only asks to check */}submissionCapability.current='legacy';setSubmissionSupported(false);setError(error.message);return;}
     void kept.then(draftVault.bump);setError(withSealNote(error instanceof Error?error.message:'제출 결과를 확인하지 못했습니다. 작성 내용은 유지했습니다.'));
-  }).finally(()=>{submissionInFlight.current=false;setSubmissionBusy(false);setSendingId(null);});
+    checkAfter=true;
+  }).finally(()=>{submissionInFlight.current=false;setSubmissionBusy(false);setSendingId(null);if(checkAfter)void statusAfterFailure(sessionId,id);});
+ };
+ // One read-only status of a failed request's own id, once its send has let go of the fence: a refusal before the write
+ // fence is recorded as never run, which settles the banner at once and keeps the refusal shown above; anything else
+ // (unknown, prepared, no answer) keeps the banner and its manual check. Never re-sent. The record is read back from
+ // that session's own storage, not the selected session's state, so a session switch neither loses nor misapplies it;
+ // a running outcome check or a newer send in flight leaves it to the banner, so the same id is read at most once here.
+ const statusAfterFailure=async(sessionId:string,id:string)=>{
+  if(outcomeCheck.current||submissionInFlight.current)return;
+  outcomeCheck.current=true;
+  try{
+   const result=await request({operation:'submission',sessionId,submission:{phase:'status',id}});
+   const stored=readPendingSubmission(sessionStorage,pendingSubmissionKey(sessionScope,sessionId));
+   if(result.submission&&stored?.id===id&&stored.sessionId===sessionId&&!submissionInFlight.current)settleSubmission(stored,result.submission,true);
+  }catch{/* the banner keeps its manual check */}
+  finally{outcomeCheck.current=false;}
  };
  // S3-8 queue. One press on one stored request: the receipt of its pre-assigned id is read first, and an existing receipt
  // is shown instead of sending (never twice). Only the host's own «no such submission» lets it go, with the same id.
@@ -1258,6 +1278,9 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
   const value=pendingAfterStatus(pending,receipt);writePendingSubmission(sessionStorage,pendingSubmissionKey(sessionScope,pending.sessionId),value);
   if(activeSessionRef.current?.id===pending.sessionId)setPendingSubmission(value);
   if(value){if(!quiet)setError('제출 상태: '+submissionStateLabel(receipt.state)+'. 터미널 결과를 확인하세요. 자동으로 다시 보내지 않습니다.');return;}
+  // Definitively never ran (refused before the write fence, or prepared before a host restart): the banner goes, and the
+  // draft, chips, attachments and browser access stay — sending again is the user's own click (2026-10-30).
+  if(launchNeverStarted(receipt)){submittedDrafts.current.delete(pending.id);submittedAttachKeys.current.delete(pending.id);submittedBrowserHandoffs.current.delete(pending.id);if(!quiet)setError('앞선 요청은 터미널에 입력되지 않았습니다('+submissionStateLabel(receipt.state)+'). 작성 내용은 그대로이니 확인한 뒤 다시 보내세요.');return;}
   const outcome=draftAfterWrittenStatus(submittedDrafts.current.get(pending.id),terminalDraftLive.current);submittedDrafts.current.delete(pending.id);
   confirmBrowserHandoff(pending.id);
   if(outcome.clear&&activeSessionRef.current?.id===pending.sessionId){setTerminalDraft('');setTerminalCursor(0);setReferenceChips([]);setImages([]);}
@@ -1451,6 +1474,13 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
  // agent holding this conversation writes the memory. Only agents that have such a command take
  // this path; the others keep the draft, and the label says which one will happen.
  const memoryCommand=activeSession&&activeSession.state==='running'?workroomMemoryCommand(activeSession.agent):null;
+ const prepareUnfinishedWork=()=>{
+  if(!activeSession||activeSession.state!=='running'||!activeProject||busy)return;
+  if(terminalDraft.trim()||routeTargetId||referenceChips.length||images.length||imageBusy||sessionChips.length||browserHandoff){setError(workroomUnfinishedWorkCopy[appLang].occupied);return;}
+  const request=workroomUnfinishedWorkCopy[appLang].request;
+  setError('');setTerminalDraft(request);setTerminalCursor(request.length);rawInputRef.current=false;setRawInput(false);
+  requestAnimationFrame(()=>terminalComposer.current?.focus());
+ };
  const remoteMemoryDraft=()=>{
   if(!activeProject||busy)return;
   if(prompt.trim()){setError('작성 중인 요청을 유지했습니다. 먼저 내용을 실행하거나 비운 뒤 세션 기억 요청을 여세요.');setComposerOpen(true);return;}
@@ -1545,12 +1575,14 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
     {!remote&&!popout&&<button type="button" className="ai-terminal-btn" data-testid="workroom-wide-toggle" aria-pressed={wide} title={wide?'사이드바와 설정을 다시 표시':'사이드바와 설정을 숨기고 터미널을 화면 가득'} onClick={()=>{setWide(value=>!value);restoreWorkroomKeyboard()}}>{wide?<Minimize2 size={13}/>:<Maximize2 size={13}/>}{wide?'기본 보기':'넓게 보기'}</button>}
     {/* 팀 작전 sits with the session's own controls: on the usage line under the terminal it was out of sight in a short window (2026-10-25). */}
     {!remote&&activeSession.state==='running'&&<button type="button" className="ai-terminal-btn" data-testid="workroom-team-open" aria-expanded={teamOpen} title={teamCopy.openTitle} disabled={busy} onClick={()=>setTeamOpen(open=>!open)}><Users size={13} aria-hidden="true"/>{teamCopy.open}</button>}
+    {activeSession.state==='running'&&activeProject&&activeProject.targetId!==opsTargetId&&<button type="button" className="ai-terminal-btn" data-testid="workroom-unfinished-work" title={workroomUnfinishedWorkCopy[appLang].title} disabled={busy} onClick={prepareUnfinishedWork}>{workroomUnfinishedWorkCopy[appLang].label}</button>}
+    {!remote&&!sessionScope.startsWith('community:')&&<button type="button" className="ai-terminal-btn" data-testid="workroom-schedule-open" aria-expanded={scheduleOpen} onClick={()=>setScheduleSession(id=>id===activeSession.id?null:activeSession.id)}>예약 재개</button>}
     {!remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-restart" disabled={busy} title={workroomRestartTitle(activeSession.state)} onClick={()=>void restart()}><RotateCcw size={13}/>다시 시작</button>}
     {remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-readable-toggle" aria-pressed={readableMode} onClick={()=>{readableStick.current=true;setReadableMode(value=>!value);restoreWorkroomKeyboard()}}>{readableMode?'원본 터미널':'읽기 보기'}</button>}
     {!remote&&<button type="button" className="ai-terminal-btn" data-testid="workroom-popout" aria-disabled={!popoutAvailability.available} data-available={popoutAvailability.available?'true':'false'} title={popoutAvailability.reason} onClick={()=>void popOut()}><ExternalLink size={13}/>새 창으로 분리</button>}
     </div>,
   // 팀 현황: this Mac's own sessions only — another Mac's or a phone's sessions are not in this Mac's team ledger.
-  teamStatus:<>{!remote&&!sessionScope.startsWith('community:')&&<WorkroomTeamStatus sessionId={activeSession.id} visible={visible} openable={id=>sessions.some(s=>s.id===id)} onOpen={id=>{selectionGeneration.current++;setError('');setSelected(id);}}/>}</>,
+  teamStatus:<>{!remote&&!sessionScope.startsWith('community:')&&<><WorkroomTeamStatus sessionId={activeSession.id} visible={visible} openable={id=>sessions.some(s=>s.id===id)} onOpen={id=>{selectionGeneration.current++;setError('');setSelected(id);}}/>{scheduleOpen&&<WorkroomScheduleCard key={activeSession.id} sessionId={activeSession.id} visible={visible} onOpen={id=>{const generation=++selectionGeneration.current;setError('');void refresh().then(()=>{if(selectionGeneration.current===generation)setSelected(id);});}}/>}</>}</>,
   restartLine:<>{restartNotice&&restartNotice.sessionId===activeSession.id&&<p className="ai-terminal-caption ai-terminal-route-receipt" role="status" data-testid="workroom-restart-notice"><span>{restartNotice.text}</span><button type="button" className="ai-terminal-btn ai-terminal-btn--icon" aria-label="다시 시작 알림 닫기" onClick={()=>setRestartNotice(null)}>×</button></p>}</>,
   surface:<div className={`ai-terminal-surface${remote?' ai-terminal-surface--remote':''}`} onClick={()=>{if(!rawInput&&!readableMode)terminalComposer.current?.focus()}}><div ref={host} className="ai-terminal-screen" aria-hidden={remote&&readableMode}/>{remote&&readableMode&&<pre ref={readableRef} className="ai-terminal-readable" data-testid="workroom-readable-screen" data-layout={readableLayout} tabIndex={0} role="region" aria-label={readableLayout==='grid'?'행과 열을 유지한 터미널 출력 · 좌우로 이동 가능':'화면 너비에 맞춘 터미널 출력'} style={{fontSize}}
    onScroll={event=>{const el=event.currentTarget,near=el.scrollTop>=workroomReadableTail(el)-40;readableStick.current=near;if(near)setReadablePill(false);}}>{readableScreen||'화면을 불러오는 중…'}</pre>}
@@ -1803,6 +1835,7 @@ export function AiTerminalPanel({visible=true,onScreen,projects:suppliedProjects
       the Mac tabs, the bottom navigation and the voice dock stay under it). Escape closes it except while typing. */}
   {viewShown&&typeof document!=='undefined'&&createPortal(<div ref={viewRoot} className="ai-terminal-panel ai-terminal-session-view" role="dialog" aria-modal="true" aria-labelledby={viewTitleId} tabIndex={-1}
     data-testid="workroom-session-view" data-session-id={activeSession?.id??''} data-session-state={activeSession?.state??'loading'}
+    onKeyDownCapture={event=>{if(event.key==='Escape'&&!event.nativeEvent.isComposing&&event.keyCode!==229){const settings=viewRoot.current?.querySelector<HTMLDetailsElement>('.workroom-settings[open]');if(settings){event.preventDefault();event.stopPropagation();settings.open=false;settings.querySelector('summary')?.focus();}}}}
     onKeyDown={event=>{if(sessionViewEscapeCloses(event,event.target as Element,viewRoot.current)){event.preventDefault();event.stopPropagation();closeSessionView('ui');}}}>
    <header className="ai-terminal-session-view-bar">
     <button type="button" className="ai-terminal-btn ai-terminal-session-view-back" data-testid="workroom-session-view-back" aria-label="워크룸 목록으로 돌아가기" title="워크룸 목록으로 돌아가기 · 세션은 계속 실행됩니다" onClick={()=>closeSessionView('ui')}><ArrowLeft size={16} aria-hidden="true"/><span>워크룸</span></button>

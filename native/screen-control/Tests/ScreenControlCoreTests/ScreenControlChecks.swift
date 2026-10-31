@@ -821,8 +821,21 @@ struct ScreenControlChecks {
     }
 
     // Notifications and remote stop: PushChecks.swift.
-    static var all: [(String, (ScreenControlChecks) -> () async throws -> Void)] { pushChecks + coreChecks }
+    static var all: [(String, (ScreenControlChecks) -> () async throws -> Void)] { pushChecks + controllerChecks + coreChecks }
     static var coreChecks: [(String, (ScreenControlChecks) -> () async throws -> Void)] { [
+        ("private network route is explicit and bounded", { $0.testPrivateNetworkRouteIsExplicitAndBounded }),
+        ("desktop controls strictly versioned", { $0.testDesktopControlsAreStrictAndVersioned }),
+        ("Caps Lock tap, hold and cancellation", { $0.testCapsLockTapHoldAndCancellation }),
+        ("keyboard first-character fence and bounds", { $0.testKeyboardFenceOrdersFirstCharacterAndBoundsMemory }),
+        ("keyboard fence coalesces pointer positions across no button boundary", { $0.testKeyboardFenceCoalescesPointerPositionsWithoutCrossingButtonBoundaries }),
+        ("registry read failure cannot replace registrations", { $0.testReadFailureCannotReplaceAnUnreadableRegistry }),
+        ("registry mutation preserves the latest other device", { $0.testStaleViewsAlwaysPreserveTheCurrentOtherDevice }),
+        ("failed registry write never publishes a removed device", { $0.testFailedRevokeDoesNotPublishADeletedRow }),
+        ("desktop input respects local input and lifetime", { $0.testDesktopInputUsesLocalPriorityAndSessionLifetime }),
+        ("keyboard controls and input share wire order", { $0.testDesktopCommandsAndInputShareWireOrder }),
+        ("quality restarts encoder and keeps display", { $0.testQualityChangeRestartsEncoderAndKeepsDisplay }),
+        ("relay retry is bounded and resettable", { $0.testRelayRetryIsBoundedAndResettable }),
+        ("desktop controls and notices cross authenticated channel", { $0.testDesktopControlsReachAuthenticatedHostAndReturnNotices }),
         ("handshake agrees and carries records", { $0.testHandshakeAgreesAndCarriesRecordsBothWays }),
         ("fake Mac refused before Face ID", { $0.testFakeMacIsRefusedBeforeFaceID }),
         ("unknown or inconsistent device refused", { $0.testUnknownOrInconsistentDeviceIsRefused }),
@@ -844,6 +857,7 @@ struct ScreenControlChecks {
         ("approved network list is capped and renewed", { $0.testApprovedNetworkListIsCappedAndRenewed }),
         ("routing tables are read strictly", { $0.testRoutingTablesAreReadStrictly }),
         ("frame reader checks every length before buffering", { $0.testFrameReaderChecksEveryLengthBeforeBuffering }),
+        ("connection waits for a usable path until cancelled", { $0.testConnectionWaitsForAUsablePathUntilCancelled }),
         ("transport carries records over TCP", { $0.testTransportCarriesRecordsOverLoopback }),
         ("listener bounds attempts before authentication", { $0.testListenerBoundsAttemptsBeforeAuthentication }),
         ("video frames parse strictly", { $0.testVideoFrameWireFormatIsStrict }),
@@ -851,9 +865,14 @@ struct ScreenControlChecks {
         ("video pump keeps feeding the encoder, answers the phone", { $0.testVideoPumpKeepsFeedingTheEncoder }),
         ("viewer asks for a keyframe, shows pictures, says goodbye", { $0.testViewerAsksForAKeyframeShowsPicturesAndSaysGoodbye }),
         ("Face ID approval signs once", { $0.testFaceIDApprovalSignsOnce }),
+        ("lockout recovery requires available biometry", { $0.testLockoutRecoveryRequiresAvailableBiometry }),
+        ("device authentication key protection", { $0.testDeviceAuthenticationKeyProtection }),
         ("registration QR text is strict", { $0.testRegistrationInviteTextIsStrict }),
+        ("registration QR is a URL the app opens", { $0.testRegistrationQRIsAURLTheAppOpens }),
         ("registration over TCP needs the Mac's approval", { $0.testRegistrationOverTCPNeedsTheMacsApproval }),
         ("App Attest: any one app ID, telling refusal", { $0.testAnyAppAttestVerifierAcceptsOneAndReportsTheTellingRefusal }),
+        ("text and Return authenticated transport", { $0.testTextAndReturnCrossesAuthenticatedTransportOnce }),
+        ("text and Return one admission, version, and replay", { $0.testTextAndReturnIsVersionedAndSingleAdmission }),
         ("input receiver decodes, limits and releases", { $0.testInputReceiverDecodesLimitsAndReleases }),
         ("input reaches the Mac in order; malformed ends it", { $0.testInputReachesTheMacInOrderAndAMalformedRecordEndsTheSession }),
         ("registration one-use, bound, acknowledged, attested", { $0.testRegistrationIsOneUseBoundAndConfirmedBySAS }),
@@ -862,8 +881,14 @@ struct ScreenControlChecks {
         ("attestation parsers strict", { $0.testAttestationParsersAreStrict }),
         ("session limits, end reasons, control directions", { $0.testSessionTimerReasonsAndControlDirections }),
         ("local priority tells local input from injected", { $0.testLocalPriorityTellsLocalInputFromInjected }),
+        ("pointer resync precedes local-priority resume", { $0.testPointerResynchronizesBeforeLocalPriorityResume }),
+        ("input availability reasons reach authenticated viewer", { $0.testInputAvailabilityCrossesAuthenticatedSessionWhenOnlyItsReasonChanges }),
+        ("secure input and view-only reasons survive unrelated notices", { $0.testSecureInputAndViewOnlyReasonsCannotBeClearedByUnrelatedNotices }),
+        ("physical input wins during same-kind injection and held input", { $0.testPhysicalInputWinsDuringSameKindInjectionAndHeldInput }),
+        ("physical takeover checks before dispatch and notifies viewer", { $0.testPhysicalTakeoverIsCheckedBeforeDispatchAndNotifiesTheViewer }),
         ("input receiver pauses for local input and lets go", { $0.testInputReceiverPausesForLocalInputAndLetsGo }),
         ("session limits end the session and tell the phone", { $0.testSessionLimitsEndTheSessionAndTellThePhone }),
+        ("display choice extends idle, keyframe request does not", { $0.testDisplayChoiceRestartsIdleWithoutKeyframeRequestsExtendingIt }),
         ("every way a session ends lets go", { $0.testEveryWayASessionEndsLetsGo }),
         ("local input pauses remote input over the session", { $0.testLocalInputPausesRemoteInputOverTheSession }),
         ("registrations expire after 90 days without use", { $0.testRegistrationsExpireAfterNinetyDaysWithoutUse }),
@@ -904,6 +929,7 @@ struct ScreenControlChecks {
 #else
 import XCTest
 final class ScreenControlCoreTests: XCTestCase {
+    func testTextAndReturn() async throws { try await ScreenControlChecks().testTextAndReturnIsVersionedAndSingleAdmission() }
     func testSecurityRequirements() async throws {
         for (name, run) in ScreenControlChecks.all {
             do { try await run(ScreenControlChecks())() } catch { XCTFail("\(name): \(error)") }

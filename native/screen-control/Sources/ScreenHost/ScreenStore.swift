@@ -15,6 +15,22 @@ public struct RegisteredDevice: Codable, Sendable, Identifiable, Hashable, Expir
     public let attestationKeyID: Data
     public let registeredAt: Date
     public var lastConnectedAt: Date?
+    /// The person's own name for it at this Mac; nil until renamed. Display only: the key, the record and every check
+    /// stay the registration's. Stores written before it existed read as nil.
+    public var alias: String?
+
+    /// What this Mac shows, and tells the person's other devices: their name for it, else the one it registered with.
+    public var displayName: String { alias ?? name }
+
+    public enum AliasInput: Equatable, Sendable { case clear, name(String), invalid }
+
+    /// What the person typed, as stored: spaces trimmed and collapsed, NFC. Empty or the registered name goes back to
+    /// the registered name. Otherwise it follows the rule for a registered name, so every screen and push can show it.
+    public func alias(from text: String) -> AliasInput {
+        let typed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ").precomposedStringWithCanonicalMapping
+        if typed.isEmpty || typed == name { return .clear }
+        return RegistrationInvite.isShowableName(typed) ? .name(typed) : .invalid
+    }
 
     public init(record: RegistrationRecord, attestationKeyID: Data, at date: Date = Date()) {
         id = record.deviceID.map { String(format: "%02x", $0) }.joined()
@@ -37,46 +53,28 @@ public enum ScreenStoreError: Error, Sendable {
     case keychain(OSStatus), corrupt
 }
 
+/// Where the store's items live, one per account: the keychain in the app. Tests hand in memory and never reach the
+/// person's keychain.
+protocol ScreenStoreItems: Sendable {
+    func read(_ account: String) throws -> Data?
+    func write(_ account: String, _ data: Data) throws
+}
+
 /// The identity key and the registered devices, where only AgentsToZ Screen can reach them: data-protection keychain
 /// items in the app's own access group, which its provisioning profile grants and no other app's signature can claim
 /// (DESIGN 「보안 원칙」 2·3). Never a file: another process of the same user could put its own key in a file.
 public struct ScreenStore: Sendable {
     static let accessGroup = "DA8QKAQ2C9.com.intenet.agentstozbycs.screen"
     static let service = "com.intenet.agentstozbycs.screen"
+    private let items: any ScreenStoreItems
 
-    public init() {}
+    public init() { items = KeychainScreenStoreItems() }
 
-    private func query(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: Self.service,
-         kSecAttrAccount as String: account,
-         kSecAttrAccessGroup as String: Self.accessGroup,
-         kSecUseDataProtectionKeychain as String: true,
-         kSecAttrSynchronizable as String: false]
-    }
+    init(items: any ScreenStoreItems) { self.items = items }
 
-    func read(_ account: String) throws -> Data? {
-        var request = query(account)
-        request[kSecReturnData as String] = true
-        request[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(request as CFDictionary, &item)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = item as? Data else { throw ScreenStoreError.keychain(status) }
-        return data
-    }
+    func read(_ account: String) throws -> Data? { try items.read(account) }
 
-    func write(_ account: String, _ data: Data) throws {
-        let status = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecSuccess { return }
-        guard status == errSecItemNotFound else { throw ScreenStoreError.keychain(status) }
-        var request = query(account)
-        request[kSecValueData as String] = data
-        // Readable after the first unlock, so a locked Mac can still answer a registered phone (DESIGN S0-2).
-        request[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let added = SecItemAdd(request as CFDictionary, nil)
-        guard added == errSecSuccess else { throw ScreenStoreError.keychain(added) }
-    }
+    func write(_ account: String, _ data: Data) throws { try items.write(account, data) }
 
     /// The Mac identity key, made once in the Secure Enclave. Only its blob is stored; it works on this Mac only.
     public func identity() throws -> SecureEnclaveTranscriptSigner {
@@ -132,6 +130,41 @@ public struct ScreenStore: Sendable {
 
     public func saveNetworks(_ networks: [ApprovedNetwork]) throws {
         try write("networks", try JSONEncoder().encode(NetworkApproval.normalized(networks)))
+    }
+}
+
+/// The app's keychain items: generic passwords of `ScreenStore.service` in its access group, never synchronized.
+struct KeychainScreenStoreItems: ScreenStoreItems {
+    private func query(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: ScreenStore.service,
+         kSecAttrAccount as String: account,
+         kSecAttrAccessGroup as String: ScreenStore.accessGroup,
+         kSecUseDataProtectionKeychain as String: true,
+         kSecAttrSynchronizable as String: false]
+    }
+
+    func read(_ account: String) throws -> Data? {
+        var request = query(account)
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = item as? Data else { throw ScreenStoreError.keychain(status) }
+        return data
+    }
+
+    func write(_ account: String, _ data: Data) throws {
+        let status = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecSuccess { return }
+        guard status == errSecItemNotFound else { throw ScreenStoreError.keychain(status) }
+        var request = query(account)
+        request[kSecValueData as String] = data
+        // Readable after the first unlock, so a locked Mac can still answer a registered phone (DESIGN S0-2).
+        request[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let added = SecItemAdd(request as CFDictionary, nil)
+        guard added == errSecSuccess else { throw ScreenStoreError.keychain(added) }
     }
 }
 

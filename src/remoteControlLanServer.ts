@@ -1,4 +1,5 @@
 import {normalizeRemoteTerminalRequest,type RemoteTerminalGateway} from './remoteControlTerminalProtocol';
+import {CODEX_NEW_RECEIPT_FEATURE} from './remoteControlProtocol';
 import { createHash, randomBytes as nodeRandomBytes, timingSafeEqual } from 'node:crypto';
 import type { Server, ServerWebSocket } from 'bun';
 import {
@@ -241,7 +242,8 @@ export class RemoteControlLanServer {
     this.#randomBytes = options.randomBytes ?? ((length) => nodeRandomBytes(length));
     this.#core = new RemoteControlCore(options.gateway, {
       hostName: options.hostName,
-      supportedFeatures: options.terminalGateway && options.workspaceSupported ? ['workspace-v1',...(options.deviceMemorySupported?['device-memory-v1']:[]),...(options.commonMemorySupported?['goal-common-memory-v1']:[]),...(options.testerSupported?['tester-v1']:[]),...(options.voiceSupported?['voice-v1']:[])] : [],
+      codexFeatureInLegacy:true,
+      supportedFeatures: [CODEX_NEW_RECEIPT_FEATURE,...(options.terminalGateway && options.workspaceSupported ? ['workspace-v1',...(options.deviceMemorySupported?['device-memory-v1']:[]),...(options.commonMemorySupported?['goal-common-memory-v1']:[]),...(options.testerSupported?['tester-v1']:[]),...(options.voiceSupported?['voice-v1']:[])] : [])],
       now: this.#now,
       randomBytes: this.#randomBytes,
       pairingTtlMs: options.pairingTtlMs,

@@ -59,6 +59,26 @@ export class CodexFirstConversationLaunchCoordinator {
       || !!this.#pendingStore?.load(projectKey);
   }
 
+  /** Clear only the exact, separately confirmed thread after crash recovery. */
+  hasConfirmedPending(projectKey: string, threadId: string): boolean {
+    if (this.#inflightByProject.has(projectKey)) throw new CodexFirstConversationRecoveryError();
+    const pending = this.#pendingThreadByProject.get(projectKey) ?? this.#pendingStore?.load(projectKey);
+    if (pending && pending !== threadId) throw new CodexFirstConversationRecoveryError();
+    return !!pending;
+  }
+
+  pendingThreadForRecovery(projectKey: string): string | null {
+    if (this.#inflightByProject.has(projectKey)) throw new CodexFirstConversationRecoveryError();
+    return this.#pendingThreadByProject.get(projectKey) ?? this.#pendingStore?.load(projectKey) ?? null;
+  }
+
+  clearConfirmedPending(projectKey: string, threadId: string): boolean {
+    const exists = this.hasConfirmedPending(projectKey, threadId);
+    if (exists) this.#pendingStore?.clear(projectKey);
+    this.#pendingThreadByProject.delete(projectKey);
+    return exists;
+  }
+
   createAndOpen(input: {
     projectKey: string;
     /** The creator must call this as soon as an already-created thread is
@@ -75,6 +95,8 @@ export class CodexFirstConversationLaunchCoordinator {
       threadId: string,
     ) => Promise<CodexFirstConversationRecoveryStatus>;
     openThread: (threadId: string) => unknown;
+    /** Last check before clearing the retained ID, including after a slow OS open. */
+    afterOpen?: (threadId: string) => Promise<void>;
   }): Promise<CodexFirstConversationLaunchResult> {
     const inflight = this.#inflightByProject.get(input.projectKey);
     if (inflight) return inflight;
@@ -97,6 +119,7 @@ export class CodexFirstConversationLaunchCoordinator {
       threadId: string,
     ) => Promise<CodexFirstConversationRecoveryStatus>;
     openThread: (threadId: string) => unknown;
+    afterOpen?: (threadId: string) => Promise<void>;
   }): Promise<CodexFirstConversationLaunchResult> {
     let threadId = this.#pendingThreadByProject.get(input.projectKey);
     let recoveredFromStore = false;
@@ -152,6 +175,7 @@ export class CodexFirstConversationLaunchCoordinator {
     } catch (cause) {
       throw new CodexFirstConversationOpenError(reusedCreatedThread, { cause });
     }
+    await input.afterOpen?.(threadId);
     this.#pendingStore?.clear(input.projectKey);
     if (this.#pendingThreadByProject.get(input.projectKey) === threadId) {
       this.#pendingThreadByProject.delete(input.projectKey);

@@ -11,8 +11,8 @@ import {dirname} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import {parseTeamMemberSelection} from './teamLaunchOptions';
-import {startsWithShellEscape} from './workroomOrchestration';
-import {isExternalTeamSurface, teamLaunchSummary, type TeamDelivery, type TeamExecutionRef, type TeamExternalRuntime, type TeamExternalObserved, type TeamLaunchOptions, type TeamLaunchPlan, type TeamLaunchSurface} from './teamLaunchPlan';
+import {normalizeWorkroomKeys, startsWithShellEscape, type WorkroomKey} from './workroomOrchestration';
+import {isExternalTeamSurface, teamLaunchSummary, teamReportProvenance, type TeamDelivery, type TeamExecutionRef, type TeamExternalRuntime, type TeamExternalObserved, type TeamLaunchOptions, type TeamLaunchPlan, type TeamLaunchSurface} from './teamLaunchPlan';
 export {TEAM_LAUNCH_SURFACES, type TeamExternalLaunch, type TeamExternalRuntime, type TeamExternalStarted, type TeamLaunchPlan, type TeamLaunchSurface} from './teamLaunchPlan';
 import {TEAM_AGENT_LABEL as AGENT_LABEL, TEAM_MAX_MEMBERS, TEAM_SESSION_ID, teamMemberLabel as modelLabel, type AiTerminalLaunchModel} from './workroomTeamInstruction';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
@@ -43,12 +43,23 @@ export interface TeamMemberInput {
    * surface is started through the injected runtime and is never substituted with a Workroom.
    */
   surface?: TeamLaunchSurface; launchOptions?: TeamLaunchOptions;
+  /**
+   * `computerUseApprovals`: desktop app members only (src/teamLaunchOptions.ts). The person let the leader answer this
+   * member's one-time approvals with an application-scoped computer session; it launches nothing and grants nothing
+   * by itself — each computer session still needs its own human approval in Control.
+   */
+  computerUseApprovals?: boolean;
 }
-/** A member is addressed through its team binding, including external members without a Workroom sessionId. */
+/**
+ * A member is addressed through its team binding, including external members without a Workroom sessionId.
+ * `keys`: allow-listed keys (src/workroomOrchestration.ts) answering a one-time prompt on a managed Orca worktree
+ * member's screen — the leader's own request only, never into its own session, never resent when its outcome is unknown.
+ */
 export type WorkroomTeamMemberRequest = {op: 'member'; teamId: string; memberId: string} & (
   | {operation: 'read'; cursor?: string; limit: number}
   | {operation: 'send'; requestId: string; text: string}
   | {operation: 'reveal'; requestId: string}
+  | {operation: 'keys'; requestId: string; keys: WorkroomKey[]}
 );
 export type WorkroomTeamRequest =
   | WorkroomTeamMemberRequest
@@ -84,6 +95,8 @@ export interface TeamMember {
    * (src/workroomTeamPanel.ts allowlists its fields), so a security option does not reach another device.
    */
   accountId?: string; bypassPermissions?: true;
+  /** The builder's per-app-member opt-in, kept so the leader's own read_team shows what the person allowed. */
+  computerUseApprovals?: true;
   /**
    * `attached`: an open Workroom that joined (TeamMemberInput.sessionId). The team did not make its session, checkout or
    * branch, so close never ends, removes or deletes them. `branch` is its checkout's branch for a worker, '' for a
@@ -103,6 +116,13 @@ export interface TeamMember {
   observedOutputAt?: number;
   /** What the user confirmed by hand on a surface the host cannot read, and when. Never read as the member's own word. */
   manual?: {confirmed: 'started' | 'delivered'; at: string};
+  /**
+   * A Workroom member whose AI had no agentstoz_use connection when the team was made (host.teamTool said `missing`),
+   * so it cannot call agentstoz_use_report_team_task. Its brief asks it to write the result in its own terminal, and
+   * the leader may record that as a manual report marked TEAM_TRANSCRIBED_MARK. Its own report, if the tool turns out to
+   * be there after all, is still taken and is never replaced by a transcription.
+   */
+  reportsThroughLeader?: true;
   branch: string; worktreePath: string; targetId: string | null; sessionId: string | null; state: TeamMemberState;
   /**
    * `provenance`: `member` is the member's own report through its own MCP call; `manual` is the leader writing down
@@ -174,6 +194,12 @@ export interface WorkroomTeamHost {
    * member that asked for another surface fails with that reason stated — it is never quietly started as a Workroom.
    */
   external?: TeamExternalRuntime;
+  /**
+   * Whether this AI's CLI has the agentstoz_use connection a member reports through (src/controlProfileConnections.ts).
+   * `missing` only when that connection is known to be absent; anything uncertain is `unknown` and changes nothing.
+   * A host without it changes nothing either: every Workroom member is told to report with the team tool, as before.
+   */
+  teamTool?(agent: AiTerminalAgent): Promise<'connected' | 'missing' | 'unknown'>;
   /**
    * A running Workroom on that worktree target — and, given the member's `checkout`, one opened under any other target
    * whose folder is that checkout or inside it (the folder registered as a project of its own). Close keeps the checkout for it.
@@ -287,7 +313,13 @@ export function parseWorkroomTeamRequest(input: unknown): WorkroomTeamRequest {
         exact(value, ['op', 'teamId', 'memberId', 'operation', 'requestId']);
         return {...base, operation: 'reveal', requestId: id(value.requestId, 'requestId', /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)};
       }
-      throw invalid('operation은 read·send·reveal 중 하나입니다.');
+      if (value.operation === 'keys') {
+        exact(value, ['op', 'teamId', 'memberId', 'operation', 'requestId', 'keys']);
+        let keys: WorkroomKey[];
+        try { keys = normalizeWorkroomKeys(value.keys); } catch (error) { throw invalid(error instanceof Error ? error.message : 'keys를 확인하세요.'); }
+        return {...base, operation: 'keys', requestId: id(value.requestId, 'requestId', /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/), keys};
+      }
+      throw invalid('operation은 read·send·reveal·keys 중 하나입니다.');
     }
     case 'close':
       exact(value, ['op', 'teamId', 'deleteMergedBranches']);
@@ -297,10 +329,21 @@ export function parseWorkroomTeamRequest(input: unknown): WorkroomTeamRequest {
   }
 }
 
-/** External agents leave their report in the exact terminal the leader reads; they do not claim a verified Workroom report. */
+/** A member asked to run on an external surface: it never had a Workroom to report from, whatever its AI's tools. */
+const teamInputExternal = (input: TeamMemberInput) => !input.sessionId && !!input.surface && isExternalTeamSurface(input.surface);
+/** The team row's one line for a member without the team tool (TeamMember.note: no path, command or secret). */
+const teamToollessNote = (agent: AiTerminalAgent) =>
+  `이 ${AGENT_LABEL[agent]}에는 agentstoz_use 연결이 없어 팀 도구로 보고하지 못할 수 있습니다. 결과는 그 터미널에 적게 했고, 리더가 읽어 manual: true로 옮기면 「${TEAM_TRANSCRIBED_MARK}」로 남습니다. 아젠투지 설정의 「AI별 MCP 사용 설정」에서 연결하면 다음 팀부터 직접 보고합니다.`;
+/** The marker a leader's transcription of a Workroom member's terminal carries in its summary (TeamMember.reportsThroughLeader). */
+export const TEAM_TRANSCRIBED_MARK = '[리더 전사 · manual]';
+/**
+ * External agents, and Workroom members without the team tool, leave their report in the exact terminal the leader
+ * reads; they do not claim a verified Workroom report.
+ */
 function externalMemberReport(team: Team, member: TeamMember, summary: string): string | null {
-  if (!member.surface || !isExternalTeamSurface(member.surface)) return null;
-  return `현재 터미널에 teamId ${team.id}, memberId ${member.id}, status "done"과 summary(${summary})를 적습니다.
+  const external = !!member.surface && isExternalTeamSurface(member.surface);
+  if (!external && !member.reportsThroughLeader) return null;
+  return `${external ? '' : `agentstoz_use_report_team_task 도구가 보이면 그것으로 한 번 보고합니다(teamId ${team.id}, memberId ${member.id}). 이 AI에는 팀 도구 연결이 확인되지 않았으니, 도구가 없으면 대신 `}현재 터미널에 teamId ${team.id}, memberId ${member.id}, status "done"과 summary(${summary})를 적습니다.
    막히면 같은 터미널에 status "blocked"와 질문을 적습니다. 리더는 팀원 통합 read로 이 출력을 확인하고 manual: true인 옮긴 보고로 수집합니다.
    자동으로 검증된 AI 보고라고 표시하지 않으며, 리더 워크룸에 직접 입력하지 않습니다.`;
 }
@@ -365,7 +408,7 @@ ${targets}` : `작업 팀원이 없습니다. 위 검토 범위를 기준 커밋
 작업 위치: ${member.attached ? '이 체크아웃' : '이 워크트리'}(${member.worktreePath}) — 읽기 전용입니다. 기준 커밋 ${base}.
 규칙:
 1. 파일을 고치거나 커밋하지 않습니다. 병합·push하지 않습니다. 고칠 점은 파일:줄, 이유, 제안으로만 적습니다.
-${workers.length ? `2. agentstoz_use_wait_team(teamId ${team.id}, until "any", afterCursor = 마지막으로 본 팀 화면의 settledCursor)으로 작업 팀원의 보고를 기다리고,
+${workers.length ? `2. agentstoz_use_wait_team(teamId ${team.id}, until "any", afterCursor = 마지막으로 본 팀 화면의 settledCursor)으로 작업 팀원의 보고를 기다리고${member.reportsThroughLeader ? '(그 도구가 없으면 리더가 이 세션에 알려 줄 때까지 기다리고)' : ''},
    끝난 팀원의 브랜치마다 \`git log ${base}..<브랜치>\`와 \`git diff ${base}...<브랜치>\`로 읽습니다. 보고는 증거가 아닙니다 — diff와 검사로 확인합니다.
 ${checkout}
 4. 작업 팀원이 모두 끝나면(보고·막힘·실패·종료)` : `2. 필요한 검사를 이 워크트리에서 돌려 봅니다. 파일은 고치지 않습니다.
@@ -601,6 +644,10 @@ export class WorkroomTeamService {
         checkouts.push({index, root: info.cwd, worker});
         joining.set(input.sessionId, info);
       }
+      // Asked once per AI before anything is written. A member whose AI is known to lack the team tool still starts —
+      // refusing would leave the team unbuildable until someone finds the setting — but it is told to write its result
+      // in its terminal, its row says why, and the leader may transcribe that result (report, manual: true).
+      const toolless = await this.#toollessAgents(request.members);
       const teamId = `team_${randomBytes(6).toString('hex')}`, short = teamId.slice(5, 11);
       const at = new Date(this.now()).toISOString();
       const team: Team = {id: teamId, requestId: request.requestId, fingerprint, projectId: project.projectId, projectName: project.projectName, primaryPath: primary.path,
@@ -613,7 +660,9 @@ export class WorkroomTeamService {
             // Launch options belong to a Workroom this team starts; a joined session runs with its own (the parser refuses them there).
             ...(input.sessionId ? {} : {...(input.accountId ? {accountId: input.accountId} : {}), ...(input.bypassPermissions ? {bypassPermissions: true as const} : {}),
               // The chosen surface is kept as asked, whatever its runtime does next. Absent = the Workroom, as before.
-              ...(input.surface && input.surface !== 'internal' ? {surface: input.surface} : {}), ...(input.launchOptions ? {launchOptions: input.launchOptions} : {})}),
+              ...(input.surface && input.surface !== 'internal' ? {surface: input.surface} : {}), ...(input.launchOptions ? {launchOptions: input.launchOptions} : {}),
+              ...(input.surface === 'app' && input.computerUseApprovals ? {computerUseApprovals: true as const} : {})}),
+            ...(toolless.has(input.agent) && !teamInputExternal(input) ? {reportsThroughLeader: true as const, note: teamToollessNote(input.agent)} : {}),
             task: input.task, state: 'starting' as const};
           // Joined: its own checkout and branch (a reviewer has none to merge), and its session from the start.
           return joined
@@ -688,6 +737,14 @@ export class WorkroomTeamService {
       }
       return {team: this.#handOut(team, await this.view(team)), replayed: false, untracked: primary.untracked};
     });
+  }
+
+  /** The AIs among these Workroom members that the host knows lack the team tool. Unknown or a failed check is not missing. */
+  async #toollessAgents(members: TeamMemberInput[]): Promise<Set<AiTerminalAgent>> {
+    const agents = [...new Set(members.filter(input => !teamInputExternal(input)).map(input => input.agent))];
+    if (!this.host.teamTool || !agents.length) return new Set();
+    const checked = await Promise.all(agents.map(agent => Promise.resolve().then(() => this.host.teamTool!(agent)).catch(() => 'unknown' as const)));
+    return new Set(agents.filter((_, index) => checked[index] === 'missing'));
   }
 
   async read(request: Extract<WorkroomTeamRequest, {op: 'read'}>): Promise<{team?: TeamView; teams?: TeamView[]}> {
@@ -822,9 +879,16 @@ export class WorkroomTeamService {
         'WORKROOM_TEAM_REPORT_UNVERIFIED', 409);
     }
     if (request.manual && (team.leader.sessionId ? !caller || !this.leads(team, caller.sessionId) : caller !== null)) throw new WorkroomTeamError('수동 보고는 이 팀의 리더가 합니다.', 'WORKROOM_TEAM_REPORT_DENIED', 403);
-    if (request.manual && !external) throw new WorkroomTeamError(`${member.id}은(는) 워크룸 팀원이라 자기 보고를 그대로 씁니다. manual을 빼고 그 워크룸에서 보고하세요.`, 'WORKROOM_TEAM_REPORT_DENIED', 403);
-    if (member.report?.status === request.status && member.report.summary === request.summary && (member.report.provenance ?? 'member') === (request.manual ? 'manual' : 'member')) return {team: await this.view(team)};
-    member.report = {status: request.status, summary: request.summary, at: new Date(this.now()).toISOString(), provenance: request.manual ? 'manual' : 'member'};
+    // A Workroom member the team found without the team tool writes its result in its terminal; the leader transcribes it.
+    const transcribed = !external && member.reportsThroughLeader === true;
+    if (request.manual && !external && !transcribed) throw new WorkroomTeamError(`${member.id}은(는) 워크룸 팀원이라 자기 보고를 그대로 씁니다. manual을 빼고 그 워크룸에서 보고하세요.`, 'WORKROOM_TEAM_REPORT_DENIED', 403);
+    // The member's own report stays authoritative: a transcription never replaces it.
+    if (request.manual && transcribed && member.report && teamReportProvenance(member.report) === 'member') {
+      throw new WorkroomTeamError(`${member.id}이(가) 팀 도구로 직접 보고했습니다. 그 보고를 그대로 씁니다 — 바꿀 것이 있으면 그 워크룸에 다시 보고하라고 하세요.`, 'WORKROOM_TEAM_REPORT_DENIED', 409);
+    }
+    const summary = transcribed && request.manual && !request.summary.startsWith(TEAM_TRANSCRIBED_MARK) ? `${TEAM_TRANSCRIBED_MARK} ${request.summary}` : request.summary;
+    if (member.report?.status === request.status && member.report.summary === summary && (member.report.provenance ?? 'member') === (request.manual ? 'manual' : 'member')) return {team: await this.view(team)};
+    member.report = {status: request.status, summary, at: new Date(this.now()).toISOString(), provenance: request.manual ? 'manual' : 'member'};
     member.state = request.status === 'done' ? 'reported' : 'blocked';
     this.#touch(team);
     return {team: await this.view(team)};

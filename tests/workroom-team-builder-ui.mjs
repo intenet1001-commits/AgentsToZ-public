@@ -38,9 +38,13 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   for(let i=0;i<4;i++)await page.getByRole('button',{name:'팀원 추가'}).click();
   assert.equal(await rows.count(),6);assert.equal(await page.getByRole('button',{name:'팀원 추가'}).isDisabled(),true,'six members at most');
   assert.deepEqual((await agents()).slice(2,3),['agy'],'an added member takes an AI not yet on the team');
-  assert.equal(await effort(3).isDisabled(),true,'Antigravity picks effort with its model');
+  assert.equal(await effort(3).isDisabled(),false,'Antigravity effort is available for known model variants');
   assert.equal(await effort(3).locator('option:checked').textContent(),'모델에 포함');
   assert.ok((await options(3)).includes('Gemini 4 Argon (High)'));
+  await model(3).selectOption({label:'Gemini 4 Argon (Low)'});
+  await effort(3).selectOption('high');
+  assert.equal(await model(3).locator('option:checked').textContent(),'Gemini 4 Argon (High)');
+  await model(3).selectOption('');
   // Changing a member's AI starts it from that AI's defaults.
   assert.deepEqual((await agents()).slice(3,4),['codex'],'with every other AI taken, Codex again');
   await model(4).selectOption({label:'GPT-6-Astra'});await effort(4).selectOption('low');
@@ -61,14 +65,33 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await page.getByRole('alert').filter({hasText:'팀원 1의 모델 이름'}).waitFor();
   assert.equal(await page.evaluate(()=>window.composed.length),0,'an invalid model composes nothing');
   await page.getByRole('textbox',{name:'팀원 1 · 모델 이름'}).fill('gpt-7-nova');
+  // A Codex model the catalog does not know offers no level to pin (its Workroom start would refuse one): 자동 only.
+  assert.deepEqual(await effort(1).locator('option').evaluateAll(o=>o.map(x=>x.textContent)),['에포트 자동'],'an uncatalogued Codex model offers only 자동');
+  // A typed catalog model (not a preset) offers its own levels, xhigh and max read 「고정 · …」 like the rest.
+  await page.getByRole('textbox',{name:'팀원 1 · 모델 이름'}).fill('gpt-reserve');
+  assert.deepEqual(await effort(1).locator('option').evaluateAll(o=>o.map(x=>x.textContent)),['에포트 자동','고정 · 낮음 · low','고정 · 보통 · medium','고정 · 높음 · high','고정 · xhigh','고정 · max']);
+  await effort(1).selectOption('high');
   await model(2).selectOption('custom');
   assert.equal(await page.getByRole('textbox',{name:'팀원 2 · provider'}).inputValue(),'anthropic','typing starts from the picked preset');
+  // Hermes levels depend on the provider: editing it keeps a pin the new provider still offers and clears one it does not,
+  // instead of keeping it unseen until compose refuses it. Every Hermes pin is a request (its adapter may move it).
+  const hermesProvider=page.getByRole('textbox',{name:'팀원 2 · provider'});
+  await effort(2).selectOption('max');
+  assert.equal(await effort(2).getAttribute('title'),'요청됨 · 실제 적용 확인 필요','a Workroom Hermes pin is still a request');
+  await hermesProvider.fill('openrouter');
+  assert.ok(!(await effort(2).locator('option').evaluateAll(o=>o.map(x=>x.value))).includes('max'),'openrouter offers no max');
+  await hermesProvider.fill('anthropic');
+  assert.equal(await effort(2).inputValue(),'','a level the new provider did not offer was cleared, not kept unseen');
+  await effort(2).selectOption('high');
+  await hermesProvider.fill('openrouter');
+  assert.equal(await effort(2).inputValue(),'high','a level the new provider still offers stays');
+  await hermesProvider.fill('anthropic');
   await model(2).selectOption({label:'Anthropic · Opus 5.5'});
   await page.getByRole('textbox',{name:'목표'}).fill('');await page.getByTestId('workroom-team-compose').click();
   await page.getByRole('alert').filter({hasText:'목표를 적어 주세요'}).waitFor();
   await page.getByRole('textbox',{name:'목표'}).fill('결제 오류를 고친다');await page.getByTestId('workroom-team-compose').click();
   const text=await page.evaluate(()=>window.composed.at(-1));
-  for(const part of ['[AgentsToZ 팀 작전 · 리더]','결제 오류를 고친다','팀원 1: Codex (gpt-7-nova) · 에포트 고정 high — API와 테스트','팀원 2: Hermes (anthropic/claude-opus-5-5) · 에포트 자동 — 작업은 리더가 배분','agentstoz_use_create_team','push는 하지 않습니다'])assert.ok(text.includes(part),part);
+  for(const part of ['[AgentsToZ 팀 작전 · 리더]','결제 오류를 고친다','팀원 1: Codex (gpt-reserve) · 에포트 고정 high — API와 테스트','팀원 2: Hermes (anthropic/claude-opus-5-5) · 에포트 자동 — 작업은 리더가 배분','agentstoz_use_create_team','push는 하지 않습니다'])assert.ok(text.includes(part),part);
   // 빠른 구성: one tap fills the members from the AIs other than the leader; a reviewer reads and reports, and the leader is told.
   await page.getByRole('button',{name:'다시 열기'}).click();
   const role=n=>page.getByRole('combobox',{name:`팀원 ${n} · 역할`}),roles=async()=>[await role(1).inputValue(),await role(2).inputValue()];
@@ -197,8 +220,42 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await check(4,'Claude --bg').uncheck();await check(4,'tmux').check();
   assert.equal(await chip(4).innerText(),'연결 대기');
   assert.equal(await check(4,'기존 창 재사용').isDisabled(),true,'cmux cannot find a window again');
+  await surface(4).selectOption('orca-worktree');
+  await effort(4).selectOption('max');
+  assert.equal(await model(4).inputValue(),'','Orca can request max while keeping the CLI default model');
+  // The Workroom enforces a pin and offers Claude's CLI default no max: moving there clears it instead of keeping it unseen.
+  await surface(4).selectOption('internal');
+  assert.equal(await effort(4).inputValue(),'','a level the new place does not offer is cleared');
+  assert.equal(await effort(4).locator('option:checked').textContent(),'에포트 자동');
+  await surface(4).selectOption('orca-worktree');
+  await effort(4).selectOption('xhigh');
+  assert.equal(await effort(4).locator('option:checked').textContent(),'고정 · xhigh');
+  await model(4).selectOption({label:'Opus 5.5'});
+  await effort(4).selectOption('max');
+  assert.equal(await effort(4).inputValue(),'max');
+  assert.equal(await effort(4).getAttribute('title'),'요청됨 · 실제 적용 확인 필요');
+  // A model that offers the level in both places keeps it, and in the Workroom it is a pin, not a request.
+  await surface(4).selectOption('internal');
+  assert.equal(await effort(4).inputValue(),'max','Opus 5.5 offers max in the Workroom too');
+  assert.equal(await effort(4).getAttribute('title'),null);
+  await surface(4).selectOption('cmux');
+  await check(4,'Claude --bg').uncheck();await check(4,'tmux').check();
   // The Codex app fills its composer without sending: a person joins it.
   await surface(5).selectOption('app');
+  // Computer use for one-time approvals is a desktop app member opt-in, off by default; a terminal member is answered with keys.
+  const computerUse=n=>check(n,'리더가 이 앱 팀원의 1회성 승인만 컴퓨터 유즈로 응답할 수 있음');
+  assert.equal(await computerUse(4).count(),0,'a terminal member offers no computer use');
+  assert.equal(await computerUse(5).isChecked(),false,'computer use is off until the person turns it on');
+  await computerUse(5).check();
+  // Moved off the app, the choice stays visible and compose refuses it rather than dropping it silently.
+  await surface(5).selectOption('internal');
+  assert.equal(await computerUse(5).getAttribute('aria-invalid'),'true');
+  const beforeComputerUse=await page.evaluate(()=>window.composed.length);
+  await page.getByTestId('workroom-team-compose').click();
+  await page.getByRole('alert').filter({hasText:'데스크톱 앱 팀원에만'}).waitFor();
+  assert.equal(await page.evaluate(()=>window.composed.length),beforeComputerUse,'computer use on a terminal member composes nothing');
+  await surface(5).selectOption('app');
+  assert.equal(await computerUse(5).getAttribute('aria-invalid'),null);
   assert.deepEqual(await page.getByRole('combobox',{name:'팀원 5 · 앱 대화'}).locator('option').evaluateAll(o=>o.map(x=>x.textContent)),['새 대화','최근 대화 다시 열기']);
   await page.getByRole('combobox',{name:'팀원 5 · 앱 대화'}).selectOption('reopen');
   assert.equal(await check(5,'권한 우회').count(),0,'the Codex app takes no bypass');
@@ -215,12 +272,12 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   for(const part of ['팀원 1: Codex · 에포트 자동 · 계정 「회사 계정」(accountId acct_12345678-1234-4123-8123-123456789abc)','팀원 2: Hermes (anthropic/claude-opus-5-5) · 에포트 자동',
    '팀원 3: Antigravity · 실행 위치 iTerm(iterm) · 권한 우회 · tmux · 기존 창 재사용 · 수동 합류: 터미널 창에는 지시·결과 연결이 없습니다',
    '팀원 4: Claude Code · 실행 위치 cmux(cmux) · Claude --bg 끔 · tmux · 새 창 · 연결 대기: cmux 제어 연결이 확인된 뒤에 지시합니다',
-   '팀원 5: Codex · 실행 위치 Codex 앱(app) · 최근 대화 다시 열기 · 수동 합류: Codex 앱 입력칸에 채우기만 하고 보내지 않습니다','실행 위치·옵션:'])assert.ok(launched.includes(part),part);
+   '팀원 5: Codex · 실행 위치 Codex 앱(app) · 최근 대화 다시 열기 · 리더가 1회성 승인만 컴퓨터 유즈로 응답 가능 · 수동 합류: Codex 앱 입력칸에 채우기만 하고 보내지 않습니다','실행 위치·옵션:','항상 허용·다시 묻지 않기·권한 우회'])assert.ok(launched.includes(part),part);
   assert.deepEqual(parseTeamSelectionBlock(launched).members,[
    {agent:'codex',accountId:'acct_12345678-1234-4123-8123-123456789abc'},{agent:'hermes',model:'claude-opus-5-5',provider:'anthropic'},
    {agent:'agy',bypassPermissions:true,surface:'iterm',launchOptions:{tmuxMode:true,reuse:'reuse-or-new'}},
    {agent:'claude',surface:'cmux',launchOptions:{bgMode:false,tmuxMode:true,reuse:'new'}},
-   {agent:'codex',surface:'app',launchOptions:{appMode:'reopen'}},
+   {agent:'codex',surface:'app',launchOptions:{appMode:'reopen'},computerUseApprovals:true},
   ],'the selection block carries exactly what was chosen');
   // Production reopens with the current composed draft: restore choices and the original goal, never nest old authority.
   await page.evaluate(()=>{window.initialGoal=window.composed.at(-1);});
@@ -228,6 +285,7 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   assert.equal(await page.getByRole('textbox',{name:'목표'}).inputValue(),'결제 오류를 고친다');
   assert.equal(await rows.count(),5);assert.equal(await surface(3).inputValue(),'iterm');
   assert.equal(await check(3,'권한 우회').isChecked(),true,'the old choice is visible for review');
+  assert.equal(await computerUse(5).isChecked(),true,'the computer use opt-in is restored for review too');
   await check(3,'권한 우회').uncheck();
   await page.getByTestId('workroom-team-compose').click();
   const replaced=await page.evaluate(()=>window.composed.at(-1));
@@ -259,7 +317,7 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await page.getByTestId('workroom-team-compose').click();
   assert.equal(parseTeamSelectionBlock(await page.evaluate(()=>window.composed.at(-1))).members[1].agent,'hermes');
   assert.deepEqual(errors,[]);
-  console.log(`${name}: leader exclusion, model lists, 자동/pinned effort, agy model-bound effort, AI change reset, typed model and Hermes provider, six-member bound, model and goal validation, composed instruction, presets and reviewer role, open sessions joining, Escape, Hermes variants, launch surfaces and options, management states, selection block and narrow widths passed`);
+  console.log(`${name}: leader exclusion, model lists, 자동/pinned effort, agy model-bound effort, AI change reset, typed model and Hermes provider, six-member bound, model and goal validation, composed instruction, presets and reviewer role, open sessions joining, Escape, Hermes variants, launch surfaces and options, management states, app computer use opt-in, selection block and narrow widths passed`);
  }finally{await browser.close();}
 }}finally{server.stop(true);}
 // 팀 현황 shares this check (the tester manifest is at its 96-check cap): the strip above a team session's terminal.

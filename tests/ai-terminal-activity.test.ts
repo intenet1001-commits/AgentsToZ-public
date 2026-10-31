@@ -9,7 +9,7 @@ import {
   parseWorkroomTurnCompletions, reduceWorkroomActivity, workroomSampleInputs, type WorkroomActivityInput, type WorkroomActivityTracker,
 } from '../src/aiTerminalActivity';
 import {initialWorkroomNotifyMemory, stepWorkroomNotify, type WorkroomNotification} from '../src/workroomNotifyPolicy';
-import {createWorkroomTranscriptSignals, WORKROOM_TRANSCRIPT_TICK_BYTES} from '../src/aiTerminalActivityTranscript';
+import {createWorkroomTranscriptSignals,readWorkroomTranscriptWitness,verifyWorkroomTranscriptWitness,WORKROOM_TRANSCRIPT_TICK_BYTES,WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES} from '../src/aiTerminalActivityTranscript';
 import {spawnSync} from 'node:child_process';
 import {renameSync, utimesSync} from 'node:fs';
 import {claudeProjectSlugCandidates} from '../src/sessionTranscript';
@@ -600,6 +600,17 @@ describe('turn parser and bounded transcript tail', () => {
 
 // Review 2026-10-16: bounded, non-blocking tails; a resumed Codex thread binds wherever its rollout lives.
 describe('transcript tail: review fixes', () => {
+  test('completion witness rejects replacement, same-size edits, partial records and oversized history',()=>{
+    const dir=mkdtempSync(join(tmpdir(),'agentstoz-witness-'));dirs.push(dir);const path=join(dir,'transcript.jsonl');
+    const end=JSON.stringify({type:'event_msg',timestamp:'2026-10-27T00:00:00.000Z',payload:{type:'task_complete',turn_id:'end'}})+'\n';
+    const content=JSON.stringify({type:'user',value:'alpha'})+'\n'+end;writeFileSync(path,content);
+    const witness=readWorkroomTranscriptWitness(path,'codex','codex:end');expect(witness).not.toBeNull();expect(verifyWorkroomTranscriptWitness(witness!,path)).toBe(true);
+    writeFileSync(path,content.replace('alpha','bravo'));expect(verifyWorkroomTranscriptWitness(witness!,path)).toBe(false);
+    writeFileSync(path,content);appendFileSync(path,'{"type":"user"');expect(readWorkroomTranscriptWitness(path,'codex','codex:end')).toBeNull();
+    writeFileSync(path,content);rmSync(path);writeFileSync(path,content);expect(verifyWorkroomTranscriptWitness(witness!,path)).toBe(false);
+    writeFileSync(path,'x'.repeat(WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES)+end);expect(readWorkroomTranscriptWitness(path,'codex','codex:end')).toBeNull();
+    const link=join(dir,'link');symlinkSync(path,link);expect(readWorkroomTranscriptWitness(link,'codex','codex:end')).toBeNull();
+  });
   const dayFolder = (home: string, at: Date) => join(home, '.codex', 'sessions', String(at.getFullYear()), String(at.getMonth() + 1).padStart(2, '0'), String(at.getDate()).padStart(2, '0'));
 
   test('a resumed Codex thread whose rollout sits in an older day folder still binds', async () => {
@@ -616,6 +627,8 @@ describe('transcript tail: review fixes', () => {
     appendFileSync(rollout, JSON.stringify({timestamp: new Date().toISOString(), type: 'event_msg', payload: {type: 'task_complete', turn_id: 't9'}}) + '\n');
     const got = await signals.poll({...session, lastSubmitAt: Date.now() + 1}, WORKROOM_TRANSCRIPT_TICK_BYTES);
     expect(got.completions.map(c => c.key)).toEqual(['codex:t9']);
+    expect(got.witness?.key).toBe('codex:t9');expect(verifyWorkroomTranscriptWitness(got.witness!,rollout)).toBe(true);
+    expect(got.bytes).toBeLessThanOrEqual(WORKROOM_TRANSCRIPT_TICK_BYTES);
   });
 
   test('a FIFO swapped in between the stat and the open never blocks the sidecar', () => {

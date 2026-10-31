@@ -694,6 +694,85 @@ for (const engineName of engines) {
         await region('session', VIEW);
       });
 
+      await step('session-tools-reach', async () => {
+        if (!phone) return;
+        // On the narrowest phone, the action used to squeeze into vertical text and make the toolbar taller than the
+        // terminal. The row can scroll, but every action still has to be usable by a real pointer, including its popup.
+        const unfinished = view.getByTestId('workroom-unfinished-work');
+        const settings = view.getByTestId('workroom-settings');
+        const field = view.getByLabel('워크룸 입력');
+        if (!(await unfinished.count()) || !(await settings.count())) { fail('session-tools-reach: expected session actions are missing'); return; }
+        const submissionsBefore = mac.state.submissions.length;
+        try {
+          await unfinished.scrollIntoViewIfNeeded();
+          const box = await unfinished.evaluate(el => {
+            const r = el.getBoundingClientRect(), parent = el.closest('.ai-terminal-view-controls').getBoundingClientRect();
+            return { left: r.left, right: r.right, parentLeft: parent.left, parentRight: parent.right, whiteSpace: getComputedStyle(el).whiteSpace };
+          });
+          if (box.left < box.parentLeft - 1 || box.right > box.parentRight + 1 || box.whiteSpace !== 'nowrap')
+            fail(`session-tools-reach: unfinished action is clipped or wraps after scrolling (${JSON.stringify(box)})`);
+          await unfinished.click({ timeout: 5_000 });
+          if (!(await field.inputValue()).trim()) fail('session-tools-reach: tapping unfinished work did not prepare a draft');
+          if (mac.state.submissions.length !== submissionsBefore) fail('session-tools-reach: preparing a draft sent a request');
+          await field.fill('');
+          await field.blur();
+          await settings.locator('summary').scrollIntoViewIfNeeded();
+          await settings.locator('summary').click({ timeout: 5_000 });
+          const panel = settings.locator('.workroom-settings-body');
+          await panel.waitFor({ state: 'visible', timeout: 5_000 });
+          const hit = await panel.evaluate(el => window.__layout.hitsSelf(el));
+          if (!hit.ok) fail(`session-tools-reach: settings popup is clipped or covered by ${hit.hit}`);
+          await settings.locator('summary').click({ timeout: 5_000 });
+          if (await settings.evaluate(el => el.open)) fail('session-tools-reach: tapping settings again did not close it');
+          if (!(await view.isVisible())) fail('session-tools-reach: closing settings also closed the session');
+          // A hardware Escape immediately after opening the popover must close that popover, not the Workroom.
+          await settings.locator('summary').click({ timeout: 5_000 });
+          await page.keyboard.press('Escape');
+          if (!(await view.isVisible())) {
+            fail('session-tools-reach: immediate Escape closed the session instead of only settings');
+            await firstRow.click({ timeout: 5_000 });
+            await view.waitFor({ timeout: 5_000 });
+          } else if (await settings.evaluate(el => el.open)) {
+            fail('session-tools-reach: immediate Escape left settings open');
+            await settings.evaluate(el => { el.open = false; });
+          }
+          // iOS touch can leave the composer focused while the native summary opens. Dispatch in one turn, before
+          // the details toggle's deferred React effect can install its document listener.
+          await page.waitForTimeout(50);
+          const inputsBefore = mac.state.inputs.length;
+          const outsideFocus = await view.evaluate(el => {
+            const details = el.querySelector('.workroom-settings'), input = el.querySelector('textarea[aria-label="워크룸 입력"]');
+            input.focus();
+            details.querySelector('summary').click();
+            const wasOpen = details.open, focusStayed = document.activeElement === input;
+            const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+            input.dispatchEvent(key);
+            return { wasOpen, focusStayed, stillOpen: details.open, prevented: key.defaultPrevented };
+          });
+          await page.waitForTimeout(50);
+          if (!outsideFocus.wasOpen || !outsideFocus.focusStayed || outsideFocus.stillOpen || !outsideFocus.prevented || !(await view.isVisible()))
+            fail(`session-tools-reach: Escape with composer focus did not close only settings (${JSON.stringify(outsideFocus)})`);
+          if (mac.state.inputs.length !== inputsBefore) fail('session-tools-reach: Escape with settings open reached the CLI');
+          await settings.evaluate(el => { el.open = false; }).catch(() => {});
+          await page.waitForTimeout(50);
+          const composing = await view.evaluate(el => {
+            const details = el.querySelector('.workroom-settings'), input = el.querySelector('textarea[aria-label="워크룸 입력"]');
+            input.focus();
+            details.querySelector('summary').click();
+            const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true });
+            input.dispatchEvent(key);
+            const result = { stillOpen: details.open, prevented: key.defaultPrevented };
+            details.open = false;
+            return result;
+          });
+          if (!composing.stillOpen || composing.prevented) fail(`session-tools-reach: composing Escape was intercepted (${JSON.stringify(composing)})`);
+        } catch (error) {
+          fail(`session-tools-reach: action or settings popup was unreachable (${String(error.message).split('\n')[0]})`);
+          await settings.evaluate(el => { el.open = false; }).catch(() => {});
+          await field.fill('').catch(() => {});
+        }
+      });
+
       await step('readable-bottom', async () => {
         if (!phone) return;
         // 읽기 보기 sticks to the bottom (w11, S4.1): within 40px of it new output follows; scrolled up, a 「새 출력 ↓」 pill
@@ -859,6 +938,12 @@ for (const engineName of engines) {
       await step('session-escape', async () => {
         if (!phone) return;
         if (!(await view.count())) { fail('session-escape: the session view is not open'); return; }
+        const switcher = view.getByTestId('workroom-session-switcher');
+        if (await switcher.count()) {
+          await switcher.focus();
+          await page.keyboard.press('Escape');
+          if (!(await view.count())) { fail('session-escape: Escape in the session select closed the view'); return; }
+        }
         // Escape in the 「세션 종료」 dialog (a hardware keyboard) closes that dialog only, not the whole view (w7 review).
         await press(view.getByRole('button', { name: '세션 종료', exact: true }));
         const exitDialog = page.locator('dialog.workroom-exit-dialog[open]');

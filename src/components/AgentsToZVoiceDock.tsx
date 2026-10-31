@@ -107,9 +107,12 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
   };
 
   // The OPS panel sits above the dock instead of covering it.
+  // Layout px (offsetHeight), not getBoundingClientRect: in a browser build #root is scaled by the 화면 배율
+  // (src/uiZoom.ts, 125% by default) and everything that reads this offset is laid out inside #root. A scaled
+  // height lifted the panel 25% too far and pushed its 닫기 above the window (click sweep 2026-11-01, 1440×900).
   useLayoutEffect(()=>{
     const node=dock.current;if(!node||typeof ResizeObserver==='undefined')return;
-    const root=document.documentElement,apply=()=>root.style.setProperty('--voice-dock-offset',viewMode==='captions'?'0px':Math.ceil(node.getBoundingClientRect().height+12)+'px');
+    const root=document.documentElement,apply=()=>root.style.setProperty('--voice-dock-offset',viewMode==='captions'?'0px':Math.ceil(node.offsetHeight+12)+'px');
     apply();const observer=new ResizeObserver(apply);observer.observe(node);
     return()=>{observer.disconnect();root.style.removeProperty('--voice-dock-offset');};
   },[viewMode]);
@@ -129,6 +132,13 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
     const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setSessionsOpen(false);};
     document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);
   },[sessionsOpen]);
+  // One panel above the dock at a time: the OPS panel sits on top of the dock's height, and an expanded session list
+  // under it left the panel only its head on screen. The save runner outlives the list. The settings menu folds too —
+  // 「대화 방식 → 음성」 opens the consent panel from inside the menu, which (z 1000) then covered the panel's checkbox.
+  useEffect(()=>{
+    const fold=()=>{setSessionsOpen(false);setMenu(false);setPicker(false);setRooms(null);};
+    window.addEventListener(OPEN_OPS_VOICE_EVENT,fold);return()=>window.removeEventListener(OPEN_OPS_VOICE_EVENT,fold);
+  },[]);
   const partnerNow=owns&&state.session?.activeTarget?JSON.stringify(state.session.activeTarget):'';
   useEffect(()=>{setPicker(false);},[partnerNow]);
   useEffect(()=>{
@@ -332,7 +342,7 @@ export function AgentsToZVoiceDock({transport,remote=false,deviceName,unavailabl
         <button type="button" data-testid="voice-dock-fullscreen-open" aria-label="자막 전체 화면" title="자막 전체 화면" onClick={()=>showView('captions')}><Maximize2 size={15}/></button>
         <button type="button" data-testid="voice-dock-minimize" aria-label="작은 아이콘으로 내리기" title="대화를 유지하며 작은 아이콘으로 내리기" onClick={()=>showView('compact')}><Minimize2 size={15}/></button>
       </div>}
-      {localSessions&&<button type="button" className="az-voice-dock__settings az-voice-dock__sessions-toggle" data-testid="voice-dock-sessions" aria-label={`${sessionsOpen?'열린 AI 세션 접기':'열린 AI 세션 펼치기 · 컨텍스트와 기억 저장'}${unsavedCount?` · 저장 안 된 프로젝트 ${unsavedCount}개`:''}`} aria-expanded={sessionsOpen} title={unsavedCount?`저장 안 된 프로젝트 ${unsavedCount}개 · 펼쳐서 지금 저장·모두 저장`:'열린 프로젝트·AI 세션의 컨텍스트 %와 지금 저장·동기화'} onClick={()=>{setSessionsOpen(v=>!v);setMenu(false);setPicker(false);}}><Layers size={15}/>{unsavedCount>0&&<span className="az-voice-dock__badge" data-testid="voice-dock-sessions-unsaved" aria-hidden="true">{unsavedCount>9?'9+':unsavedCount}</span>}</button>}
+      {localSessions&&<button type="button" className="az-voice-dock__settings az-voice-dock__sessions-toggle" data-testid="voice-dock-sessions" aria-label={`${sessionsOpen?'열린 AI 세션 접기':'열린 AI 세션 펼치기 · 컨텍스트와 기억 저장'}${unsavedCount?` · 저장 안 된 프로젝트 ${unsavedCount}개`:''}`} aria-expanded={sessionsOpen} title={unsavedCount?`저장 안 된 프로젝트 ${unsavedCount}개 · 펼쳐서 지금 저장·모두 저장`:'열린 프로젝트·AI 세션의 컨텍스트 %와 지금 저장·동기화'} onClick={()=>{if(!sessionsOpen)window.dispatchEvent(new Event(CLOSE_OPS_VOICE_EVENT));setSessionsOpen(v=>!v);setMenu(false);setPicker(false);}}><Layers size={15}/>{unsavedCount>0&&<span className="az-voice-dock__badge" data-testid="voice-dock-sessions-unsaved" aria-hidden="true">{unsavedCount>9?'9+':unsavedCount}</span>}</button>}
       <button type="button" className="az-voice-dock__settings" data-testid="voice-dock-settings" aria-label="음성 설정" aria-expanded={menu} title="음성 제공자·자막 설정" onClick={()=>{setProviderState(readVoiceProvider(voicePreferenceStorage())??'openai');setMenu(v=>!v);setPicker(false);setSessionsOpen(false);}}><Settings2 size={15}/></button>
     </div>
     {active&&!folded&&state.partnersSupported!==false&&partners.length>0&&<div className="az-voice-dock__partners" role="group" aria-label="대화 상대" data-testid="voice-dock-partners">

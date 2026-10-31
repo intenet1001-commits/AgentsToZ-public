@@ -2,6 +2,7 @@ import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 export type CodexDesktopComposerAutomationErrorCode =
+  | 'CODEX_DESKTOP_AUTHORITY_REVOKED'
   | 'CODEX_DESKTOP_AUTOMATION_PERMISSION_DENIED'
   | 'CODEX_DESKTOP_PROCESS_NOT_FOUND'
   | 'CODEX_DESKTOP_SUBMISSION_UNCERTAIN'

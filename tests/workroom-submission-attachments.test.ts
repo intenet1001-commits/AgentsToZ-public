@@ -71,7 +71,7 @@ test('a submission with images is written once with its paths intact; a missing,
   const before=f.writes.length;
   await expect(submitWorkroomDraft({id,sessionId:session.id,text:workroomImageMessage('확인',list)+'\r',request:r=>f.perform(r),prepared:()=>{}})).rejects.toThrow('이미지');
   expect(f.writes.length).toBe(before);
-  expect((await f.perform({operation:'submission',sessionId:session.id,submission:{phase:'status',id}})).submission?.state).toBe('prepared');
+  expect((await f.perform({operation:'submission',sessionId:session.id,submission:{phase:'status',id}})).submission?.state).toBe('rejected'); // refused before the fence: never ran, so the sender is not fenced (2026-10-30)
  };
  await refused('missing-image-submission',[join(f.day,'101012-cccccccc.png')]);
  const outside=join(f.app,'101013-dddddddd.png');writeFileSync(outside,PNG);await refused('foreign-image-submission',[outside]);

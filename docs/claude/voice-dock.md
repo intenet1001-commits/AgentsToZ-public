@@ -1,5 +1,41 @@
 # 아젠투지 음성 도크 · Codex Voice
 
+## 도크·음성 패널이 창 안에 머문다 — 화면 배율과 머리 띠 (2026-11-01)
+
+전수 클릭 검사(1440×900)가 두 결함을 찾았다. ① 음성 패널의 「음성 패널 닫기」·「대화 패널 닫기」가 창 위(패널 top y=-200)로 나가
+누를 수 없었다. ② 「실행 도구」를 열면 권한 우회 토글과 빌드 메뉴가 도크(z 1000) 밑에 깔려 클릭이 도크에 먹혔다.
+
+- **원인 ①**: 브라우저 빌드는 `#root`를 화면 배율(기본 125%, `src/uiZoom.ts`)로 `transform: scale`한다. `#root` 안의 fixed 요소는
+  `#root`의 논리 px로 놓이는데, 패널이 `100dvh`(창 높이 = 논리 높이의 125%)와 `getBoundingClientRect()`로 잰 **확대된** 도크 높이로
+  자기 높이를 잡았다. 지금은 `--ui-viewport-height`(배율로 나눈 창 높이, Tauri는 미설정 → `100dvh`)를 쓰고 도크 높이는 `offsetHeight`
+  (논리 px)로 잰다. ⚠️ **`#root` 안의 fixed 표면에 `100dvh`/`100vw`·`getBoundingClientRect` 높이를 쓰지 말 것** — 배율이 1이 아니면 어긋난다.
+- **패널 머리 고정**: 패널은 자기 안에서 스크롤한다(오류 안내를 `scrollIntoView`한다). 머리(`.voice-panel>header`)는 sticky이고
+  `top: calc(-1 * var(--voice-panel-pad))`라 패널 위 끝에 붙어 스크롤된 본문을 가린다 — 패딩은 `--voice-panel-pad` 하나로 맞춘다.
+- **도크 상한**: 도크(`max-height`)는 머리 띠(논리 ~131px, 오프라인 배너 포함 실측) 아래에서 멈추고, 늘어나는 것은 「열린 AI 세션」 목록
+  (`flex-shrink: 1`)뿐이다. 휴대폰 원격 도크(`data-remote`)는 상한이 없다. 음성 패널과 세션 목록은 한 번에 하나만 뜬다(서로 닫는다). 패널이 열리면 도크의 설정 메뉴·담당자 고르기도 접힌다 — 「대화 방식 → 음성」이 메뉴 안에서 동의 패널을 열면 메뉴(z 1000)가 그 체크박스를 덮었다(휴대폰 390px, sticky 머리와 겹쳐 누를 자리가 14px만 남았다).
+- **원인 ②와 고침**: `WorkspaceTools.fitPanel`이 목록 높이를 창 끝까지 잡았다. 지금은 `src/cornerFloatClearance.ts`의 `popoverPlacement`가
+  같은 열의 도크·떠 있는 알림 스택 위에서 끝나게 하고, 그 위 공간이 160 논리 px 미만이면(펼친 도크) 창 높이를 쓰되 `data-over-dock`을 단다.
+  그동안 `body:has(...)` 규칙이 도크와 알림 스택을 **z 9**로 내린다. ⚠️ 머리 팝오버는 `[data-testid="project-main-header"]`의
+  z 10 쌓임 맥락 안에 있어 팝오버의 z(60)는 바깥에서 의미가 없다 — 이 9는 머리의 10보다 작아야 한다(`tests/corner-float-clearance.test.ts`가 지킨다).
+- **검증**: `tests/voice-dock-viewport.e2e.mjs`(격리 빌드, 1280×800·1440×900·1920×1200 × 배율 125%/100%, 한가한 도크·펼친 도크).
+  닫기 버튼과 `#bypass-toggle`·빌드 summary의 가운데 점 `elementFromPoint`가 자기 자신인지 + 실제 클릭으로 본다. 고치기 전 빌드는
+  101건 실패(같은 피복 대상: `voice-dock-call`·`voice-dock-type`), 고친 뒤 204/0. Tauri 본창은 `NativeVoiceLauncher`를 띄우고
+  네이티브 배율을 쓰므로 이 검사는 브라우저 빌드 기준이다.
+
+## 기억 저장 확인 필요 → 진단 워크룸 (2026-10-29)
+
+설치 앱의 알림은 음성 독립 창에 있으므로 일반 `/api/agent-runtime/terminals`를 호출하면 Rust의 창별 경계에서
+거절된다. 일반 터미널 경로는 계속 막고, 고정 `POST /api/agent-runtime/memory-save-recovery`만 추가한다.
+앱 Runtime capability와 Tauri Origin으로 보호하며 What I Said·QR 원격제어 capability는 사용할 수 없다.
+
+이 경로는 2KiB 안의 operation(start/list)·requestId·등록 targetId·Codex/Claude·문제 종류만 받는다.
+prompt·폴더·임의 명령·bypass는 거절한다. 호스트가 진단 프롬프트를 만들고 현재 등록 대상을 다시 검증하는 기존
+터미널 서비스로 시작한다. 목록은 같은 프로젝트·AI의 최신 세션 16개 메타데이터뿐이다. 본문·기억 원문은 반환하지 않는다.
+요청은 실패 알림을 본 사람이 AI를 선택하고 누를 때만 생기며, 시작 결과 유실 후 자동 재실행은 없다.
+
+행별 버튼은 펼침 버튼 밖에 두고 오류 목록은 화면 높이의 48%/340px 안에서 스크롤한다. 280px 창의 Chromium/WebKit
+검사에서 입력칸·닫기·복구 버튼의 표시, 충돌·미확정·백업·등록 실패·시작 유실·창 열기 실패를 각각 확인한다.
+
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
@@ -81,19 +117,116 @@
   읽기는 15초·문서가 보일 때만(예전 배너와 같은 비용 — 배너를 지웠으므로 이중 폴링은 없다).
 - **「열린 AI 세션」**(도크의 겹친 사각형 버튼 `voice-dock-sessions`, `src/components/DockSessionsPanel.tsx`): AI 사용량 패널과 같은 자료
   (`/api/context-usage`, `visibleContextSessions` — 오래됨·닫힌 표면 제외)와 같은 판정(`sessionMemoryAction`, `voiceProjectMemoryIsBlocked` —
-  AiUsagePanel에서 export)으로 행마다 프로젝트·AI·컨텍스트 %(70% 이상 주황·90% 빨강)·로컬 저장/Supabase 백업 시각과 「지금 저장」·「동기화」를 준다.
+  AiUsagePanel에서 export)으로 행마다 프로젝트·AI·「컨텍스트 N%」(70% 이상 주황·90% 빨강)·상태 한 줄과 「지금 저장」·「동기화」를 준다.
+  로컬 저장/Supabase 백업 시각은 접힌 「저장·백업 시각」(`voice-dock-session-times`) 안에 있다 — 현재 상태와 경쟁하지 않게. 충돌은 접지 않고 상태 줄에 그대로 보인다.
   프로젝트 이름은 펼칠 때 한 번 읽는 `/api/ports`로 붙인다(독립 창에는 본창의 워크트리 목록이 없다 — 워크트리는 부모 경로 포함 판정으로 잡힌다).
+  - 머리 아래 한 줄은 「Claude·Codex 자동 체크포인트 켜짐 · 컨텍스트 50·70·75·90%」(또는 꺼짐)이다. 한 조정기가 Claude·Codex 세션을 함께
+    저장하므로(`readCodexAutoRememberObservations`+`readClaudeAutoRememberObservations`, AI 사용량 패널 문구와 같다) 「Codex …」만 쓰면 Claude 행 위에서
+    틀린 말이 된다(2026-10-28 바로잡음). 이 줄과 컨텍스트 칸만 `dockSessionsCopy`(`src/i18n.ts`, 7개 언어)로 번역되고 나머지 목록은 아직 한국어 전용이다.
+  - ⚠️ 컨텍스트 칸(`az-session__pct`)은 일반 `<span>`이라 `aria-label`을 달지 않는다 — ARIA 1.2가 generic 역할의 이름 붙이기를 금지해 무시될 수 있다.
+    스크린 리더는 칸의 글자 「컨텍스트 72%」를 읽고, 모르는 값은 보이는 「—」를 숨기고 `az-voice-dock__sr-only`의 「확인 안 됨」을 읽는다. 검사는 속성이
+    아니라 Playwright `ariaSnapshot()`으로 실제로 읽히는 글자를 본다.
   - 「지금 저장」 = 그 세션의 AI로 `session-end`(`preservePreferredAgent:true` — 프로젝트의 기본 AI를 바꾸지 않는다). 버튼은 **자기 질문만** 답한다
     (`resolveProjectMemorySaveButtonAction`과 같은 규칙, 프로젝트 패널과 같다): 새 활동이 있거나 장기기억이 아직 없으면 켜지고, 충돌이면 꺼진다.
     백업이 밀려 있는 것은 저장을 막지 않는다. 누를 때 상태를 다시 읽는다(자동 체크포인트나 다른 창이 방금 저장했을 수 있다).
     ⚠️ **장기기억을 새로 만드는 것(`start`)은 등록된 프로젝트·그 워크트리에서만** 한다 — AI 사용량 패널은 아무 폴더에나 「시작」을 주지만,
     한 번 누르는 이 목록에서는 `~/Downloads` 같은 폴더에 기억이 조용히 생길 수 있다. 등록되지 않은 폴더 행은 「등록되지 않은 폴더 · 장기기억 없음」.
   - 「동기화」 = `/api/project-memory/sync`(해시로 안전한 방향만). 충돌이면 덮어쓰지 않고 「프로젝트 화면에서 검토」라고 말한다.
+    양쪽이 이미 같으면(`sessionMemorySyncDirection`이 `synced`) 「동기화됨」으로 꺼진다(`dockSyncButtonState`, VOC 2026-10-29 「동기화 누른 뒤에도
+    켜져 있음」). 행의 `action`(`saved`·`remember`)으로 판정하지 말 것 — `remember`도 이미 동기화된 상태일 수 있다. 백업 꺼짐·비교 실패는 켜 둔다.
+    ⚠️ Compact·Clear의 `canSync`(동기화할 수 있는 기억인가)와 버튼 켜짐은 다른 질문이다 — 섞으면 동기화된 행의 Compact가 꺼진다.
   - **5초 폴링은 펼친 동안에만**(세션 5초, 기억 상태는 폴더마다 30초 캐시·한 번에 하나). 접으면 그 타이머가 사라지고 아래 「저장 안 된 작업」의 1분 검사가 이어받는다. 바깥 클릭으로 닫지 않는다 —
     저장 중에 다른 곳을 눌러 결과를 잃지 않게. Escape·토글로 닫는다. 설정 메뉴를 열면 닫힌다(둘이 쌓여 창이 길어지지 않게).
   - ⚠️ **패널은 `lazy`로만 가져온다** — `projectMemoryApi`가 든 `ProjectMemoryPanel`을 끌고 오므로, 항상 실리는 도크가 정적으로 가져오면
     지연 로딩이 깨진다(`tests/dock-notices-sessions.test.ts`가 지킨다).
   - 저장은 장기기억을 갱신할 뿐 열린 대화의 컨텍스트 %를 줄이지 않는다 — 패널이 그렇게 말한다.
+  - **2026-10-26: 최근 기록과 실제 열린 창을 구분한다.** 머리는 「최근 AI 세션」이다. `guardian_review`·`subagent` 내부 실행은 API 수집·공유 UI 판정에서 제외한다(제목으로 판정하지 않는다). `Guardian review`가 같은 프로젝트의 충돌 경고를 여러 번 반복한 원인이었다.
+  - **주간 잔여량**은 목록 상단의 Claude·Codex·Antigravity 3칸이다. 컨텍스트 %와 별개다. Codex는 기존 app-server 읽기, Claude는 공식 statusline의 `rate_limits.seven_day`, Antigravity는 `quota`의 명시적 weekly bucket만 쓴다. 여러 bucket은 최소 잔여량이라고 표시하고 세부 한도·초기화 시각은 툴팁에 둔다. 조회 실패는 확인 안 됨, 15분 초과·리셋 경과는 이전 값이며 0/100%를 추정하지 않는다. 계정 단위의 최근 CLI 활동 기준이며 앱 계정과 같다고 보장하지 않는다.
+    Codex 사용량 읽기 전용 child는 Orca·AgentsToZ 관리 계정 경로의 `CODEX_HOME`이 상속되면 `OPENAI_`·`CODEX_` 환경 전체를 제외하고 기본 CLI 계정을 읽는다. 다른 계정의 인증이나 endpoint가 기본 계정에 섞이지 않도록 하는 기존 계정 격리 정책이다. 일반 프록시·TLS 환경과 부모 환경, 기존 세션·로그인 파일은 유지한다. 관리 경로가 아닌 명시적 `CODEX_HOME`과 그 provider 설정은 그대로 쓰므로 이 경우 해당 CLI 계정 기준이다. 관리 경로를 사용자가 명시 선택한 것과 앱에 상속된 것은 경로만으로 구분할 수 없어 두 경우 모두 기본 CLI를 읽는다. 열린 모든 세션의 계정을 대변하지 않는다. 실시간 조회는 성공했지만 주간 창이 없는 경우 「주간 자료 없음」과 확인 경과를 표시하며 15분을 넘기면 「이전 확인」을 덧붙인다. 조회 실패는 「확인 안 됨」이다. 주간 한도 자체가 없다고 단정하지 않는다.
+  - Claude·agy의 「사용량 연결」은 이 Mac 기본 CLI의 상태줄을 감싸는 명시적 opt-in이다. 고정된 Python shim이 주간 숫자·시각만 기기 내 0600 파일 하나씩 원자 교체하고 원래 상태줄의 입력·출력을 유지한다(원래 명령 최대 3초). 대화·이메일·토큰은 저장하지 않는다. 연결 해제는 현재 명령이 앱 소유일 때만 원래 설정을 복원하며 외부 변경을 덮지 않는다. Python·CLI가 없거나 Windows이면 연결 미지원이다. 연결 직후 숫자는 다음 CLI 활동부터 들어온다. 도크 패널을 펼친 동안·문서가 보일 때만 60초 폴링하며, 별도 권한이 있는 휴대폰에는 같은 호스트의 마지막 주간 사용량 스냅샷만 전달한다([원격 주간 잔여](remote-control.md)).
+  - **목록 정리와 네이티브 `/compact`·`/clear`는 별개다.** ×는 관측 시각까지의 표시만 숨기고, 「지난 목록 정리」는 유휴·표면 미확인 기록만 일괄로 숨긴다. 실행 중이거나 `live`인 표면은 일괄 대상이 아니다. `contextSessionCleanup`의 localStorage 256개 상한·storage 이벤트를 도크/사용량/미저장 검사에 공유한다. 새 `capturedAt`이면 다시 표시하며 원본 대화·기억·로그를 삭제하지 않는다.
+  - **Compact·Clear 버튼은 모든 행에 그리고, 자동 전송은 두 곳뿐이다**(2026-10-29, `contextCommandAvailability`·`contextCommandButtonState`). 행별 안내는
+    표면의 고정된 사실이다(「나중에」 류 금지, 문구는 `dockSessionsCopy(lang).command`). ① 정확히 연결된 로컬 Claude Code **워크룸**: 기존
+    `workroom.save`의 동일 세션·입력 리비전 영수증 → 해시 기반 sync → 보호된 terminal 경로의 고정 명령. 서버가 저장 증거·동기화·입력 리비전·빈 입력칸·유휴를
+    쓰기 직전에 재확인한다. ② **Orca의 Claude**(사용자 결정 2026-10-29) — 아래. 일반 터미널·iTerm·VS Code·cmux·백그라운드 에이전트·위치 미확인 Claude와
+    Codex(앱 「Codex 앱에서 직접 실행」, CLI 「Codex에서 직접 실행」)는 수동이고 원본 창 안내만 한다. 지원 행이 기억 상태로만 막히면 그 기억 상태를 말한다.
+    임의 shell·외부 창 자동 타이핑·원격 DTO 확장은 없다.
+  - **Orca Claude 경로**(`src/contextOrcaCommand.ts`, `context.orca.execute·receipt·acknowledge`): 버튼은 목록의 `surfacePresence:'live'`(정확히 한 터미널)이고
+    기억이 이미 `saved`(저장·동기화 완료)일 때만 켜진다 — 이 경로는 저장하지 않는다. 클릭은 sync 확인 후 요청 ID(UUID)만 보낸다. 서버는 손잡이·경로·문자열을
+    받지 않고 행의 캡처(`orcaPaneKey`·`orcaWorktreeId`) → Orca 저장 세션(`profile-state.db`) 정확히 하나 → 기억 저장·동기화 → `terminal list`에서 그 탭·leaf·
+    워크트리의 살아 있는 손잡이 정확히 하나 → `show`(claude·local·writable, runtime·incarnation 기록) → `wait --for tui-idle` → 기억 재확인 → `read --screen`(두
+    규칙선 사이 빈 `❯`, draft 없음, 「esc to interrupt」 없음) → `show` 재확인(같은 runtime·손잡이·incarnation) → 영수증 `write_started` → `terminal send --text
+    /compact --enter --wait-submit 2 --retry-request <requestId>` 순서다. ⚠️ 빈 입력칸을 읽은 뒤 쓰기까지는 `show` 한 번과 로컬 영수증뿐이다 — Orca 전송은
+    입력칸에 있는 글 뒤에 붙여 Enter를 누르므로, 느린 기억·Supabase 확인을 그 사이로 옮기지 말 것. 받은 응답의 runtimeId·handle·
+    `prompt.processIncarnation`이 모두 같고 `accepted:true`일 때만 `written`, `accepted:false`는 `rejected`, 그 밖(시간 초과·불일치·오류)은 전부 `unknown`이다.
+    ⚠️ Orca 1.4는 저장 세션을 `profile-state.db`(SQLite)로 옮겼고 `orca-data.json`은 그 뒤 갱신되지 않는다(1호 2026-10-13에 멈춤). 예전 판정은 JSON만 읽어
+    새로 연 Orca Claude를 `gone`으로 숨겼다 — 읽기는 `src/orcaProfileState.ts` 하나(DB가 있으면 DB만, 못 읽으면 `unverified`).
+  - **Orca 울타리**: `unknown`(또는 재시작 뒤 `write_started`)인 영수증이 하나라도 있으면 그 대화에는 다시 보내지 않는다. 같은 requestId는 영수증으로만 답한다.
+    풀리는 길은 사람이 Orca 화면을 확인하고 누르는 「직접 확인함 · 미확정 해제」(`acknowledgeSubmission`이 그 영수증 하나에 `acknowledgedAt`만 찍고 상태는
+    `unknown` 그대로)뿐이다 — 자동 해제·만료는 없다. 영수증은 워크룸 제출 저널(owner `local-context-orca`, target `orca-context`)에 둔다.
+    쓰기 전 거절도 `rejected` 영수증으로 남긴다 — 응답이 유실돼도(사이드카 재시작, Orca 잠금을 기다리다 프록시 20초 초과) 「전송 확인」이 도크 표시를 푼다.
+    기록이 없는 요청(서버에 닿기 전에 유실)을 해제하면 같은 키에 묘비(`rejected`+`acknowledgedAt`)를 남겨, 늦게 도착한 그 요청은 거절되고 보내지 않는다.
+    이미 확정된(written·rejected) 영수증의 해제는 기록을 바꾸지 않고 그 상태만 답해 도크 표시를 지운다.
+  - **세션 창이 닫힐 때**(2026-10-29): ① 클릭 전 — Orca `gone` 행은 목록에서 빠지고, 워크룸은 바인딩이 사라져 수동 안내가 된다(보내지 않음).
+    ② 저장·동기화 중이나 쓰기 직전 — 호스트가 다시 확인해 `rejected`(워크룸 「워크룸 세션이 닫혀 명령을 보내지 않았습니다」). 도크 표시가 풀린다.
+    ③ 쓰기 결과 모름(`unknown`) — **미확정 명령이 있는 행은 창이 닫혀도·×로 숨겨도 목록에 남는다**(`surfacePresence:'gone'`으로 표시, 「세션 창이
+    닫혔습니다」, Compact·Clear는 `closed` 안내로 꺼짐). 그 행의 「전송 확인」·「미확정 해제」가 사라지면 울타리가 보이지 않게 그 대화를 막기 때문이다.
+    워크룸에는 호스트 울타리가 없으므로 `context.receipt`가 `sessionOpen`을 답하고, **그 워크룸 세션이 닫힌 뒤에만** 사람이 「창 닫힘 확인 · 미확정 해제」로
+    로컬 표시를 푼다(닫힌 세션에는 늦은 요청도 `rejected`, 다시 연 대화는 다른 세션). `sessionOpen`이 없는 옛 호스트는 해제하지 않는다.
+  - ⚠️ **주간 사용량 정지(WIP)와의 관계**: 주간 정지가 들어오면 `/compact`·`/clear`(워크룸·Orca 둘 다)는 정지 중에도 허용해야 한다 — 컨텍스트를 줄이는
+    명령이지 새 작업이 아니다. 이 트랙은 그 게이트를 구현하지 않았다.
+  - 명령은 기존 durable submission 영수증을 재사용한다. 응답 유실은 localStorage에 남긴 원래 requestId로 조회할 뿐 다시 보내지 않는다. `/clear` 뒤에는 옛 provider ID의 바인딩을 폐기한다. 옛 행은 전송 즉시가 아니라 같은 창의 새 대화가 확인된 뒤에 숨긴다(아래 「처리 결과」). 워크룸에서 직접 `/clear`·별칭·`/resume`·`/fork`를 실행해도 옛 바인딩을 폐기한다(직접 입력의 Enter는 현재 입력칸도 확인). 새 대화의 정확한 바인딩이 확인되기 전까지 도크 명령은 지원하지 않으며 워크룸에서 직접 조작한다. Codex 데스크톱 앱에는 Claude 명령을 보내지 않는다.
+  - **처리 결과를 행에서 말한다**(VOC 2026-11-01 「처리결과도 여기서 알아야 하는 거 아님?」, `src/contextCommandOutcome.ts`). 예전에는 「…전송했습니다.
+    처리 결과는 Orca에서 확인하세요」로 끝났고, 머리에는 「컨텍스트 0%」가 떠 있었다.
+    - ⚠️ **Claude의 0은 「측정 전」이다**(`src/contextUsageReading.ts` `measuredContextPercent`): 시작·재개·요약 직후 첫 응답 전까지 statusline이
+      `used_percentage:0`·`current_usage` 전부 0을 보낸다. 도크·AI 사용량 패널·워크룸 꼬리줄은 이것을 0%가 아니라 「확인 안 됨」(—)으로 보인다.
+      토큰이 0보다 크면 0%도 진짜 값이다. 그래서 컨텍스트 %만으로는 요약을 판정할 수 없다 — 실측 2026-10-31(이 Mac의 Orca Claude): `/compact`가 끝난 뒤에도 스냅샷은 0 그대로였다.
+    - **Compact**의 1차 증거는 transcript의 `{"type":"system","subtype":"compact_boundary",…,"compactMetadata":{preTokens,postTokens}}` 행이다
+      (`src/contextCommandEvidence.ts`). 따옴표가 이스케이프되지 않은 표식이라 대화 본문(JSON 문자열)에는 걸리지 않는다. ⚠️ 그 뒤에 요약·첨부가
+      ~418 KB 붙어 512 KB 꼬리 읽기에서 빠질 수 있어, 같은 파일이 자랐으면 꼬리가 덮지 못한 덧붙은 부분만(최대 8 MB) 표식으로 훑는다.
+      보조 증거는 누른 뒤 캡처된 값이 1포인트 이상 내려감(`reading`), 또는 알던 값이 Claude의 0으로 바뀜(「요약된 것으로 보입니다」, `reset`).
+      더 강한 증거가 늦게 오면 약한 답을 덮는다(기록 > 감소 > 초기화 > 확인 안 됨). 대기 5분.
+    - **Clear**의 증거는 **같은 터미널**의 새 세션 ID다 — 워크룸 `launchContext.agentstozWorkroomSessionId`, Orca `orcaWorktreeId`+`orcaPaneKey`가 같고
+      누른 뒤 캡처된 다른 세션. 서버가 행의 `nextConversation`으로 붙인다(사용량이 없는 행을 거르기 전에 계산 — 새 대화는 첫 응답 전 0이다). 옛 호스트를 위해
+      워크룸은 행의 `workroomSessionId`로도 찾는다. 확인되면 옛 행을 숨기고 결과는 새 대화 행으로 옮긴다. 대기 2분. 옛 대화가 창에서 빠지는 것은 Clear의
+      정상 경과라 기다린다(Compact는 창이 닫히면 바로 「결과 확인 안 됨」).
+    - 증거는 누른 시각보다 새것만 센다. 대기 표시는 보낸 시각부터 센다. 시간이 지나면 「결과 확인 안 됨 · <사유>. Orca|워크룸 화면에서 확인하세요.
+      명령은 다시 보내지 않았습니다.」 **절대 다시 보내지 않는다.** 따로 폴링하지 않고 패널이 이미 하는 5초 읽기마다 진행한다(접혀 있으면 멈춘다).
+      추적은 localStorage `agentstoz:context-command:outcome:v1`(16개, 두 도크 창이 storage 이벤트로 공유)이고, 결과는 10분 보인 뒤 사라진다.
+      결과를 보이는 행은 숨겨졌거나 창이 닫혀도 남는다(울타리 행과 같은 고정). 「전송 확인」으로 늦게 확정된 요청도 누른 시각부터 따라간다.
+    - `lastCompaction`·`nextConversation`은 로컬 `/api/context-usage` 행에만 있다 — 원격 DTO·`AiTerminalSummary`에는 넣지 않았다.
+    - ⚠️ `CLAUDE_CONFIG_DIR`로 다른 계정을 쓰는 Claude의 transcript는 색인하지 않으므로 그 대화의 Compact는 기록 없이 % 보조 증거만 쓴다.
+    - 검증: `tests/context-command-outcome.test.ts`(상태 기계·문구·저장소), `tests/context-command-evidence.test.ts`(경계 행·덧붙은 부분 훑기·같은 터미널의
+      다음 대화·0 = 측정 전·API 계약), `scripts/check-voice-dock-sessions.ts`(Chromium·WebKit: 요약 완료 줄, Clear 뒤 옛 행 유지 → 새 대화 행으로 이동).
+      ⚠️ 설치 앱에서 실제 Claude로 /clear 뒤 상태줄 캡처를 관측하지 않았다.
+  - **Claude 행은 어디서 오나 · 저장 확인의 범위**(2026-10-31):
+    - ⚠️ `<appData>/context/<session_id>.json`을 쓰는 것은 Claude 「사용량 연결」의 상태줄 shim(`src/weeklyUsageHook.ts` **v2**)뿐이다. v1은 주간 숫자만
+      써서 이 폴더가 어디서도 생기지 않았고, `/api/context-usage`의 Claude 행은 0개(`captureInstalled:false`)라 도크에 Codex만 보였다. v2는 같은 입력에서
+      세션 ID(UUID만)·cwd·project_dir·model·`context_window`의 숫자·비용·`launchContext`(Orca·cmux 식별자·TERM_PROGRAM·entrypoint, 워크룸이면
+      `AGENTSTOZ_WORKROOM_SESSION_ID` 하나만)를 0700 폴더의 0600 파일로 원자 교체한다. 대화·transcript 경로·이메일·토큰·Orca hook 토큰은 쓰지 않는다.
+      같은 값은 15초 안에 다시 쓰지 않고, 새 세션 파일을 만들 때 30일 지난 자기 파일만 지운다. 쓰기 실패는 전부 무시한다 — 상태줄 출력·주간 숫자·원래 명령 통과는 그대로다.
+    - 파일 이름은 `statusline-v1.py` 그대로 둔다(설정의 명령이 바뀌지 않게). 내용 해시가 `RELEASED_WEEKLY_USAGE_HOOK_SHA256`에 있을 때만 제자리에서 교체한다
+      (`WeeklyUsageHost.upgradeHook` — 사이드카 시작·status). 사람이 고친 shim은 건드리지 않는다. shim을 바꾸면 버전을 올리고 이전 해시를 목록에 더한다
+      (`tests/fixtures/weekly-usage-hook-v1.py`가 v1 원문). 캡처 폴더가 없으면 목록이 「Claude 세션은 위의 Claude 「사용량 연결」을 켠 뒤 …」를 말한다(`voice-dock-sessions-capture`).
+    - **워크룸 `/compact`·`/clear`의 저장 확인은 이 대화만 본다**(`src/workroomSavedReceipt.ts`, purpose `context`): 같은 세션·입력 리비전의 `workroom.save`
+      영수증 + 같은 폴더 + **그 저장이 시작된 뒤 이 대화의 활동 전환이 없음**(tracker `activity.since` ≤ 영수증 `at`). 종료(`close`)는 그대로 프로젝트 전체
+      증거(`projectMemoryCloseEvidence` — 모든 워크트리의 git 지문 + 프로젝트 활동 표식)를 비교한다. 예전에는 컨텍스트 명령도 종료 검사를 그대로 써서, 다른
+      워크트리·다른 에이전트가 저장 뒤 무엇이든 바꾸면 종료 문구(「…다시 저장 후 종료하세요」)로 거절했다. ⚠️ 프로젝트 증거를 뺐으므로 입력 리비전만으로는
+      저장 뒤 이 대화의 출력(입력 없이 끝난 턴)을 못 본다 — 그래서 활동 전환 시각을 함께 본다. `seen`(turn-finished→idle)도 시각을 바꾸므로 한 번 불필요하게
+      거절될 수 있다(fail-closed, 다시 누르면 새로 저장한다). 거절 문구는 `WORKROOM_CONTEXT_SAVE_REFUSALS`(「…명령을 보내지 않았습니다」) — 종료·터미널 유지 표현 없음.
+    - **Orca 경로는 그대로 프로젝트 전체 `needsRemember`를 본다.** 이 경로는 저장하지 않아 대화별 저장 영수증도 입력 리비전도 없다 — 대화 단위로 좁히려면
+      provider 세션에 묶인 Orca 저장 작업과 대화별 활동 증인이 먼저 있어야 한다. 그 거절 문구에는 이미 종료 표현이 없다.
+    - **Clear 뒤 워크룸의 새 대화**: 워크룸 Claude는 `--session-id <워크룸 id>`로 시작하므로, 캡처의 `launchContext.agentstozWorkroomSessionId`(행의
+      `workroomSessionId`)가 행의 세션 ID와 다르면 그 워크룸의 바인딩되지 않은 새 대화다 — 안내는 「위치 미확인」 대신 `workroomUnbound`. 이 표식은 문구용일 뿐
+      전송 권한이 아니다(보내는 것은 정확한 바인딩뿐).
+    - **끝난 워크룸의 첫 대화**(표식 = 행 세션 ID인데 바인딩 없음): 안내는 `workroomNotBound`(「워크룸이 연결돼 있지 않아… 닫혔다면 다시 연 뒤」).
+      앱을 다시 시작하면 워크룸이 모두 끝나므로 그 뒤의 회색 버튼이 전부 「창을 확인하지 못해」라 고장처럼 읽혔다(3호 2026-10-31). 「닫혀」라고
+      단정하지 않는 것은 독이 아직 바인딩을 못 읽은 실행 중 워크룸도 같은 모양이라서다. 같은 날 살아 있는 워크룸에서 Compact를 실제로 눌러
+      `/compact` → PreCompact 훅 → 요약 완료까지 확인했다(Codex 컴퓨터 유즈 1회 클릭, 기록에 요약 경계 생김).
+    - 검증: `tests/weekly-usage.test.ts`(캡처 필드·권한·15초·워크룸 표식·쓸 수 없는 폴더에도 상태줄 유지·v1 제자리 업그레이드·멱등·고친 shim 보존),
+      `tests/workroom-saved-receipt.test.ts`(실제 git + 링크 워크트리: 저장 뒤 다른 워크트리 변경이 종료는 막고 컨텍스트 명령은 막지 않음, 입력 미저장은 여전히 막음),
+      `tests/context-session-command.test.ts`(저장 뒤 이 대화의 활동 → 쓰기 없음), `tests/context-session-command-availability.test.ts`(`workroomUnbound`).
+      ⚠️ 이 Mac의 실제 Claude로 v2 shim을 돌려 보지 않았고, 설치 앱에서 누르지 않았다.
 - 쉬는 Mac 도크의 한 줄(호출 · 텍스트로만 · 열린 세션 · 설정)은 줄바꿈하지 않는다(`data-active="false"`이고 휴대폰이 아닐 때) —
   shrink-to-fit 도크에서 설정 버튼이 혼자 둘째 줄로 떨어졌다. 대화 중(컨트롤 최대 6개)은 예전처럼 줄바꿈한다.
 - **「저장 안 된 작업」 · 「모두 저장」**(VOC 2026-10-24, `src/unsavedSessionMemory.ts`): 자동 저장은 컨텍스트 기준에 닿을 때만 돌아서,
@@ -118,7 +251,8 @@
     같은 루트의 BUSY를 받아, 저장이 실제로 진행되는데도 「다른 기억 저장이 실행 또는 대기 중」을 보였을 것이다. 실행기는 8분 한도·재시도 없음이다.
     (프로젝트 패널의 「세션 기억하기」는 아직 `memoryRequest`를 쓴다 — 손대지 않았다.)
 - 검증: `bun scripts/check-voice-dock-sessions.ts [shots]`(Chromium·WebKit, 1280×800·420×760, 합성 로컬 API — 3개+더 보기·도크 바로 위·
-  펼치기·닫기 뒤 새로고침에도 닫힘·모두 지우기·접힌 동안 5초 폴링 없음·행 내용·저장 1회 본문·동기화·Escape 뒤 폴링 멈춤·가로 스크롤 없음,
+  펼치기·닫기 뒤 새로고침에도 닫힘·모두 지우기·접힌 동안 5초 폴링 없음·행 내용·컨텍스트 칸이 읽히는 글자(확인 안 됨 포함)·체크포인트 줄 두 언어·
+  접힌 시각·충돌은 접지 않음·접힌 네이티브 명령·저장 1회 본문·동기화·Escape 뒤 폴링 멈춤·가로 스크롤 없음,
   저장 안 된 카드·버튼 숫자·접어 둔 뒤 새 집합이면 다시 뜸·「모두 저장」 차례 저장(동시 1개)·목록 「모두 저장」을 접어도 끝까지),
   `tests/unsaved-session-memory.test.ts`(판정·쉬기/넘기기·차례 저장·직전 재확인·start 제한·BUSY/충돌/백업 실패/결과 모름),
   `tests/dock-notices-sessions.test.ts`(배선·저장소·지연 로딩·규칙), `tests/voice-popout-ui.mjs`(독립 창 — 픽스처가 3001 읽기를 대신 답한다).

@@ -28,11 +28,11 @@ import { verifyReleaseSource } from "./releaseSourceGuard";
 import { stageMacOSRuntimeDevelopmentBundle } from "./stage-macos-runtime-development-bundle";
 import { stageWorkroomBrowserBundle } from "./stageWorkroomBrowserBundle";
 import { assertMacosBrowserBuildVariant } from "./src/macosBrowserUpgrade";
-import { freshDmgs, preflightDeveloperId, resolveMacOSCargoTargetDir, signNotarizeAndStaple } from "./src/macOSDeveloperIdBuild";
+import { freshDmgs, parseDeveloperIdNotaryOptions, preflightDeveloperId, resolveMacOSCargoTargetDir, signNotarizeAndStaple } from "./src/macOSDeveloperIdBuild";
 import { stageScreenControlBundle } from "./stageScreenControlBundle";
 import { refreshBundledAppDmgs } from "./refreshBundledAppDmgs";
 
-const buildArguments = process.argv.slice(2);
+const {buildArguments,notaryOptions} = parseDeveloperIdNotaryOptions(process.argv.slice(2));
 const allowedBuildArguments = new Set(["--dmg", "--allow-unpublished-source", "--embedded-browser", "--developer-id"]);
 const rejectedBuildArguments = buildArguments.filter(value => !allowedBuildArguments.has(value));
 if (rejectedBuildArguments.length > 0) {
@@ -43,7 +43,7 @@ if (rejectedBuildArguments.length > 0) {
       + "ad-hoc 빌드로 대체하지 않습니다.",
     );
   }
-  console.error("usage: bun build-macos.ts [--dmg | --embedded-browser] [--developer-id] [--allow-unpublished-source]");
+  console.error("usage: bun build-macos.ts [--dmg | --embedded-browser] [--developer-id [--notary-profile PROFILE [--notary-keychain /absolute/path]]] [--allow-unpublished-source]");
   process.exit(64);
 }
 
@@ -70,7 +70,7 @@ const tauriBin = join(import.meta.dir, "node_modules", ".bin", process.platform 
 console.log(`[build-macos] CARGO_TARGET_DIR=${targetDir}`);
 console.log(`[build-macos] Build type: ${embeddedBrowser ? ".app with embedded Chromium" : isDmg ? "DMG only" : "full (.app + DMG)"}`);
 // Developer ID: check the identity and the notary key before spending a whole build on them.
-const developerIdPreflight = developerId ? await preflightDeveloperId() : undefined;
+const developerIdPreflight = developerId ? await preflightDeveloperId(notaryOptions) : undefined;
 if (developerIdPreflight) console.log(`[build-macos] Developer ID: ${developerIdPreflight.identity.commonName} — 서명·공증·스테이플까지 한다`);
 
 // The version files are rewritten in place for one build and never committed
@@ -198,6 +198,9 @@ if (existsSync(appBundlePath)) {
     appBundlePath,
     version: `${newVersion}.0.0`,
     signingIdentity: developerIdPreflight?.identity.certificateFingerprint,
+    // This Mac's own build only (the public base pipeline never passes one): notifications, remote stop and the weekly
+    // allowance alerts go through this relay. Unset: the bundled Screen has push off, as before.
+    pushEndpoint: process.env.AGENTSTOZ_SCREEN_PUSH_URL,
   });
   if (developerIdPreflight) {
     // Opt-in only (--developer-id): every piece gets a Developer ID signature with its own

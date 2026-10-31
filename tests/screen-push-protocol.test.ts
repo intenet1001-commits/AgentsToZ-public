@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createPrivateKey } from 'node:crypto';
 import {
   apnsJwt, base64, createApnsSender, createScreenPushHandler, decodeCommand, decodeEvent, decodeFetch, decodeRegistration, decodeResult,
-  fromBase64, hex, pushTargets, resultSignedData, sha256, verifySignature, type ApnsSender, type PushTarget, type ScreenPushDeps,
+  fromBase64, hex, notificationText, pushTargets, resultSignedData, sha256, verifySignature, type ApnsSender, type PushTarget, type ScreenPushDeps,
 } from '../supabase/functions/screen-push/protocol';
 import * as kit from './screenPushTestKit';
 import { screenPushDatabase } from './screenPushTestKit';
@@ -92,6 +92,34 @@ function fakeDeps(answers: Record<string, unknown> = {}, apns: ApnsSender | null
 const post = (body: unknown) => new Request('https://relay.invalid/screen-push', { method: 'POST', body: JSON.stringify(body) });
 const signedBody = async (type: string, message: Uint8Array, signer: kit.TestKey) =>
   ({ type, message: base64(message), signature: base64(await signer.sign(message)) });
+
+test('Mac controller notifications use distinct signed kinds and only the named phone receives them', async () => {
+  const now = 1_800_000_000_000;
+  const mac = await kit.testKey('controller event mac'), phone = await kit.testKey('controller event phone');
+  const controller = await kit.testKey('controller event controller'), stranger = await kit.testKey('controller event stranger');
+  const targets = [phone, controller, stranger].map(k => ({ deviceID: hex(k.fingerprint), token: 'ab'.repeat(32), environment: 'production', topic: TOPIC }));
+  for (const [kind, expected] of [[3, 'controllerConnected'], [4, 'controllerRegistered']] as const) {
+    const eventBytes = kit.event({ mac, kind, eventAt: now, macName: '대상 Mac', actorID: controller.fingerprint,
+      actorName: '보는 Mac', recipients: [phone.fingerprint], issuedAt: now, nonce: kit.nonceOf(kind) });
+    const event = decodeEvent(eventBytes);
+    expect(event.kind).toBe(expected);
+    expect(notificationText(event).body).toContain('Mac 컨트롤러 ‘보는 Mac’');
+    const sent: { target: PushTarget; payload: string }[] = [];
+    const apns: ApnsSender = { send: async (target, payload) => { sent.push({ target, payload }); return { status: 200 }; } };
+    const { calls, handler } = fakeDeps({ portmgr_screen_push_targets: targets }, apns, now);
+    const response = await handler(post(await signedBody('notify', eventBytes, mac)));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, sent: 1 });
+    expect(sent.map(s => s.target.deviceID)).toEqual([hex(phone.fingerprint)]);
+    expect(JSON.parse(sent[0]!.payload).aps.alert.body).toContain('Mac 컨트롤러');
+    expect(calls[1]!.args.p_devices).toEqual([hex(phone.fingerprint)]);
+    const forged = await handler(post(await signedBody('notify', eventBytes, controller)));
+    expect(forged.status).toBe(401);
+  }
+  const unknown = kit.event({ mac, kind: 5 as 3, eventAt: now, macName: 'Mac', actorID: controller.fingerprint,
+    actorName: 'Mac', recipients: [], issuedAt: now, nonce: kit.nonceOf(8) });
+  expect(() => decodeEvent(unknown)).toThrow('malformed');
+});
 
 test('oversized streamed requests are cancelled before the rest of the body is read', async () => {
   const { calls, handler } = fakeDeps();
@@ -297,6 +325,15 @@ test('end to end through PostgreSQL: register, notify, remote stop and the Mac\'
     expect(payload.aps.alert.body).toBe('‘아이패드’이(가) ‘사무실 Mac’ 화면에 연결했습니다.');
     expect(fromBase64(payload.screen.m)).toEqual(event); // the app checks the Mac's signature itself
     expect(await call(notifyBody)).toEqual({ status: 409, body: { error: 'replayed' } });
+
+    // A weekly allowance alert (kind weekly-usage): the 'usage' rate kind exists in the table, both devices hear it once.
+    const usage = kit.weeklyUsage({ mac, macName: '사무실 Mac', provider: 1, mark: 0, windowKey: 'w2026-W44', observedAt: now() - 60_000,
+      recipients: [phone.fingerprint, ipad.fingerprint], issuedAt: now(), nonce: kit.nonceOf(n++) });
+    const usageBody = await signedBody('weekly-usage', usage, mac);
+    pushed.length = 0;
+    expect((await call(usageBody)).body).toEqual({ ok: true, sent: 2 });
+    expect(pushed.map(p => JSON.parse(p.body).aps.alert.body)).toEqual(Array(2).fill('‘사무실 Mac’에서 확인한 Claude 주간 사용량을 모두 썼습니다.'));
+    expect(await call(usageBody)).toEqual({ status: 409, body: { error: 'replayed' } });
 
     // The phone stops it: queued, handed to the Mac, answered with the Mac's signature, read back by the phone.
     const stop = kit.command({ macFingerprint: mac.fingerprint, device: phone, action: 1, issuedAt: now(), nonce: kit.nonceOf(n++) });

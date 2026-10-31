@@ -6,6 +6,9 @@ import { opsStatusText, remoteActionErrorHint, remoteControlActionConfirm, remot
 
 // The internet portal and the same-Wi-Fi QR page drew these separately and drifted (2026-10-07 audit).
 describe('one set of words for both phone surfaces', () => {
+  test('the complete generated LAN page script parses as JavaScript', () => {
+    expect(() => new Function(REMOTE_CONTROL_MOBILE_JS)).not.toThrow();
+  });
   test('the QR page embeds the exact functions the portal uses', () => {
     for (const [name, fn] of [['actionLabel', remoteControlActionLabel], ['statusLabel', remoteProjectStatusLabel],
       ['errorNextStep', remoteActionErrorHint], ['sessionStateLabel', workroomSessionStateLabel], ['opsStatusLine', opsStatusText],
@@ -80,6 +83,18 @@ describe('a sentence per action, one date format', () => {
     expect(REMOTE_CONTROL_MOBILE_JS).not.toContain('"AgentsToZ OPS"');
   });
 
+  test('new and recent Codex requests stay distinct without asserting an unreported creation result', () => {
+    expect(remoteControlActionLabel('codex.thread.start')).toContain('새 대화 요청');
+    expect(remoteControlActionLabel('app.codex')).toContain('최근 Codex 대화 다시 열기');
+    const notice = remoteControlActionDone('codex.thread.start');
+    expect(notice).toContain('이전에 결과를 확인하지 못한 요청을 복구했을 수');
+    expect(notice).toContain('Mac의 Codex 프로젝트에서 확인');
+    expect(notice).not.toContain('새 대화를 만들었습니다');
+    expect(remoteControlActionDone('app.codex')).toContain('최근 대화 열기');
+    expect(REMOTE_CONTROL_MOBILE_JS).toContain('이전 요청의 결과가 확인되지 않았다면 그 요청을 먼저 복구할 수 있습니다.');
+    expect(REMOTE_CONTROL_MOBILE_JS).toContain('Mac의 AgentsToZ를 최신으로 유지');
+  });
+
   test('the OPS line uses the phone date format, whatever the device region', () => {
     const iso = '2026-10-16T05:04:05.000Z';
     const line = opsStatusText({ state: 'ready', pendingCount: 2, lastSavedAt: iso });
@@ -120,25 +135,29 @@ describe('the QR page says what happened the way the portal does', () => {
   };
   // The embedded copies are checked to be these exact functions (above and below), so the source is used directly.
 
-  function actionResult(action: string, message: Record<string, unknown>) {
+  function actionResult(action: string, message: Record<string, unknown>, state: {unlocked: boolean; cleared?: boolean} = { unlocked: false }) {
     const notices: string[] = [];
-    const run = new Function('notices', 'action', 'message', `
+    const run = new Function('notices', 'action', 'message', 'state', `
       const actionLabel = ${remoteControlActionLabel.toString()}, opsStatusLine = ${opsStatusText.toString()};
       // What the page has under this name — nothing before the fix, so the lifted code shows what it really does.
       const actionDone = ${REMOTE_CONTROL_MOBILE_JS.includes('const actionDone=') ? remoteControlActionDone.toString() : 'undefined'};
       let lastActionName = actionLabel(action) || action, lastActionCode = action, lastRequestedPage = null;
+      let inFlight = true, pendingActionId = 'request-current';
+      let currentCodexNewIntent = { actionId: 'request-current' }, currentCodexControlId = 'control', codexAcknowledgingReview = false;
       let projects = [], nextProjectPage = null, totalProjectCount = 0, workspaceRootsRequested = true, currentProjectCreateIntent = null;
       const opsStatus = { textContent: '' }, RATE_LIMIT_RETRY_MS = 11000;
       const element = () => ({ replaceChildren() {}, append() {}, add() {}, value: '', hidden: false, textContent: '' });
       const document = { querySelector: element, createElement: element };
-      function setBusy() {} function renderProjects() {} function updateProject() {} function recordError() {}
+      function setBusy(value) { state.unlocked = !value; } function renderProjects() {} function updateProject() {} function recordError() { notices.push('error'); }
       function terminalReady() {} function showWorkspaceTab() {} function scheduleEnumerationRetry() {}
+      function sendCodexFollowup(action, id) { notices.push('followup:' + action + ':' + id); return true; }
+      function codexNewIntentStore() { return {complete() { state.cleared = true; }}; }
       function projectIntentStore() { return { complete() {} }; } function setTimeout() {} function sendAction() {}
       function notify(text) { notices.push(text); }
       ${lift('function handleActionResult(message) {', '/**\n * Resume an enumeration')}
       handleActionResult(message);
     `);
-    run(notices, action, { type: 'action.result', ok: true, ...message });
+    run(notices, action, { type: 'action.result', actionId: 'request-current', ok: true, ...message }, state);
     return notices;
   }
 
@@ -146,16 +165,38 @@ describe('the QR page says what happened the way the portal does', () => {
     expect(REMOTE_CONTROL_MOBILE_JS).toContain(`const actionDone=${remoteControlActionDone.toString()}`);
   });
 
+  test('a delayed reply cannot unlock or claim success for a newer request', () => {
+    const state = { unlocked: false };
+    expect(actionResult('codex.thread.start', { actionId: 'request-previous', project: null }, state)).toEqual([]);
+    expect(state.unlocked).toBe(false);
+    expect(actionResult('codex.thread.start', { actionId: 'request-current', project: null }, state)[0])
+      .toBe('followup:codex.thread.ack.v2:request-current');
+    expect(state.unlocked).toBe(true);
+  });
+
+  test('only an authenticated not-sent result clears the matching pending request', () => {
+    const cancelled = {unlocked: false, cleared: false};
+    actionResult('codex.thread.start', {ok: false, error: {code: 'CODEX_NEW_CHAT_NOT_SENT', message: 'not sent'}}, cancelled);
+    expect(cancelled.cleared).toBe(true);
+    const unknown = {unlocked: false, cleared: false};
+    actionResult('codex.thread.start', {ok: false, error: {code: 'CODEX_FIRST_TURN_FAILED', message: 'unknown'}}, unknown);
+    expect(unknown.cleared).toBe(false);
+    const late = {unlocked: false, cleared: false};
+    actionResult('codex.thread.start', {actionId: 'request-previous', ok: false, error: {code: 'CODEX_NEW_CHAT_NOT_SENT'}}, late);
+    expect(late.cleared).toBe(false);
+    expect(late.unlocked).toBe(false);
+  });
+
   test('a project action, an OPS check and the list each say a sentence, not 「<label> 완료」', () => {
     const project = { controlId: 'C'.repeat(43), name: 'p', kind: 'main', status: 'stopped', actions: [] };
-    for (const action of ['git.pull', 'folder.open', 'start', 'app.codex', 'codex.thread.start']) {
+    for (const action of ['git.pull', 'folder.open', 'start', 'app.codex']) {
       const [notice] = actionResult(action, { project });
       expect(notice).toBe(remoteControlActionDone(action));
       expect(notice).not.toMatch(/ 완료$/);
     }
     // An app the Mac only asks to open is not said to have opened.
     expect(actionResult('app.codex', { project })[0]).toContain('요청했습니다');
-    expect(actionResult('codex.thread.start', { project })[0]).toContain('요청했습니다');
+    expect(actionResult('codex.thread.start', { project })[0]).toBe('followup:codex.thread.ack.v2:request-current');
     expect(actionResult('ops.status', { ops: { state: 'ready', pendingCount: 0, lastSavedAt: null } })[0]).toBe('운영기억 상태를 확인했습니다.');
     expect(actionResult('ops.memory.pending', { opsCandidates: { candidates: [] } })[0]).toBe('운영기억 저장 후보를 확인했습니다.');
     const listed = actionResult('projects.list', { projects: [project], page: 0, nextPage: null, projectCount: 1 });

@@ -13,6 +13,13 @@ protocol PictureEncoding: Sendable {
 
 extension VideoEncoder: PictureEncoding {}
 
+public protocol DesktopControlling: Sendable {
+    func keyboardState() async -> ScreenKeyboardState
+    func keyboard(_ action: ScreenKeyboardAction) async -> (ScreenKeyboardState, ScreenControlResult)
+    func navigate(_ action: ScreenSpaceAction) async -> ScreenControlResult
+    func spaceChanges() async -> AsyncStream<Bool>
+}
+
 /// Where an encoder's frames go.
 typealias EncoderOutput = @Sendable (Result<VideoFrame, VideoError>) -> Void
 
@@ -28,12 +35,19 @@ public struct SessionFeatures: Sendable {
     /// `turnedOffFromDevice` when it calls this. Without it, the phone's request changes nothing, and so does a request
     /// read after the Mac ended the session for another reason.
     public var turnOff: (@Sendable () -> Void)?
+    public var desktop: (any DesktopControlling)?
+    public var reportsInputAvailability: Bool
+    public var pointerPosition: (@Sendable () -> ScreenPointerPosition?)?
 
     public init(lockStates: (@Sendable () -> AsyncStream<Bool>)? = nil, capture: (any CaptureControl)? = nil,
-                turnOff: (@Sendable () -> Void)? = nil) {
+                turnOff: (@Sendable () -> Void)? = nil, desktop: (any DesktopControlling)? = nil,
+                reportsInputAvailability: Bool = false, pointerPosition: (@Sendable () -> ScreenPointerPosition?)? = nil) {
         self.lockStates = lockStates
         self.capture = capture
         self.turnOff = turnOff
+        self.desktop = desktop
+        self.reportsInputAvailability = reportsInputAvailability
+        self.pointerPosition = pointerPosition
     }
 }
 
@@ -91,6 +105,7 @@ public final class VideoPump: @unchecked Sendable {
     private let sink: AsyncStream<VideoFrame>.Continuation
     private let coding = OSAllocatedUnfairLock(initialState: Coding())
     private let ending: OSAllocatedUnfairLock<Ending>
+    private let qualityLimiter = OSAllocatedUnfairLock(initialState: TokenBucket(perSecond: 1, burst: 2))
 
     /// Without `input`, the phone's input records are read and dropped: a view-only session. `localInput` lets
     /// local input win; without it the phone's input is never paused.
@@ -237,8 +252,14 @@ public final class VideoPump: @unchecked Sendable {
             await ending.withLock { $0.task }?.value
             return
         }
+        let reportsInputAvailability = features.reportsInputAvailability
         let features = connection.version >= 2 ? features : SessionFeatures()
+        if input?.observesPhysicalInput == true { _ = input?.checkLocalInput(at: clock.now()) }
+        let initialAvailability = input?.availability ?? .permissionsRequired
         do {
+            if reportsInputAvailability, connection.version >= 3 { try await connection.send(ControlMessage.inputAvailability(initialAvailability)) }
+            if connection.version >= 3, let position = features.pointerPosition?() { try await connection.send(ControlMessage.pointerPosition(position)) }
+            if reportsInputAvailability, initialAvailability != .ready { try await connection.send(ControlMessage.remoteInputPaused) }
             // Each task returns true when the session is over, false when only its own part is done.
             try await withThrowingTaskGroup(of: Bool.self) { [connection, frames, coding, input, clock, localInput, ending] group in
                 group.addTask {
@@ -274,7 +295,13 @@ public final class VideoPump: @unchecked Sendable {
                             // Input keeps the session alive even while it is paused or view-only: someone is there.
                             let now = clock.now()
                             ending.withLock { $0.timer.noteInput(at: now) }
-                            try input?.receive(record.payload, at: now)
+                            if let input {
+                                if let (id, result) = try input.receive(record.payload, version: connection.version, at: now) {
+                                    try await connection.send(ControlMessage.textAndReturnResult(id: id, result))
+                                }
+                            } else if case let .textAndReturn(id, _) = try InputCodec.decode(record.payload, version: connection.version) {
+                                try await connection.send(ControlMessage.textAndReturnResult(id: id, .blocked))
+                            }
                         case .video: continue
                         }
                     }
@@ -290,11 +317,22 @@ public final class VideoPump: @unchecked Sendable {
                         }
                     }
                 }
-                if let input, let localInput {
+                if let input, localInput != nil || input.observesPhysicalInput {
                     group.addTask {
+                        var previousAvailability = initialAvailability
                         while true {
                             try await clock.sleep(clock.now() + input.localPriority.pollInterval)
-                            switch input.checkLocalInput(localInput, at: clock.now()) {
+                            let change = input.checkLocalInput(localInput, at: clock.now())
+                            let availability = input.availability
+                            if reportsInputAvailability, connection.version >= 3, availability != previousAvailability {
+                                try await connection.send(ControlMessage.inputAvailability(availability))
+                                previousAvailability = availability
+                            }
+                            if change == .resumed, connection.version >= 3, let position = features.pointerPosition?() {
+                                // The client receives the real position before it is allowed to resume relative input.
+                                try await connection.send(ControlMessage.pointerPosition(position))
+                            }
+                            switch change {
                             case .paused?: try await connection.send(ControlMessage.remoteInputPaused)
                             case .resumed?: try await connection.send(ControlMessage.remoteInputResumed)
                             case nil: break
@@ -309,6 +347,26 @@ public final class VideoPump: @unchecked Sendable {
                         for await locked in makeStates() where locked != told {
                             told = locked
                             try await connection.send(locked ? ControlMessage.macLocked : .macUnlocked)
+                        }
+                        return false
+                    }
+                }
+                if connection.version >= 3, let desktop = features.desktop {
+                    group.addTask {
+                        var previous: ScreenKeyboardState?
+                        while true {
+                            let state = await desktop.keyboardState()
+                            if state != previous {
+                                try await connection.send(ControlMessage.keyboardState(id: 0, state, .observed))
+                                previous = state
+                            }
+                            try await clock.sleep(clock.now() + .milliseconds(500))
+                        }
+                    }
+                    group.addTask {
+                        for await _ in await desktop.spaceChanges() {
+                            self.requestKeyframe()
+                            try await connection.send(ControlMessage.spaceChanged)
                         }
                         return false
                     }
@@ -335,6 +393,7 @@ public final class VideoPump: @unchecked Sendable {
             requestKeyframe()
         case .nextDisplay, .selectDisplay:
             guard let capture = features.capture else { return false }
+            ending.withLock { $0.timer.noteInput(at: clock.now()) }
             let choice: DisplayChoice
             do {
                 if case .selectDisplay(let index) = message {
@@ -348,9 +407,15 @@ public final class VideoPump: @unchecked Sendable {
                 return true
             }
             try await connection.send(ControlMessage.displays(count: choice.count, current: choice.current))
+            if connection.version >= 3, let position = features.pointerPosition?() {
+                try await connection.send(ControlMessage.pointerPosition(position))
+            }
         case .hideCursor, .showCursor:
             // A cursor the capture could not change stays as it was; nothing else does.
-            try? await features.capture?.setCursorVisible(message == .showCursor)
+            if let capture = features.capture {
+                ending.withLock { $0.timer.noteInput(at: clock.now()) }
+                try? await capture.setCursorVisible(message == .showCursor)
+            }
         case .turnOff:
             guard let turnOff = features.turnOff else { return false }
             // The Mac may end the session for its own reason at the same moment; then that reason stands and nothing is
@@ -359,7 +424,24 @@ public final class VideoPump: @unchecked Sendable {
             if first { turnOff() }
             await goodbye.value
             return true
-        case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays:
+        case let .keyboardAction(id, action):
+            guard let desktop = features.desktop else { throw ScreenControlWireError.malformed }
+            ending.withLock { $0.timer.noteInput(at: clock.now()) }
+            let (state, result) = await desktop.keyboard(action)
+            try await connection.send(ControlMessage.keyboardState(id: id, state, result))
+        case .navigateSpace(let action):
+            guard let desktop = features.desktop else { throw ScreenControlWireError.malformed }
+            ending.withLock { $0.timer.noteInput(at: clock.now()) }
+            let result = await desktop.navigate(action)
+            requestKeyframe()
+            try await connection.send(ControlMessage.spaceResult(action, result))
+        case .setVideoQuality(let quality):
+            guard let capture = features.capture, qualityLimiter.withLock({ $0.admit(at: clock.now()) }) else { return false }
+            ending.withLock { $0.timer.noteInput(at: clock.now()) }
+            try await capture.setVideoQuality(quality)
+            try await connection.send(ControlMessage.videoQuality(quality))
+        case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays,
+             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult:
             // The Mac's own messages, sent by the phone.
             throw ScreenControlWireError.malformed
         }

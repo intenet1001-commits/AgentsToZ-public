@@ -29,11 +29,11 @@ enum RegistrationWire {
 public final class PendingRegistration: Sendable {
     public let acceptance: RegistrationAcceptance
     public let peer: PeerKey
-    let framed: FramedConnection
+    let framed: any ScreenFrameTransport
     let signer: TranscriptSigner
     private let decided = Once()
 
-    init(acceptance: RegistrationAcceptance, peer: PeerKey, framed: FramedConnection, signer: TranscriptSigner) {
+    init(acceptance: RegistrationAcceptance, peer: PeerKey, framed: any ScreenFrameTransport, signer: TranscriptSigner) {
         self.acceptance = acceptance
         self.peer = peer
         self.framed = framed
@@ -44,7 +44,8 @@ public final class PendingRegistration: Sendable {
     public func approve() async throws {
         guard decided.claim() else { return }
         defer { framed.cancel() }
-        try await framed.send(RegistrationWire.reply(try await RegistrationApproval.make(for: acceptance.record, signer: signer)))
+        try await framed.send(RegistrationWire.reply(try await RegistrationApproval.make(for: acceptance.record,
+                                                                                         purpose: acceptance.purpose, signer: signer)))
     }
 
     public func refuse() async {
@@ -71,14 +72,16 @@ public final class RegistrationListener: Sendable {
     private let window: RegistrationWindow
     private let signer: TranscriptSigner
     private let gate: PreAuthGate
+    private let privacyCode: RegistrationCode?
 
     /// `signer` is the Mac identity key the window was opened with.
     public init(window: RegistrationWindow, signer: TranscriptSigner, gate: PreAuthGate,
-                host: NWEndpoint.Host? = nil, port: NWEndpoint.Port = .any) throws {
-        listener = try ScreenListener.makeListener(host: host, port: port)
+                host: NWEndpoint.Host? = nil, port: NWEndpoint.Port = .any, nearbyServiceName: String? = nil, privacyCode: RegistrationCode? = nil) throws {
+        listener = try ScreenListener.makeListener(host: host, port: port, nearbyServiceName: nearbyServiceName)
         self.window = window
         self.signer = signer
         self.gate = gate
+        self.privacyCode = privacyCode
         (outcomes, sink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(16))
     }
 
@@ -97,36 +100,15 @@ public final class RegistrationListener: Sendable {
 
     func handle(_ connection: NWConnection) async {
         guard let peer = PeerKey(connection.endpoint) else { return connection.cancel() }
-        guard case .success(let ticket) = await gate.admit(peer, at: .now) else { return connection.cancel() }
         let framed = FramedConnection(connection, maxFrame: RegistrationWire.maxFrame)
-        let settled = Once()
-        let watchdog = Task {
-            guard (try? await Task.sleep(until: ticket.deadline, clock: .continuous)) != nil else { return }
-            if settled.claim() { connection.cancel() }
-        }
         do {
-            try await connection.open(on: queue)
-            guard let fields = try? LengthPrefixed.decode(try await framed.receive(), count: 4) else {
-                throw RegistrationError.malformed
-            }
-            let acceptance = try await window.verify(record: fields[0], proof: fields[1], attestation: fields[2],
-                                                     attestationKeyID: fields[3], now: .now)
-            try await framed.send(RegistrationWire.reply(acceptance.acknowledgement))
-            guard settled.claim() else { throw TransportError.timedOut }
-            watchdog.cancel()
-            _ = await gate.finish(ticket, succeeded: true, at: .now)
-            let pending = PendingRegistration(acceptance: acceptance, peer: peer, framed: framed, signer: signer)
+            let pending = try await RegistrationHost.accept(over: framed, peer: peer, window: window, signer: signer,
+                                                            gate: gate, privacyCode: privacyCode, open: { try await connection.open(on: self.queue) })
             if case .terminated = sink.yield(.pending(pending)) { await pending.refuse() }
         } catch {
-            watchdog.cancel()
-            _ = settled.claim()
             if !(await window.isOpen(at: .now)) {
-                // The attempt named this QR's code, so the window is used up whatever went wrong.
-                try? await framed.send(RegistrationWire.reply(nil))
                 sink.yield(.failed(peer, error as? RegistrationError ?? .refused))
             }
-            connection.cancel()
-            _ = await gate.finish(ticket, succeeded: false, at: .now)
         }
     }
 }
@@ -142,33 +124,104 @@ public enum RegistrationClient {
                                 decisionTimeout: Duration = .seconds(180)) async throws -> PinnedMac {
         let connection = NWConnection(to: endpoint, using: ScreenClient.parameters())
         let framed = FramedConnection(connection, maxFrame: RegistrationWire.maxFrame)
+        do {
+            try await ScreenNearby.open(connection, timeout: timeout)
+            return try await register(over: framed, record: record, code: code, attestation: attestation,
+                                      attestationKeyID: attestationKeyID, showSAS: showSAS,
+                                      timeout: timeout, decisionTimeout: decisionTimeout)
+        } catch { framed.cancel(); throw error }
+    }
+
+    public static func register(over framed: any ScreenFrameTransport, record: RegistrationRecord, code: RegistrationCode,
+                                attestation: Data, attestationKeyID: Data,
+                                showSAS: @escaping @Sendable (String) async -> Void,
+                                timeout: Duration = .seconds(10), decisionTimeout: Duration = .seconds(180)) async throws -> PinnedMac {
+        try await exchange(over: framed, record: record, code: code, purpose: .device, attestation: attestation,
+                           attestationKeyID: attestationKeyID, showSAS: showSAS, timeout: timeout, decisionTimeout: decisionTimeout).mac
+    }
+
+    /// A phone brokering a Mac controller (`ControllerBroker`): the same exchange under the Mac-controller labels, so a Mac
+    /// whose window does not enroll Mac controllers can never satisfy it. Returns the approval too, which the phone
+    /// brings to the controller Mac. The phone's own App Attest covers the record; `record` names the controller's key.
+    public static func registerController(over framed: any ScreenFrameTransport, record: RegistrationRecord, code: RegistrationCode,
+                                          attestation: Data, attestationKeyID: Data,
+                                          showSAS: @escaping @Sendable (String) async -> Void,
+                                          timeout: Duration = .seconds(10),
+                                          decisionTimeout: Duration = .seconds(180)) async throws -> (mac: PinnedMac, approval: Data) {
+        try await exchange(over: framed, record: record, code: code, purpose: .macController, attestation: attestation,
+                           attestationKeyID: attestationKeyID, showSAS: showSAS, timeout: timeout, decisionTimeout: decisionTimeout)
+    }
+
+    private static func exchange(over framed: any ScreenFrameTransport, record: RegistrationRecord, code: RegistrationCode,
+                                 purpose: RegistrationPurpose, attestation: Data, attestationKeyID: Data,
+                                 showSAS: @escaping @Sendable (String) async -> Void,
+                                 timeout: Duration, decisionTimeout: Duration) async throws -> (mac: PinnedMac, approval: Data) {
+        framed.setMaxFrame(RegistrationWire.maxFrame)
         let deadline = OSAllocatedUnfairLock(initialState: ContinuousClock.now + timeout)
         let watchdog = Task {
             while true {
                 let until = deadline.withLock { $0 }
                 guard (try? await Task.sleep(until: until, clock: .continuous)) != nil else { return }
-                if deadline.withLock({ $0 }) <= .now { return connection.cancel() }
+                if deadline.withLock({ $0 }) <= .now { return framed.cancel() }
             }
         }
         defer {
             watchdog.cancel()
-            connection.cancel()
+            framed.cancel()
         }
+        return try await withTaskCancellationHandler {
         do {
-            try await connection.open(on: ScreenClient.queue)
             try await framed.send(LengthPrefixed.encode([record.encoded(), RegistrationProof.proof(for: record, code: code),
                                                          attestation, attestationKeyID]))
             let (sas, mac) = try RegistrationAcknowledgement.open(try RegistrationWire.open(try await framed.receive()),
-                                                                  for: record, code: code)
+                                                                  for: record, code: code, purpose: purpose)
             deadline.withLock { $0 = .now + decisionTimeout }
             await showSAS(sas)
             let approval = try RegistrationWire.open(try await framed.receive())
-            guard RegistrationApproval.isValid(approval, for: record, mac: mac) else { throw RegistrationError.badAcknowledgement }
-            return mac
+            guard RegistrationApproval.isValid(approval, for: record, mac: mac, purpose: purpose) else {
+                throw RegistrationError.badAcknowledgement
+            }
+            return (mac, Data(approval))
         } catch let error as RegistrationError {
             throw error
         } catch {
             throw deadline.withLock({ $0 }) <= .now ? TransportError.timedOut : error
+        }
+        } onCancel: { framed.cancel() }
+    }
+}
+
+/// The registration proof, App Attest and Mac approval are identical on nearby and Internet paths.
+public enum RegistrationHost {
+    public static func accept(over base: any ScreenFrameTransport, peer: PeerKey, window: RegistrationWindow,
+                              signer: any TranscriptSigner, gate: PreAuthGate, privacyCode: RegistrationCode? = nil,
+                              open: @escaping @Sendable () async throws -> Void = {}) async throws -> PendingRegistration {
+        guard case .success(let ticket) = await gate.admit(peer, at: .now) else {
+            base.cancel(); throw RegistrationError.refused
+        }
+        let framed: any ScreenFrameTransport = privacyCode.map { RegistrationPrivacyTransport(over: base, code: $0, role: .mac) } ?? base
+        framed.setMaxFrame(RegistrationWire.maxFrame)
+        let settled = Once()
+        let watchdog = Task {
+            guard (try? await Task.sleep(until: ticket.deadline, clock: .continuous)) != nil else { return }
+            if settled.claim() { framed.cancel() }
+        }
+        defer { watchdog.cancel() }
+        do {
+            try await open()
+            let fields = try LengthPrefixed.decode(try await framed.receive(), count: 4)
+            let acceptance = try await window.verify(record: fields[0], proof: fields[1], attestation: fields[2],
+                                                     attestationKeyID: fields[3], now: .now)
+            try await framed.send(RegistrationWire.reply(acceptance.acknowledgement))
+            guard settled.claim() else { throw TransportError.timedOut }
+            _ = await gate.finish(ticket, succeeded: true, at: .now)
+            return PendingRegistration(acceptance: acceptance, peer: peer, framed: framed, signer: signer)
+        } catch {
+            // Refusal is generic and never carries attestation or network details.
+            if !(await window.isOpen(at: .now)) { try? await framed.send(RegistrationWire.reply(nil)) }
+            framed.cancel()
+            _ = await gate.finish(ticket, succeeded: false, at: .now)
+            throw settled.claim() ? error : TransportError.timedOut
         }
     }
 }

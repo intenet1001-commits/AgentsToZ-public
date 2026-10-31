@@ -304,7 +304,8 @@ test('the create_team member schema reaches the strict host parser with canonica
   const tool = AGENTSTOZ_USE_MCP_TOOLS.find(entry => entry.name === 'agentstoz_use_create_team');
   const schema = (tool!.inputSchema as any).properties.members.items.properties as Record<string, unknown>;
   const declared = Object.keys(schema).sort();
-  expect(declared).toEqual(['accountId', 'agent', 'bypassPermissions', 'effort', 'hermesVariant', 'launchOptions', 'model', 'name', 'provider', 'role', 'sessionId', 'surface', 'task']);
+  expect(declared).toEqual(['accountId', 'agent', 'bypassPermissions', 'computerUseApprovals', 'effort', 'hermesVariant', 'launchOptions', 'model', 'name', 'provider', 'role', 'sessionId', 'surface', 'task']);
+  expect(schema.computerUseApprovals).toMatchObject({type: 'boolean'});
   expect(schema.hermesVariant).toMatchObject({enum:['default','claude','codex']});
   // Every project launch surface the contract names is offered to a connected app or CLI, not only the Workroom.
   expect((schema.surface as {enum: string[]}).enum).toEqual(['internal', 'orca-floating', 'orca-worktree', 'cmux', 'iterm', 'terminal', 'powershell', 'wsl', 'app']);

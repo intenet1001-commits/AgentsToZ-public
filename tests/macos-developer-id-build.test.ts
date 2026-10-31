@@ -15,6 +15,8 @@ import {
   findMachOFiles,
   freshDmgs,
   notaryAuthArguments,
+  parseDeveloperIdNotaryOptions,
+  readDeveloperIdNotaryAuthentication,
   parseNotarySubmission,
   planDeveloperIdSigning,
   readNotaryApiKey,
@@ -194,6 +196,31 @@ describe('Developer ID verification helpers', () => {
     expect(() => readNotaryApiKey(home, fs({ [config]: '{"keyId":"ABCDE12345","issuerId":"69a6de7e-1111-2222-3333-444455556666"}' }))).toThrow('key is missing');
   });
 
+  test('explicit existing Keychain profile avoids all raw-key reads and preserves the same auth selection', () => {
+    const seen: unknown[]=[];
+    const deps={readKey:()=>{throw Error('must not read a raw key');},checkProfile:(options:any)=>{seen.push(options);return {ready:true,status:'ready'} as any;}};
+    const options={profile:'existing-profile',keychain:'/tmp/signing keychain-db'};
+    const auth=readDeveloperIdNotaryAuthentication(options,deps);
+    expect(seen).toEqual([options]);
+    expect(notaryAuthArguments(auth)).toEqual(['--keychain-profile','existing-profile','--keychain','/tmp/signing keychain-db']);
+    expect(()=>readDeveloperIdNotaryAuthentication(options,{...deps,checkProfile:()=>({ready:false,status:'lookup-timeout'} as any)})).toThrow('no submission was made');
+    const key={keyPath:'/key.p8',keyId:'ABCDE12345',issuerId:'issuer'};
+    expect(readDeveloperIdNotaryAuthentication(undefined,{readKey:()=>key,checkProfile:()=>{throw Error('not selected');}})).toEqual(key);
+  });
+
+  test('notary flags require explicit Developer ID mode and reject missing, duplicate or invalid selectors', () => {
+    expect(parseDeveloperIdNotaryOptions(['--dmg'])).toEqual({buildArguments:['--dmg'],notaryOptions:undefined});
+    expect(parseDeveloperIdNotaryOptions(['--developer-id','--notary-profile','existing','--embedded-browser'])).toEqual({buildArguments:['--developer-id','--embedded-browser'],notaryOptions:{profile:'existing'}});
+    for (const args of [
+      ['--notary-profile','existing'], ['--developer-id','--notary-keychain','/tmp/keychain'],
+      ['--developer-id','--notary-profile'], ['--developer-id','--notary-profile','--dmg'],
+      ['--developer-id','--notary-profile','a','--notary-profile','b'],
+      ['--developer-id','--notary-profile','a','--notary-keychain','relative'],
+      ['--developer-id','--notary-profile','a\nsecret'],
+    ]) expect(()=>parseDeveloperIdNotaryOptions(args)).toThrow();
+    expect(parseDeveloperIdNotaryOptions(['--developer-id','--notary-profile','existing','--notary-keychain','/tmp/keychain']).notaryOptions).toEqual({profile:'existing',keychain:'/tmp/keychain'});
+  });
+
   test('finds Mach-O files by magic, not by name', () => {
     const root = mkdtempSync(join(tmpdir(), 'devid-macho-'));
     try {
@@ -229,9 +256,9 @@ describe('build-macos.ts --developer-id wiring', () => {
 
   test('is opt-in: the default keeps its ad-hoc signature and identifier-only requirement', () => {
     expect(buildScript).toContain('"--developer-id"');
-    expect(buildScript).toContain('const developerIdPreflight = developerId ? await preflightDeveloperId() : undefined;');
+    expect(buildScript).toContain('const developerIdPreflight = developerId ? await preflightDeveloperId(notaryOptions) : undefined;');
     // The preflight runs before anything mutates the checkout or spends a build.
-    expect(buildScript.indexOf('await preflightDeveloperId()')).toBeLessThan(buildScript.indexOf('await $`bun update-version.ts`'));
+    expect(buildScript.indexOf('await preflightDeveloperId(notaryOptions)')).toBeLessThan(buildScript.indexOf('await $`bun update-version.ts`'));
     const devidBranch = buildScript.indexOf('if (developerIdPreflight) {\n    // Opt-in only');
     const adhocBranch = buildScript.indexOf("const stableRequirement = '=designated => identifier \"com.intenet.agentstozbycs\"'");
     expect(devidBranch).toBeGreaterThan(buildScript.indexOf('stageMacOSRuntimeDevelopmentBundle({'));

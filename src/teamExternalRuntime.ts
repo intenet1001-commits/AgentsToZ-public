@@ -2,6 +2,7 @@
 import {createHash} from 'node:crypto';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
+import {normalizeWorkroomKeys, type WorkroomKey} from './workroomOrchestration';
 
 export type TeamExternalSurface = 'orca-floating' | 'orca-worktree' | 'cmux' | 'iterm' | 'terminal' | 'powershell' | 'wsl' | 'app';
 export interface TeamExternalRequested {
@@ -57,14 +58,25 @@ export interface TeamExternalReceipt {
   /** Unknown lifetime and all borrowed windows keep the member checkout. Git safety is additionally enforced by TeamService. */
   retainWorktree: boolean; reason: string | null;
 }
+/** Identity can recover independently of an unconfirmed instruction; never clear that uncertainty. */
+function reasonAfterIdentityRecovery(receipt: TeamExternalReceipt): string | null {
+  return receipt.reason === 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED'
+    ? receipt.instruction.status === 'unknown' ? 'EXTERNAL_DELIVERY_UNKNOWN' : null
+    : receipt.reason;
+}
 export interface TeamExternalReadResult {
   receipt: TeamExternalReceipt; outcome: 'read' | 'unavailable' | 'unconfirmed'; text: string; cursor?: string;
 }
-export type TeamExternalOperationKind = 'launch' | 'submit' | 'reveal' | 'close';
+export type TeamExternalOperationKind = 'launch' | 'submit' | 'reveal' | 'close' | 'keys';
 export interface TeamExternalOperation {
   id: string; kind: TeamExternalOperationKind; fingerprint: string; status: 'reserved' | 'settled';
-  /** Reveal only: settled also includes failures. Missing in old journals means unconfirmed, never performed. */
-  outcome?: 'performed' | 'unknown';
+  /**
+   * Settled also includes failures. Missing in old journals means unconfirmed, never performed.
+   * `not-sent` for keys or submit is positive evidence that nothing was typed.
+   */
+  outcome?: 'performed' | 'unknown' | 'not-sent';
+  /** The bounded reason belongs to this operation, not to whichever request last updated the receipt. */
+  reason?: TeamExternalDelivery['reason'];
 }
 /** Persist this together with the team's member binding. CAS must be durable and atomic across adapter instances. */
 export interface TeamExternalJournalRecord {
@@ -100,7 +112,14 @@ export type TeamExternalTargetPlan = {
 export interface TeamExternalDelivery {
   /** Orca accepted:true alone is only input acceptance. turn_started must come from its actual submission receipt. */
   outcome: 'written' | 'unknown' | 'not-sent'; turnStarted?: boolean;
+  reason?: 'EXTERNAL_SCREEN_UNAVAILABLE' | 'EXTERNAL_PROMPT_AWAITS_ANSWER' | 'EXTERNAL_BINDING_UNVERIFIED';
 }
+/**
+ * Keys typed into a managed Orca worktree member: `performed` only when every key was accepted by the same verified
+ * process, `not-sent` only when nothing was typed, anything in between is `unknown` and never typed again.
+ * `EXTERNAL_KEYS_WOULD_EXIT`: an Enter or digit would have chosen 「No, exit」 and was withheld, with any earlier keys typed.
+ */
+export interface TeamExternalKeysDelivery {outcome: 'performed' | 'not-sent' | 'unknown'; reason?: 'EXTERNAL_KEYS_WOULD_EXIT'}
 export interface TeamExternalRuntimeDeps {
   journal: TeamExternalJournal;
   /** Synchronous current generation + checkout ownership check, repeated immediately before every external write. */
@@ -117,6 +136,8 @@ export interface TeamExternalRuntimeDeps {
   submit(plan: TeamExternalTargetPlan & {text: string}): Promise<TeamExternalDelivery>;
   reveal(plan: TeamExternalTargetPlan): Promise<void>;
   close(plan: TeamExternalTargetPlan): Promise<{closed: boolean}>;
+  /** Optional: a runtime without it refuses keys. One attempt per key, never a resend. */
+  keys?(plan: TeamExternalTargetPlan & {keys: readonly WorkroomKey[]}): Promise<TeamExternalKeysDelivery>;
 }
 export class TeamExternalRuntimeError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -206,14 +227,16 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
     return receiptOf(next);
   }
   async function settle(record: TeamExternalJournalRecord, operationId: string, mutate: (receipt: TeamExternalReceipt) => void,
-    outcome?: TeamExternalOperation['outcome']): Promise<TeamExternalReceipt> {
+    outcome?: TeamExternalOperation['outcome'], reason?: TeamExternalDelivery['reason']): Promise<TeamExternalReceipt> {
     const next = copy(record); next.revision++;
     const operation = next.operations.find(item => item.id === operationId)!; operation.status = 'settled';
-    if (operation.kind === 'reveal') operation.outcome = outcome ?? 'unknown';
+    if (operation.kind === 'reveal' || operation.kind === 'keys' || operation.kind === 'submit') operation.outcome = outcome ?? 'unknown';
+    if (operation.kind === 'submit' && outcome === 'not-sent' && reason) operation.reason = reason;
     // Keep a late-created handle in this old execution's receipt for reconciliation; it cannot become the new generation.
     mutate(next.receipt);
     if (!current(next.receipt.executionRef)) {next.receipt.state = 'unknown'; next.receipt.reason = 'EXTERNAL_GENERATION_STALE'; next.receipt.retainWorktree = true;
-      if (operation.kind === 'reveal') operation.outcome = 'unknown';
+      if (operation.kind === 'reveal' || operation.kind === 'keys' || operation.kind === 'submit') operation.outcome = 'unknown';
+      if (operation.kind === 'submit') delete operation.reason;
       if (next.receipt.instruction.status === 'sending') next.receipt.instruction.status = 'unknown';}
     // A concurrent update wins; never replay a side effect to repair a failed persistence write.
     if (!await deps.journal.compareAndSet(next.receipt.executionRef.executionId, record.revision, next)) {
@@ -312,10 +335,13 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
         else if (evidence.connection !== 'connected') {value.state = evidence.connection === 'missing' ? 'exited' : 'awaiting-connection'; value.reason = 'EXTERNAL_CONNECTION_REQUIRED';}
         else if (value.management === 'manual') {value.state = 'awaiting-manual-join'; value.reason = 'EXTERNAL_MANUAL_JOIN_REQUIRED';}
         else if (!evidence.agentVerified) {value.state = value.instruction.status === 'unknown' ? 'unknown' : 'awaiting-ack'; value.reason = 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED';}
-        else if (evidence.activity === 'exited') value.state = 'exited';
-        else if (value.instruction.status === 'written' && evidence.activity === 'working') value.state = 'working';
-        else if (value.instruction.status === 'unknown') value.state = 'unknown';
-        else value.state = 'awaiting-ack';
+        else {
+          value.reason = reasonAfterIdentityRecovery(value);
+          if (evidence.activity === 'exited') value.state = 'exited';
+          else if (value.instruction.status === 'written' && evidence.activity === 'working') value.state = 'working';
+          else if (value.instruction.status === 'unknown') value.state = 'unknown';
+          else value.state = 'awaiting-ack';
+        }
       });
     } catch {return update(record, value => {value.state = 'unknown'; value.reason = 'EXTERNAL_PROBE_UNKNOWN';});}
   }
@@ -327,7 +353,8 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
     const evidence = await verified(record, false);
     if (!evidence) return {receipt: {...receiptOf(record), state: 'unknown', agentVerified: false, reason: 'EXTERNAL_BINDING_UNVERIFIED'}, outcome: 'unconfirmed', text: ''};
     const readReceipt = (): TeamExternalReceipt => ({...receiptOf(record), agentVerified: evidence.agentVerified,
-      ...(!evidence.agentVerified ? {state: record.receipt.instruction.status === 'unknown' ? 'unknown' : 'awaiting-ack', reason: 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED'} as const : {})});
+      ...(!evidence.agentVerified ? {state: record.receipt.instruction.status === 'unknown' ? 'unknown' : 'awaiting-ack', reason: 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED'} as const
+        : {reason: reasonAfterIdentityRecovery(record.receipt)})});
     const limit = Math.max(1, Math.min(20_000, Math.floor(Number.isFinite(options.limit) ? options.limit! : 4_000)));
     if (!current(ref)) return {receipt: {...receiptOf(record), state: 'unknown', retainWorktree: true, reason: 'EXTERNAL_GENERATION_STALE'}, outcome: 'unconfirmed', text: ''};
     try {
@@ -351,12 +378,16 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
     // Closing again under a fresh ID does not resolve an uncertain earlier close. Reconcile through probe/manual review.
     if (kind === 'close' && record.operations.some(operation => operation.kind === 'close')) return receiptOf(record);
     if (kind === 'submit') {
+      // An uncertain key may still change this terminal; no instruction may be typed until it is reconciled.
+      // Older settled key records with no outcome are also unconfirmed, never evidence of a safe write.
+      if (record.operations.some(operation => operation.kind === 'keys' && (operation.outcome === 'unknown' || operation.outcome === undefined)))
+        return {...receiptOf(record), reason: 'EXTERNAL_KEYS_UNKNOWN'};
       const known = record.receipt.instruction.status;
       if (!surfaceManaged(ref.surface) || record.receipt.management !== 'managed' || !['awaiting-ack', 'working', 'blocked'].includes(record.receipt.state)
         || known !== 'not-sent' && known !== 'written') return receiptOf(record);
       // Public submit is an explicit new instruction. It never doubles as an implicit retry of the initial/previous brief.
       if (known === 'written' && (!record.initialInstructionFingerprint || record.initialInstructionFingerprint === fingerprint
-        || record.operations.some(operation => operation.kind === 'submit' && operation.fingerprint === fingerprint))) return receiptOf(record);
+        || record.operations.some(operation => operation.kind === 'submit' && operation.outcome !== 'not-sent' && operation.fingerprint === fingerprint))) return receiptOf(record);
     }
     if (kind === 'close' && !ref.native?.owned) return {...receiptOf(record), retainWorktree: true, reason: 'EXTERNAL_EXECUTION_NOT_OWNED'};
     const capability = kind === 'close' ? 'close' : kind;
@@ -371,7 +402,13 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
       const command = target(ref, operationId);
       if (kind === 'submit') {
         const delivery = await deps.submit({...command, text: normalizedText!});
-        return settle(reserved, operationId, value => {value.instruction = {status: delivery.outcome, operationId}; value.state = delivery.outcome === 'unknown' ? 'unknown' : delivery.outcome === 'written' && delivery.turnStarted ? 'working' : 'awaiting-ack'; value.reason = delivery.outcome === 'unknown' ? 'EXTERNAL_DELIVERY_UNKNOWN' : null;});
+        return settle(reserved, operationId, value => {
+          // A refused write cannot erase the last successfully delivered instruction. The reserved operation still
+          // prevents a retry with this ID from ever typing; a fresh request may be made after the screen is resolved.
+          value.instruction = delivery.outcome === 'not-sent' ? copy(record.receipt.instruction) : {status: delivery.outcome, operationId};
+          value.state = delivery.outcome === 'not-sent' ? record.receipt.state : delivery.outcome === 'unknown' ? 'unknown' : delivery.turnStarted ? 'working' : 'awaiting-ack';
+          value.reason = delivery.outcome === 'unknown' ? 'EXTERNAL_DELIVERY_UNKNOWN' : delivery.reason ?? null;
+        }, delivery.outcome === 'written' ? 'performed' : delivery.outcome, delivery.reason);
       }
       if (kind === 'reveal') {await deps.reveal(command); return settle(reserved, operationId, value => {
         if (evidence) {value.agentVerified = evidence.agentVerified; if (!evidence.agentVerified && value.state === 'working') {value.state = 'awaiting-ack'; value.reason = 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED';}}
@@ -380,7 +417,37 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
       return settle(reserved, operationId, value => {value.state = result.closed ? 'closed' : 'unknown'; value.retainWorktree = !result.closed; value.reason = result.closed ? null : 'EXTERNAL_CLOSE_UNKNOWN';});
     } catch {return settle(reserved, operationId, value => {value.state = 'unknown'; value.reason = 'EXTERNAL_OUTCOME_UNKNOWN'; value.retainWorktree = true; if (kind === 'submit') value.instruction = {status: 'unknown', operationId};});}
   }
-  return {launch, probe, read,
+  /**
+   * Allow-listed keys answering a one-time prompt (folder trust, setup, a selection) on a managed Orca worktree
+   * member. Its requestId is the operation: a replay answers from the journal and never types again, an unknown
+   * outcome is never resent, and keys never touch the instruction receipt. Only an agent-verified binding of this
+   * member's own worktree is typed into — never a floating Orca terminal, a cmux surface or an unmanaged window.
+   */
+  async function keys(ref: TeamExternalRef, operationId: string, raw: readonly string[]): Promise<TeamExternalReceipt> {
+    if (typeof operationId !== 'string' || !operationId.trim() || /[\x00-\x1f\x7f]/.test(operationId)) fail('EXTERNAL_OPERATION_INVALID');
+    let names: WorkroomKey[] = [];
+    try {names = normalizeWorkroomKeys(raw);} catch {fail('EXTERNAL_KEYS_INVALID');}
+    const record = await load(ref), fingerprint = digest(['keys', names]);
+    const old = record.operations.find(operation => operation.id === operationId);
+    if (old && (old.kind !== 'keys' || old.fingerprint !== fingerprint)) fail('EXTERNAL_OPERATION_CONFLICT');
+    if (old || record.operations.some(operation => operation.status === 'reserved') || record.receipt.state === 'closed') return receiptOf(record);
+    const known = record.receipt.instruction.status;
+    if (ref.surface !== 'orca-worktree' || ref.native?.kind !== 'orca' || record.receipt.management !== 'managed' || !record.receipt.capabilities.submit || !deps.keys
+      || !['awaiting-ack', 'working', 'blocked'].includes(record.receipt.state) || known === 'sending' || known === 'unknown') return {...receiptOf(record), reason: 'EXTERNAL_KEYS_UNAVAILABLE'};
+    const evidence = await verified(record);
+    if (!evidence) return {...receiptOf(record), state: 'unknown', retainWorktree: true, reason: 'EXTERNAL_BINDING_UNVERIFIED'};
+    const reserved = await reserve(record, operationId, 'keys', fingerprint);
+    if (!reserved) return receiptOf((await deps.journal.read(ref.executionId))!);
+    try {
+      if (!current(ref)) return settle(reserved, operationId, () => {});
+      const result = await deps.keys({...target(ref, operationId), keys: names});
+      return settle(reserved, operationId, value => {
+        // WOULD_EXIT may follow earlier typed keys (outcome unknown): the reason still says which key was withheld.
+        if (result.outcome !== 'performed') value.reason = result.reason ?? (result.outcome === 'unknown' ? 'EXTERNAL_KEYS_UNKNOWN' : 'EXTERNAL_KEYS_NOT_SENT');
+      }, result.outcome);
+    } catch {return settle(reserved, operationId, value => {value.reason = 'EXTERNAL_KEYS_UNKNOWN'; value.retainWorktree = true;});}
+  }
+  return {launch, probe, read, keys,
     submit: (ref: TeamExternalRef, input: {operationId: string; text: string}) => mutate(ref, input.operationId, 'submit', input.text),
     reveal: (ref: TeamExternalRef, operationId: string) => mutate(ref, operationId, 'reveal'),
     closeOwned: (ref: TeamExternalRef, operationId: string) => mutate(ref, operationId, 'close'),

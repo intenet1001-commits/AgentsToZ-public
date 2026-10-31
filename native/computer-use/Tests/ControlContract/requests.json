@@ -1,0 +1,751 @@
+{
+ "_note": "Shared XPC contract samples for AgentsToZ Control (native/computer-use/CONTRACT.md). The Swift checks (Tests/ComputerUseControlCoreChecks) decode every valid request on its channel and refuse every invalid one. Change CONTRACT.md, this file and ControlProtocol.swift together.",
+ "inputs": {
+  "approvalId": "abababababababababababababababababababababababababababababababab",
+  "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "grant": "efefefefefefefefefefefefefefefef",
+  "caller": {
+   "sessionId": "workroom_session_a",
+   "lane": "leader"
+  },
+  "target": {
+   "bundleId": "com.example.editor",
+   "teamId": "ABCDEFGHIJ",
+   "codeHash": "abababababababababababababababababababab",
+   "pid": 100,
+   "processStart": "9007199254740995",
+   "windowId": 321
+  },
+  "label": "Edit draft",
+  "expiresAt": 1793000120000,
+  "requestId": "control_request_0001",
+  "snapshotId": "ps1_exact",
+  "element": "elem_1",
+  "value": "Hello",
+  "sessionId": "workroom_session_a"
+ },
+ "replies": {
+  "_note": "Success replies whose field names every layer pins: Swift core (ControlResponse.status/openGrant), the engine's capture payload (Tests/ComputerUseEngineTests), the TypeScript adapter and host (tests/computer-use-control-hooks.test.ts, tests/computer-use-runtime.test.ts). A Control without operations predates capture/click.",
+  "status": {"success": true, "halted": false, "protocolVersion": 1, "workerProtocol": 2, "accessibility": true, "secureInput": false,
+   "backgroundOnly": true, "pendingApprovals": 0, "grants": 1, "operations": ["capture", "click", "observe", "press", "receipt", "set-value"]},
+  "open-grant": {"success": true, "halted": false, "bound": true, "grant": "efefefefefefefefefefefefefefefef", "protocolVersion": 2,
+   "expiresAt": 1793000631000, "operations": ["capture", "click", "observe", "press", "receipt", "set-value"]},
+  "capture": {"success": true, "halted": false, "mediaType": "image/jpeg", "data": "/9j/", "width": 1280, "height": 800,
+   "windowWidth": 2560, "windowHeight": 1600},
+  "click": {"success": true, "halted": false, "outcome": {"state": "confirmed_change"}, "humanStatePreserved": true}
+ },
+ "valid": {
+  "agent": {
+   "status": {
+    "v": 1,
+    "channel": "agent",
+    "op": "status"
+   },
+   "request-approval": {
+    "v": 1,
+    "channel": "agent",
+    "op": "request-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    },
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "label": "Edit draft",
+    "expiresAt": 1793000120000
+   },
+   "approval-status": {
+    "v": 1,
+    "channel": "agent",
+    "op": "approval-status",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   },
+   "open-grant": {
+    "v": 1,
+    "channel": "agent",
+    "op": "open-grant",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    }
+   },
+   "observe": {
+    "v": 1,
+    "channel": "agent",
+    "op": "observe",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   },
+   "capture": {
+    "v": 1, "channel": "agent", "op": "capture",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {"sessionId": "workroom_session_a", "lane": "leader", "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"},
+    "snapshotId": "ps1_exact"
+   },
+   "click": {
+    "v": 1, "channel": "agent", "op": "click",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {"sessionId": "workroom_session_a", "lane": "leader", "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"},
+    "snapshotId": "ps1_exact", "requestId": "control_request_0001", "x": 15.5, "y": 27
+   },
+   "press": {
+    "v": 1,
+    "channel": "agent",
+    "op": "press",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1"
+   },
+   "set-value": {
+    "v": 1,
+    "channel": "agent",
+    "op": "set-value",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1",
+    "value": "Hello"
+   },
+   "receipt": {
+    "v": 1,
+    "channel": "agent",
+    "op": "receipt",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001"
+   },
+   "revoke": {
+    "v": 1,
+    "channel": "agent",
+    "op": "revoke",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   },
+   "revoke-session": {
+    "v": 1,
+    "channel": "agent",
+    "op": "revoke-session",
+    "sessionId": "workroom_session_a"
+   },
+   "disconnect-owner": {
+    "v": 1,
+    "channel": "agent",
+    "op": "disconnect-owner"
+   }
+  },
+  "management": {
+   "status": {
+    "v": 1,
+    "channel": "management",
+    "op": "status"
+   },
+   "catalog": {
+    "v": 1,
+    "channel": "management",
+    "op": "catalog"
+   },
+   "approvals": {
+    "v": 1,
+    "channel": "management",
+    "op": "approvals"
+   },
+   "request-approval": {
+    "v": 1,
+    "channel": "management",
+    "op": "request-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    },
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "label": "Edit draft",
+    "expiresAt": 1793000120000
+   },
+   "approval-status": {
+    "v": 1,
+    "channel": "management",
+    "op": "approval-status",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   },
+   "cancel-approval": {
+    "v": 1,
+    "channel": "management",
+    "op": "cancel-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab"
+   },
+   "revoke": {
+    "v": 1,
+    "channel": "management",
+    "op": "revoke",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   },
+   "revoke-session": {
+    "v": 1,
+    "channel": "management",
+    "op": "revoke-session",
+    "sessionId": "workroom_session_a"
+   },
+   "disconnect-owner": {
+    "v": 1,
+    "channel": "management",
+    "op": "disconnect-owner"
+   },
+   "show-review": {
+    "v": 1,
+    "channel": "management",
+    "op": "show-review"
+   }
+  }
+ },
+ "invalid": [
+  {
+   "why": "no channel",
+   "request": {
+    "v": 1,
+    "op": "status"
+   }
+  },
+  {
+   "why": "unknown channel",
+   "request": {
+    "v": 1,
+    "channel": "root",
+    "op": "status"
+   }
+  },
+  {
+   "why": "the root bridge's field names are adapted before XPC",
+   "request": {
+    "version": 1,
+    "surface": "agent",
+    "operation": "status"
+   }
+  },
+  {
+   "why": "the window catalog is never on the agent path",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "catalog"
+   }
+  },
+  {
+   "why": "the approval list is never on the agent path",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "approvals"
+   }
+  },
+  {
+   "why": "withdrawing an approval is a person's management action",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "cancel-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "why": "the engine is never on the management path: open-grant",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "open-grant",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    }
+   }
+  },
+  {
+   "why": "the engine is never on the management path: observe",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "observe",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   }
+  },
+  {
+   "why": "the engine is never on the management path: press",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "press",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1"
+   }
+  },
+  {
+   "why": "the engine is never on the management path: receipt",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "receipt",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001"
+   }
+  },
+  {
+   "why": "the recovery ledger lives in the sidecar, not the helper: pending-recovery",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "pending-recovery"
+   }
+  },
+  {
+   "why": "the recovery ledger lives in the sidecar, not the helper: review-recovery",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "review-recovery"
+   }
+  },
+  {
+   "why": "approvals are decided only in Control's window",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "approve",
+    "approvalId": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "why": "no key preparation over XPC",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "prepare-key"
+   }
+  },
+  {
+   "why": "no shell",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "shell"
+   }
+  },
+  {
+   "why": "disconnect-owner takes no PID",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "disconnect-owner",
+    "pid": 500
+   }
+  },
+  {
+   "why": "disconnect-owner takes no generation",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "disconnect-owner",
+    "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  {
+   "why": "an executable path is never an argument",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "status",
+    "executable": "/bin/sh"
+   }
+  },
+  {
+   "why": "a requirement string is never an argument",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "catalog",
+    "requirement": "anchor apple"
+   }
+  },
+  {
+   "why": "wrong version",
+   "request": {
+    "v": 2,
+    "channel": "agent",
+    "op": "status"
+   }
+  },
+  {
+   "why": "boolean version",
+   "request": {
+    "v": true,
+    "channel": "agent",
+    "op": "status"
+   }
+  },
+  {
+   "why": "caller without generation",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "observe",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader"
+    }
+   }
+  },
+  {
+   "why": "short generation",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "observe",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcd"
+    }
+   }
+  },
+  {
+   "why": "approval status without caller",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "approval-status",
+    "approvalId": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "why": "uppercase grant",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "observe",
+    "grant": "EFEFEFEFEFEFEFEFEFEFEFEFEFEFEFEF",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+   }
+  },
+  {
+   "why": "fractional pid",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "open-grant",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100.5,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    }
+   }
+  },
+  {
+   "why": "bundle with a newline",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "open-grant",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "target": {
+     "bundleId": "com.example.editor\nteam=X",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    }
+   }
+  },
+  {
+   "why": "process start with a leading zero",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "open-grant",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "0123",
+     "windowId": 321
+    }
+   }
+  },
+  {
+   "why": "label with a control character",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "request-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    },
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "label": "Edit\u0007draft",
+    "expiresAt": 1793000120000
+   }
+  },
+  {
+   "why": "boolean expiry",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "request-approval",
+    "approvalId": "abababababababababababababababababababababababababababababababab",
+    "target": {
+     "bundleId": "com.example.editor",
+     "teamId": "ABCDEFGHIJ",
+     "codeHash": "abababababababababababababababababababab",
+     "pid": 100,
+     "processStart": "9007199254740995",
+     "windowId": 321
+    },
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "label": "Edit draft",
+    "expiresAt": true
+   }
+  },
+  {
+   "why": "press with a value",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "press",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1",
+    "value": "x"
+   }
+  },
+  {
+   "why": "set-value without a value",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "set-value",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1"
+   }
+  },
+  {
+   "why": "short request ID",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "receipt",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "short"
+   }
+  },
+  {
+   "why": "element with a space",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "press",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem 1"
+   }
+  },
+  {
+   "why": "oversized value",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "set-value",
+    "grant": "efefefefefefefefefefefefefefefef",
+    "caller": {
+     "sessionId": "workroom_session_a",
+     "lane": "leader",
+     "generation": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "requestId": "control_request_0001",
+    "snapshotId": "ps1_exact",
+    "element": "elem_1",
+    "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "why": "session ID with a slash",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "revoke-session",
+    "sessionId": "workroom/session"
+   }
+  },
+  {
+   "why": "an agent cannot activate the review UI",
+   "request": {
+    "v": 1,
+    "channel": "agent",
+    "op": "show-review"
+   }
+  },
+  {
+   "why": "review UI takes no approval or target authority",
+   "request": {
+    "v": 1,
+    "channel": "management",
+    "op": "show-review",
+    "approve": true
+   }
+  }
+ ]
+}

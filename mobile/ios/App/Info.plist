@@ -33,7 +33,7 @@
 	<key>AgentsToZScreenPushURL</key>
 	<string>$(AGENTSTOZ_SCREEN_PUSH_URL)</string>
 	<key>CFBundleURLTypes</key>
-	<array><dict><key>CFBundleURLSchemes</key><array><string>agentstoz-mobile</string></array><key>CFBundleURLName</key><string>AgentsToZ PKCE callback</string></dict><dict><key>CFBundleURLSchemes</key><array><string>agentstoz</string></array><key>CFBundleURLName</key><string>AgentsToZ phone connect link</string></dict></array>
+	<array><dict><key>CFBundleURLSchemes</key><array><string>agentstoz-mobile</string></array><key>CFBundleURLName</key><string>AgentsToZ PKCE callback</string></dict><dict><key>CFBundleURLSchemes</key><array><string>agentstoz</string></array><key>CFBundleURLName</key><string>AgentsToZ phone connect link</string></dict><dict><key>CFBundleURLSchemes</key><array><string>agentstoz-screen</string></array><key>CFBundleURLName</key><string>AgentsToZ Screen registration QR</string></dict></array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -48,9 +48,11 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Mac 앱의 연결 QR을 스캔합니다. 촬영한 영상을 저장하거나 전송하지 않습니다.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Mac 화면에 연결할 때마다 Face ID로 이번 연결을 승인합니다.</string>
+	<string>Mac 화면에 연결할 때마다 선택한 인증 방식으로 이번 연결을 승인합니다.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>선택한 Mac의 AgentsToZ와 같은 Wi-Fi에서 연결합니다.</string>
+	<string>선택한 Mac을 근거리 또는 같은 네트워크에서 찾아 화면과 작업 공간에 연결합니다.</string>
+	<key>NSBonjourServices</key>
+	<array><string>_atzscreen._tcp</string></array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

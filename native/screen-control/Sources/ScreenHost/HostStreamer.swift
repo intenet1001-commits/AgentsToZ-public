@@ -9,17 +9,22 @@ import ScreenControlCore
 public final class HostStreamer: Sendable {
     private let pump: VideoPump
     private let capture: HostCapture
+    private let desktop: (any DesktopControlling)?
+    private let pointerPosition: (@Sendable () -> ScreenPointerPosition?)?
 
     /// `onDisplay` hears each display the session shows before its capture starts: point input at it there.
     public init(connection: SecureConnection, backend: any DisplayCapturing = ScreenCaptureBackend(),
                 sizing: CaptureSizing = .fitWidth(1920), framesPerSecond: Int = 30, bitRate: Int = 4_000_000,
                 input: InputReceiver? = nil, onDisplay: @escaping @Sendable (CaptureDisplay) -> Void = { _ in },
                 limits: SessionLimits = .standard, localInput: LocalInputProbe? = nil,
-                observe: (@Sendable (CapturedPicture) -> Void)? = nil) {
+                observe: (@Sendable (CapturedPicture) -> Void)? = nil, desktop: (any DesktopControlling)? = nil,
+                pointerPosition: (@Sendable () -> ScreenPointerPosition?)? = nil) {
         let pump = VideoPump(connection: connection, input: input, limits: limits, localInput: localInput)
         capture = HostCapture(backend: backend, pump: pump, sizing: sizing, framesPerSecond: framesPerSecond, bitRate: bitRate,
                               onDisplay: onDisplay, observe: observe)
         self.pump = pump
+        self.desktop = desktop
+        self.pointerPosition = pointerPosition
     }
 
     public var statistics: VideoPump.Statistics { pump.statistics }
@@ -45,7 +50,7 @@ public final class HostStreamer: Sendable {
             throw error
         }
         do {
-            try await pump.run(features: SessionFeatures(lockStates: lockStates, capture: capture, turnOff: turnOff))
+            try await pump.run(features: SessionFeatures(lockStates: lockStates, capture: capture, turnOff: turnOff, desktop: desktop, reportsInputAvailability: true, pointerPosition: pointerPosition))
         } catch {
             await capture.stop()
             throw error

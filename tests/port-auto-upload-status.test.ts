@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { portAutoUploadFailureMessage } from '../src/portAutoUploadStatus';
+import { isPortAutoUploadTransientStop, portAutoUploadChipLabel, portAutoUploadFailureMessage } from '../src/portAutoUploadStatus';
 import { PortDurableFenceError, PORT_UPSERT_FENCE_RPC } from '../src/portDurableFence';
 
 describe('automatic port upload failure status', () => {
@@ -115,5 +115,44 @@ describe('automatic port upload failure status', () => {
     const unbounded = (): object => ({ get cause() { reads += 1; return unbounded(); } });
     expect(portAutoUploadFailureMessage(unbounded())).toContain('원인을 확인하지 못했습니다');
     expect(reads).toBeLessThanOrEqual(16);
+  });
+});
+
+describe('automatic port upload header chip', () => {
+  const chip = (signal: unknown, conflicts = 0) => portAutoUploadChipLabel(portAutoUploadFailureMessage(signal), conflicts);
+  test('names the cause instead of only 「확인」', () => {
+    expect(chip(new Error('PORT_AUTO_UPLOAD_METADATA_CONFLICT'), 3)).toBe('프로젝트 정보 차이 3개 · 확인');
+    expect(chip(new Error('PORT_AUTO_UPLOAD_METADATA_CONFLICT'))).toBe('프로젝트 정보 차이 · 확인');
+    expect(chip({ code: '42501', message: 'permission denied' })).toBe('자동 업로드 중단 · 로그인 확인');
+    expect(chip(new TypeError('Failed to fetch'))).toBe('자동 업로드 중단 · 연결 확인');
+    expect(chip({ code: 'PGRST202' })).toBe('자동 업로드 중단 · DB 업데이트 필요');
+    expect(chip({ cause: { code: 'WORKSPACE_LEASE_UNSAFE' } })).toBe('자동 업로드 중단 · 잠금 확인');
+    expect(chip(new Error('DESKTOP_SIDECAR_STARTUP_TIMEOUT'))).toBe('자동 업로드 중단 · 앱 다시 열기');
+    expect(chip(new Error('PORT_AUTO_UPLOAD_PULL_REQUIRED'))).toBe('자동 업로드 중단 · 앱 다시 열기');
+    expect(chip({ code: 'PORT_FENCE_GENERATION_MISMATCH' })).toBe('동기화 충돌 · 확인');
+    expect(chip({ mutationMayHaveCommitted: true })).toBe('업로드 결과 확인 필요');
+    expect(chip(new Error('something new'))).toBe('자동 업로드 중단 · 확인');
+  });
+  test('the lock that stays held after its retries is still a lock', () => {
+    expect(portAutoUploadChipLabel('자동 업로드 중단 · 다른 로컬 작업이 계속 잠금을 사용합니다. 잠금 상태를 확인해 주세요.'))
+      .toBe('자동 업로드 중단 · 잠금 확인');
+  });
+});
+
+describe('automatic port upload recheck', () => {
+  const transient = (signal: unknown) => isPortAutoUploadTransientStop(portAutoUploadFailureMessage(signal));
+  test('a fresh startup Pull may clear only a network stop or a local API that was not ready', () => {
+    expect(transient(new TypeError('Failed to fetch'))).toBe(true);
+    expect(transient(new Error('DESKTOP_SIDECAR_STARTUP_TIMEOUT'))).toBe(true);
+  });
+  test('never an upload whose result is unknown, a conflict, sign-in, DB or lock', () => {
+    const rpcNetwork = new PortDurableFenceError('rejected', PORT_UPSERT_FENCE_RPC, 'PORT_DURABLE_FENCE_RPC_REJECTED', new TypeError('fetch failed'), true);
+    expect(transient(rpcNetwork)).toBe(false);
+    expect(transient(new Error('PORT_AUTO_UPLOAD_METADATA_CONFLICT'))).toBe(false);
+    expect(transient({ code: '42501', message: 'permission denied' })).toBe(false);
+    expect(transient({ code: 'PGRST202' })).toBe(false);
+    expect(transient({ cause: { code: 'WORKSPACE_LEASE_UNSAFE' } })).toBe(false);
+    expect(transient(new Error('PORT_AUTO_UPLOAD_PULL_REQUIRED'))).toBe(false);
+    expect(isPortAutoUploadTransientStop('포트 자동 업로드 켜짐 · 변경 후 3초')).toBe(false);
   });
 });

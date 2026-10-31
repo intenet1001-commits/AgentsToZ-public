@@ -5,6 +5,8 @@ export const QR_REMOTE_CONTROL_PATHS = {
   rotatePairing: '/api/remote-control/pairing/rotate',
   revokeSession: '/api/remote-control/sessions/revoke',
   disable: '/api/remote-control/disable',
+  codexNewReview: '/api/remote-control/codex-new/review',
+  codexNewResolve: '/api/remote-control/codex-new/resolve',
 } as const;
 
 export type QrRemoteControlPath = typeof QR_REMOTE_CONTROL_PATHS[keyof typeof QR_REMOTE_CONTROL_PATHS];

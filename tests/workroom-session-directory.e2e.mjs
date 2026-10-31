@@ -33,7 +33,7 @@ window.fixture={visible:true,entry:undefined,consumed:[],mount(){root.render(Rea
   browser=await chromium.launch({headless:true});
   for(const width of [1280,390]){
     const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:'block'}),requests=[],apiRequests=[],errors=[],external=[];
-    const peers=[{endpointId:first,deviceId:'peer-device-two',displayName:'아젠투지2호',kind:'ops',lastSeenAt:'2026-10-12T01:00:00Z'},{endpointId:second,deviceId:'peer-device-three',displayName:'아젠투지3호',kind:'ops',lastSeenAt:'2026-10-12T01:00:00Z'}];
+    const peers=[{endpointId:first,deviceId:'peer-device-two',displayName:'아젠투지2호',kind:'ops',lastSeenAt:'2026-10-12T01:00:00Z'},{endpointId:second,deviceId:'peer-device-three',displayName:'아젠투지3호',kind:'ops',lastSeenAt:new Date().toISOString()}];
     const inventories=new Map([['local',[session('local-project-001')]], [first,[session('peer-project-001')]], [second,[session('peer-project-001'),session('peer-project-001','ended-session-001','exited','2026-10-12T02:00:00Z')]]]);
     const failed=new Set();let deviceFailure=false,historyAvailable=false;
     await context.route('**/*',async route=>{
@@ -75,6 +75,12 @@ window.fixture={visible:true,entry:undefined,consumed:[],mount(){root.render(Rea
     // Live rows lead each device, ended ones included (no checkbox gate): 1 local + 1 peer + 2 on the third Mac.
     await page.waitForFunction(()=>document.querySelectorAll('[data-testid="session-directory-row"]').length===4);
     assert.deepEqual(requests.filter(request=>request.operation!=='list'),[],'Inventory must not read terminal output or mutate sessions');
+    // A Mac past its heartbeats says so here too (2026-10-31 click QA), and stays listed; one that beat just now does not.
+    assert.match(await page.locator(`[data-device-key="${first}"] [data-testid="session-directory-device-stale"]`).textContent(),/^응답 없음 · 마지막 \d+일 전$/);
+    assert.equal(await page.locator(`[data-device-key="${first}"] [data-testid="session-directory-device-stale-note"]`).count(),1);
+    assert.equal(await page.locator(`[data-device-key="${second}"] [data-testid="session-directory-device-stale"]`).count(),0);
+    assert.equal(await page.locator(`[data-device-key="local"][data-stale]`).count(),0);
+    assert.match(await page.getByLabel('대화 세션 기기').locator(`option[value="${first}"]`).textContent(),/ · 응답 없음$/);
     assert.deepEqual(await page.locator(`[data-device-key="${second}"] [data-testid="session-directory-live-group"]`).evaluateAll(groups=>groups.map(group=>group.dataset.group)),['running','ended'],'Another Mac has no activity: its running rows sit under 실행 중, ended rows last');
     assert.equal(await page.locator(`[data-device-key="${second}"] [data-session-key="${second}:ended-session-001"] [data-testid="session-directory-row-state"]`).textContent(),'종료');
     // Starting a conversation in a project without a session stays folded below the live list.
@@ -193,7 +199,7 @@ window.fixture={visible:true,entry:undefined,consumed:[],mount(){root.render(Rea
     await page.evaluate(()=>document.fonts.ready);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'No horizontal page overflow');
     for(const theme of width===1280?['gray','dark']:['gray']){await page.evaluate(theme=>document.documentElement.dataset.appTheme=theme,theme);await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:join(shots,`directory-${width}-${theme}.png`),fullPage:true});}
     assert.deepEqual(errors,[],'No React or browser errors');assert.deepEqual(external,[],'No external or installed API access');assert.equal(requests.filter(request=>request.operation==='start'||request.operation==='close').length,0,'Browse/open/close never starts or ends a host session');
-    results.push({width,passed:true,checks:['three-device-list','id-collision-owner','live-first-groups','folded-start-projects','search-filter','ordered-peer-input','view-only-close','retained-drafts','disconnected-draft-resume','pending-owner-replacement','actual-child-session-restore','incoming-OPS-queue','dirty-owner-switch-guard','local-header-owner','bounded-pending-queue','nested-dialog-escape','ended-readonly','stale-peer','discovery-failure','blocked-popup-fallback','saved-title-child-session-binding','entry-consumption','hidden-poll-stop','no-overflow']});await context.close();
+    results.push({width,passed:true,checks:['three-device-list','id-collision-owner','live-first-groups','folded-start-projects','search-filter','ordered-peer-input','view-only-close','retained-drafts','disconnected-draft-resume','pending-owner-replacement','actual-child-session-restore','incoming-OPS-queue','dirty-owner-switch-guard','local-header-owner','bounded-pending-queue','nested-dialog-escape','ended-readonly','stale-peer','stale-device-label','discovery-failure','blocked-popup-fallback','saved-title-child-session-binding','entry-consumption','hidden-poll-stop','no-overflow']});await context.close();
   }
   await writeFile(join(shots,'directory-results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify({passed:results.length,failed:0,results,evidence:shots},null,2));
 }catch(error){console.error(error);process.exitCode=1;}

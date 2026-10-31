@@ -58,6 +58,8 @@ const browser=new WorkroomBrowserHost({runningSession:id=>terminal.runningSessio
 // grant, writes it into a textarea/storage, or reports it. One bounded entry follows the currently launched QA app.
 let qaSessionId=session.id,qaBrowser={workspaceId:null,access:null,resume:0,grant:0};
 const redact=value=>String(value).replace(/\b[a-f0-9]{64}\b/gi,'[redacted browser grant]');
+// The fixture's geometry probes (qa_log) from an already redacted log: the last 24 lines, each bounded by the host.
+const probesFrom=text=>[...text.matchAll(/ATZ_NATIVE_QA_PROBE:([^\n]+)/g)].slice(-24).map(([,line])=>{try{return JSON.parse(line);}catch{return {unparsed:line.slice(0,2000)};}});
 const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){const path=new URL(req.url).pathname;
  // This isolated browser host creates no teams. Serve the real read contract instead of manufacturing an unrelated
  // route-refused error strip in the production Workroom, whose height is part of the native geometry assertions.
@@ -123,10 +125,10 @@ try{
   child.stdout.on('data',b=>{log=(log+b).slice(-256000);});child.stderr.on('data',b=>{log=(log+b).slice(-256000);});
   let code;
   try{code=await Promise.race([new Promise(r=>child.once('exit',r)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Native Workroom QA timed out')),90000);})]);}
-  catch(error){log=redact(log);await writeFile(join(out,restoreOnly?`${mode}-restart-${coldLaunches}.log`:'last-run.log'),log);processReports.push({mode,elapsedMs:Date.now()-started,stats:structuredClone(stats),error:redact(error),logTail:log.slice(-6000)});throw error;}
+  catch(error){log=redact(log);await writeFile(join(out,restoreOnly?`${mode}-restart-${coldLaunches}.log`:'last-run.log'),log);processReports.push({mode,elapsedMs:Date.now()-started,stats:structuredClone(stats),error:redact(error),probes:probesFrom(log),logTail:log.slice(-6000)});throw error;}
   finally{clearTimeout(timer);}
   log=redact(log);await writeFile(join(out,restoreOnly?`${mode}-restart-${coldLaunches}.log`:'last-run.log'),log);if(mode==='cold')await writeFile(join(out,'cold-restart.log'),log);
-  const match=log.match(/ATZ_WORKROOM_NATIVE_QA:(\{[^\n]+\})/);assert(match,log.slice(-6000));const report=JSON.parse(match[1]);processReports.push({mode,coldLaunch:restoreOnly?coldLaunches:0,elapsedMs:Date.now()-started,stats:structuredClone(stats),...structuredClone(report)});assert.equal(code,0,log.slice(-5000));assert.equal(report.passed,true);if(mode==='main')assert(stats.teamPanelReads>0,'The production team strip did not reach its strict empty-ledger fixture');assert.equal(report.checks.length,EXPECTED_CHECKS[mode]);assert(log.includes('ATZ_WORKROOM_NATIVE_CLEAN_EXIT:0'),'CEF shutdown not confirmed');assert(!log.includes('Cannot create profile'),'CEF profile was not created');assert(log.includes('ATZ_BROWSER_CLOSE_PENDING:0'),'CEF views remained alive at shutdown');return report;
+  const match=log.match(/ATZ_WORKROOM_NATIVE_QA:(\{[^\n]+\})/);if(!match)processReports.push({mode,elapsedMs:Date.now()-started,stats:structuredClone(stats),exitCode:code,error:'The QA app exited without a report',probes:probesFrom(log),logTail:log.slice(-6000)});assert(match,log.slice(-6000));const report=JSON.parse(match[1]);processReports.push({mode,coldLaunch:restoreOnly?coldLaunches:0,elapsedMs:Date.now()-started,stats:structuredClone(stats),probes:probesFrom(log),...structuredClone(report)});assert.equal(code,0,log.slice(-5000));assert.equal(report.passed,true);if(mode==='main')assert(stats.teamPanelReads>0,'The production team strip did not reach its strict empty-ledger fixture');assert.equal(report.checks.length,EXPECTED_CHECKS[mode]);assert(log.includes('ATZ_WORKROOM_NATIVE_CLEAN_EXIT:0'),'CEF shutdown not confirmed');assert(!log.includes('Cannot create profile'),'CEF profile was not created');assert(log.includes('ATZ_BROWSER_CLOSE_PENDING:0'),'CEF views remained alive at shutdown');return report;
  }
  const report=await launch('main');for(const mode of [...Array(coldRuns).fill('cold'),'slow','lost']){const next=await launch(mode);report.checks.push(...next.checks);}
  assert.deepEqual(await nativeSourceFingerprint(),sourceAtStart,'Native QA source changed during execution; cached success cannot verify the changed source');

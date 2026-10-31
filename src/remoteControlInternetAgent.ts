@@ -5,6 +5,7 @@ import {REMOTE_VOC_INBOX_FEATURE} from './vocInboxSummary';
 import {COMMON_MEMORY_RPC_V2_FEATURE} from './metaCommonMemoryRemoteProtocol';
 import {WORKROOM_HISTORY_REMOTE_FEATURE,WORKROOM_RESTART_REMOTE_FEATURE} from './workroomHistoryRemoteProtocol';
 import {WORKROOM_ATTACH_FEATURE} from './workroomRemoteAttachmentProtocol';
+import {CODEX_NEW_RECEIPT_FEATURE,REMOTE_CONTROL_SUPPORTED_FEATURE_LIMIT} from './remoteControlProtocol';
 import {normalizeRemoteTerminalRequest,type RemoteTerminalRequest,type RemoteTerminalGateway} from './remoteControlTerminalProtocol';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
@@ -311,7 +312,7 @@ export function remoteControlHostSupportedFeatures(options: {
   taskGateway?: unknown; conversationGateway?: unknown;
 }): string[] {
   const workspace = !!options.terminalGateway && !!options.workspaceSupported;
-  return [
+  const features = [
     // `#` project references on Workroom input (the host resolves and authorizes them).
     ...(options.terminalGateway ? [AI_TERMINAL_REFERENCES_FEATURE] : []),
     ...(workspace ? ['workspace-v1',...(options.commonMemorySupported?['goal-common-memory-v1']:[]),...(options.deviceMemorySupported?['device-memory-v1']:[]),...(options.metaMemorySupported?['meta-memory-v1']:[]),...(options.commonMemorySupported||options.metaMemorySupported?[COMMON_MEMORY_RPC_V2_FEATURE]:[]),REMOTE_VOC_FEATURE,REMOTE_VOC_INBOX_FEATURE,...(options.testerSupported?['tester-v1']:[]),...(options.voiceSupported?['voice-v1']:[]),...(options.historySupported?[WORKROOM_HISTORY_REMOTE_FEATURE,WORKROOM_RESTART_REMOTE_FEATURE]:[])] : []),
@@ -322,6 +323,12 @@ export function remoteControlHostSupportedFeatures(options: {
     ...(workspace && options.attachmentsSupported ? [WORKROOM_ATTACH_FEATURE] : []),
     ...(workspace && options.threadsSupported ? [WORKROOM_THREADS_FEATURE] : []),
   ];
+  // Never evict an existing capability or exceed the old decoder's limit.
+  if (features.length < REMOTE_CONTROL_SUPPORTED_FEATURE_LIMIT) {
+    const attachment=features.indexOf(WORKROOM_ATTACH_FEATURE);
+    features.splice(attachment<0?features.length:attachment,0,CODEX_NEW_RECEIPT_FEATURE);
+  }
+  return features;
 }
 
 type SessionCryptoState = {

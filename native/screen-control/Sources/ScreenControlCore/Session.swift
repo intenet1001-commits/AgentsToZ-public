@@ -43,21 +43,21 @@ public enum SessionEndReason: UInt8, Sendable, CaseIterable {
     }
 }
 
-/// 결정 3: a session ends after ten minutes without input from the phone and after sixty minutes in all.
+/// The standard session ends after one hour without input; active sessions have no wall-clock limit.
 public struct SessionLimits: Sendable, Equatable {
-    public static let standard = SessionLimits(idle: .seconds(10 * 60), maximum: .seconds(60 * 60))
+    public static let standard = SessionLimits(idle: .seconds(60 * 60))
 
     public var idle: Duration
-    public var maximum: Duration
+    public var maximum: Duration?
 
-    public init(idle: Duration, maximum: Duration) {
+    public init(idle: Duration, maximum: Duration? = nil) {
         self.idle = idle
         self.maximum = maximum
     }
 }
 
-/// Both limits as one deadline. Only input from the phone keeps a session alive: the Mac's video and the phone's
-/// keyframe requests flow without anyone there.
+/// The idle limit and optional maximum as one deadline. Phone input and deliberate screen controls count as activity;
+/// video and keyframe requests can flow without anyone there.
 public struct SessionTimer: Sendable {
     public let limits: SessionLimits
     public let started: ContinuousClock.Instant
@@ -73,7 +73,9 @@ public struct SessionTimer: Sendable {
 
     /// When the next limit runs out, and which one.
     public var deadline: (at: ContinuousClock.Instant, reason: SessionEndReason) {
-        let idle = lastInput + limits.idle, maximum = started + limits.maximum
+        let idle = lastInput + limits.idle
+        guard let maxDuration = limits.maximum else { return (idle, .idle) }
+        let maximum = started + maxDuration
         return maximum <= idle ? (maximum, .timeLimit) : (idle, .idle)
     }
 
@@ -112,7 +114,7 @@ extension InputEvent {
         case .pointerMove: .pointer
         case .button: .button
         case .scroll: .scroll
-        case .key, .text: .key
+        case .key, .text, .textAndReturn: .key
         }
     }
 }
@@ -121,14 +123,33 @@ extension InputEvent {
 /// CGEventSource's HID system state (ScreenHost/InputInjector.swift); checks pass a stand-in.
 public typealias LocalInputProbe = @Sendable (LocalInputKind) -> Double?
 
+/// A passive native monitor excludes this session's explicitly tagged events. It retains no typed text.
+/// Unavailable observation and a held physical key/button both keep remote input paused.
+public enum ScreenInputAvailability: UInt8, CaseIterable, Sendable {
+    case ready = 0, permissionsRequired, secureInput, monitorUnavailable, localActivity
+}
+
+public struct PhysicalInputSnapshot: Sendable {
+    public var available: Bool
+    public var lastEvent: ContinuousClock.Instant?
+    public var held: Bool
+    public var secureInput: Bool
+    public init(available: Bool, lastEvent: ContinuousClock.Instant? = nil, held: Bool = false, secureInput: Bool = false) {
+        self.available = available; self.lastEvent = lastEvent; self.held = held
+        self.secureInput = secureInput
+    }
+}
+public typealias PhysicalInputProbe = @Sendable () -> PhysicalInputSnapshot
+
 /// Local input wins (DESIGN 「3) 세션 동안」): when the person at the Mac uses its own mouse or keyboard, remote input
 /// pauses until they have been still for `window`, and the phone is told both ways.
 ///
-/// The system's clock of recent input may include the events this session injected, or may not; nothing documents
+/// The legacy system-clock probe may include the events this session injected, or may not; nothing documents
 /// which. So an event counts as local only when it lies more than `tolerance` away from every event of the same kind
 /// the session injected recently. That never takes the session's own input for local input, either way. The price:
 /// while the phone streams one kind without pause (dragging, say), local input of that same kind shows only after a
-/// pause longer than `tolerance`; a local click or key during a remote drag shows at once.
+/// pause longer than `tolerance`; a local click or key during a remote drag shows at once. Production control uses
+/// `updatePhysical` instead, since this ambiguity cannot safely arbitrate simultaneous input of the same kind.
 public struct LocalPriority: Sendable {
     public struct Policy: Sendable, Equatable {
         /// How long remote input stays paused after the last local event.
@@ -148,6 +169,7 @@ public struct LocalPriority: Sendable {
 
     public let policy: Policy
     public private(set) var isPaused = false
+    public private(set) var availability: ScreenInputAvailability = .ready
     private var injected: [LocalInputKind: [ContinuousClock.Instant]] = [:]
     private var lastLocal: ContinuousClock.Instant?
 
@@ -174,6 +196,22 @@ public struct LocalPriority: Sendable {
             if lastLocal.map({ seen > $0 }) ?? true { lastLocal = seen }
         }
         let pause = lastLocal.map { now < $0 + policy.window } ?? false
+        availability = pause ? .localActivity : .ready
+        defer { isPaused = pause }
+        switch (isPaused, pause) {
+        case (false, true): return .paused
+        case (true, false): return .resumed
+        default: return nil
+        }
+    }
+
+    public mutating func updatePhysical(_ snapshot: PhysicalInputSnapshot, at now: ContinuousClock.Instant) -> Change? {
+        if let event = snapshot.lastEvent, event <= now, lastLocal.map({ event > $0 }) ?? true { lastLocal = event }
+        // Secure Event Input hides keyboard activity from a passive tap. Never interpret that silence as idle.
+        let reason: ScreenInputAvailability = !snapshot.available ? .monitorUnavailable : snapshot.secureInput ? .secureInput
+            : snapshot.held || (lastLocal.map { now < $0 + policy.window } ?? false) ? .localActivity : .ready
+        availability = reason
+        let pause = reason != .ready
         defer { isPaused = pause }
         switch (isPaused, pause) {
         case (false, true): return .paused

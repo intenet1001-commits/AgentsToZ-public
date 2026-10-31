@@ -125,3 +125,10 @@ test('the in-app catalog says where 아젠투지 설정 is, without calling OPS 
  expect(guide.text).toContain('지시 원문');
  expect(helpdeskPrompt('프로필',[],{})).toContain('[profile] 내 프로필과 아젠투지 설정');
 });
+
+test('computer-use onboarding distinguishes native human approval, shared connections, and remote Screen',()=>{
+ const guide=HELPDESK_GUIDES.find(g=>g.id==='computer-use')!;
+ expect(guide.action).toBe('computer');expect(guide.text).toContain('도구 및 설정 → 컴퓨터 유즈');
+ for(const phrase of ['본인이 승인','최대 10분','여러 대화','결과 불명','원격 화면 등록'])expect(guide.text).toContain(phrase);
+ expect(helpdeskPrompt('컴퓨터 유즈 연결',[],{})).toContain('[computer-use] AI에 창 하나 맡기기');
+});

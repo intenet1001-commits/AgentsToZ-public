@@ -27,7 +27,7 @@ export function remoteControlActionLabel(action: string): string {
     // Kept for old paired clients; current cards do not advertise this redundant entry point.
     // (app.claude is not offered anywhere any more — tests/remote-control-claude-cli.test.ts.)
     'claude.thread.start': 'Claude Code 원격 대화',
-    'codex.thread.start': 'Mac의 Codex 앱에서 열기',
+    'codex.thread.start': 'Mac의 Codex에서 새 대화 요청',
     'git.commit': 'Commit',
     'git.pull': 'Pull',
     'git.push': 'Push',
@@ -93,7 +93,7 @@ export function remoteControlActionDone(action: string): string {
     'app.codex': 'Mac의 Codex 앱에 최근 대화 열기를 요청했습니다. 실제 화면은 Mac에서 확인하세요.',
     'app.hermes': 'Mac의 Hermes Desktop에 최근 대화 열기를 요청했습니다. 실제 대화 선택은 Mac에서 확인하세요.',
     'claude.thread.start': 'Mac에서 Claude Code 원격 대화를 시작했습니다.',
-    'codex.thread.start': 'Mac의 Codex 앱에 새 대화 열기를 요청했습니다. 실제 화면은 Mac에서 확인하세요.',
+    'codex.thread.start': '새 대화 요청을 처리했습니다. 이전에 결과를 확인하지 못한 요청을 복구했을 수 있으니 Mac의 Codex 프로젝트에서 확인하세요.',
     'git.commit': '커밋했습니다(git commit).',
     'git.pull': '원격 변경을 받아왔습니다(git pull).',
     'git.push': '원격 저장소에 올렸습니다(git push).',

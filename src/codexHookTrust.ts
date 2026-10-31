@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isAgentsToZActivityHookCommand } from './projectMemoryActivityHook';
+import { isAgentsToZRecoveryHookCommand } from './projectMemoryRecoveryHook';
 
 /**
  * Codex asks 「Review hooks / Trust all / Continue without trusting」 the first time it meets a hook it has
@@ -52,7 +53,18 @@ export function configDeclaresHooks(toml: string): boolean {
   return toml.split(/\r?\n/).some(line => /^\s*\[\[?\s*hooks(\s*\]|\.)/.test(line) && !/^\s*\[\s*hooks\.state\s*(\]|\.)/.test(line));
 }
 
-/** A project hooks file that holds the AgentsToZ activity hook and nothing else. */
+/**
+ * Each event AgentsToZ writes into a project's Codex hooks file, with its generator's timeout. 2026-10-31: the
+ * pre-compaction recovery hooks (PreCompact, Stop) were not listed here, so every project that carried them
+ * stopped at Codex's hook menu again — an OPS task handed over from another Mac included.
+ */
+const OUR_EVENTS = new Map<string, { timeout: number; is: (command: string) => boolean }>([
+  ['UserPromptSubmit', { timeout: 5, is: command => isAgentsToZActivityHookCommand(command, 'codex') }],
+  ['PreCompact', { timeout: 10, is: command => isAgentsToZRecoveryHookCommand(command, 'codex', 'pre-compaction') }],
+  ['Stop', { timeout: 10, is: command => isAgentsToZRecoveryHookCommand(command, 'codex', 'periodic') }],
+]);
+
+/** A project hooks file that holds AgentsToZ's own hooks (activity, recovery) and nothing else. */
 export function hooksFileOnlyAgentsToZ(json: string): boolean {
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { return false; }
@@ -64,7 +76,8 @@ export function hooksFileOnlyAgentsToZ(json: string): boolean {
   const events = Object.entries(hooks as Record<string, unknown>);
   if (events.length === 0) return false;
   for (const [event, entries] of events) {
-    if (event !== 'UserPromptSubmit' || !Array.isArray(entries) || entries.length === 0) return false;
+    const ours = OUR_EVENTS.get(event);
+    if (!ours || !Array.isArray(entries) || entries.length === 0) return false;
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
       const group = entry as Record<string, unknown>;
@@ -73,8 +86,8 @@ export function hooksFileOnlyAgentsToZ(json: string): boolean {
         if (!handler || typeof handler !== 'object' || Array.isArray(handler)) return false;
         const h = handler as Record<string, unknown>;
         if (Object.keys(h).some(key => !['type', 'command', 'timeout'].includes(key))) return false;
-        if (h.type !== 'command' || typeof h.command !== 'string' || (h.timeout !== undefined && h.timeout !== 5)) return false;
-        if (!isAgentsToZActivityHookCommand(h.command, 'codex')) return false;
+        if (h.type !== 'command' || typeof h.command !== 'string' || (h.timeout !== undefined && h.timeout !== ours.timeout)) return false;
+        if (!ours.is(h.command)) return false;
       }
     }
   }
@@ -84,7 +97,7 @@ export function hooksFileOnlyAgentsToZ(json: string): boolean {
 /**
  * True when every hook source Codex reads for `cwd` is AgentsToZ's own: no user-level hooks file, no plugin
  * hooks, no hook tables in config.toml, and each `.codex/hooks.json` from `cwd` up to the repository root
- * holds only the AgentsToZ activity hook. A directory with no project hooks at all needs no flag (false).
+ * holds only AgentsToZ's own hooks. A directory with no project hooks at all needs no flag (false).
  */
 export function codexHooksAreAgentsToZOnly(cwd: string, codexHome: string, files: CodexHookTrustFiles = realFiles): boolean {
   try {

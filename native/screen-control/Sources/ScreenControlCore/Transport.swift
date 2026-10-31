@@ -62,8 +62,9 @@ final class Once: Sendable {
 }
 
 extension NWConnection {
-    /// Starts the connection and waits until it carries data. `.waiting` is a failure here: this transport never
-    /// retries by itself. Cancelling the task cancels the connection.
+    /// Starts the connection and waits until it carries data. `.waiting` means the path can recover (including
+    /// switching away from an initially selected LTE path), not that the connection failed. The caller's existing
+    /// watchdog bounds this wait; cancelling the task or connection still settles it exactly once.
     func open(on queue: DispatchQueue) async throws {
         let once = Once()
         try await withTaskCancellationHandler {
@@ -72,7 +73,9 @@ extension NWConnection {
                     switch state {
                     case .ready:
                         if once.claim() { continuation.resume() }
-                    case .waiting(let error), .failed(let error):
+                    case .waiting:
+                        break
+                    case .failed(let error):
                         if once.claim() { continuation.resume(throwing: TransportError(error)) }
                         self?.cancel()
                     case .cancelled:
@@ -107,7 +110,7 @@ extension NWConnection {
 }
 
 /// One NWConnection read and written as frames. One reader at a time; writes leave in the order they are enqueued.
-final class FramedConnection: Sendable {
+final class FramedConnection: ScreenFrameTransport {
     let connection: NWConnection
     private let reader: OSAllocatedUnfairLock<FrameReader>
 
@@ -154,11 +157,11 @@ final class FramedConnection: Sendable {
 public final class SecureConnection: Sendable {
     public static let maxFrame = SecureChannel.maxPayload + SecureChannel.headerSize + SecureChannel.tagSize
 
-    let framed: FramedConnection
+    let framed: any ScreenFrameTransport
     let channel: SecureChannel
     private let sending = OSAllocatedUnfairLock()
 
-    init(framed: FramedConnection, channel: SecureChannel) {
+    init(framed: any ScreenFrameTransport, channel: SecureChannel) {
         self.framed = framed
         self.channel = channel
         framed.setMaxFrame(Self.maxFrame)
@@ -245,8 +248,9 @@ public final class ScreenListener: Sendable {
     private let handshake: MacHandshake
     private let gate: PreAuthGate
 
-    public init(handshake: MacHandshake, gate: PreAuthGate, host: NWEndpoint.Host? = nil, port: NWEndpoint.Port = .any) throws {
-        listener = try Self.makeListener(host: host, port: port)
+    public init(handshake: MacHandshake, gate: PreAuthGate, host: NWEndpoint.Host? = nil, port: NWEndpoint.Port = .any,
+                nearbyServiceName: String? = nil) throws {
+        listener = try Self.makeListener(host: host, port: port, nearbyServiceName: nearbyServiceName)
         self.handshake = handshake
         self.gate = gate
         (sessions, sessionSink) = AsyncStream.makeStream()
@@ -254,14 +258,23 @@ public final class ScreenListener: Sendable {
     }
 
     /// Local-network peers only, no peer-to-peer, no delay; bound to `host` when given.
-    static func makeListener(host: NWEndpoint.Host?, port: NWEndpoint.Port) throws -> NWListener {
-        let parameters = NWParameters.tcp
+    static func makeListener(host: NWEndpoint.Host?, port: NWEndpoint.Port, nearbyServiceName: String? = nil) throws -> NWListener {
+        if let nearbyServiceName, !ScreenNearby.isValidServiceName(nearbyServiceName) || host != nil {
+            throw TransportError.badFrame
+        }
+        let parameters = nearbyServiceName == nil ? NWParameters.tcp : ScreenNearby.parameters()
         parameters.acceptLocalOnly = true
-        parameters.includePeerToPeer = false
+        parameters.includePeerToPeer = nearbyServiceName != nil
         (parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options)?.noDelay = true
-        guard let host else { return try NWListener(using: parameters, on: port) }
-        parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
-        return try NWListener(using: parameters)
+        let listener: NWListener
+        if let host {
+            parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
+            listener = try NWListener(using: parameters)
+        } else {
+            listener = try NWListener(using: parameters, on: port)
+        }
+        if let nearbyServiceName { listener.service = NWListener.Service(name: nearbyServiceName, type: ScreenNearby.serviceType) }
+        return listener
     }
 
     /// Starts listening and returns the port once the listener is ready.
@@ -352,11 +365,36 @@ extension NWListener {
 public enum ScreenClient {
     static let queue = DispatchQueue(label: "agentstoz.screen-control.client")
 
+    /// Opens a legacy LAN route without consuming the one-use biometric signer.
+    public static func open(to endpoint: NWEndpoint, maxFrame: Int, timeout: Duration = .seconds(5)) async throws -> any ScreenFrameTransport {
+        let connection = NWConnection(to: endpoint, using: parameters())
+        try await ScreenNearby.open(connection, timeout: timeout)
+        return FramedConnection(connection, maxFrame: maxFrame)
+    }
+
+    /// Explicit private-network opt-in only. Cellular carries the VPN, so the legacy Wi-Fi requirement must not be
+    /// reused here. A fixed screen port and RFC1918 literal bound the destination; no discovery, redirect or fallback.
+    public static func open(privateNetwork route: ScreenPrivateNetworkRoute, maxFrame: Int,
+                            timeout: Duration = .seconds(10)) async throws -> any ScreenFrameTransport {
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = false
+        (parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options)?.noDelay = true
+        let endpoint = NWEndpoint.hostPort(host: .init(route.address), port: .init(rawValue: ScreenPrivateNetworkRoute.port)!)
+        let connection = NWConnection(to: endpoint, using: parameters)
+        try await ScreenNearby.open(connection, timeout: timeout)
+        return FramedConnection(connection, maxFrame: maxFrame)
+    }
+
     /// TCP with no delay, never peer-to-peer and never cellular.
     static func parameters() -> NWParameters {
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = false
         parameters.prohibitedInterfaceTypes = [.cellular]
+        #if os(iOS)
+        // A prohibition alone can leave an iPad on its default LTE path even with Wi-Fi available.
+        // Registration and viewing are LAN operations: explicitly ask the phone to select its Wi-Fi path.
+        parameters.requiredInterfaceType = .wifi
+        #endif
         (parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options)?.noDelay = true
         return parameters
     }

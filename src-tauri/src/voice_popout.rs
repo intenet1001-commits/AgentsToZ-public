@@ -22,7 +22,7 @@ fn validate_context(context:&VoiceContext)->bool {
     context.devices.len()<=64&&bounded(&context.device_name,100)&&context.devices.iter().all(|d|!d.key.is_empty()&&bounded(&d.key,1000)&&bounded(&d.name,100))
 }
 pub(crate) fn allows_runtime(label:&str,path:&str,method:&str)->bool {
-    if label==LABEL {return path=="/api/agent-runtime/voice"&&method=="POST";}
+    if label==LABEL {return matches!(path,"/api/agent-runtime/voice"|"/api/agent-runtime/context-sessions"|"/api/agent-runtime/weekly-usage"|"/api/agent-runtime/memory-save-recovery")&&method=="POST";}
     label=="main"||crate::workroom_popout::is_workroom_popout_label(label)
 }
 fn main_window(label:&str)->Result<(),String> {
@@ -155,6 +155,15 @@ mod tests {
     }
     #[test]fn voice_runtime_is_limited_to_voice_posts() {
         assert!(allows_runtime(LABEL,"/api/agent-runtime/voice","POST"));
+        assert!(allows_runtime(LABEL,"/api/agent-runtime/context-sessions","POST"));
+        assert!(allows_runtime(LABEL,"/api/agent-runtime/weekly-usage","POST"));
+        assert!(allows_runtime(LABEL,"/api/agent-runtime/memory-save-recovery","POST"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/memory-save-recovery","GET"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/memory-save-recovery?operation=start","POST"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/weekly-usage?path=x","POST"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/weekly-usage","GET"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/context-sessions","GET"));
+        assert!(!allows_runtime(LABEL,"/api/agent-runtime/context-sessions?operation=context.execute","POST"));
         for path in ["/api/agent-runtime/tester","/api/agent-runtime/terminals","/api/agent-runtime/voice?x=1","/api/agent-runtime/voice/history"] {assert!(!allows_runtime(LABEL,path,"POST"));}
         assert!(!allows_runtime(LABEL,"/api/agent-runtime/voice","GET"));assert!(!allows_runtime("voice-dock-2","/api/agent-runtime/voice","POST"));
     }

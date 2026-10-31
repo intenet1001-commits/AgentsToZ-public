@@ -723,9 +723,19 @@ const copy = {
     clearSelection: '선택 해제',
     selectedCount: (count: number) => `수집 대상 ${count}개`,
     synced: (captured: number, pushed: number, succeeded: number, requested: number) => `${requested}개 중 ${succeeded}개 기억 동기화 완료 · 새 수집 ${captured}개 · 업로드 ${pushed}개`,
+    // Panel-owned reasons for stable sync codes. Unlisted codes keep the local API's own text.
+    syncReasons: {
+      WHAT_I_SAID_BACKFILL_INCOMPLETE: '가져오기가 아직 끝나지 않았습니다.',
+      WHAT_I_SAID_BACKFILL_UNREADABLE: '일부 대화 파일을 읽지 못했습니다.',
+      WHAT_I_SAID_SYNC_DEFERRED: '이번 요청 시간 안에 시작하지 못했습니다.',
+      WHAT_I_SAID_CAPTURE_DISABLED: '프롬프트 저장을 먼저 켜세요.',
+    } as Partial<Record<string, string>>,
+    syncResumeHint: '다시 요청하면 이어서 진행합니다.',
+    syncUploadFailed: (detail: string) => `업로드 실패: ${detail}`,
+    syncUploadIncomplete: '일부 업로드가 이번 요청 시간 안에 끝나지 않았습니다. 다시 동기화하면 이어서 올립니다.',
     captureNowScope: '담기는 범위 · 마지막으로 가져온 뒤에 오간 대화. 평소에는 이것으로 충분합니다.',
     backfill: '켜기 전 대화까지 처음부터 가져오기',
-    backfillHelp: '담기는 범위 · 저장을 켜기 전에 오간 대화까지 거슬러 올라가 처음부터 다시 훑습니다. 이미 담긴 것은 중복으로 걸러지므로 두 번 쌓이지 않습니다.',
+    backfillHelp: '담기는 범위 · 저장을 켜기 전 대화까지 이 기기의 파일을 확인합니다. 한 번에 끝나지 않으면 다시 요청할 때 이어서 확인하고, 확인 중 바뀐 파일은 다시 확인합니다. 확인 후 추가된 대화는 다음 수집에서 확인합니다.',
     backfillConfirm: (count: number) => `선택한 ${count}개 장기기억에 저장을 켜기 전의 과거 프롬프트까지 수집하고 동기화합니다. 계속할까요?`,
     notCapturedYetTitle: '아직 이 장기기억의 프롬프트를 수집하지 않았습니다.',
     notCapturedYetBody: '저장을 켜고 앱을 실행해 두면 대상별로 순환 수집합니다. 아직 빠진 기록은 위의 수집·동기화 버튼으로 가져오세요.',
@@ -901,9 +911,24 @@ const copy = {
     clearSelection: 'Clear selection',
     selectedCount: (count: number) => `${count} collection targets`,
     synced: (captured: number, pushed: number, succeeded: number, requested: number) => `${succeeded} of ${requested} memories synced · ${captured} newly captured · ${pushed} uploaded`,
+    syncReasons: {
+      WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE: 'Shared capture consent could not be verified. Check the connection and try again.',
+      WHAT_I_SAID_VERIFICATION_UNCERTAIN: 'The files could not be checked in one pass, so overall completion is unconfirmed.',
+      WHAT_I_SAID_SCAN_BUDGET_TOO_SMALL: 'A transcript item cannot fit within the scan budget.',
+      WHAT_I_SAID_CONSENT_CHANGED: 'Capture consent or the retention period changed, so the import stopped. Check the settings and try again.',
+      WHAT_I_SAID_CAPTURE_DISABLED: 'Turn on prompt saving for this memory first.',
+      WHAT_I_SAID_BACKFILL_INCOMPLETE: 'The import has not finished yet.',
+      WHAT_I_SAID_BACKFILL_UNREADABLE: 'Some transcript files could not be read.',
+      WHAT_I_SAID_SYNC_DEFERRED: 'Not started within this request.',
+      WHAT_I_SAID_REMOTE_PUSH_FAILED: 'Upload to Supabase failed.',
+    } as Partial<Record<string, string>>,
+    syncResumeHint: 'Request it again to continue.',
+    // The raw upload error comes from the server or Supabase and may be Korean.
+    syncUploadFailed: (_detail: string) => 'Upload to Supabase failed.',
+    syncUploadIncomplete: 'Some uploads did not finish within this request. Sync again to continue uploading.',
     captureNowScope: 'Range · conversations since the last import. This is the everyday choice.',
     backfill: 'Import from the start, including before it was on',
-    backfillHelp: 'Range · reaches back past the moment saving was turned on and re-reads from the beginning. Anything already stored is filtered out as a duplicate, so nothing is stored twice.',
+    backfillHelp: 'Range · checks this device’s files, including conversations from before saving was enabled. If it does not finish at once, requesting it again continues the check, and files that change meanwhile are checked again. Conversations added after the check are covered by a later import.',
     backfillConfirm: (count: number) => `Collect and sync prompts from before saving was turned on for ${count} selected memories. Continue?`,
     notCapturedYetTitle: 'No prompts have been captured for this memory yet.',
     notCapturedYetBody: 'After enabling saving, collection cycles through memories while the app runs. Use the collection and sync action above for missing records.',
@@ -1073,6 +1098,94 @@ export const whatISaidErrorMessage = (error: unknown, fallback: string, language
   if (language === 'en' && code) return fallback;
   return message || fallback;
 };
+
+/** Sync codes after which the same request can simply be sent again. */
+const WHAT_I_SAID_RESUMABLE_SYNC_CODES = new Set([
+  'WHAT_I_SAID_BACKFILL_INCOMPLETE',
+  'WHAT_I_SAID_BACKFILL_UNREADABLE',
+  'WHAT_I_SAID_SYNC_DEFERRED',
+]);
+
+export function whatISaidSyncFailureReasons(value: unknown, language: WhatISaidLanguage): string {
+  if (!Array.isArray(value)) return '';
+  const t = copy[language];
+  let resumable = false;
+  const reasons = value.flatMap(item => {
+    const row = asObject(item);
+    const message = nullableString(row?.error);
+    if (!message) return [];
+    const name = (nullableString(row?.name) ?? '').slice(0, 100);
+    // An older local API marked an unfinished import only with `incomplete`.
+    const code = nullableString(row?.code) ?? (row?.incomplete === true ? 'WHAT_I_SAID_BACKFILL_INCOMPLETE' : null);
+    const remoteError = nullableString(row?.remoteError);
+    const mapped = code ? t.syncReasons[code] : undefined;
+    if (code && WHAT_I_SAID_RESUMABLE_SYNC_CODES.has(code)) resumable = true;
+    // A mapped capture reason and the separate upload failure are both shown.
+    // Local API text is Korean authored: Korean keeps it for unlisted codes,
+    // English uses its own generic copy instead of leaking it.
+    const reason = mapped
+      ? (remoteError && code !== 'WHAT_I_SAID_REMOTE_PUSH_FAILED' ? `${mapped} ${t.syncUploadFailed(remoteError)}` : mapped)
+      : language === 'en' && code ? t.actionFailed : message;
+    return [`${name ? `${name}: ` : ''}${reason.slice(0, 300)}`];
+  }).slice(0, 5).join(' · ');
+  // The "request again" hint is said once, not once per memory.
+  return resumable && reasons ? `${reasons} ${t.syncResumeHint}` : reasons;
+}
+
+export interface WhatISaidSyncTotals {
+  requested: number;
+  succeeded: number;
+  captured: number;
+  pushed: number;
+  items: unknown[];
+}
+
+/**
+ * Send one confirmed sync and follow its continuation: the local API starts
+ * only as many memories as fit one request (the desktop proxy times out at
+ * 35 s) and returns the rest. Only memories it did not start are sent again;
+ * an unfinished import still waits for the user to request it.
+ */
+export async function syncWhatISaidAcrossRequests(
+  memoryIds: readonly string[],
+  backfill: boolean,
+  sync: (memoryIds: readonly string[], backfill: boolean) => Promise<unknown> = (ids, value) => whatISaidApi.sync(ids, value),
+): Promise<WhatISaidSyncTotals> {
+  const latest = new Map<string, unknown>();
+  const unnamed: unknown[] = [];
+  const totals = { requested: 0, succeeded: 0, captured: 0, pushed: 0 };
+  let pending = [...memoryIds];
+  // Each request finishes at least one memory, so the selection bounds the rounds.
+  for (let round = 0; round <= memoryIds.length && pending.length; round++) {
+    const result = asObject(await sync(pending, backfill)) ?? {};
+    if (round === 0) totals.requested = nonNegativeInteger(result.requested);
+    totals.succeeded += nonNegativeInteger(result.succeeded);
+    totals.captured += nonNegativeInteger(result.captured);
+    totals.pushed += nonNegativeInteger(result.pushed);
+    for (const item of Array.isArray(result.items) ? result.items : []) {
+      const memoryId = nullableString(asObject(item)?.memoryId);
+      if (memoryId) latest.set(memoryId, item);
+      else unnamed.push(item);
+    }
+    const continuation = asObject(result.continuation)?.memoryIds;
+    const next = Array.isArray(continuation)
+      ? continuation.filter((id): id is string => typeof id === 'string' && pending.includes(id))
+      : [];
+    // Never repeat a request that made no progress.
+    pending = next.length < pending.length ? [...new Set(next)] : [];
+  }
+  return { ...totals, items: [...latest.values(), ...unnamed] };
+}
+
+export function whatISaidSyncNotice(result: WhatISaidSyncTotals, language: WhatISaidLanguage): { kind: 'success' | 'error'; message: string } {
+  const t = copy[language];
+  const summary = t.synced(result.captured, result.pushed, result.succeeded, result.requested);
+  const uploadIncomplete = result.items.some(item => asObject(item)?.uploadIncomplete === true);
+  const tail = uploadIncomplete ? ` ${t.syncUploadIncomplete}` : '';
+  if (result.succeeded === result.requested) return { kind: 'success', message: `${summary}${tail}` };
+  const reasons = whatISaidSyncFailureReasons(result.items, language);
+  return { kind: 'error', message: `${summary}${reasons ? ` ${reasons}` : ''}${tail}` };
+}
 
 const canFallBackToExplicitLocalDelete = (error: unknown): boolean => {
   const code = typeof (error as { code?: unknown })?.code === 'string'
@@ -1610,16 +1723,9 @@ export function WhatISaidPanel({ projects, language, visible, onOpenUserProfile 
     setCaptureBusy(backfill ? 'backfill' : 'capture');
     setNotice(null);
     try {
-      const result = asObject(await whatISaidApi.sync(selectedMemoryIds, backfill)) ?? {};
-      const requested = nonNegativeInteger(result.requested);
-      const succeeded = nonNegativeInteger(result.succeeded);
-      const captured = nonNegativeInteger(result.captured);
-      const pushed = nonNegativeInteger(result.pushed);
+      const result = await syncWhatISaidAcrossRequests(selectedMemoryIds, backfill);
       await Promise.all([loadCaptureStatus(), loadPrompts(false), loadRemoteStatus()]);
-      setNotice({
-        kind: succeeded === requested ? 'success' : 'error',
-        message: t.synced(captured, pushed, succeeded, requested),
-      });
+      setNotice(whatISaidSyncNotice(result, language));
     } catch (error) {
       setNotice({ kind: 'error', message: whatISaidErrorMessage(error, t.actionFailed, language) });
     } finally {

@@ -111,3 +111,19 @@ test('고정 런처로 적은 항목은 env 고정이 남아 있어도 다시 �
   expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers.agentstoz_use.env)
     .toEqual({ AGENTSTOZ_CONTROLLER_PORT_ID: '1773136552857' });
 });
+
+test('one AI is inspected alone, read-only, with the verdict list() gives (팀 작전 asks it before briefing a member)', async () => {
+  const dir = home(), path = join(dir, '.gemini/config/mcp_config.json');
+  mkdirSync(join(dir, '.gemini/config'), { recursive: true });
+  writeFileSync(path, JSON.stringify({ mcpServers: { other: { command: '/fixture/other' } } }));
+  const raw = readFileSync(path, 'utf8');
+  const connections = createControlProfileConnections({
+    home: dir, appDataDir: dir, executable: '/fixture/agentstoz-use-mcp',
+    agents: { agy: '/fixture/agy' }, run: async () => ({ stdout: '', exitCode: 1 }),
+  });
+  expect((await connections.inspect('agy')).state).toBe('not-configured');
+  expect((await connections.list()).find(entry => entry.agent === 'agy')!.state).toBe('not-configured');
+  // A CLI that is not installed is `unavailable` — not the same as a known-missing connection.
+  expect((await connections.inspect('hermes')).state).toBe('unavailable');
+  expect(readFileSync(path, 'utf8')).toBe(raw);
+});

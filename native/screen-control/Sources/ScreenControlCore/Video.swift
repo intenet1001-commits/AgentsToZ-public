@@ -161,13 +161,28 @@ public enum ControlMessage: Equatable, Sendable {
     /// Phone → Mac, version 2. Turn screen control off at the Mac, as its menu's 「끄기」 does. The phone asks for Face ID
     /// first; turning it on again happens only at the Mac.
     case turnOff
+    /// Version 3. IDs are nonzero, per-session request numbers; replies fence subsequent typing.
+    case keyboardAction(id: UInt32, ScreenKeyboardAction)
+    case keyboardState(id: UInt32, ScreenKeyboardState, ScreenControlResult)
+    case navigateSpace(ScreenSpaceAction)
+    case spaceResult(ScreenSpaceAction, ScreenControlResult)
+    /// The system reported a Space change, without a desktop index or target-display guarantee.
+    case spaceChanged
+    case setVideoQuality(ScreenVideoQuality)
+    case videoQuality(ScreenVideoQuality)
+    /// Version 3, Mac → phone. No permissions or input content are sent, only a fixed availability reason.
+    case inputAvailability(ScreenInputAvailability)
+    case pointerPosition(ScreenPointerPosition)
+    /// v4: `posted` is a HID post attempt, never target application receipt.
+    case textAndReturnResult(id: UInt32, ScreenTextReturnResult)
 
     /// The most displays a session names; a Mac with more offers the first sixteen.
     public static let maxDisplays = 16
 
     private enum Tag: UInt8 {
         case requestKeyframe = 1, remoteInputPaused, remoteInputResumed, macLocked, macUnlocked, displays, nextDisplay,
-             selectDisplay, hideCursor, showCursor, turnOff
+             selectDisplay, hideCursor, showCursor, turnOff, keyboardAction, keyboardState, navigateSpace,
+             spaceResult, spaceChanged, setVideoQuality, videoQuality, inputAvailability, pointerPosition, textAndReturnResult
     }
 
     /// `version` is the session's negotiated version: a message newer than it is malformed there.
@@ -192,6 +207,37 @@ public enum ControlMessage: Equatable, Sendable {
         case (.hideCursor, 1): message = .hideCursor
         case (.showCursor, 1): message = .showCursor
         case (.turnOff, 1): message = .turnOff
+        case (.keyboardAction, 6):
+            let id = bytes[1...4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            guard id != 0, let action = ScreenKeyboardAction(rawValue: bytes[5]) else { throw ScreenControlWireError.malformed }
+            message = .keyboardAction(id: id, action)
+        case (.keyboardState, 8):
+            let id = bytes[1...4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            guard let result = ScreenControlResult(rawValue: bytes[7]), (id == 0) == (result == .observed) else {
+                throw ScreenControlWireError.malformed
+            }
+            message = .keyboardState(id: id, try ScreenKeyboardState(bytes: bytes[5...6]), result)
+        case (.navigateSpace, 2):
+            guard let action = ScreenSpaceAction(rawValue: bytes[1]) else { throw ScreenControlWireError.malformed }
+            message = .navigateSpace(action)
+        case (.spaceResult, 3):
+            guard let action = ScreenSpaceAction(rawValue: bytes[1]), let result = ScreenControlResult(rawValue: bytes[2]),
+                  result != .observed else { throw ScreenControlWireError.malformed }
+            message = .spaceResult(action, result)
+        case (.pointerPosition, 5):
+            message = .pointerPosition(.init(x: UInt16(bytes[1]) << 8 | UInt16(bytes[2]),
+                                             y: UInt16(bytes[3]) << 8 | UInt16(bytes[4])))
+        case (.inputAvailability, 2):
+            guard let reason = ScreenInputAvailability(rawValue: bytes[1]) else { throw ScreenControlWireError.malformed }
+            message = .inputAvailability(reason)
+        case (.textAndReturnResult, 6):
+            let id = bytes[1...4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            guard id != 0, let result = ScreenTextReturnResult(rawValue: bytes[5]) else { throw ScreenControlWireError.malformed }
+            message = .textAndReturnResult(id: id, result)
+        case (.spaceChanged, 1): message = .spaceChanged
+        case (.setVideoQuality, 2), (.videoQuality, 2):
+            guard let quality = ScreenVideoQuality(rawValue: bytes[1]) else { throw ScreenControlWireError.malformed }
+            message = tag == .setVideoQuality ? .setVideoQuality(quality) : .videoQuality(quality)
         default: throw ScreenControlWireError.malformed
         }
         guard message.minimumVersion <= version else { throw ScreenControlWireError.malformed }
@@ -200,15 +246,19 @@ public enum ControlMessage: Equatable, Sendable {
 
     public var sender: ChannelRole {
         switch self {
-        case .requestKeyframe, .nextDisplay, .selectDisplay, .hideCursor, .showCursor, .turnOff: .device
-        case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays: .mac
+        case .requestKeyframe, .nextDisplay, .selectDisplay, .hideCursor, .showCursor, .turnOff,
+             .keyboardAction, .navigateSpace, .setVideoQuality: .device
+        case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays,
+             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult: .mac
         }
     }
 
     /// The first session version that carries this message.
     public var minimumVersion: UInt16 {
         switch self {
+        case .textAndReturnResult: 4
         case .requestKeyframe, .remoteInputPaused, .remoteInputResumed: 1
+        case .keyboardAction, .keyboardState, .navigateSpace, .spaceResult, .spaceChanged, .setVideoQuality, .videoQuality, .inputAvailability, .pointerPosition: 3
         default: 2
         }
     }
@@ -228,6 +278,16 @@ public enum ControlMessage: Equatable, Sendable {
         case .hideCursor: Data([Tag.hideCursor.rawValue])
         case .showCursor: Data([Tag.showCursor.rawValue])
         case .turnOff: Data([Tag.turnOff.rawValue])
+        case let .keyboardAction(id, action): Data([Tag.keyboardAction.rawValue]) + id.bigEndianData + Data([action.rawValue])
+        case let .keyboardState(id, state, result): Data([Tag.keyboardState.rawValue]) + id.bigEndianData + state.encoded + Data([result.rawValue])
+        case .navigateSpace(let action): Data([Tag.navigateSpace.rawValue, action.rawValue])
+        case let .spaceResult(action, result): Data([Tag.spaceResult.rawValue, action.rawValue, result.rawValue])
+        case .spaceChanged: Data([Tag.spaceChanged.rawValue])
+        case .setVideoQuality(let quality): Data([Tag.setVideoQuality.rawValue, quality.rawValue])
+        case .videoQuality(let quality): Data([Tag.videoQuality.rawValue, quality.rawValue])
+        case .inputAvailability(let reason): Data([Tag.inputAvailability.rawValue, reason.rawValue])
+        case .pointerPosition(let position): Data([Tag.pointerPosition.rawValue]) + position.x.bigEndianData + position.y.bigEndianData
+        case let .textAndReturnResult(id, result): Data([Tag.textAndReturnResult.rawValue]) + id.bigEndianData + Data([result.rawValue])
         }
     }
 }

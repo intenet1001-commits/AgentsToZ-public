@@ -225,6 +225,61 @@ describe("encrypted local What-I-said authority", () => {
     expect((wrongKey as Error).message).not.toContain(exact);
   });
 
+  test("pages across decimal sequence boundaries in both directions and through the feed without gaps", () => {
+    const location = fixture("memory-sequence-boundaries");
+    enableWhatISaidCapture({ ...location, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const expected = Array.from({ length: 105 }, (_, index) => String(index + 1));
+    for (const seq of expected) {
+      expect(prompt(location, { sourceEventIdentity: seq, text: `boundary prompt ${seq}` }).stored).toBe(true);
+    }
+    const now = "2026-08-30T10:05:00Z";
+    for (const direction of ["oldest", "newest"] as const) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+        if (direction === "oldest") {
+          const page = listWhatISaidEntries({ ...location, key: KEY, afterSeq: cursor, limit: 7, now });
+          seen.push(...page.items.map(item => item.seq));
+          cursor = page.nextSeq;
+        } else {
+          const page = listRecentWhatISaidEntries({ ...location, key: KEY, beforeSeq: cursor, limit: 7, now });
+          seen.push(...page.items.map(item => item.seq));
+          cursor = page.nextBeforeSeq;
+        }
+        if (cursor === null) break;
+      }
+      expect(cursor).toBeNull();
+      expect(seen).toEqual(direction === "oldest" ? expected : [...expected].reverse());
+      expect(new Set(seen).size).toBe(expected.length);
+    }
+    const enabled = enableWhatISaidFeed({ ...location, key: KEY, registrationId: "sequence-project", now });
+    const requestTarget = "/api/what-i-said/feed";
+    const authorization = createWhatISaidFeedAuthorization({ token: enabled.token, challenge: "12".repeat(32), requestTarget });
+    const texts: string[] = [];
+    let cursor: string | undefined;
+    let hasMore = true;
+    for (let pageIndex = 0; pageIndex < 20 && hasMore; pageIndex += 1) {
+      const page = readWhatISaidFeed({ ...location, key: KEY, expectedRegistrationId: "sequence-project", authorization, requestTarget, cursor, limit: 7, now });
+      texts.push(...page.items.map(item => item.text));
+      cursor = page.nextCursor;
+      hasMore = page.hasMore;
+    }
+    expect(hasMore).toBe(false);
+    expect(texts).toEqual(expected.map(seq => `boundary prompt ${seq}`));
+  });
+
+  test("verifies every legacy ciphertext across the 250-row key-binding scan boundary", () => {
+    const location = fixture("memory-legacy-sequence-boundary");
+    enableWhatISaidCapture({ ...location, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    for (let seq = 1; seq <= 260; seq += 1) {
+      expect(prompt(location, { sourceEventIdentity: String(seq) }).stored).toBe(true);
+    }
+    const db = new Database(whatISaidDatabasePath(location));
+    try { db.query("UPDATE what_i_said_settings SET key_verifier = NULL").run(); } finally { db.close(); }
+    expect(() => verifyWhatISaidStoreKey({ ...location, key: KEY })).not.toThrow();
+    expect(readWhatISaidStatus({ ...location, now: "2026-08-30T10:05:00Z" }).counts.active).toBe(260);
+  });
+
   test("binds one key before the first insert and rejects a valid-looking replacement without mutation", () => {
     const location = fixture("memory-key-binding");
     enableWhatISaidCapture({ ...location, retention: "forever", now: "2026-08-30T10:00:00Z" });
@@ -311,7 +366,7 @@ describe("encrypted local What-I-said authority", () => {
     expect(readWhatISaidStatus(location).enabled).toBe(false);
     verifyWhatISaidStoreKey({ ...location, key: KEY });
     const migrated = new Database(path, { readonly: true });
-    expect((migrated.query(`PRAGMA user_version`).get() as any).user_version).toBe(6);
+    expect((migrated.query(`PRAGMA user_version`).get() as any).user_version).toBe(7);
     // v5는 수집 기기를 행에 남긴다. 기존 행은 소급해 채우지 않는다 — 그 프롬프트가
     // 어느 기기에서 왔는지는 지나간 사실이고, 지금 기기를 박으면 추측이 기록이 된다.
     {
@@ -322,7 +377,7 @@ describe("encrypted local What-I-said authority", () => {
       expect(columns).toContain('prompt_origin');
     }
     const row = migrated.query(`SELECT schema_version, key_version, key_verifier, feed_registration_id FROM what_i_said_settings`).get() as any;
-    expect(row.schema_version).toBe(6);
+    expect(row.schema_version).toBe(7);
     expect(row.key_version).toBe(1);
     expect(row.key_verifier).toMatch(/^[0-9a-f]{64}$/);
     expect(row.feed_registration_id).toBeNull();
@@ -366,7 +421,7 @@ describe("encrypted local What-I-said authority", () => {
     verifyWhatISaidStoreKey({ ...location, key: KEY });
     const migrated = new Database(path, { readonly: true });
     const row = migrated.query(`SELECT * FROM what_i_said_settings WHERE singleton = 1`).get() as any;
-    expect((migrated.query(`PRAGMA user_version`).get() as any).user_version).toBe(6);
+    expect((migrated.query(`PRAGMA user_version`).get() as any).user_version).toBe(7);
     // v5는 수집 기기를 행에 남긴다. 기존 행은 소급해 채우지 않는다 — 그 프롬프트가
     // 어느 기기에서 왔는지는 지나간 사실이고, 지금 기기를 박으면 추측이 기록이 된다.
     {

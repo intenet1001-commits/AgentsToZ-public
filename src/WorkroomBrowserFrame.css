@@ -29,6 +29,11 @@
 :is(.workroom-popout,.workroom-session-dialog-content) .workroom-browser-frame:not([data-layout=terminal]) .workroom-browser-panes{flex:1 1 0;height:auto}
 .workroom-browser-frame:not([data-layout=terminal]) .workroom-browser-terminal{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
 .workroom-browser-frame[data-layout=split] .workroom-browser-terminal{overflow-y:auto;overscroll-behavior:contain}
+/* Beside the page the switch heads the terminal column. It shares the column's cell and covers a transparent top border
+   of its measured height, so the column's box still starts beside the page top while its scrolling content starts below
+   the switch and never passes under it. */
+.workroom-browser-frame[data-layout=split] .workroom-browser-panes>.workroom-browser-tabs{grid-column:1;grid-row:1;align-self:start;justify-self:start;position:relative;z-index:1;flex-wrap:wrap;margin:0}
+.workroom-browser-frame[data-layout=split] .workroom-browser-terminal{border-top:var(--workroom-browser-switch-block,48px) solid transparent}
 .ai-terminal-panel .workroom-browser-frame[data-layout=split] .workroom-browser-terminal .ai-terminal-surface{flex:1 1 0;height:auto;min-height:160px}
 /* A full page keeps the composer close, without allowing it to displace the native view. */
 .workroom-browser-frame[data-layout=browser] .workroom-browser-panes{display:flex;flex-direction:column;gap:6px}

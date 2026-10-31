@@ -1,5 +1,5 @@
 import {afterEach, expect, test} from 'bun:test';
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdtempSync, rmSync, mkdirSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {resolveConversationTargetAlias} from '../src/conversationTargetAlias';
@@ -65,9 +65,10 @@ afterEach(async () => {
   for (const home of homes.splice(0)) rmSync(home, {recursive: true, force: true});
 });
 
-function startMcp(endpoint: string) {
+function startMcp(endpoint: string,computerAccess=false) {
   const home = mkdtempSync(join(tmpdir(), 'agentstoz-mcp-stdio-'));
   homes.push(home);
+  if(computerAccess){const folder=join(home,'app-data','control-profile');mkdirSync(folder,{recursive:true,mode:0o700});writeFileSync(join(folder,'access.json'),JSON.stringify({schemaVersion:1,profileId:'11111111-1111-4111-8111-111111111111',token:'a'.repeat(64)}),{mode:0o600});}
   const child = Bun.spawn([process.execPath, resolve(import.meta.dir, '..', 'agentstoz-use-mcp-server.ts')], {
     cwd: resolve(import.meta.dir, '..'),
     env: {
@@ -330,4 +331,39 @@ test('non-object JSON-RPC input returns errors and leaves the connection usable'
   expect(await mcp.child.exited).toBe(0);
   await mcp.reading;
   expect(mcp.lines.filter(line => line.id === null).map(line => line.error.code)).toEqual([-32600, -32600, -32600]);
+});
+
+
+test('computer-use MCP keeps its instance secret in a header, advertises only closed actions, and retires on EOF',async()=>{
+  const calls:{path:string;body:any;instance:string|null;access:string|null}[]=[];
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    const body=await request.json(),instance=request.headers.get('X-AgentsToZ-Computer-Instance');
+    calls.push({path:new URL(request.url).pathname,body,instance,access:request.headers.get('X-AgentsToZ-Control-Profile')});
+    return Response.json({success:true,scope:'mcp-connection',grants:[],available:false});
+  }});servers.push(server);
+  const mcp=startMcp(`http://127.0.0.1:${server.port}/api/agentstoz-use/action`,true);
+  mcp.write({id:1,method:'initialize',params:{clientInfo:{name:'computer-test'}}});await mcp.read(1);
+  mcp.write({id:2,method:'tools/list'});const tool=(await mcp.read(2)).value.result.tools.find((t:any)=>t.name==='agentstoz_use_computer');
+  expect(tool.inputSchema.properties.operation.enum).not.toContain('approve');expect(tool.inputSchema.properties.operation.enum).not.toContain('catalog');
+  mcp.write({id:3,method:'tools/call',params:{name:tool.name,arguments:{operation:'status'}}});const result=await mcp.read(3);
+  expect(result.value.result.structuredContent.scope).toBe('mcp-connection');expect(calls).toHaveLength(1);
+  expect(calls[0]!.path).toBe('/api/computer-use-agent');expect(calls[0]!.body).toEqual({operation:'status'});expect(calls[0]!.instance).toMatch(/^[a-f0-9]{64}$/);expect(calls[0]!.access).toBe('a'.repeat(64));
+  expect(JSON.stringify(result)).not.toContain(calls[0]!.instance!);
+  mcp.write({id:4,method:'tools/call',params:{name:tool.name,arguments:{operation:'status',caller:{sessionId:'forged'}}}});expect((await mcp.read(4)).value.result.isError).toBe(true);expect(calls).toHaveLength(1);
+  mcp.child.stdin.end();expect(await mcp.child.exited).toBe(0);await mcp.reading;
+  expect(calls.map(c=>c.body.operation)).toEqual(['status','disconnect']);expect(calls[1]!.instance).toBe(calls[0]!.instance);
+});
+
+
+test('a broken computer-use response explains unknown delivery without replaying the input',async()=>{
+  const calls:any[]=[];
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){calls.push(await request.json());return new Response('broken response');}});servers.push(server);
+  const mcp=startMcp(`http://127.0.0.1:${server.port}/api/agentstoz-use/action`,true);
+  mcp.write({id:1,method:'initialize',params:{clientInfo:{name:'computer-test'}}});await mcp.read(1);
+  const input={operation:'press',grant:'b'.repeat(64),epoch:1,requestId:'fixture_unknown_1',observationId:'fixture_observation_1',element:'field1'};
+  mcp.write({id:2,method:'tools/call',params:{name:'agentstoz_use_computer',arguments:input}});
+  const result=(await within(mcp.read(2),'computer-use error response stalled')).value.result;
+  expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('입력을 다시 보내지 말고 같은 requestId로 receipt');
+  expect(calls).toEqual([input]);mcp.child.stdin.end();expect(await mcp.child.exited).toBe(0);await mcp.reading;
+  expect(calls).toEqual([input]);
 });

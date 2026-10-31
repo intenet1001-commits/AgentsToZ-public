@@ -7,6 +7,40 @@ import LocalAuthentication
 #endif
 
 extension ScreenControlChecks {
+    func testDeviceAuthenticationKeyProtection() throws {
+        let strict = ScreenDeviceAuthentication.biometricsOnly.accessFlags
+        let owner = ScreenDeviceAuthentication.deviceOwner.accessFlags
+        try check(strict.contains(.privateKeyUsage) && strict.contains(.biometryCurrentSet), "strict keys require current biometrics")
+        try check(!strict.contains(.userPresence), "strict keys cannot accept passcode fallback")
+        try check(owner.contains(.privateKeyUsage) && owner.contains(.userPresence), "owner keys accept system user presence")
+        try check(!owner.contains(.biometryCurrentSet), "owner keys do not also require biometrics")
+        try check(try JSONDecoder().decode(ScreenDeviceAuthentication.self, from: Data("\"deviceOwner\"".utf8)) == .deviceOwner, "owner mode round trip")
+        do {
+            _ = try JSONDecoder().decode(ScreenDeviceAuthentication.self, from: Data("\"unknown\"".utf8))
+            throw CheckFailure(description: "unknown authentication mode accepted")
+        } catch is DecodingError {}
+    }
+    func testLockoutRecoveryRequiresAvailableBiometry() async throws {
+        // Reproduces the device report: owner/passcode authentication succeeded but a fresh context still
+        // returned -8. That must remain a recovery failure, rather than telling the person to connect again.
+        try await expectError(LAError(.biometryLockout)) {
+            try await BiometricApproval.recoverLockout(authenticateOwner: { true }, verifyBiometry: {
+                throw LAError(.biometryLockout)
+            })
+        }
+        try await expectError(LAError(.authenticationFailed)) {
+            try await BiometricApproval.recoverLockout(authenticateOwner: { false }, verifyBiometry: {
+                throw LAError(.biometryNotEnrolled) // must not reach the availability check
+            })
+        }
+        try await expectError(LAError(.userCancel)) {
+            try await BiometricApproval.recoverLockout(authenticateOwner: { throw LAError(.userCancel) }, verifyBiometry: {
+                throw LAError(.biometryNotEnrolled)
+            })
+        }
+        try await BiometricApproval.recoverLockout(authenticateOwner: { true }, verifyBiometry: {})
+    }
+
     func testViewerAsksForAKeyframeShowsPicturesAndSaysGoodbye() async throws {
         let encoded = Collector<VideoFrame>()
         let encoder = try VideoEncoder(.init(width: 640, height: 360)) { if case .success(let frame) = $0 { encoded.add(frame) } }
@@ -57,12 +91,18 @@ extension ScreenControlChecks {
     }
 
     func testFaceIDApprovalSignsOnce() async throws {
-        // A key without Face ID access control stands in: the one-use rule is what this checks; the Face ID prompt
-        // itself needs a real iPhone (SR-12, iOS UI test).
+        // An unprotected SE key exercises the real approval probe/reference lifetime without asking the test
+        // runner's person for biometrics. Touch ID / Face ID and their ACL need separate physical-device acceptance.
+        try check(BiometricApproval.name(for: .touchID) == "Touch ID", "fingerprint hardware must not say Face ID")
+        try check(BiometricApproval.name(for: .faceID) == "Face ID", "face hardware retains its own name")
+        try check(BiometricApproval.name(for: .none) == "생체 인증", "unknown hardware has a neutral name")
         let key = try SecureEnclave.P256.Signing.PrivateKey()
-        let signer = try FaceIDApprovedSigner(dataRepresentation: key.dataRepresentation, context: LAContext())
+        let signer = try await FaceIDApprovedSigner.approve(dataRepresentation: key.dataRepresentation, reason: "Test key authorization")
         let transcript = Data("transcript".utf8)
         try check(signer.publicKey.isValidSignature(try await signer.signature(for: transcript), for: transcript), "first signature")
         try await expectError(HandshakeError.alreadyUsed) { _ = try await signer.signature(for: transcript) }
+        // One connection consuming its approval cannot consume the next connection's fresh context/key reference.
+        let next = try await FaceIDApprovedSigner.approve(dataRepresentation: key.dataRepresentation, reason: "Next test authorization")
+        try check(next.publicKey.isValidSignature(try await next.signature(for: transcript), for: transcript), "fresh connection approval")
     }
 }

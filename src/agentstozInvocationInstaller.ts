@@ -15,10 +15,12 @@ import {CONTROL_PROFILE_ALIASES} from './controlProfileContract';
 import {AGENTSTOZ_TARGET_ALIAS_GUIDANCE} from './conversationTargetAlias';
 import {AGENTSTOZ_MENTION_GUIDANCE} from './agentstozMention';
 import {AGENTSTOZ_TEAM_SKILL, AGENTSTOZ_TEAM_SKILL_NAME} from './agentstozTeamSkill';
+import {UNFINISHED_WORK_MANAGED_MARKER, UNFINISHED_WORK_SKILL, UNFINISHED_WORK_SKILL_NAME, UNFINISHED_WORK_SKILL_VERSION} from './unfinishedWorkSkill';
 
-export const AGENTSTOZ_INVOCATION_VERSION = 9;
+export const AGENTSTOZ_INVOCATION_VERSION = 10;
 const START = '<!-- AgentsToZ invocation:start -->';
 const END = '<!-- AgentsToZ invocation:end -->';
+const VERSION_STAMP = `<!-- AgentsToZ invocation-version:${AGENTSTOZ_INVOCATION_VERSION} -->`;
 
 const BODY = `# AgentsToZ conversational control
 
@@ -41,12 +43,25 @@ ${AGENTSTOZ_MENTION_GUIDANCE}
 - For an explicit task on another device, use \`agentstoz_use_list_ops_devices\`, select its exact endpointId, then \`agentstoz_use_submit_ops_request\` and \`agentstoz_use_wait_ops_request\` until its actual result. The receiving device opens its own configured OPS AI. Preserve endpointId/requestId and exact text on retry; use \`agentstoz_use_get_ops_request_result\` after interruption. Admission or a window is not completion. A receiving OPS worker submits its actual result and evidence with \`agentstoz_use_complete_ops_request\` using its private task capability. Never expose that capability or automatically replay an unknown outcome with a fresh ID.
 - Use a durable mission only when the user requests continuing orchestration or the work spans multiple projects or agents. After a restart, resume only on an explicit request to continue.
 - For 팀 작전 (one task split across several AI agents, each in its own git worktree, one leader merging), follow the ${AGENTSTOZ_TEAM_SKILL_NAME} skill and its \`agentstoz_use_*_team\` tools. Any model can lead.
+- For 미처리·미완료 업무/과제, 후속 작업, backlog or 장기기억 진행 현황 of a registered AgentsToZ project (current or named, e.g. 아젠투지데브), follow the ${UNFINISHED_WORK_SKILL_NAME} skill (Claude \`/${UNFINISHED_WORK_SKILL_NAME}\`, Codex \`$${UNFINISHED_WORK_SKILL_NAME}\`): read-only; improvement instructions only after the user picks.
 - Report success only from a successful MCP result. If the tools are unavailable, say that the local AgentsToZ bridge is offline.
 
 Arguments or the words following the invocation are the user's request. Continue naturally when the invocation is spoken in an active voice conversation.`;
 
 function managedBlock(): string {
-  return `${START}\n<!-- AgentsToZ invocation-version:${AGENTSTOZ_INVOCATION_VERSION} -->\n${BODY}\n${END}`;
+  return `${START}\n${VERSION_STAMP}\n${BODY}\n${END}`;
+}
+
+/**
+ * Never downgrade. Every installed app rewrites these files when its sidecar starts, so an older
+ * build (a backup bundle, another device's checkout, a dev api-server) used to roll a newer block
+ * back until the newer app started again. A copy stamped with a higher version is kept; an equal,
+ * older or unstamped one is replaced as before. Builds before invocation 10 lack this check and
+ * still rewrite once when they start.
+ */
+function newerInvocation(text: string): boolean {
+  const stamp = /<!-- AgentsToZ invocation-version:(\d+) -->/.exec(text);
+  return !!stamp && Number(stamp[1]) > AGENTSTOZ_INVOCATION_VERSION;
 }
 
 export function withAgentsToZInvocation(existing: string): string {
@@ -54,6 +69,7 @@ export function withAgentsToZInvocation(existing: string): string {
   const start = existing.indexOf(START);
   const end = existing.indexOf(END);
   if (start >= 0 && end >= start) {
+    if (newerInvocation(existing.slice(start, end))) return existing;
     const after = end + END.length;
     return `${existing.slice(0, start)}${block}${existing.slice(after)}`;
   }
@@ -65,6 +81,7 @@ name: agentstoz
 description: "Control AgentsToZ through installed MCP tools for /agentstoz, $agentstoz, a direct AgentsToZ request, @OPS, @project-DEV, @project-USE, or a #project memory reference in a connected agent CLI or app."
 ---
 
+${VERSION_STAMP}
 ${BODY}
 `;
 
@@ -73,6 +90,7 @@ description: Control AgentsToZ projects, memory, missions, and Workroom agents
 argument-hint: "[request]"
 ---
 
+${VERSION_STAMP}
 ${BODY}
 
 Handle this request now: $ARGUMENTS
@@ -119,44 +137,121 @@ function atomicWrite(path: string, content: string): boolean {
   return true;
 }
 
+/** A whole file that carries BODY: a copy stamped newer than ours stays as it is (see newerInvocation). */
+function invocationFile(path: string, content: string): [string, string] {
+  const current = read(path);
+  return [path, newerInvocation(current) ? current : content];
+}
+
 function installTarget(target: AgentsToZInvocationTarget, writes: Array<[string, string]>): AgentsToZInvocationInstallResult {
   let changed = false;
   for (const [path, content] of writes) changed = atomicWrite(path, content) || changed;
   return { target, paths: writes.map(([path]) => path), changed };
 }
 
+// A user may already own a skill with this generic name. Never overwrite or follow
+// a foreign file/symlink; future versions may replace only our own managed skill.
+// The folder is checked too: a symlinked folder would carry the write to wherever it
+// points, and a folder holding someone else's files is theirs even without a SKILL.md.
+// Only an empty folder (or one left with our own interrupted temp file) is taken over.
+function unfinishedSkillWrite(skillsDir: string): Array<[string, string]> {
+  const folder = join(skillsDir, UNFINISHED_WORK_SKILL_NAME);
+  const path = join(folder, 'SKILL.md');
+  const info = (target: string) => { try { return lstatSync(target); } catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; } };
+  const folderInfo = info(folder);
+  if (!folderInfo) return [[path, UNFINISHED_WORK_SKILL]];
+  if (folderInfo.isSymbolicLink() || !folderInfo.isDirectory()) return [];
+  const skillInfo = info(path);
+  if (skillInfo) {
+    if (skillInfo.isSymbolicLink() || !skillInfo.isFile()) return [];
+    const current = readFileSync(path, 'utf8');
+    if (!current.includes(UNFINISHED_WORK_MANAGED_MARKER)) return [];
+    // Never downgrade our own skill either; the unstamped first release counts as version 1.
+    const stamp = /<!-- AgentsToZ agentstoz-unfinished-work skill-version:(\d+) -->/.exec(current);
+    if (Number(stamp?.[1] ?? 1) > UNFINISHED_WORK_SKILL_VERSION) return [[path, current]];
+    return [[path, UNFINISHED_WORK_SKILL]];
+  }
+  if (readdirSync(folder).some(name => !name.startsWith('SKILL.md.tmp-'))) return [];
+  return [[path, UNFINISHED_WORK_SKILL]];
+}
+
+// The CLI has its own skill home; do not create a missing CLI home or write
+// through a symlinked parent when installing this managed skill.
+function agyCliSkillsDir(home: string): string | null {
+  const gemini = join(home, '.gemini');
+  const cli = join(gemini, 'antigravity-cli');
+  const skills = join(cli, 'skills');
+  try {
+    for (const path of [gemini, cli]) {
+      const info = lstatSync(path);
+      if (info.isSymbolicLink() || !info.isDirectory()) return null;
+    }
+    try {
+      const info = lstatSync(skills);
+      if (info.isSymbolicLink() || !info.isDirectory()) return null;
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') return null;
+    }
+    return skills;
+  } catch { return null; }
+}
+
+/** Only a caller that has verified the agy executable may request its first CLI home. */
+export function reconcileAgyCliUnfinishedWork(home: string, options: {createCliHome?: boolean} = {}): AgentsToZInvocationInstallResult {
+  let skills = agyCliSkillsDir(home);
+  if (!skills && options.createCliHome) {
+    const gemini = join(home, '.gemini');
+    const cli = join(gemini, 'antigravity-cli');
+    try {
+      const parent = lstatSync(gemini);
+      if (parent.isDirectory() && !parent.isSymbolicLink()) {
+        try { mkdirSync(cli, {mode: 0o700}); }
+        catch (error: any) { if (error?.code !== 'EEXIST') throw error; }
+        skills = agyCliSkillsDir(home);
+      }
+    } catch (error: any) { if (error?.code !== 'ENOENT') throw error; }
+  }
+  return installTarget('antigravity', skills ? unfinishedSkillWrite(skills) : []);
+}
+
 export function installAgentsToZInvocation(input: { home: string; hermesHome?: string | null; hermesHomes?: readonly string[] }): AgentsToZInvocationInstallResult[] {
   // Decided before anything is written: agy's config folder must be agy's own, never one made here.
   const agyConfig = agyGlobalConfigDir(input.home);
+  const agyCliSkills = agyCliSkillsDir(input.home);
   const results = [
     installTarget('codex', [
-      [join(input.home, '.codex', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      invocationFile(join(input.home, '.codex', 'skills', 'agentstoz', 'SKILL.md'), SKILL),
       [join(input.home, '.codex', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
+      ...unfinishedSkillWrite(join(input.home, '.codex', 'skills')),
       [join(input.home, '.codex', 'AGENTS.md'), withAgentsToZInvocation(read(join(input.home, '.codex', 'AGENTS.md')))],
     ]),
     installTarget('claude', [
-      [join(input.home, '.claude', 'commands', 'agentstoz.md'), CLAUDE_COMMAND],
+      invocationFile(join(input.home, '.claude', 'commands', 'agentstoz.md'), CLAUDE_COMMAND),
       [join(input.home, '.claude', 'commands', 'remember_agentstoz.md'), CLAUDE_REMEMBER_COMMAND],
-      [join(input.home, '.claude', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      invocationFile(join(input.home, '.claude', 'skills', 'agentstoz', 'SKILL.md'), SKILL),
       [join(input.home, '.claude', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
+      ...unfinishedSkillWrite(join(input.home, '.claude', 'skills')),
       [join(input.home, '.claude', 'CLAUDE.md'), withAgentsToZInvocation(read(join(input.home, '.claude', 'CLAUDE.md')))],
     ]),
     installTarget('antigravity', [
-      [join(input.home, '.gemini', 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      invocationFile(join(input.home, '.gemini', 'skills', 'agentstoz', 'SKILL.md'), SKILL),
       [join(input.home, '.gemini', 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
-      // agy (Antigravity CLI) loads global customizations from ~/.gemini/config/ (MCP from its
-      // mcp_config.json); its bundled docs place global skills at ~/.gemini/config/skills/<name>/SKILL.md
-      // and always-on global rules in a standalone GEMINI.md there. Only when agy made that folder.
-      ...(agyConfig ? [[join(agyConfig, 'skills', 'agentstoz', 'SKILL.md'), SKILL] as [string, string], [join(agyConfig, 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL] as [string, string]] : []),
+      ...unfinishedSkillWrite(join(input.home, '.gemini', 'skills')),
+      // The IDE/config customization home and the CLI skill home are separate.
+      // Only use each when its own pre-existing home is present.
+      ...(agyConfig ? [invocationFile(join(agyConfig, 'skills', 'agentstoz', 'SKILL.md'), SKILL), [join(agyConfig, 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL] as [string, string]] : []),
+      ...(agyConfig ? unfinishedSkillWrite(join(agyConfig, 'skills')) : []),
+      ...(agyCliSkills ? unfinishedSkillWrite(agyCliSkills) : []),
       [join(input.home, '.gemini', 'GEMINI.md'), withAgentsToZInvocation(read(join(input.home, '.gemini', 'GEMINI.md')))],
       ...(agyConfig ? [[join(agyConfig, 'GEMINI.md'), withAgentsToZInvocation(read(join(agyConfig, 'GEMINI.md')))] as [string, string]] : []),
     ]),
   ];
   for (const hermesHome of new Set([input.hermesHome, ...(input.hermesHomes ?? [])].filter((value):value is string=>!!value))) {
     results.push(installTarget('hermes', [
-      [join(hermesHome, 'skills', 'agentstoz', 'SKILL.md'), SKILL],
+      invocationFile(join(hermesHome, 'skills', 'agentstoz', 'SKILL.md'), SKILL),
       [join(hermesHome, 'skills', 'remember_agentstoz', 'SKILL.md'), HERMES_REMEMBER_SKILL],
       [join(hermesHome, 'skills', AGENTSTOZ_TEAM_SKILL_NAME, 'SKILL.md'), AGENTSTOZ_TEAM_SKILL],
+      ...unfinishedSkillWrite(join(hermesHome, 'skills')),
       [join(hermesHome, 'SOUL.md'), withAgentsToZInvocation(read(join(hermesHome, 'SOUL.md')))],
     ]));
   }

@@ -124,6 +124,61 @@
 - 검증: `tests/maintainer/test_maintainer.py`의 `PromotionCandidateTests`(아무 파일도 쓰지 않음 ·
   `candidate.*`만 · 두 blocker 를 구분), `tests/bulk-upgrade.test.ts`의 승격 행 묶음.
 
+### 전수 클릭 검사 — 버튼을 하나씩 다 눌러 보고 목록을 이력으로 남긴다 (2026-11-01)
+
+일반 세트(계약·화면 fixture)와 페르소나 세트(사용자 목표 ↔ 검사)에 이어 **세 번째 공통 세트**다. 이 저장소에서는
+프로젝트 계층 검사(`click-sweep-screen`, 프로필 `web`·`full`)로도 돌고, 다른 등록 프로젝트에는 공통 러너가 엔진을 깔아 준다
+(아래 「공통 세트」).
+
+- **실행**: `bun scripts/check-maintainer-web.ts click-sweep`(격리 Vite 빌드부터 해 준다) → `tests/click-sweep.e2e.mjs <dist>`.
+  합성 API만 쓰고 3001·Supabase·외부 사이트에 닿지 않는다. 고정 응답이 없는 요청은 전부 503으로 답하고 보고서에
+  `unmockedGet`·`interceptedWrites`로 남는다 — **쓰기 요청이 실제로 실행되지 않으므로 삭제·Push·빌드 버튼도 누른다.**
+- **대상**: 보이고 맨 위에 있는(모달 뒤에 가려지지 않은) `button`·링크·탭·메뉴·스위치·`summary`와, 시맨틱 요소가 아니어도
+  React가 `onClick`을 단 요소(프로젝트 목록의 `div` 행 등 — `__reactProps$`로 읽는다, 전파만 막는 처리기는 제외).
+  같은 testid가 반복되는 목록은 **첫 항목 안쪽만** 본다(행마다 다른 이름·로딩 글자가 키를 흔들지 않게).
+- **키**: `<가장 가까운 testid·id·대화상자 이름 두 단계>><testid 또는 role:이름>`, 숫자는 `#`로 접는다. 이름도 testid도 없는
+  대상은 `(unnamed N)` — 스크린리더에도 이름이 없다는 뜻이라 접근성 결함 후보다(`summary.unnamed`).
+- **탐색**: 첫 화면(깊이 0)의 대상을 다 누르고, 누른 뒤 새 대상이 생기면 그 경로를 큐에 넣는다(기본 깊이 2). 같은 키는 한 번만
+  누른다. 화면이 바뀌면 Escape로 되돌려 보고 안 되면 처음부터 경로를 재생한다. 매 로드마다 저장소를 비우고 같은 값만 넣는다.
+- **반응 판정**: `crash`(앱 오류 화면) · `navigation` · `popup` · `native-dialog` · `file-chooser` · `download` · `dialog` · `ui`
+  (보이는 대상 목록·선택/펼침 상태·알림 글자·주소가 바뀜) · `network` · `clipboard` · `dom`(클릭 전 같은 시간의 자연 변화의 3배를
+  넘는 DOM 변화) · `none`. 이미 선택된 탭처럼 정당한 `none`도 있으므로 `none` 자체는 실패가 아니다.
+  `network`·`dom`은 **약한 반응**이다 — 배경 요청·DOM 흔들림만 사라진 것은 보고(`약한 반응만 사라짐`)이고, 강한 반응
+  (`ui`·`dialog`·`clipboard` 등)을 잃어야 실패다. 같은 트리를 두 번 돌려도 약한 반응은 오갔다(실측).
+- **판정**(`compareSweep` — 공통 엔진 `scripts/agentstoz-click-sweep.mjs` 안, 단위 테스트 `tests/click-sweep-compare.test.ts`): 새 오류(처리되지 않은 예외·
+  앱 오류 화면·503 외의 console.error) · 반응 상실(반응하던 대상이 `none`/`not-clickable`/`disabled`) · 사라짐 · 예산 초과 ·
+  깊이/화면 크기 불일치 · 기준선 없음은 **실패**, 새 대상·새 반응·고쳐진 오류는 **보고만**. 새 대상을 실패로 두지 않는 이유는
+  기능이 늘 때마다 깨지면 기준선 갱신이 습관이 되고, 그러면 정말 사라진 기능도 같은 손놀림에 묻히기 때문이다.
+- **이력**: 기준선 `tests/click-sweep/desktop.json`이 커밋 대상이다. 의도한 변경이면
+  `bun scripts/check-maintainer-web.ts click-sweep --update`로 다시 쓰고 **그 diff를 커밋한다 — 그 커밋 이력이 버튼 목록의
+  이력이다.** 예산에 걸린(전수가 아닌) 실행은 기준선이 될 수 없다. 실행마다 요약은 `.agentstoz/maintainer/click-sweep/history.jsonl`,
+  전체 결과는 `latest.json`(gitignore).
+- ⚠️ 매니페스트가 검사 96칸으로 꽉 차 있어 단일 파일 검사 `voice-remote-benchmark`를 같은 quick 전용·음성 도크 계약 묶음
+  `dock-notices-sessions-contracts`에 합쳐 자리를 만들었다(프로필 소속이 같아 검증 범위는 그대로).
+- **공통 세트(러너 1.8.0)**: 엔진은 Node/Bun 중립 단일 파일 `scripts/agentstoz-click-sweep.mjs`이고, 러너가
+  `CLICK_SWEEP_ENGINE` 문자열로 **바이트 그대로** 싣는다(마커 사이 블록 — `bun scripts/embed-click-sweep-engine.ts`가 다시 쓰고
+  `--check`가 어긋남을 잡는다. 러너 안의 사본을 손으로 고치지 말 것). 엔진을 고치면 다시 싣고 러너 `VERSION`을 올린다.
+  - 설정은 프로젝트의 `.agentstoz/click-sweep.json`(`schemaVersion: 1`, 화면 1~8개). 화면은 둘 중 하나다:
+    `command`(프로젝트가 자기 하네스를 돌린다 — 이 저장소의 `desktop`, `updateArgs` 기본 `["--update"]`) 또는
+    `url`(엔진이 직접 Playwright로 연다 — **loopback 주소만**, 선택 `serve.command`로 개발 서버를 띄웠다 끈다, `ready`는 CSS 선택자).
+    기준선 기본값은 `.agentstoz/click-sweep/<id>.json`이고 `..`·절대경로는 거절한다.
+  - `url` 화면의 요청 정책: **쓰기 요청과 다른 origin 요청은 503으로 막고 기록**, 같은 origin의 GET/HEAD만 통과시킨다 —
+    프로젝트 개발 서버에 쓰기가 닿지 않는다(엔진 테스트가 서버 측 카운터로 확인). 하네스는 `mock` 콜백으로 덮어쓸 수 있다.
+  - 러너: `sweep status`(구성·엔진·화면별 최근 요약) · `sweep install`(엔진 파일을 깐다 — **로컬에서 고친 엔진은 덮어쓰지 않고
+    거절**) · `sweep run [--surface id] [--update]`. 종료 코드 0 통과 · 1 실패 · 2 구성 없음/설정 오류 · 3 실행 불가
+    (Playwright 없음 등) — **2와 3은 통과가 아니다.** `capabilities`에 `clickSweep: 1`과 엔진 버전이 실린다.
+  - Playwright는 **디스크에 설치된 것만** 쓴다(프로젝트 → 엔진 위치 순으로 `node_modules/playwright`를 찾는다). 못 찾으면
+    3으로 끝낸다 — Bun이 import 시점에 최신 playwright를 자동 설치해 깔리지 않은 Chromium을 찾다 죽은 실측이 있다.
+  - 증거: 화면마다 `.agentstoz/maintainer/click-sweep/<id>/latest.json`(전체)·`summary.json`(작은 요약), 이력은
+    `.agentstoz/maintainer/click-sweep/history.jsonl`. 앱의 프로젝트 테스트 세트 화면은 `summary.json`과 기준선 **존재**만 읽어
+    세 번째 카드 「전수 클릭 세트」(`tester-click-sweep-set`)를 그린다(`src/testerSetsReader.ts`, 옛 호스트는 카드를 숨김).
+  - 검증: `tests/click-sweep-engine.test.ts`(AgentsToZ가 아닌 작은 정적 페이지에 CLI로 — 기준선 없음 실패 → `--update` →
+    통과 → 버튼이 사라지면 실패, 쓰기 요청이 서버에 닿지 않음, loopback 외 거절, 구성 없음 2),
+    `tests/maintainer/test_click_sweep.py`(사본 일치·구성 없음은 통과 아님·설치가 로컬 편집을 지킴·command 화면 판정),
+    `tests/tester-sets.test.ts`(세 번째 카드 읽기).
+- ⚠️ 이것은 **격리 빌드의 증거**다 — 설치 앱·TCC·실제 CLI는 증명하지 않는다. 그쪽은 실기 세트(설치 앱에서 기록한 단계를
+  재생, 컴퓨터 유즈 지속 승인과 아젠투지 자기 대상 허용이 정해진 뒤)의 몫이다.
+
 ### 프로젝트 테스터는 자연어로 시작된다 (`/api/project-tester/ensure`)
 
 - 네 에이전트의 상시 지침(공유 출력 블록의 `PROJECT_TESTER_AUTO_SETUP_POLICY`)이 «이 프로젝트를 테스트해»류 요청에서

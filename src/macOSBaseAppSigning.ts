@@ -21,6 +21,7 @@ export const MACOS_BASE_APP_ENTITLEMENTS = "<?xml version=\"1.0\" encoding=\"UTF
 const RESOURCE_ROOT = 'Contents/Resources/resources/';
 export const MACOS_BASE_CODEX_ACCESSIBILITY_HELPER_IDENTIFIER =
   'com.intenet.agentstozbycs.helper.codex-accessibility' as const;
+export const MACOS_BASE_CONTROL_LINK_IDENTIFIER = 'com.intenet.agentstozbycs.helper.control-link' as const;
 export const MACOS_BASE_KMSG_IDENTIFIER = 'com.intenet.agentstozbycs.helper.kmsg' as const;
 export const MACOS_BASE_SCREEN_HELPER = Object.freeze({
   path: 'Contents/Helpers/AgentsToZ Screen.app',
@@ -28,6 +29,7 @@ export const MACOS_BASE_SCREEN_HELPER = Object.freeze({
   identifier: 'com.intenet.agentstozbycs.screen', teamIdentifier: 'DA8QKAQ2C9',
 } as const);
 export const MACOS_BASE_CODE = Object.freeze([
+  { path: RESOURCE_ROOT + 'agentstoz-api-sidecar-control-link.node', identifier: MACOS_BASE_CONTROL_LINK_IDENTIFIER },
   { path: RESOURCE_ROOT + 'agentstoz-api-sidecar', identifier: MACOS_RUNTIME_PRODUCTION_API_SIDECAR_IDENTIFIER },
   { path: RESOURCE_ROOT + 'agentstoz-use-mcp', identifier: MACOS_RUNTIME_PRODUCTION_USE_MCP_IDENTIFIER },
   { path: RESOURCE_ROOT + 'agentstoz-agent-runtime-guard', identifier: MACOS_RUNTIME_PRODUCTION_GUARD_IDENTIFIER },
@@ -44,6 +46,7 @@ export const MACOS_BASE_REQUIRED_FILES = Object.freeze([
   'Contents/Info.plist', 'Contents/Resources/icon.icns',
   RESOURCE_ROOT + 'windows-process-supervisor.ps1',
   RESOURCE_ROOT + 'agentstoz-kmsg.LICENSE',
+  RESOURCE_ROOT + 'agentstoz-api-sidecar-control-link.LICENSE',
   RESOURCE_ROOT + 'templates/tester-agent/agentstoz-maintainer.py',
   ...['memory-status', 'memory-start', 'memory-stop', 'project-start', 'memory-unlink',
     'project-from-memory', 'project-clone', 'memory-link', 'remember-session', 'hermes-open', 'memory-sync']

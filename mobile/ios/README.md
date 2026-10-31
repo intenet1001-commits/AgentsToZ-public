@@ -87,6 +87,8 @@ bun run preflight:ios
 # 전체 Xcode와 사용 가능한 iOS simulator runtime 필요
 bun mobile/ios/scripts/check-workroom.ts
 python3 mobile/ios/scripts/check-ui.py
+# 실제 프로덕션 SurfaceView의 한 손가락 클릭·두 손가락 우클릭 (별도 빈 simulator)
+python3 mobile/ios/scripts/check-ui.py --screen-gestures
 # USB iPhone (격리 UI 시험 번들, 팀 기본값 사용). 실행 전 --plan으로 명령만 확인 가능
 python3 mobile/ios/scripts/check-ui.py --device '<device-id>'
 ```
@@ -96,6 +98,23 @@ python3 mobile/ios/scripts/check-ui.py --device '<device-id>'
 ⚠️ **`bun run verify`는 이 앱을 건드리지 않습니다.** 실측(2026-09-10): Mac 쪽에서 「소켓 종료 ≠ 세션 종료」로 계약을 바꾼 뒤 `test:ios`가 깨져 있었는데 verify는 4,011건 전부 통과했습니다. 원격제어 계약(`remoteControlCore.ts`·`remoteControlLanServer.ts`·`remoteControlMobilePage.ts`)을 건드렸다면 `bun run test:ios`를 따로 돌리세요. CI에서는 `verify.yml`의 `native-ios` job이 push마다 `swift test`와 무서명 iPhone 빌드를 강제합니다. `native-ios.yml` 수동 workflow는 XCUITest로 빌드·온보딩 입력/주소 거절을 검사하며 개인 포털 시험은 명시적으로 skipped로 남깁니다. 실제 LAN/PTY가 필요한 `check-workroom.ts`와 `check-native.ts`는 사설 IPv4가 있는 단말에서 위 명령으로 별도 실행해야 합니다.
 
 `check-ui.py`는 기본값으로 별도의 빈 simulator에서 프로덕션 앱을 XCUITest로 조작합니다. 기본 실행은 한글 문자열 입력·잘못된 주소 거절 1개 시험을 실행하고 개인 포털 시험 1개를 건너뜁니다. 선택적으로 `AGENTSTOZ_IOS_PORTAL_URL`에 본인 HTTPS origin을 로컬에서만 지정하면 익명 포털의 탭, 연결 설정 열기/완료/삭제 취소, 테마 메뉴 바깥 탭, 회전, background 복귀와 실제 앱 프로세스 종료/재실행을 추가 검사합니다. Google 로그인이나 실제 호스트 연결·작업은 실행하지 않습니다. 한글 문자열 주입은 한글 키보드 조합·받침 편집 검증을 대신하지 않습니다.
+
+`--screen-gestures`는 프로덕션 소스의 `ScreenSurface.SurfaceView`를 복사한 전용 시험 앱에서
+XCUITest의 실제 한 손가락/두 손가락 탭을 실행하고 발생한 `InputEvent`를 검사합니다.
+프로덕션 진입점·프로젝트는 수정하지 않으며 로그인·생체 인증·Mac 연결은 하지 않습니다.
+2026-10-26에는 수정 전 한 손가락 탭이 `left=0 right=1`을 만드는 결함을 실제 재현했습니다.
+이 검사는 Mac 주입 성공을 뜻하지 않습니다. USB 실기 검사는 `PhysicalScreenControls.swift`의
+연결 캡처 단계를 먼저 실행해 전용 `ScreenControlFixture.swift` 창이 실제 영상에 온전히 보이는지
+확인한 뒤 별도 입력 단계를 실행합니다. Mac receipt의 클릭 증가·정확한 문자열·양축 스크롤 변화로
+전달을 판정하며, UI 탭 성공만으로 통과시키지 않습니다.
+
+실기기에서 `Timed out while enabling automation mode`가 시험 초기화 전에 발생하면
+iPad/iPhone에 표시된 **‘XCTest’의 Touch ID/Face ID · Enable UI Automation** 요청을
+확인합니다. 기기가 잠금 해제되어 있어도 별도 생체 승인이 필요할 수 있으며 사용자가
+직접 승인해야 합니다. 이는 Screen 연결 때의 생체 승인과 별개입니다. 승인 후에는 새 연결
+캡처를 확인하고 입력 단계를 따로 실행하며, 이전 입력의 수신 여부가 불명확하면 재전송하지 않습니다.
+또한 iOS 빌드와 UI 검사는 공유 `mobile/ios/build/portal-web`을 사용하므로, Xcode가 자원을
+복사하는 동안 다른 빌드로 해당 디렉터리를 재생성하지 않습니다.
 
 `--device <device-id> [--team <team-id>]`는 같은 XCUITest를 USB iPhone에서 실행합니다. 앱은 격리 번들 `com.intenet.agentstoz.mobile.uitest`("AgentsToZ UI 시험")로 서명·설치되고 실행 전후에 그 앱과 러너만 지웁니다 — 실제 앱(main·dev·TestFlight)과 저장된 연결은 건드리지 않습니다. `--plan`은 명령만 JSON으로 출력하고 빌드·기기 접근을 하지 않습니다. 결과는 `mobile/ios/build/ui-device-evidence/run-*/`(`actualIPhone: true`, `gitHead`)에 남습니다. 화면별로 무엇이 자동이고 무엇을 사람이 눌러야 하는지는 [실기기 체크리스트](DEVICE-CHECKLIST.md)를 따릅니다.
 
@@ -159,6 +178,7 @@ bun run install:ios:development -- --device '<connected-device-id>'
 - **터치:** 탭 = 누른 곳 클릭(빠른 두 번 탭은 첫 탭 위치를 다시 써서 Mac이 더블클릭으로 셉니다. 단 두 탭이 유리에서 16pt **그리고** Mac 영상에서 8픽셀 안일 때만 — 축소한 폰에서는 16pt가 Finder 줄 세 개라, 바로 아랫줄·옆 계산기 키를 빠르게 누른 것이 첫 자리 더블클릭이 되면 안 됩니다. 그래서 1배 세로 화면에서는 더블클릭이 잘 안 잡힐 수 있고, 확대하거나 트랙패드 방식을 씁니다), 길게 누른 뒤 끌기 = 버튼을 누른 채 끌기(손을 떼면 놓음), 한 손가락 끌기 = 확대한 화면 이동.
 - **트랙패드:** 폰이 영상 위에 커서를 그리고 한 손가락이 상대 이동시킵니다(천천히 1:1, 빠르게 최대 3배). 탭 = 커서 위치 클릭, 길게 누른 뒤 끌기 = 끌기. 확대 중 커서가 가장자리에 가면 화면이 따라갑니다.
 - **공통:** 두 손가락 탭 = 오른쪽 클릭, 두 손가락 끌기 = 스크롤(내용이 손가락을 따라오고, 튕기면 미끄러짐), 벌리기 = 1~4배 확대, 두 손가락 두 번 탭 또는 「확대 원래대로」 = 1배. 두 손가락 동작은 처음 움직임으로 확대인지 스크롤인지 한 번만 정합니다.
+- **텍스트 입력:** 패널에서 Enter를 누르면 표시 중인 한글 조합을 확정하고 Mac에 글자와 Return을 보냅니다. Mac이 v4보다 오래되면 글자만 보내므로 별도 ⏎를 사용합니다. Mac 화면에서 실제 결과를 확인하세요. 패널의 좌우 버튼과 1·2·3은 Mac의 Mission Control 단축키를 사용하며, 활성화되지 않았거나 다르게 지정된 단축키는 Mac 설정을 따라야 합니다.
 - **암호 입력(열쇠 버튼):** 보안 입력칸(자동 고침·예측·받아쓰기 없음, 복사·붙여넣기·끌어 놓기 막음)에 친 글자를 기존 유니코드 글자 입력으로 보내고 곧바로 칸을 비웁니다. 클립보드는 쓰지 않습니다(SR-17). 키보드의 보내기는 Mac에서 Return까지 누릅니다.
 - 포인터 이동과 스크롤은 화면 갱신마다 모아 각각 초당 60번까지만 보냅니다. Mac 입력 한도(초당 240)를 넘으면 Mac이 조용히 버리기 때문입니다. 스크롤 한 번은 Mac 한도(4000)를 넘지 않고, 글자는 제어 문자를 빼고 256바이트씩 나눕니다 — 둘 다 Mac에서는 세션을 끝내는 형식 오류입니다.
 - 좌표·확대·가속·스크롤 계산은 UIKit 없는 `AgentsToZCore/ScreenViewport.swift`에 있고 `bun run test:ios`(및 `swift test --package-path mobile/ios/AgentsToZCore`)의 `ScreenViewportTests.swift`가 확인합니다. 조작 느낌·Face ID·실제 Mac은 [실기기 체크리스트](DEVICE-CHECKLIST.md)의 「Mac 화면」 절로 확인합니다.

@@ -1,7 +1,7 @@
 import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
-import {lstat,open,realpath,readlink,mkdtemp,mkdir,writeFile,chmod,rm} from 'node:fs/promises';
+import {lstat,open,realpath,readlink,mkdtemp,mkdir,writeFile,chmod,rm,utimes} from 'node:fs/promises';
 import {isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {tmpdir} from 'node:os';
 import {parseGitWorktreePorcelain} from '../git-worktree-list';
@@ -102,7 +102,7 @@ class BoundedFiles {
     if(!inside(this.root,await realpath(path)))throw new SourceReadError('SOURCE_PATH_INVALID');
     return path;
   }
-  async read(rel:string,max=this.budget.maxSourceBytes):Promise<{bytes:Buffer;mtime:number}|null>{
+  async read(rel:string,max=this.budget.maxSourceBytes):Promise<{bytes:Buffer;mtime:number;identity:{dev:number;ino:number;size:number;mtimeMs:number;ctimeMs:number}}|null>{
     const path=await this.path(rel);if(!path)return null;
     const file=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0)|(constants.O_NONBLOCK??0));
     try{
@@ -116,8 +116,13 @@ class BoundedFiles {
       while(used<bytes.length){check(this.signal,this.budget.deadline);const r=await file.read(bytes,used,Math.min(64*1024,bytes.length-used),used);if(!r.bytesRead)break;used+=r.bytesRead;}
       check(this.signal,this.budget.deadline);const after=await file.stat(),current=await lstat(path);
       if(used!==before.size||current.isSymbolicLink()||await realpath(path)!==path||![after,current].every(s=>s.dev===before.dev&&s.ino===before.ino&&s.size===before.size&&s.mtimeMs===before.mtimeMs&&s.ctimeMs===before.ctimeMs))throw new SourceReadError('SOURCE_CHANGED');
-      return {bytes:bytes.subarray(0,used),mtime:before.mtimeMs};
+      return {bytes:bytes.subarray(0,used),mtime:before.mtimeMs,identity:{dev:before.dev,ino:before.ino,size:before.size,mtimeMs:before.mtimeMs,ctimeMs:before.ctimeMs}};
     }finally{await file.close();}
+  }
+  async assertUnchanged(rel:string,identity:{dev:number;ino:number;size:number;mtimeMs:number;ctimeMs:number}):Promise<void>{
+    const path=await this.path(rel);if(!path)throw new SourceReadError('SOURCE_CHANGED');
+    const current=await lstat(path);check(this.signal,this.budget.deadline);
+    if(!current.isFile()||current.nlink!==1||current.dev!==identity.dev||current.ino!==identity.ino||current.size!==identity.size||current.mtimeMs!==identity.mtimeMs||current.ctimeMs!==identity.ctimeMs)throw new SourceReadError('SOURCE_CHANGED');
   }
   async text(rel:string,max=this.budget.maxSourceBytes){const file=await this.read(rel,max);if(!file)return null;let text:string;try{text=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);}catch{throw new SourceReadError('SOURCE_FORMAT_INVALID');}return {...file,text};}
 }
@@ -157,13 +162,21 @@ function safeIndex(bytes:Buffer):boolean {
 async function withIsolatedGitProbe<T>(input:{root:string;gitDir:string;common:string;head:string;signal:AbortSignal;deadline:number},read:(probe:IsolatedGitProbe)=>Promise<T>):Promise<T|undefined>{
   const files=new BoundedFiles(input.gitDir,localBudget(input.deadline),input.signal),index=await files.read('index',SOURCE_BYTES);
   if(!index||!safeIndex(index.bytes))return undefined;
+  // Git compares the index file's mtime to cached entry times to decide when
+  // it must rehash a racy entry. A freshly written copy would hide that race.
+  // Round down rather than up: a coarser timestamp may cause extra rehashing,
+  // but must never make the isolated index appear newer than the original.
+  const indexSeconds=Math.floor(index.mtime/1000);if(!Number.isFinite(indexSeconds)||indexSeconds<1)return undefined;
   const objects=await realpath(join(input.common,'objects'));if(!(await lstat(objects)).isDirectory())return undefined;
   check(input.signal,input.deadline);const directory=await mkdtemp(join(tmpdir(),'agentstoz-state-git-'));
   try{
     await chmod(directory,0o700);await mkdir(join(directory,'objects'),{mode:0o700});await mkdir(join(directory,'refs'),{mode:0o700});
     await writeFile(join(directory,'config'),'[core]\n bare = false\n repositoryformatversion = 0\n attributesfile = '+(process.platform==='win32'?'NUL':'/dev/null')+'\n fsmonitor = false\n untrackedcache = false\n',{mode:0o600,flag:'wx'});
-    await writeFile(join(directory,'HEAD'),input.head+'\n',{mode:0o600,flag:'wx'});await writeFile(join(directory,'index'),index.bytes,{mode:0o600,flag:'wx'});
-    check(input.signal,input.deadline);return await read({directory,objects,index:join(directory,'index')});
+    await writeFile(join(directory,'HEAD'),input.head+'\n',{mode:0o600,flag:'wx'});const indexPath=join(directory,'index');await writeFile(indexPath,index.bytes,{mode:0o600,flag:'wx'});
+    await utimes(indexPath,indexSeconds,indexSeconds);const copied=await lstat(indexPath);
+    if(!Number.isFinite(copied.mtimeMs)||copied.mtimeMs>index.mtime||copied.mtimeMs<1000)return undefined;
+    await files.assertUnchanged('index',index.identity);check(input.signal,input.deadline);
+    const result=await read({directory,objects,index:indexPath});await files.assertUnchanged('index',index.identity);return result;
   }finally{await rm(directory,{recursive:true,force:true});}
 }
 

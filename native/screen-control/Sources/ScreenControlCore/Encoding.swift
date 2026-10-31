@@ -8,8 +8,10 @@ public enum ScreenControlProtocol {
     /// The newest session version this build speaks. A session settles on the newest version both ends speak, and that
     /// version is the one bound into its transcript, keys and records (Handshake.swift, `VersionStamp`).
     /// Version 2 adds control messages only: the Mac's lock state, its displays, the cursor in the picture and turning
-    /// screen control off from the phone (`ControlMessage`). The key exchange, records and input are version 1's.
-    public static let version: UInt16 = 2
+    /// screen control off from the phone (`ControlMessage`). The key exchange and records remain version 1's.
+    /// Version 3 adds keyboard acknowledgements, Spaces and bounded video-quality requests.
+    /// Version 4 adds a single admitted text and Return request with posting-only feedback.
+    public static let version: UInt16 = 4
     /// The oldest session version this build still speaks, so a Mac and a phone of different builds still connect.
     public static let minimumVersion: UInt16 = 1
     /// Registration (QR, record, acknowledgement, approval) did not change with version 2 and stays at 1, so a phone and a

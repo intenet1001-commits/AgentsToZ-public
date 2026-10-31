@@ -1,7 +1,7 @@
 import {afterEach,describe,expect,test} from 'bun:test';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink,lstat} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink,lstat,utimes,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createProjectStateBundleSources,createReadToolSourceAdapters,resolveProjectStateCheckout} from '../src/projectStateBundleSources';
@@ -39,6 +39,34 @@ describe('bounded project state production sources',()=>{
     await writeFile(join(root,'new.txt'),'one');const added=await bind(root);await writeFile(join(root,'new.txt'),'two');expect((await bind(root)).proof).not.toBe(added.proof);
     const observed=await read(await bind(root),'git');expect(observed.availability).toBe('ready');expect(observed.summary.join('\n')).toContain('unstaged 1, untracked 1');expect(observed.summary.join('\n')).toContain('file: tracked.txt');expect(JSON.stringify(observed)).not.toContain(root);
     git(root,'switch','-c','another');expect((await bind(root)).proof).not.toBe(added.proof);
+  });
+
+  test('isolated index preserves Git racy-index detection for a same-size change',async()=>{
+    const root=await project(),indexPath=join(root,'.git/index'),tracked=join(root,'tracked.txt');
+    const clean=await bind(root);expect(clean.sourceProofComplete).toBe(true);
+    // Make the stat tuple match the changed file while the index still contains
+    // the original blob. A same-second index mtime forces Git to rehash it.
+    await writeFile(tracked,'changed!\n');const sec=Math.floor(Date.now()/1000)-120;await utimes(tracked,sec,sec);
+    const stat=await lstat(tracked,{bigint:true}),index=await readFile(indexPath);
+    let offset=12,found=false;for(let n=0;n<index.readUInt32BE(8);n++){
+      const start=offset,flags=index.readUInt16BE(offset+60);offset+=62;if(flags&0x4000)offset+=2;
+      const end=index.indexOf(0,offset);if(index.toString('utf8',offset,end)==='tracked.txt'){
+        for(const [pos,ns] of [[0,stat.ctimeNs],[8,stat.mtimeNs]] as const){index.writeUInt32BE(Number(ns/1000000000n),start+pos);index.writeUInt32BE(Number(ns%1000000000n),start+pos+4);}found=true;
+      }offset=start+Math.ceil((end+1-start)/8)*8;
+    }
+    expect(found).toBe(true);createHash('sha1').update(index.subarray(0,-20)).digest().copy(index,index.length-20);
+    await writeFile(indexPath,index);await utimes(indexPath,sec,sec);
+    expect(git(root,'diff','--no-ext-diff','--no-textconv','--binary','HEAD').toString()).toContain('changed!');
+    const changed=await bind(root),result=await read(changed,'git');expect(changed.sourceProofComplete).toBe(true);
+    expect(changed.proof).not.toBe(clean.proof);expect(result.summary.join('\n')).toContain('unstaged 1');
+  });
+
+  test('replacing the original index while probing withholds source proof',async()=>{
+    const root=await project(),indexPath=join(root,'.git/index');let temporary='';
+    const binding=await resolveProjectStateCheckout({rootPath:root,targetId:'project-1',projectId:'project-1',owner:'local',authorityRevision:'v1'},new AbortController().signal,{beforeIsolatedRead:async directory=>{
+      temporary=directory;await writeFile(indexPath+'.replacement',await readFile(indexPath));await rename(indexPath+'.replacement',indexPath);
+    }});
+    expect(binding.sourceProofComplete).toBe(false);expect((await read(binding,'git')).availability).toBe('partial');await expect(lstat(temporary)).rejects.toThrow();
   });
 
   test('cached tester result requires both exact commit and maintainer source fingerprint',async()=>{

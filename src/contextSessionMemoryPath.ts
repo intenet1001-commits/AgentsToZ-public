@@ -1,3 +1,4 @@
+import type { ClaudeCompaction, NextClaudeConversation } from './contextCommandEvidence';
 import type { ContextSurfacePresence } from './contextSessionPresence';
 import type { ContextSessionProjectHint } from './contextSessionMetadata';
 import type { ProjectCodexVoiceBindingState } from './projectCodexVoice';
@@ -27,6 +28,8 @@ export interface ContextSession {
   usedTokens: number | null;
   costUsd: number | null;
   ageMs: number;
+  /** Stable observation stamp; polling age is not an activity revision. */
+  capturedAt?: string;
   state: 'active' | 'idle' | 'stale';
   clientLabel: string;
   surfaceKind: string;
@@ -35,6 +38,14 @@ export interface ContextSession {
   /** Runtime presence for integrations such as Orca and cmux.  Snapshot
    * freshness is intentionally a separate field (`state`). */
   surfacePresence?: ContextSurfacePresence | null;
+  /** The AgentsToZ Workroom this Claude runs in, as its environment said (`AGENTSTOZ_WORKROOM_SESSION_ID`, captured by
+   *  the statusline hook). A hint for copy only — never authority to send: only an exact binding is. */
+  workroomSessionId?: string | null;
+  /** Claude only, local API only: the transcript's newest compaction, and the conversation that followed this one in
+   *  the same Workroom or Orca pane (after /clear). What the dock reads to tell a /compact·/clear outcome
+   *  (src/contextCommandEvidence.ts). */
+  lastCompaction?: ClaudeCompaction | null;
+  nextConversation?: NextClaudeConversation | null;
   /** Project binding for a ChatGPT Desktop `realtime_voice` rollout. This is
    * independent of whether the Voice rollout emitted a token-count event. */
   voiceBindingState?: ProjectCodexVoiceBindingState;

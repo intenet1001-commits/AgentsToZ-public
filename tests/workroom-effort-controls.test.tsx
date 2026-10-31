@@ -6,8 +6,9 @@ import {expect, test} from 'bun:test';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {GUIDE_CONTENT} from '../src/guide/guideContent';
-import {WorkroomEffortAdvice, WorkroomEffortBadge, WorkroomEffortOption, createWorkroomEffortReader, type WorkroomEffortState} from '../src/WorkroomEffortControls';
-import {WORKROOM_EFFORT_ELSEWHERE, type WorkroomEffortView} from '../src/workroomEffortView';
+import {WorkroomEffortAdvice, WorkroomEffortBadge, WorkroomEffortOption, createWorkroomEffortReader, createWorkroomEffortRequest, type WorkroomEffortState} from '../src/WorkroomEffortControls';
+import {WORKROOM_EFFORT_ELSEWHERE, workroomEffortView, type WorkroomEffortView} from '../src/workroomEffortView';
+import {normalizeMobileWorkspaceRequest, normalizeMobileWorkspaceResult} from '../src/mobileWorkspaceProtocol';
 
 const state = (over: Partial<WorkroomEffortState>): WorkroomEffortState => ({supported: true, auto: true, session: null, sessionId: null, busy: false, error: '', ...over});
 const option = (s: WorkroomEffortState, extra: Partial<React.ComponentProps<typeof WorkroomEffortOption>> = {}) =>
@@ -58,6 +59,65 @@ test('both help keys have guide entries', () => {
 });
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('extended local read negotiates max, older strict hosts fall back once, and writes never retry', async () => {
+  const record = {sessionId:'session-1234',agent:'claude' as const,manual:false,level:'max' as const,origin:'launch' as const};
+  const calls: unknown[] = [];
+  let old = false;
+  const request = createWorkroomEffortRequest(async raw => {
+    const parsed = normalizeMobileWorkspaceRequest(raw);
+    calls.push(parsed.workspace);
+    if (old && parsed.workspace.effortExtended) throw new Error('모바일 작업 요청 형식이 올바르지 않습니다.');
+    return normalizeMobileWorkspaceResult({kind:'workspace',action:'workroom.effort',effort:workroomEffortView(true,record,'auto',parsed.workspace.effortExtended === true)});
+  }, true);
+  const input = {targetId:'project-1234',sessionId:'session-1234'};
+  expect((await request(input)).session?.level).toBe('max');
+  expect(calls).toHaveLength(1);
+  old = true;
+  expect((await request(input)).session?.level).toBeUndefined();
+  expect(calls).toHaveLength(3);
+  expect((calls[1] as {effortExtended?:boolean}).effortExtended).toBe(true);
+  expect((calls[2] as {effortExtended?:boolean}).effortExtended).toBeUndefined();
+  await request(input);
+  expect(calls).toHaveLength(4);
+  const failedWrites: unknown[] = [];
+  const write = createWorkroomEffortRequest(async raw => {failedWrites.push(raw); throw new Error('모바일 작업 요청 형식이 올바르지 않습니다.');}, true);
+  await expect(write({...input,mode:'off'})).rejects.toThrow();
+  expect(failedWrites).toHaveLength(1);
+  const legacy = workroomEffortView(true,record,'auto');
+  expect(legacy.session?.level).toBeUndefined();
+});
+test('effortExtended: the strict normalizer takes only `true`, only on workroom.effort, and a reply carries no new key', () => {
+  const request = (workspace: Record<string, unknown>) => ({operation: 'workspace', requestId: 'request-1234', targetId: 'project-1234', workspace});
+  // Accepted with or without a session, for a read or a change, and kept as sent.
+  for (const workspace of [{action: 'workroom.effort', effortModes: true, effortExtended: true},
+    {action: 'workroom.effort', effortModes: true, effortExtended: true, sessionId: 'session-1234'},
+    {action: 'workroom.effort', effortModes: true, effortExtended: true, mode: 'off'}])
+    expect(normalizeMobileWorkspaceRequest(request(workspace)).workspace.effortExtended).toBe(true);
+  expect(normalizeMobileWorkspaceRequest(request({action: 'workroom.effort', effortModes: true})).workspace.effortExtended).toBeUndefined();
+  // Anything but `true`, or on any other action, is the same refusal an older host gives (so the reader's one fallback applies).
+  for (const value of [false, 'true', 1, null, {}])
+    expect(() => normalizeMobileWorkspaceRequest(request({action: 'workroom.effort', effortModes: true, effortExtended: value}))).toThrow('모바일 작업 요청 형식이 올바르지 않습니다.');
+  for (const action of ['workroom.status', 'memory.status', 'workroom.save'])
+    expect(() => normalizeMobileWorkspaceRequest(request({action, sessionId: 'session-1234', effortExtended: true}))).toThrow('모바일 작업 요청 형식이 올바르지 않습니다.');
+  // The reply keeps its three keys; a pinned max survives only the negotiated reader, and an unknown session key is refused.
+  const record = {sessionId: 'session-1234', agent: 'codex' as const, manual: false, level: 'ultra' as const, origin: 'launch' as const};
+  expect(normalizeMobileWorkspaceResult({kind: 'workspace', action: 'workroom.effort', effort: workroomEffortView(true, record, 'auto', true)}).effort?.session?.level).toBe('ultra');
+  expect(() => normalizeMobileWorkspaceResult({kind: 'workspace', action: 'workroom.effort', effort: {auto: true}, effortExtended: true})).toThrow();
+  expect(() => normalizeMobileWorkspaceResult({kind: 'workspace', action: 'workroom.effort', effort: {auto: true, session: {agent: 'codex', manual: false, pinned: 'max'}}})).toThrow();
+  for (const level of ['xhigh', 'max', 'ultra'] as const) expect(workroomEffortView(true, {...record, level}, 'auto').session?.level).toBeUndefined();
+});
+
+test('a phone never asks for extended levels: only the Mac\'s own panel does, and a phone request carries no new key', async () => {
+  const sent: unknown[] = [];
+  const phone = createWorkroomEffortRequest(async raw => { sent.push(normalizeMobileWorkspaceRequest(raw).workspace); return normalizeMobileWorkspaceResult({kind: 'workspace', action: 'workroom.effort', effort: {auto: true}}); }, false);
+  await phone({targetId: 'project-1234', sessionId: 'session-1234'});
+  await phone({targetId: 'project-1234', mode: 'recommend'});
+  expect(sent.every(workspace => !Object.hasOwn(workspace as object, 'effortExtended'))).toBe(true);
+  // The panel asks for extended levels only when it is not a remote surface (src/AiTerminalPanel.tsx).
+  const panel = await Bun.file(new URL('../src/AiTerminalPanel.tsx', import.meta.url)).text();
+  expect(panel).toMatch(/useWorkroomEffort\(\{[^}]*extended:!remote\}\)/);
+});
 type ReaderInput = Parameters<Parameters<typeof createWorkroomEffortReader>[0]>[0];
 function reader(answer: (input: ReaderInput) => Promise<WorkroomEffortView>, options: {readOnly?: boolean} = {}) {
   const calls: ReaderInput[] = [];

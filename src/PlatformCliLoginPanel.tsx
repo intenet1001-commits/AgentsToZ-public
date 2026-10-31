@@ -2,7 +2,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {isTauri} from './lib/env';
 import {useEffect,useRef,useState} from 'react';
 import {terminalLocalRequest} from './aiTerminalClient';
-import {PLATFORM_CLI_PATH,type PlatformCliProvider,type PlatformCliAccountPurpose} from './platformCliProtocol';
+import {PLATFORM_CLI_PATH,type PlatformCliAccount,type PlatformCliProvider,type PlatformCliAccountPurpose} from './platformCliProtocol';
 import type {PlatformCliLoginView} from './platformCliLogin';
 import {platformConnectionOperation} from './platformCliOperationClient';
 import {openPreferredBrowser} from './openPreferredBrowser';
@@ -13,7 +13,9 @@ import {PLATFORM_SIGNUP_URLS} from './platformCliSetupGuide';
 import {PLATFORM_CLI_LABELS} from './platformCliProtocol';
 import {writeOnboardingClipboard} from './onboardingClipboard';
 const button='min-h-[44px] rounded-lg border border-[var(--line)] px-3 py-2 text-xs disabled:opacity-50';
-export function PlatformCliLoginPanel({provider,email,ko,disabled=false,onConnected,onVerificationStarted,purpose='project-cli',discoverEmail=false}:{provider:PlatformCliProvider;email:string;ko:boolean;disabled?:boolean;purpose?:PlatformCliAccountPurpose;discoverEmail?:boolean;onConnected:()=>void;onVerificationStarted:(id:string)=>void}){
+export function PlatformCliLoginPanel({provider,email,ko,disabled=false,onConnected,onVerificationStarted,onLoginStarted,purpose='project-cli',discoverEmail=false}:{provider:PlatformCliProvider;email:string;ko:boolean;disabled?:boolean;purpose?:PlatformCliAccountPurpose;discoverEmail?:boolean;onConnected:(account?:PlatformCliAccount)=>void;onVerificationStarted:(id:string)=>void;
+  /** The id of a sign-in this panel just asked for, before its answer: the helpdesk's help links its run to it. */
+  onLoginStarted?:(loginId:string)=>void}){
   const views=useRef<Partial<Record<PlatformCliProvider,PlatformCliLoginView>>>({});
   const [loginEmail,setLoginEmail]=useState(email);
   useEffect(()=>{setLoginEmail(email);},[provider,email]);
@@ -27,7 +29,7 @@ export function PlatformCliLoginPanel({provider,email,ko,disabled=false,onConnec
   const request=(body:unknown)=>terminalLocalRequest(PLATFORM_CLI_PATH,body);
   useEffect(()=>{generation.current++;setLogin(views.current[provider]??null);setMessage('');setCode('');return()=>{generation.current++;};},[provider]);
   useEffect(()=>{const current=generation.current;let id:string|null=null;try{id=localStorage.getItem(`agentstoz-cli-login:${purpose}:${provider}`);}catch{}if(id)void request({operation:'login-status',loginId:id}).then(r=>{if(generation.current===current)accept(r.login);}).catch(()=>{if(generation.current===current)setMessage(ko?'이전 로그인 결과를 확인하지 못했습니다. 기존 계정 목록을 먼저 확인하세요.':'Read the existing account list before starting another login.');});},[provider,purpose]);
-  const accept=(view:PlatformCliLoginView)=>{views.current[view.provider]=view;setLogin(view);if(view.state==='completed')onConnected();};
+  const accept=(view:PlatformCliLoginView)=>{views.current[view.provider]=view;setLogin(view);if(view.state==='completed')onConnected(view.account);};
   useEffect(()=>{
     if(!login||login.provider!==provider||!['waiting','checking'].includes(login.state))return;
     let current=true,timer:ReturnType<typeof setTimeout>;const id=login.id;
@@ -49,7 +51,7 @@ export function PlatformCliLoginPanel({provider,email,ko,disabled=false,onConnec
       if(discoverEmail)openAfterAdmission.current.add(id);
       try{localStorage.setItem(`agentstoz-cli-login:${purpose}:${provider}`,id);}catch{}
       // Retain the exact request even if the admission reply is lost.
-      const initial:PlatformCliLoginView={id,provider,purpose,email:discoverEmail?'':loginEmail.trim(),state:'waiting',expiresAt:Date.now()+600_000};views.current[provider]=initial;setLogin(initial);
+      const initial:PlatformCliLoginView={id,provider,purpose,email:discoverEmail?'':loginEmail.trim(),state:'waiting',expiresAt:Date.now()+600_000};views.current[provider]=initial;setLogin(initial);onLoginStarted?.(id);
     }
     const value=code;setCode('');
     try{const r=await request(operation==='login-start'?(discoverEmail?{operation:'login-onboarding-start',provider,purpose,requestId:id}:{operation,provider,purpose,email:loginEmail.trim(),requestId:id}):{operation,loginId:id,...(operation==='login-code'?{code:value}:{})});if(generation.current===current&&epoch.current===turn)accept(r.login.cancelled?{...views.current[provider]!,state:'cancelled'}:r.login);}

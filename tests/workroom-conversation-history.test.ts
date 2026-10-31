@@ -53,6 +53,34 @@ describe('local workroom history boundaries',()=>{
       await expect(history.resumeThreadSession(f.summary.id,f.summary.targetId,randomUUID(),()=>true)).rejects.toThrow('원래');expect(launched).toBe(1);
     }finally{await history.shutdown();}
   });
+  test('scheduled history resumes pass the pinned model and final guard only through the host call',async()=>{
+    const f=fixture();f.journal.started(f.context);f.save();f.journal.observe({...f.context,summary:{...f.summary,state:'exited'}},f.summary.id);
+    const contexts:any[]=[];let guards=0,gates=0;
+    const launchModel={model:'claude-test-model'};
+    const startGuard=async()=>{guards++;return ()=>{guards++;};};
+    const startEffectGate=<T>(effect:()=>T):T=>{gates++;return effect();};
+    const history=new WorkroomConversationService({appDataDir:f.root,journal:f.journal,platform:'darwin',contexts:()=>contexts,prepare:async()=>f.context,assertNoWriter:async()=>{},launch:async(record,_id,_cols,_rows,launch)=>{
+      expect(launch.launchModel).toEqual(launchModel);expect(launch.startGuard).toBe(startGuard);expect(launch.startEffectGate).toBe(startEffectGate);
+      const guard=await launch.startGuard!(f.context);if(typeof guard==='function')guard();
+      launch.launching();const context=launch.startEffectGate!(()=>({...f.context,summary:{...f.summary,id:randomUUID()}}));contexts.push(context);history.started(context,record.id);return {session:context.summary};
+    }});
+    try{
+      const resumed=await history.resumeThreadSession(f.summary.id,f.summary.targetId,randomUUID(),()=>true,{launchModel,startGuard,startEffectGate});
+      expect(resumed?.id).not.toBe(f.summary.id);expect(guards).toBe(2);expect(gates).toBe(1);
+      expect(()=>normalizeWorkroomHistoryRequest(request('resume.execute',{storeInstanceId:randomUUID(),launchModel}))).toThrow();
+    }finally{await history.shutdown();}
+  });
+  test('a revoked scheduled spawn gate preserves an unknown history receipt without launching',async()=>{
+    const f=fixture();f.journal.started(f.context);f.save();f.journal.observe({...f.context,summary:{...f.summary,state:'exited'}},f.summary.id);
+    const id=randomUUID();let spawned=0;
+    const history=new WorkroomConversationService({appDataDir:f.root,journal:f.journal,platform:'darwin',contexts:()=>[],prepare:async()=>f.context,assertNoWriter:async()=>{},launch:async(_record,_id,_cols,_rows,launch)=>{
+      launch.launching();return launch.startEffectGate!(()=>{spawned++;return {session:f.summary};});
+    }});
+    try{
+      const result=await history.resumeThreadSession(f.summary.id,f.summary.targetId,id,()=>true,{launchModel:{model:'claude-test-model'},startGuard:()=>{},startEffectGate:()=>{throw Error('revoked');}});
+      expect(result).toBeUndefined();expect(spawned).toBe(0);expect(history.resumeReceipt(id)?.state).toBe('unknown');
+    }finally{await history.shutdown();}
+  });
   test('strict requests reject missing ids, paths, wrong store shape and remote fields',()=>{
     expect(()=>normalizeWorkroomHistoryRequest(request('resume.execute',{storeInstanceId:randomUUID()}))).toThrow();
     expect(()=>normalizeWorkroomHistoryRequest(request('list',{archived:false,path:'/tmp/p'}))).toThrow();

@@ -60,6 +60,9 @@
 .workspace-sidebar-footer > [data-testid="appearance-settings"]:hover { color: var(--ink); border-color: var(--line-2); }
 .workspace-sidebar-footer > [data-testid="appearance-settings"] svg { width: 15px; height: 15px; }
 
+/* Pending phone reports stay visible even when tools are closed; the zero-count state occupies no space. */
+.workspace-sidebar-footer > [data-testid="portal-errors-badge"] { height: 32px; flex-shrink: 0; }
+
 /* Disclosure popovers (도구 및 설정 · 실행 도구 · 빌드) */
 .workspace-tools { position: relative; flex-shrink: 0; }
 .workspace-tools > summary {

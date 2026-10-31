@@ -20,6 +20,9 @@ import {
   whatISaidConnectionBundle,
   whatISaidProjectPath,
   whatISaidRemoteUiState,
+  whatISaidSyncFailureReasons,
+  syncWhatISaidAcrossRequests,
+  whatISaidSyncNotice,
 } from '../src/WhatISaidPanel';
 
 const panelSource = readFileSync(new URL('../src/WhatISaidPanel.tsx', import.meta.url), 'utf8');
@@ -31,6 +34,83 @@ afterEach(() => {
 });
 
 describe('What I said panel data contract', () => {
+  test('per-memory sync failures explain why capture could not continue', () => {
+    const items = [{ name: '기억 A', code: 'WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE', error: '공유 저장 동의를 확인할 수 없습니다.' }];
+    expect(whatISaidSyncFailureReasons(items, 'ko')).toContain('기억 A: 공유 저장 동의');
+    expect(whatISaidSyncFailureReasons(items, 'en')).toContain('Shared capture consent could not be verified');
+    expect(whatISaidSyncFailureReasons([{ name: 'A', error: null }], 'ko')).toBe('');
+  });
+
+  test('English sync failures never show the local API Korean text, and the resume hint is said once', () => {
+    const items = [
+      { memoryId: 'a', name: 'A', incomplete: true, code: 'WHAT_I_SAID_BACKFILL_INCOMPLETE', error: '가져오기가 아직 끝나지 않았습니다. 다시 요청하면 이어서 진행합니다.' },
+      { memoryId: 'b', name: 'B', code: 'WHAT_I_SAID_CONSENT_CHANGED', error: '저장 동의 또는 보존 기간이 변경되어 과거 가져오기를 중단했습니다. 다시 확인해 주세요.' },
+      { memoryId: 'c', name: 'C', code: 'WHAT_I_SAID_CAPTURE_DISABLED', error: 'C 장기기억의 프롬프트 저장을 먼저 켜세요.' },
+      { memoryId: 'd', name: 'D', deferred: true, incomplete: true, code: 'WHAT_I_SAID_SYNC_DEFERRED', error: '이번 요청 시간 안에 시작하지 못했습니다. 이어서 요청하면 진행합니다.' },
+      { memoryId: 'e', name: 'E', incomplete: true, code: 'WHAT_I_SAID_BACKFILL_INCOMPLETE', remoteError: '원격 업로드 실패', error: '원격 업로드 실패 가져오기가 아직 끝나지 않았습니다.' },
+    ];
+    const english = whatISaidSyncFailureReasons(items, 'en');
+    expect(english).not.toMatch(/[\u3131-\uD79D]/);
+    expect(english).toContain('A: The import has not finished yet.');
+    expect(english).toContain('B: Capture consent or the retention period changed');
+    expect(english).toContain('C: Turn on prompt saving for this memory first.');
+    expect(english).toContain('D: Not started within this request.');
+    expect(english).toContain('E: The import has not finished yet. Upload to Supabase failed.');
+    expect(english.match(/Request it again to continue\./g)).toHaveLength(1);
+    const korean = whatISaidSyncFailureReasons(items, 'ko');
+    expect(korean.match(/다시 요청하면 이어서 진행합니다/g)).toHaveLength(1);
+    expect(korean).toContain('B: 저장 동의 또는 보존 기간이 변경되어');
+    expect(korean).toContain('E: 가져오기가 아직 끝나지 않았습니다. 업로드 실패: 원격 업로드 실패');
+    // An older local API marked an unfinished import only with `incomplete`;
+    // an unknown code falls back to generic English copy.
+    expect(whatISaidSyncFailureReasons([{ name: 'A', incomplete: true, error: '가져오기가 아직 끝나지 않았습니다.' }], 'en'))
+      .toBe('A: The import has not finished yet. Request it again to continue.');
+    expect(whatISaidSyncFailureReasons([{ name: 'A', code: 'WHAT_I_SAID_NEW_REASON', error: '새 이유' }], 'en'))
+      .toBe('A: Could not complete the request.');
+    // Non-resumable reasons add no hint.
+    expect(whatISaidSyncFailureReasons([items[1]], 'en')).not.toContain('again to continue');
+  });
+
+  test('a confirmed sync follows only the memories the local API did not start', async () => {
+    const calls: Array<readonly string[]> = [];
+    const responses = [
+      { requested: 3, succeeded: 1, captured: 4, pushed: 4, continuation: { memoryIds: ['b', 'c'] }, items: [
+        { memoryId: 'a', name: 'A', captured: 4, pushed: 4, error: null },
+        { memoryId: 'b', name: 'B', captured: 0, pushed: 0, deferred: true, code: 'WHAT_I_SAID_SYNC_DEFERRED', error: '시작하지 못했습니다.' },
+        { memoryId: 'c', name: 'C', captured: 0, pushed: 0, deferred: true, code: 'WHAT_I_SAID_SYNC_DEFERRED', error: '시작하지 못했습니다.' },
+      ] },
+      { requested: 2, succeeded: 1, captured: 2, pushed: 1, continuation: null, items: [
+        { memoryId: 'b', name: 'B', captured: 2, pushed: 1, uploadIncomplete: true, error: null },
+        { memoryId: 'c', name: 'C', captured: 0, pushed: 0, incomplete: true, code: 'WHAT_I_SAID_BACKFILL_INCOMPLETE', error: '가져오기가 아직 끝나지 않았습니다.' },
+      ] },
+    ];
+    const totals = await syncWhatISaidAcrossRequests(['a', 'b', 'c'], true, async (ids, backfill) => {
+      expect(backfill).toBe(true);
+      calls.push(ids);
+      return responses[calls.length - 1];
+    });
+    // The unfinished import of C is not repeated automatically.
+    expect(calls).toEqual([['a', 'b', 'c'], ['b', 'c']]);
+    expect(totals).toMatchObject({ requested: 3, succeeded: 2, captured: 6, pushed: 5 });
+    expect(totals.items.map(item => (item as { memoryId: string }).memoryId)).toEqual(['a', 'b', 'c']);
+    expect((totals.items[1] as { error: string | null }).error).toBeNull();
+    const notice = whatISaidSyncNotice(totals, 'en');
+    expect(notice.kind).toBe('error');
+    expect(notice.message).toBe('2 of 3 memories synced · 6 newly captured · 5 uploaded C: The import has not finished yet. Request it again to continue. Some uploads did not finish within this request. Sync again to continue uploading.');
+    expect(whatISaidSyncNotice({ ...totals, succeeded: 3, items: [] }, 'ko'))
+      .toEqual({ kind: 'success', message: '3개 중 3개 기억 동기화 완료 · 새 수집 6개 · 업로드 5개' });
+
+    // A continuation that makes no progress, or names other memories, is not followed.
+    const stalled: Array<readonly string[]> = [];
+    await syncWhatISaidAcrossRequests(['a', 'b'], false, async ids => {
+      stalled.push(ids);
+      return { requested: ids.length, succeeded: 0, captured: 0, pushed: 0, continuation: { memoryIds: [...ids, 'z'] }, items: [] };
+    });
+    expect(stalled).toEqual([['a', 'b']]);
+    // An older local API without continuation is one request, exactly as before.
+    const legacy = await syncWhatISaidAcrossRequests(['a'], false, async () => ({ requested: 1, succeeded: 1, captured: 4, pushed: 4 }));
+    expect(legacy).toEqual({ requested: 1, succeeded: 1, captured: 4, pushed: 4, items: [] });
+  });
   test('worktree path scopes capture before the parent project path', () => {
     expect(whatISaidProjectPath({ id: 'one', name: 'One', folderPath: '/project', worktreePath: '/worktree' })).toBe('/worktree');
     expect(whatISaidProjectPath({ id: 'two', name: 'Two', folderPath: ' /project ' })).toBe('/project');

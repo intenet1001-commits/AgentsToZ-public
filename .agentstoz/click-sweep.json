@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "surfaces": [
+    {
+      "id": "desktop",
+      "label": "데스크톱 앱 화면(격리 빌드·합성 API)",
+      "command": ["bun", "scripts/check-maintainer-web.ts", "click-sweep"],
+      "updateArgs": ["--update"],
+      "baseline": "tests/click-sweep/desktop.json",
+      "timeoutSeconds": 1800
+    }
+  ]
+}

@@ -38,12 +38,17 @@ export async function testKey(scalar: Uint8Array | string): Promise<TestKey> {
 export const registration = (o: { mac: TestKey; device: TestKey; token: Uint8Array; production: boolean; topic: string; issuedAt: number; nonce: Uint8Array }) =>
   encodeFields([text(LABELS.register), o.mac.publicKey, o.device.publicKey, o.token, new Uint8Array([o.production ? 1 : 0]), text(o.topic), u64(o.issuedAt), o.nonce]);
 
-export const event = (o: { mac: TestKey; kind: 1 | 2; eventAt: number; macName: string; actorID: Uint8Array; actorName: string; recipients: Uint8Array[]; issuedAt: number; nonce: Uint8Array }) =>
+export const event = (o: { mac: TestKey; kind: 1 | 2 | 3 | 4; eventAt: number; macName: string; actorID: Uint8Array; actorName: string; recipients: Uint8Array[]; issuedAt: number; nonce: Uint8Array }) =>
   encodeFields([text(LABELS.notify), o.mac.publicKey, new Uint8Array([o.kind]), u64(o.eventAt), text(o.macName), o.actorID, text(o.actorName),
     new Uint8Array(o.recipients.flatMap(r => [...r])), u64(o.issuedAt), o.nonce]);
 
 export const command = (o: { macFingerprint: Uint8Array; device: TestKey; action: 1 | 2 | 3 | 4; target?: Uint8Array; issuedAt: number; nonce: Uint8Array }) =>
   encodeFields([text(LABELS.command), o.macFingerprint, o.device.publicKey, new Uint8Array([o.action]), o.target ?? new Uint8Array(), u64(o.issuedAt), o.nonce]);
+
+/** A weekly allowance alert as AgentsToZ Screen signs it (WeeklyUsageEvent in PushCommands.swift). Provider 1 claude, 2 codex, 3 agy. */
+export const weeklyUsage = (o: { mac: TestKey; macName: string; provider: number; mark: number; windowKey: string; observedAt: number; recipients: Uint8Array[]; issuedAt: number; nonce: Uint8Array }) =>
+  encodeFields([text(LABELS.usage), o.mac.publicKey, text(o.macName), new Uint8Array([o.provider]), new Uint8Array([o.mark]), text(o.windowKey),
+    u64(o.observedAt), new Uint8Array(o.recipients.flatMap(r => [...r])), u64(o.issuedAt), o.nonce]);
 
 export async function result(mac: TestKey, commandID: Uint8Array, outcome: number): Promise<Bytes> {
   const signed = encodeFields([text(LABELS.result), mac.fingerprint, commandID, new Uint8Array([outcome])]);

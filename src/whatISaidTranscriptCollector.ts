@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -18,9 +19,12 @@ import {
   extractCodexExcerpts,
   extractOwnedClaudeSessionExcerpts,
   parseWorktreePaths,
+  type SessionExcerpt,
 } from "./sessionTranscript";
 import {
   advanceWhatISaidScan,
+  beginWhatISaidCollection,
+  finishWhatISaidCollection,
   captureWhatISaidPrompt,
   captureWhatISaidWithheldTranscriptRecord,
   commitWhatISaidTranscriptClassifications,
@@ -63,6 +67,10 @@ export interface WhatISaidTranscriptCollectorInput extends WhatISaidCryptoLocati
   gitWorktreeList?: (projectRoot: string) => string;
   gitTopLevel?: (projectRoot: string) => string | null;
   scanByteBudget?: number;
+  /** Cooperative only: checked between records and files, never interrupts I/O. */
+  scanDeadlineAt?: number;
+  /** Injectable stop check for deterministic tests. */
+  scanShouldStop?: () => boolean;
   /**
    * Explicit user-initiated backfill: scan from the beginning of the available
    * transcripts instead of from the consent instant, and let the store keep
@@ -70,6 +78,12 @@ export interface WhatISaidTranscriptCollectorInput extends WhatISaidCryptoLocati
    * this — turning the policy on must not silently ingest past conversations.
    */
   backfill?: boolean;
+  /**
+   * A later pass of the same explicit backfill request. Only then may a Codex
+   * verification page left by the previous pass be resumed; a new request
+   * re-verifies every file against the saved baseline from the first one.
+   */
+  backfillContinuation?: boolean;
   /**
    * 이 프롬프트를 수집한 기기. 행에 함께 박아 두면 나중에 아카이브·복원·원격
    * 적재로 여러 기기의 기록이 합쳐져도 출처를 되찾을 수 있다.
@@ -101,6 +115,17 @@ export interface WhatISaidTranscriptCollectionResult {
   pendingFiles: number;
   budgetExhausted: boolean;
   hasMore: boolean;
+  /** The observed transcript snapshot changed during a historical scan. */
+  snapshotChanged?: boolean;
+  /** A complete header, anchor, or record cannot fit in one scan budget. */
+  minimumBudgetInsufficient?: boolean;
+  /**
+   * A multi-page validation cannot certify that earlier files stayed unchanged.
+   * The collector no longer reports it: verification resumes within one
+   * request and restarts (without a new baseline) on the next request. The
+   * runner and the routes still stop on it for any other producer.
+   */
+  verificationUncertain?: boolean;
 }
 
 function emptyResult(enabled: boolean, enabledAt: string | null): WhatISaidTranscriptCollectionResult {
@@ -273,6 +298,103 @@ interface ScanBudget {
   remaining: number;
 }
 
+function scanStopped(input: WhatISaidTranscriptCollectorInput): boolean {
+  return input.scanShouldStop?.() === true
+    || (input.scanDeadlineAt !== undefined && Date.now() >= input.scanDeadlineAt);
+}
+
+function discoverySnapshot(candidates: readonly { file: string; sourceId: string }[]): string {
+  return createHash('sha256').update(JSON.stringify(candidates.map(candidate => {
+    const info = lstatSync(candidate.file);
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error('Transcript changed during discovery');
+    return [candidate.sourceId, String(info.dev), String(info.ino), info.size, info.mtimeMs, info.birthtimeMs];
+  }))).digest('hex');
+}
+
+class SnapshotBudgetExhausted extends Error {}
+
+/** Full metadata of one candidate; any write that moves size or mtime changes it. */
+function codexCandidateMetadata(candidate: { sourceId: string }, info: { dev: number | bigint; ino: number | bigint; size: number; mtimeMs: number; birthtimeMs: number }): string {
+  return createHash('sha256').update(JSON.stringify([candidate.sourceId, String(info.dev), String(info.ino),
+    info.size, info.mtimeMs, info.birthtimeMs])).digest('hex');
+}
+
+/**
+ * Metadata chain of the first `count` candidates, read with lstat only (no
+ * scan budget). Equal to the chain saved while they were checked means none
+ * of them was written since; null when one can no longer be read.
+ */
+function codexPrefixMetadata(candidates: readonly { file: string; sourceId: string }[], count: number): string | null {
+  let chain = EMPTY_SNAPSHOT_HASH;
+  try {
+    for (const candidate of candidates.slice(0, count)) {
+      const info = lstatSync(candidate.file);
+      if (info.isSymbolicLink() || !info.isFile()) return null;
+      chain = snapshotChain(chain, codexCandidateMetadata(candidate, info));
+    }
+  } catch {
+    return null;
+  }
+  return chain;
+}
+
+/**
+ * Foreign append-only bodies are irrelevant, but a changed ownership header is not.
+ * `metadata` comes from the lstat taken before the header read, so a write
+ * racing with the read always makes a later metadata comparison differ.
+ */
+function codexCandidateSnapshot(candidate: { file: string; sourceId: string },
+  roots: readonly string[], budget: ScanBudget, result: WhatISaidTranscriptCollectionResult,
+  shouldStop: () => boolean): { evidence: string; metadata: string } {
+  let metadata = '';
+  const evidence = (() => {
+    const info = lstatSync(candidate.file);
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error('Transcript changed during discovery');
+    metadata = codexCandidateMetadata(candidate, info);
+    const handle = openSync(candidate.file, 'r');
+    let header: string | null = null;
+    try {
+      const chunks: Buffer[] = [];
+      let position = 0;
+      while (position < 262_144 && position < info.size) {
+        if (budget.remaining <= 0 || shouldStop()) throw new SnapshotBudgetExhausted();
+        const bytes = readWithinBudget(handle, position, Math.min(position === 0 ? 128 : Math.min(position, 4096), 262_144 - position), budget, result);
+        if (!bytes.length) break;
+        const newline = bytes.indexOf(0x0a);
+        if (newline >= 0) { chunks.push(bytes.subarray(0, newline)); header = Buffer.concat(chunks).toString('utf8'); break; }
+        chunks.push(bytes);
+        position += bytes.length;
+      }
+    } finally { closeSync(handle); }
+    const cwd = header ? codexRolloutCwd(header) : null;
+    if (cwd && !cwdBelongsToExactRoot(cwd, roots)) {
+      return [candidate.sourceId, String(info.dev), String(info.ino), info.birthtimeMs, header];
+    }
+    // Unknown, incomplete or owned headers retain the conservative full
+    // metadata check. Ownership changes therefore invalidate completion.
+    return [candidate.sourceId, String(info.dev), String(info.ino), info.size, info.mtimeMs, info.birthtimeMs];
+  })();
+  return { evidence: createHash('sha256').update(JSON.stringify(evidence)).digest('hex'), metadata };
+}
+
+const EMPTY_SNAPSHOT_HASH = '0'.repeat(64);
+type CodexSnapshotPhase = 'b' | 'r' | 'v' | 'd';
+function snapshotChain(previous: string, value: string): string {
+  return createHash('sha256').update(previous).update(value).digest('hex');
+}
+/** `meta` is the metadata chain of the files a verification has checked so far (absent in older states). */
+function codexSnapshotParts(identity: string | undefined): { membership: string; phase: CodexSnapshotPhase; target: number; baseline: string; running: string; meta: string } | null {
+  if (!identity) return null;
+  const match = /^([a-f0-9]{64}):([brvd]):([0-9]{1,8}):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?$/.exec(identity);
+  return match ? { membership: match[1]!, phase: match[2] as CodexSnapshotPhase, target: Number(match[3]), baseline: match[4]!, running: match[5]!, meta: match[6] ?? EMPTY_SNAPSHOT_HASH } : null;
+}
+
+function discoveryParts(identity: string | undefined): { membership: string; snapshot: string; after: string } | null {
+  if (!identity) return null;
+  const match = /^([a-f0-9]{64}):([a-f0-9]{64}):(wisc_[a-f0-9]{64}|)$/.exec(identity);
+  return match ? { membership: match[1]!, snapshot: match[2]!, after: match[3]! } : null;
+}
+
 function readWithinBudget(
   handle: number,
   position: number,
@@ -300,7 +422,7 @@ function firstLineWithinBudget(
     const chunks: Buffer[] = [];
     let offset = 0;
     while (offset < maxBytes && budget.remaining > 0) {
-      const bytes = readWithinBudget(handle, offset, Math.min(4096, maxBytes - offset), budget, result);
+      const bytes = readWithinBudget(handle, offset, Math.min(offset === 0 ? 128 : Math.min(offset, 4096), maxBytes - offset), budget, result);
       if (!bytes.length) break;
       const newline = bytes.indexOf(0x0a);
       if (newline !== -1) {
@@ -351,9 +473,9 @@ function hasMalformedOwnedUserSchema(
   if (sourceAgent === "claude") {
     if (record.type !== "user") return false;
     const message = isJsonRecord(record.message) ? record.message : null;
-    return typeof record.timestamp !== "string"
-      || !Number.isFinite(Date.parse(record.timestamp))
-      || typeof message?.content !== "string"
+    if (typeof record.timestamp !== "string" || !Number.isFinite(Date.parse(record.timestamp))) return true;
+    if (isClaudeHostUserRow(record, message?.content)) return false;
+    return typeof message?.content !== "string"
       || message.content.trim().length === 0
       || message.content.includes("\0");
   }
@@ -363,6 +485,46 @@ function hasMalformedOwnedUserSchema(
     || !Number.isFinite(Date.parse(record.timestamp))
     || message.text.length === 0
     || message.text.includes("\0");
+}
+
+// Claude Code also writes tool results, and harness-injected context such as a
+// skill body, as `type: "user"` rows with array content. They are not the
+// person's words, so they are neither prompts nor malformed prompts: a receipt
+// for each would mark every scan of an active Claude session partial. A
+// non-meta array that carries text (a prompt with a pasted image) stays a
+// receipt, because it may be the person's request.
+function isClaudeHostUserRow(record: Record<string, unknown>, content: unknown): boolean {
+  if (!Array.isArray(content) || content.length === 0 || !content.every(isJsonRecord)) return false;
+  if (content.every(block => block.type === "tool_result")) return true;
+  return record.isMeta === true && content.every(block => block.type === "text");
+}
+
+const CLAUDE_COMMAND_TAG = /<(command-message|command-name|command-args)>([\s\S]*?)<\/\1>/g;
+
+// A slash command the person typed (`/skill some words`) reaches the transcript
+// only as command-* wrapper tags, which the shared excerpt reader skips as host
+// markup. Its arguments are the person's own request, so keep `/name args`.
+// A command without arguments (`/clear`) and a model-invoked skill (isMeta)
+// carry no words of the person and stay skipped, as before.
+function claudeTypedCommandExcerpt(record: Record<string, unknown>, captureSince: string): SessionExcerpt | null {
+  if (record.type !== "user" || record.isMeta === true || record.isSidechain === true) return null;
+  const content = isJsonRecord(record.message) ? record.message.content : null;
+  if (typeof content !== "string" || typeof record.timestamp !== "string") return null;
+  const recordedMs = Date.parse(record.timestamp);
+  const sinceMs = Date.parse(captureSince);
+  if (!Number.isFinite(recordedMs) || Number.isFinite(sinceMs) && recordedMs < sinceMs) return null;
+  const tags = new Map<string, string>();
+  let repeated = false;
+  const rest = content.replace(CLAUDE_COMMAND_TAG, (_, tag: string, value: string) => {
+    if (tags.has(tag)) repeated = true;
+    tags.set(tag, value);
+    return "";
+  });
+  if (repeated || rest.trim()) return null;
+  const name = tags.get("command-name")?.trim() ?? "";
+  const args = tags.get("command-args")?.trim() ?? "";
+  if (!/^\/?[^\s<>/][^\s<>]*$/.test(name) || !args || args.includes("\0")) return null;
+  return { role: "user", recordedAt: record.timestamp, text: `${name.startsWith("/") ? name : `/${name}`} ${args}` };
 }
 
 function receiptMalformedUserLine(input: WhatISaidTranscriptCollectorInput & {
@@ -433,7 +595,8 @@ function storeUserLine(input: WhatISaidTranscriptCollectorInput & {
     if (hasMalformedOwnedUserSchema(record, input.sourceAgent)) {
       return receiptMalformedUserLine(input);
     }
-    excerpts = owned.excerpts;
+    const command = owned.excerpts.length === 0 ? claudeTypedCommandExcerpt(record, input.captureSince) : null;
+    excerpts = command ? [command] : owned.excerpts;
   } else {
     if (hasMalformedOwnedUserSchema(record, input.sourceAgent)) {
       return receiptMalformedUserLine(input);
@@ -491,6 +654,9 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
   file: string;
   scannedFrom: string;
   captureSince: string;
+  backfillRetention: string | number;
+  codexHeaderEvidence?: { bytes: Buffer; fileIdentity: string; size: number; mtimeMs: number };
+  candidateStartingBudget?: number;
   exactRoots: readonly string[];
   budget: ScanBudget;
   result: WhatISaidTranscriptCollectionResult;
@@ -510,24 +676,34 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
     handle = openSync(canonicalFile, "r");
     const info = fstatSync(handle);
     if (!info.isFile()) return;
+    const currentHandle = handle;
     // Transcripts are append-only. Once the filesystem says the whole file
     // predates the overlap baseline, reading hundreds of MB cannot discover a
     // candidate event and only turns every capture into an O(history) sweep.
     if (input.backfill !== true && info.mtimeMs < Date.parse(input.scannedFrom)) return;
     const snapshotSize = info.size;
     const fileIdentity = `${String(info.dev)}:${String(info.ino)}:${Math.trunc(info.birthtimeMs)}`;
+    const headerEvidence = input.codexHeaderEvidence && input.codexHeaderEvidence.fileIdentity === fileIdentity
+      && input.codexHeaderEvidence.size === info.size && input.codexHeaderEvidence.mtimeMs === info.mtimeMs
+      ? input.codexHeaderEvidence.bytes : null;
+    const readAnchor = (cursor: WhatISaidTranscriptCursor): Buffer | null => {
+      const start = cursor.byteOffset - cursor.anchorLength;
+      const prefixEnd = headerEvidence ? Math.min(cursor.byteOffset, headerEvidence.byteLength) : start;
+      const prefix = headerEvidence && prefixEnd > start ? headerEvidence.subarray(start, prefixEnd) : Buffer.alloc(0);
+      const remaining = cursor.anchorLength - prefix.byteLength;
+      if (input.budget.remaining < remaining) return null;
+      const suffix = remaining ? readWithinBudget(currentHandle, start + prefix.byteLength, remaining, input.budget, input.result) : Buffer.alloc(0);
+      return Buffer.concat([prefix, suffix]);
+    };
     const cursorSourceIdentity = canonicalFile;
     const sourceId = deriveWhatISaidTranscriptSourceId({
       ...input,
       agent: input.sourceAgent,
       sourceIdentity: cursorSourceIdentity,
     });
-    // A backfill must re-read from byte 0. Lowering the timestamp floor alone
-    // does nothing once the durable cursor already sits at EOF — the file is
-    // simply skipped and the button appears to do nothing. Re-reading is safe:
-    // storage is keyed by a stable per-line event id, so everything already
-    // captured comes back as a duplicate rather than a second copy.
-    let expected = input.backfill === true ? null : readWhatISaidTranscriptCursor({
+    // The regular cursor owns the file generation used in event IDs. Validate
+    // it even for an explicit backfill so replacement cannot reuse old IDs.
+    let expected = readWhatISaidTranscriptCursor({
       ...input,
       agent: input.sourceAgent,
       sourceIdentity: cursorSourceIdentity,
@@ -540,17 +716,13 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
 
     let reset = !!expected && (expected.fileIdentity !== fileIdentity || snapshotSize < expected.byteOffset);
     if (expected && !reset && expected.anchorLength > 0) {
-      if (input.budget.remaining < expected.anchorLength) {
+      const read = readAnchor(expected);
+      if (!read) {
+        if (input.backfill === true && input.candidateStartingBudget === (input.scanByteBudget ?? DEFAULT_SCAN_BYTE_BUDGET)) input.result.minimumBudgetInsufficient = true;
         markPending(true);
         return;
       }
-      anchor = readWithinBudget(
-        handle,
-        expected.byteOffset - expected.anchorLength,
-        expected.anchorLength,
-        input.budget,
-        input.result,
-      );
+      anchor = read;
       reset = anchor.byteLength !== expected.anchorLength
         || !verifyWhatISaidTranscriptCursorAnchor({ ...input, cursor: expected, anchor });
     }
@@ -582,20 +754,111 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
       discardUntilNewline = false;
     }
 
+    if (input.backfill === true && !expected) {
+      // Establish the shared file generation without advancing ordinary capture.
+      const committed = commitWhatISaidTranscriptCursor({
+        ...input,
+        agent: input.sourceAgent,
+        sourceIdentity: cursorSourceIdentity,
+        expected: null,
+        next: { generation: 0, fileIdentity, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+        now: input.now,
+      });
+      if (!committed.committed) {
+        markPending();
+        return;
+      }
+      expected = committed.cursor;
+    }
+    let eventGeneration = generation;
+    const regularCursor = expected;
+    let progressSourceIdentity = cursorSourceIdentity;
+    let progressFileIdentity = fileIdentity;
+    if (input.backfill === true) {
+      // Backfill progress is durable but is never resumed by ordinary capture.
+      // A fresh explicit request is still required to read before consent.
+      progressSourceIdentity = `backfill:${sourceId}`;
+      progressFileIdentity = `${fileIdentity}:event-generation:${eventGeneration}:retention:${input.backfillRetention}`;
+      expected = readWhatISaidTranscriptCursor({
+        ...input,
+        agent: input.sourceAgent,
+        sourceIdentity: progressSourceIdentity,
+      });
+      generation = expected?.generation ?? 0;
+      byteOffset = expected?.byteOffset ?? 0;
+      lineNumber = expected?.lineNumber ?? 0;
+      discardUntilNewline = expected?.discardUntilNewline ?? false;
+      anchor = Buffer.alloc(0);
+      let backfillReset = !!expected && (expected.fileIdentity !== progressFileIdentity || snapshotSize < expected.byteOffset);
+      if (expected && !backfillReset && expected.anchorLength > 0) {
+        const read = readAnchor(expected);
+        if (!read) {
+          if (input.backfill === true && input.candidateStartingBudget === (input.scanByteBudget ?? DEFAULT_SCAN_BYTE_BUDGET)) input.result.minimumBudgetInsufficient = true;
+          markPending(true);
+          return;
+        }
+        anchor = read;
+        backfillReset = anchor.byteLength !== expected.anchorLength
+          || !verifyWhatISaidTranscriptCursorAnchor({ ...input, cursor: expected, anchor });
+      }
+      if (backfillReset && expected?.fileIdentity === progressFileIdentity && regularCursor) {
+        // The ordinary cursor may still be at byte zero, or its own anchor may
+        // precede a rewrite. An invalid backfill anchor is also evidence of a
+        // new file generation and must invalidate the shared event identity.
+        const committed = commitWhatISaidTranscriptCursor({
+          ...input,
+          agent: input.sourceAgent,
+          sourceIdentity: cursorSourceIdentity,
+          expected: regularCursor,
+          next: { generation: regularCursor.generation + 1, fileIdentity, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+          now: input.now,
+        });
+        if (!committed.committed) {
+          markPending();
+          return;
+        }
+        eventGeneration = committed.cursor.generation;
+        progressFileIdentity = `${fileIdentity}:event-generation:${eventGeneration}:retention:${input.backfillRetention}`;
+      }
+      if (backfillReset && expected) {
+        const committed = commitWhatISaidTranscriptCursor({
+          ...input,
+          agent: input.sourceAgent,
+          sourceIdentity: progressSourceIdentity,
+          expected,
+          next: { generation: expected.generation + 1, fileIdentity: progressFileIdentity, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+          now: input.now,
+        });
+        if (!committed.committed) {
+          markPending();
+          return;
+        }
+        expected = committed.cursor;
+        generation = committed.cursor.generation;
+        byteOffset = 0;
+        lineNumber = 0;
+        anchor = Buffer.alloc(0);
+        discardUntilNewline = false;
+      }
+    }
+
     const codexDelivery = new WhatISaidCodexDeliveryTracker();
     if (input.sourceAgent === 'codex' && byteOffset > 0 && byteOffset < snapshotSize && !discardUntilNewline) {
       // Restore only the preceding complete record. Count lookback against the
       // existing budget and reserve most of a small budget for forward work.
       // Missing/oversized evidence degrades to unknown, never guessed human.
-      const length = Math.min(CODEX_DELIVERY_LOOKBACK_BYTES, byteOffset, Math.floor(input.budget.remaining / 4));
-      const bytes = readWithinBudget(handle, byteOffset - length, length, input.budget, input.result);
+      const fromHeader = headerEvidence && byteOffset <= headerEvidence.byteLength;
+      const length = Math.min(CODEX_DELIVERY_LOOKBACK_BYTES, byteOffset, fromHeader ? byteOffset : Math.floor(input.budget.remaining / 4));
+      const bytes = fromHeader ? headerEvidence!.subarray(byteOffset - length, byteOffset)
+        : readWithinBudget(handle, byteOffset - length, length, input.budget, input.result);
       codexDelivery.read(previousCodexDeliveryRecord(bytes, byteOffset === length));
     }
     let readPosition = byteOffset;
+    const initialByteOffset = byteOffset;
     let pending = Buffer.alloc(0);
     let blocked = false;
     while (readPosition < snapshotSize && !blocked) {
-      if (input.budget.remaining <= 0) {
+      if (input.budget.remaining <= 0 || scanStopped(input)) {
         markPending(true);
         break;
       }
@@ -628,14 +891,19 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
         progressed = consumed.byteLength > 0;
       }
       while (pending.byteLength > 0) {
+        if (scanStopped(input)) {
+          blocked = true;
+          markPending(true);
+          break;
+        }
         const newline = pending.indexOf(0x0a);
         if (newline === -1) {
           if (pending.byteLength <= MAX_JSONL_RECORD_BYTES) break;
           codexDelivery.read(null);
           const nextLineNumber = lineNumber + 1;
-          const eventSourceIdentity = generation === 0
+          const eventSourceIdentity = eventGeneration === 0
             ? `${input.sourceAgent}:${canonicalFile}`
-            : `what-i-said-transcript:${sourceId}:g${generation}`;
+            : `what-i-said-transcript:${sourceId}:g${eventGeneration}`;
           const receipt = captureWhatISaidWithheldTranscriptRecord({
             ...input,
             agent: input.sourceAgent,
@@ -662,9 +930,9 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
         if (rawRecord.byteLength > MAX_JSONL_RECORD_BYTES) {
           codexDelivery.read(null);
           const nextLineNumber = lineNumber + 1;
-          const eventSourceIdentity = generation === 0
+          const eventSourceIdentity = eventGeneration === 0
             ? `${input.sourceAgent}:${canonicalFile}`
-            : `what-i-said-transcript:${sourceId}:g${generation}`;
+            : `what-i-said-transcript:${sourceId}:g${eventGeneration}`;
           const receipt = captureWhatISaidWithheldTranscriptRecord({
             ...input,
             agent: input.sourceAgent,
@@ -690,9 +958,9 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
         let lineBytes = rawRecord.subarray(0, rawRecord.byteLength - 1);
         if (lineBytes.at(-1) === 0x0d) lineBytes = lineBytes.subarray(0, lineBytes.byteLength - 1);
         const nextLineNumber = lineNumber + 1;
-        const eventSourceIdentity = generation === 0
+        const eventSourceIdentity = eventGeneration === 0
           ? `${input.sourceAgent}:${canonicalFile}`
-          : `what-i-said-transcript:${sourceId}:g${generation}`;
+          : `what-i-said-transcript:${sourceId}:g${eventGeneration}`;
         if (lineBytes.byteLength > 0 && !storeUserLine({
           ...input,
           line: lineBytes.toString("utf8"),
@@ -716,9 +984,9 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
         const committed = commitWhatISaidTranscriptCursor({
           ...input,
           agent: input.sourceAgent,
-          sourceIdentity: cursorSourceIdentity,
+          sourceIdentity: progressSourceIdentity,
           expected,
-          next: { generation, fileIdentity, byteOffset, lineNumber, anchor, discardUntilNewline },
+          next: { generation, fileIdentity: progressFileIdentity, byteOffset, lineNumber, anchor, discardUntilNewline },
           now: input.now,
         });
         if (!committed.committed) {
@@ -732,6 +1000,11 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
     if (!blocked && byteOffset < snapshotSize) {
       markPending(input.budget.remaining <= 0 && readPosition < snapshotSize);
     }
+    if (input.backfill === true && input.candidateStartingBudget === (input.scanByteBudget ?? DEFAULT_SCAN_BYTE_BUDGET)
+      && input.budget.remaining === 0 && byteOffset === initialByteOffset && pending.byteLength > 0
+      && pending.indexOf(0x0a) < 0 && readPosition < snapshotSize) {
+      input.result.minimumBudgetInsufficient = true;
+    }
   } catch {
     input.result.unreadable += 1;
     markPending();
@@ -741,6 +1014,34 @@ function collectFileIncrementally(input: WhatISaidTranscriptCollectorInput & {
 }
 
 export function collectWhatISaidTranscripts(
+  input: WhatISaidTranscriptCollectorInput,
+): WhatISaidTranscriptCollectionResult {
+  const ticket = beginWhatISaidCollection(input);
+  if (!ticket) return collectWhatISaidTranscriptsInner(input);
+  // A throw leaves the attempt unknown. Publish only after all final cursor CAS operations.
+  const scope = whatISaidCollectionScope(input);
+  const result = collectWhatISaidTranscriptsInner(input);
+  finishWhatISaidCollection({ ...input, ticket, scope, result: {
+    complete: result.enabled && result.worktreeRoots > 0 && result.scanAdvanced && result.unreadable === 0
+      && result.withheld === 0 && !result.hasMore && !result.budgetExhausted && result.pendingFiles === 0
+      && !result.snapshotChanged && !result.minimumBudgetInsufficient && !result.verificationUncertain,
+    unreadable: result.unreadable, withheld: result.withheld, scannedFrom: result.scannedFrom, scannedThrough: result.scannedThrough,
+  } });
+  return result;
+}
+
+/** Content-free binding to exact project/worktree and registered provider source roots. */
+export function whatISaidCollectionScope(input: Pick<WhatISaidTranscriptCollectorInput,
+  'projectRoot' | 'worktreeRoots' | 'gitWorktreeList' | 'gitTopLevel' | 'claudeProjectsDir' | 'codexSessionsDir' | 'additionalClaudeProjectsDirs' | 'additionalCodexSessionsDirs'>): string {
+  const paths = (values: readonly string[]) => [...new Set(values.map(value => canonicalDirectory(value) ?? resolve(value)))].sort();
+  return createHash('sha256').update(JSON.stringify({
+    roots: exactWhatISaidWorktreeRoots(input).sort(),
+    claude: paths([input.claudeProjectsDir ?? join(homedir(), '.claude', 'projects'), ...(input.additionalClaudeProjectsDirs ?? [])]),
+    codex: paths([input.codexSessionsDir ?? join(homedir(), '.codex', 'sessions'), ...(input.additionalCodexSessionsDirs ?? [])]),
+  })).digest('hex');
+}
+
+function collectWhatISaidTranscriptsInner(
   input: WhatISaidTranscriptCollectorInput,
 ): WhatISaidTranscriptCollectionResult {
   const requestedScanThrough = input.now ?? new Date().toISOString();
@@ -774,16 +1075,110 @@ export function collectWhatISaidTranscripts(
   const roots = exactWhatISaidWorktreeRoots(input);
   result.worktreeRoots = roots.length;
   if (!roots.length) return result;
+  if (scanStopped(input)) {
+    result.budgetExhausted = true;
+    result.hasMore = true;
+    result.pendingFiles += 1;
+    return result;
+  }
 
   const claudeProjectsDir = input.claudeProjectsDir ?? join(homedir(), ".claude", "projects");
   const exactClaudeSlugs = new Set(roots.flatMap(claudeProjectSlugCandidates));
   if((input.additionalClaudeProjectsDirs?.length??0)>24||(input.additionalCodexSessionsDirs?.length??0)>24)throw new Error('Too many account transcript roots.');
   const claudeBases = [...new Set([claudeProjectsDir,...(input.additionalClaudeProjectsDirs??[])].map(canonicalDirectory).filter((v):v is string=>!!v))];
-  for(const claudeBase of claudeBases) {
+  let backfillClaudeDiscovery: WhatISaidTranscriptCursor | null = null;
+  let backfillClaudeIdentity: string | null = null;
+  let backfillClaudeFingerprint: string | null = null;
+  let backfillClaudeSnapshot: string | null = null;
+  const claudeCandidateFiles = () => [...new Set(claudeBases.flatMap(base => [...exactClaudeSlugs].sort()
+    .flatMap(slug => regularJsonlFiles(join(base, slug), false))))];
+  if (input.backfill === true) {
+    // Rotate independently of the ordinary collector. Saving only keyed source
+    // IDs prevents an early collection of files from starving later files when
+    // every explicit request hits a time or byte budget.
+    const candidates = claudeCandidateFiles().flatMap(file => {
+      try {
+        const canonicalFile = realpathSync(file);
+        return [{ file, sourceId: deriveWhatISaidTranscriptSourceId({ ...input, agent: 'claude', sourceIdentity: canonicalFile }) }];
+      } catch {
+        result.unreadable += 1;
+        return [];
+      }
+    }).sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+    const discoveryIdentity = 'what-i-said-backfill-claude-discovery-v1';
+    let discovery = readWhatISaidTranscriptCursor({ ...input, agent: 'claude', sourceIdentity: discoveryIdentity });
+    // File content can change continuously while a scan is in progress. Only
+    // membership and retention define a cycle; per-file cursors verify each
+    // snapshot independently when it is visited.
+    const fingerprint = createHash('sha256').update(JSON.stringify([status.retention, candidates.map(candidate => candidate.sourceId)])).digest('hex');
+    let currentSnapshot: string;
+    try { currentSnapshot = discoverySnapshot(candidates); } catch { result.unreadable += 1; result.hasMore = true; return result; }
+    let parts = discoveryParts(discovery?.fileIdentity);
+    if (discovery && (!parts || parts.membership !== fingerprint)) {
+      const previousAfter = parts?.after ?? discovery.fileIdentity.split(':').at(-1) ?? '';
+      const reset = commitWhatISaidTranscriptCursor({
+        ...input, agent: 'claude', sourceIdentity: discoveryIdentity, expected: discovery,
+        next: { generation: discovery.generation + 1, fileIdentity: `${fingerprint}:${currentSnapshot}:${previousAfter}`, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+        now: scannedThrough,
+      });
+      if (!reset.committed) {
+        result.hasMore = true;
+        result.pendingFiles += 1;
+        return result;
+      }
+      discovery = reset.cursor;
+      parts = discoveryParts(discovery.fileIdentity);
+    }
+    let cycleSnapshot = parts?.snapshot ?? currentSnapshot;
+    let visited = discovery?.lineNumber ?? 0;
+    const after = parts?.after;
+    const nextIndex = after ? candidates.findIndex(candidate => candidate.sourceId > after) : 0;
+    const start = nextIndex < 0 ? 0 : nextIndex;
+    for (let offset = 0; offset < candidates.length && visited < candidates.length; offset++) {
+      if (budget.remaining <= 0 || scanStopped(input)) {
+        result.budgetExhausted = true;
+        result.hasMore = true;
+        result.pendingFiles += 1;
+        break;
+      }
+      const candidate = candidates[(start + offset) % candidates.length]!;
+      result.claudeFiles += 1;
+      const pendingBefore = result.pendingFiles;
+      const unreadableBefore = result.unreadable;
+      // Like Codex: a record or anchor that cannot fit even a full budget is
+      // reported as too small instead of an endless "continue".
+      const candidateStartingBudget = budget.remaining;
+      collectFileIncrementally({
+        ...input, now: scannedThrough, sourceAgent: 'claude', file: candidate.file, scannedFrom,
+        captureSince: new Date(0).toISOString(), backfillRetention: status.retention,
+        candidateStartingBudget, exactRoots: roots, budget, result,
+      });
+      const complete = result.pendingFiles === pendingBefore && result.unreadable === unreadableBefore;
+      if (!complete && offset > 0) break;
+      visited = complete ? visited + 1 : 0;
+      if (!complete) cycleSnapshot = currentSnapshot;
+      const advanced = commitWhatISaidTranscriptCursor({
+        ...input, agent: 'claude', sourceIdentity: discoveryIdentity, expected: discovery,
+        next: { generation: (discovery?.generation ?? 0) + (discovery && !complete ? 1 : 0),
+          fileIdentity: `${fingerprint}:${cycleSnapshot}:${candidate.sourceId}`, byteOffset: 0, lineNumber: visited, anchor: Buffer.alloc(0) },
+        now: scannedThrough,
+      });
+      if (!advanced.committed) {
+        result.hasMore = true;
+        result.pendingFiles += 1;
+        break;
+      }
+      discovery = advanced.cursor;
+    }
+    backfillClaudeDiscovery = discovery;
+    backfillClaudeIdentity = discoveryIdentity;
+    backfillClaudeFingerprint = fingerprint;
+    backfillClaudeSnapshot = cycleSnapshot;
+  } else for(const claudeBase of claudeBases) {
     for (const slug of [...exactClaudeSlugs].sort()) {
       const transcriptDir = join(claudeBase, slug);
       for (const file of regularJsonlFiles(transcriptDir, false)) {
-        if (budget.remaining <= 0) {
+        if (budget.remaining <= 0 || scanStopped(input)) {
           result.budgetExhausted = true;
           result.hasMore = true;
           result.pendingFiles += 1;
@@ -796,17 +1191,25 @@ export function collectWhatISaidTranscripts(
           sourceAgent: "claude",
           file,
           scannedFrom,
-          captureSince: input.backfill === true ? new Date(0).toISOString() : status.enabledAt,
+          captureSince: status.enabledAt,
+          backfillRetention: status.retention,
           exactRoots: roots,
           budget,
           result,
         });
       }
-      if (budget.remaining <= 0) break;
+      if (budget.remaining <= 0 || scanStopped(input)) break;
     }
   }
+  if (scanStopped(input)) {
+    result.budgetExhausted = true;
+    result.hasMore = true;
+    result.pendingFiles += 1;
+    return result;
+  }
   const codexSessionsDir = input.codexSessionsDir ?? join(homedir(), ".codex", "sessions");
-  const codexCandidates = [...new Set([codexSessionsDir,...(input.additionalCodexSessionsDirs??[])].flatMap(root=>regularJsonlFiles(root,true)))].flatMap(file => {
+  const codexCandidateFiles = () => [...new Set([codexSessionsDir,...(input.additionalCodexSessionsDirs??[])].flatMap(root=>regularJsonlFiles(root,true)))];
+  const codexCandidates = codexCandidateFiles().flatMap(file => {
     try {
       const canonicalFile = realpathSync(file);
       return [{
@@ -823,14 +1226,116 @@ export function collectWhatISaidTranscripts(
     }
   }).sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   let discoveryCursor = readWhatISaidDiscoveryCursor({ ...input, scope: "codex" });
-  const startIndex = discoveryCursor === null
+  let backfillCodexDiscovery: WhatISaidTranscriptCursor | null = null;
+  const backfillCodexIdentity = 'what-i-said-backfill-codex-discovery-v1';
+  let backfillCodexFingerprint: string | null = null;
+  let backfillCodexSnapshot: string | null = null;
+  let codexCurrentSnapshot: string | null = null;
+  let codexVisited = 0;
+  const codexSnapshotIdentity = 'what-i-said-backfill-codex-snapshot-v1';
+  let snapshotCursor: WhatISaidTranscriptCursor | null = null;
+  let snapshotState: ReturnType<typeof codexSnapshotParts> = null;
+  const saveSnapshotState = (phase: CodexSnapshotPhase, baseline: string, running: string, count: number, restart = false, meta = EMPTY_SNAPSHOT_HASH) => {
+    const previous = snapshotCursor;
+    const nextGeneration = previous && count < previous.lineNumber ? previous.generation + 1 : (previous?.generation ?? 0);
+    const updated = commitWhatISaidTranscriptCursor({
+      ...input, agent: 'codex', sourceIdentity: codexSnapshotIdentity, expected: previous,
+      next: { generation: nextGeneration, fileIdentity: `${restart ? backfillCodexFingerprint : (snapshotState?.membership ?? backfillCodexFingerprint)}:${phase}:${restart ? codexCandidates.length : (snapshotState?.target ?? codexCandidates.length)}:${baseline}:${running}:${meta}`,
+        byteOffset: 0, lineNumber: count, anchor: Buffer.alloc(0) }, now: scannedThrough,
+    });
+    if (!updated.committed) throw new Error('Snapshot cursor changed concurrently');
+    snapshotCursor = updated.cursor;
+    snapshotState = codexSnapshotParts(snapshotCursor.fileIdentity);
+  };
+  const runSnapshotPage = () => {
+    if (!snapshotState || !snapshotCursor || (snapshotState.phase !== 'b' && snapshotState.phase !== 'v')) return true;
+    const phase = snapshotState.phase;
+    let running = snapshotState.running;
+    let meta = snapshotState.meta;
+    const baseline = snapshotState.baseline;
+    const target = Math.min(snapshotState.target, codexCandidates.length);
+    for (let index = snapshotCursor.lineNumber; index < target; index++) {
+      // A page that runs out keeps its saved position. The next pass of the
+      // same request resumes it with a full budget; a new request resumes a
+      // verification only if the checked files are unchanged (see below).
+      if (budget.remaining <= 0 || scanStopped(input)) {
+        result.budgetExhausted = true; result.hasMore = true; result.pendingFiles += 1; return false;
+      }
+      const startingBudget = budget.remaining;
+      try {
+        const snapshot = codexCandidateSnapshot(codexCandidates[index]!, roots, budget, result, () => scanStopped(input));
+        running = snapshotChain(running, snapshot.evidence);
+        meta = snapshotChain(meta, snapshot.metadata);
+      }
+      catch (error) {
+        if (error instanceof SnapshotBudgetExhausted) {
+          result.budgetExhausted = true;
+          if (budget.remaining === 0 && startingBudget === requestedBudget) result.minimumBudgetInsufficient = true;
+        }
+        else result.unreadable += 1;
+        result.hasMore = true; result.pendingFiles += 1; return false;
+      }
+      saveSnapshotState(phase, baseline, running, index + 1, false, meta);
+    }
+    if (phase === 'b') saveSnapshotState('r', running, EMPTY_SNAPSHOT_HASH, 0);
+    else if (running === baseline) saveSnapshotState('d', baseline, EMPTY_SNAPSHOT_HASH, 0, false, meta);
+    else {
+      saveSnapshotState('b', EMPTY_SNAPSHOT_HASH, EMPTY_SNAPSHOT_HASH, 0, true);
+      result.snapshotChanged = true; result.hasMore = true; result.pendingFiles += 1; return false;
+    }
+    return true;
+  };
+  if (input.backfill === true) {
+    backfillCodexFingerprint = createHash('sha256').update(JSON.stringify([status.retention, codexCandidates.map(candidate => candidate.sourceId)])).digest('hex');
+    snapshotCursor = readWhatISaidTranscriptCursor({ ...input, agent: 'codex', sourceIdentity: codexSnapshotIdentity });
+    snapshotState = codexSnapshotParts(snapshotCursor?.fileIdentity);
+    if (!snapshotState || (snapshotState.membership !== backfillCodexFingerprint && snapshotState.phase === 'b' && snapshotCursor?.lineNumber === 0)) {
+      saveSnapshotState('b', EMPTY_SNAPSHOT_HASH, EMPTY_SNAPSHOT_HASH, 0, true);
+    } else if (snapshotState.membership !== backfillCodexFingerprint && (snapshotState.phase === 'v' || snapshotState.phase === 'd')) {
+      saveSnapshotState('b', EMPTY_SNAPSHOT_HASH, EMPTY_SNAPSHOT_HASH, 0, true);
+      result.snapshotChanged = true; result.hasMore = true; result.pendingFiles += 1; return result;
+    } else if (input.backfillContinuation !== true
+      && (snapshotState.phase === 'd' || (snapshotState.phase === 'v' && (snapshotCursor?.lineNumber ?? 0) > 0))) {
+      // Files checked by an earlier request may have changed while it was
+      // suspended, and a finished check may predate the other source. Resume
+      // only when none of them was written since (lstat only, no budget);
+      // otherwise re-verify every file against the same baseline from the
+      // first one, now and with this pass's full budget. Reading is already
+      // done, so the baseline is kept: restarting it made each request repeat
+      // the whole cycle and never reach completion.
+      const checked = snapshotState.phase === 'd' ? Math.min(snapshotState.target, codexCandidates.length) : snapshotCursor!.lineNumber;
+      if (codexPrefixMetadata(codexCandidates, checked) !== snapshotState.meta) {
+        saveSnapshotState('v', snapshotState.baseline, EMPTY_SNAPSHOT_HASH, 0);
+      }
+    }
+    if (!runSnapshotPage()) return result;
+    codexCurrentSnapshot = snapshotState?.baseline ?? null;
+    backfillCodexDiscovery = readWhatISaidTranscriptCursor({ ...input, agent: 'codex', sourceIdentity: backfillCodexIdentity });
+    let parts = discoveryParts(backfillCodexDiscovery?.fileIdentity);
+    if (backfillCodexDiscovery && (!parts || parts.membership !== backfillCodexFingerprint || parts.snapshot !== codexCurrentSnapshot)) {
+      const previousAfter = parts?.after ?? backfillCodexDiscovery.fileIdentity.split(':').at(-1) ?? '';
+      const reset = commitWhatISaidTranscriptCursor({
+        ...input, agent: 'codex', sourceIdentity: backfillCodexIdentity, expected: backfillCodexDiscovery,
+        next: { generation: backfillCodexDiscovery.generation + 1, fileIdentity: `${backfillCodexFingerprint}:${codexCurrentSnapshot}:${previousAfter}`, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) }, now: scannedThrough,
+      });
+      if (!reset.committed) { result.hasMore = true; result.pendingFiles += 1; return result; }
+      backfillCodexDiscovery = reset.cursor;
+      parts = discoveryParts(backfillCodexDiscovery.fileIdentity);
+    }
+    backfillCodexSnapshot = parts?.snapshot ?? codexCurrentSnapshot;
+    codexVisited = backfillCodexDiscovery?.lineNumber ?? 0;
+  }
+  const resumeAfter = input.backfill === true
+    ? discoveryParts(backfillCodexDiscovery?.fileIdentity)?.after || null
+    : discoveryCursor;
+  const startIndex = resumeAfter === null
     ? 0
-    : Math.max(0, codexCandidates.findIndex(candidate => candidate.sourceId > discoveryCursor!));
+    : Math.max(0, codexCandidates.findIndex(candidate => candidate.sourceId > resumeAfter));
   // Bound both cached classifications and pending writes. Committing every
   // file made even a warm scan perform thousands of synchronous SQLite writes;
   // one unbounded final batch also exceeded the store's 10,000-item guard.
-  for (let offset = 0; offset < codexCandidates.length; offset += DISCOVERY_BATCH_SIZE) {
-    if (budget.remaining <= 0) {
+  for (let offset = 0; offset < codexCandidates.length && (input.backfill !== true || codexVisited < codexCandidates.length); offset += DISCOVERY_BATCH_SIZE) {
+    if (budget.remaining <= 0 || scanStopped(input)) {
       result.budgetExhausted = true;
       result.hasMore = true;
       result.pendingFiles += 1;
@@ -850,16 +1355,24 @@ export function collectWhatISaidTranscripts(
       owned: boolean;
     }> = [];
     let lastProcessedSourceId: string | null = null;
-    for (const candidate of batch) {
-      if (budget.remaining <= 0) {
+    for (const [batchIndex, candidate] of batch.entries()) {
+      if (input.backfill === true && codexVisited >= codexCandidates.length) break;
+      // Do not start a new candidate with only the residue of a previous one:
+      // a classification-only attempt would rotate past it forever on small
+      // budgets without leaving enough space to read any of its records.
+      if (budget.remaining <= 0 || (input.backfill === true && budget.remaining < Math.min(1024, requestedBudget)) || scanStopped(input)) {
         result.budgetExhausted = true;
         result.hasMore = true;
         result.pendingFiles += 1;
         break;
       }
       const { file, sourceId } = candidate;
+      const candidateStartingBudget = budget.remaining;
+      const pendingBefore = result.pendingFiles;
+      const unreadableBefore = result.unreadable;
       let owned = false;
       let modifiedWithinScanWindow = false;
+      let codexHeaderEvidence: { bytes: Buffer; fileIdentity: string; size: number; mtimeMs: number } | undefined;
       try {
         const snapshot = transcriptFileSnapshot(file);
         modifiedWithinScanWindow = snapshot.mtimeMs >= Date.parse(scannedFrom);
@@ -877,6 +1390,7 @@ export function collectWhatISaidTranscripts(
           const header = firstLineWithinBudget(file, budget, result);
           if (header === null) {
             if (budget.remaining <= 0) {
+              if (input.backfill === true && candidateStartingBudget === requestedBudget) result.minimumBudgetInsufficient = true;
               result.budgetExhausted = true;
               result.hasMore = true;
               result.pendingFiles += 1;
@@ -886,6 +1400,8 @@ export function collectWhatISaidTranscripts(
           } else {
             const cwd = codexRolloutCwd(header);
             owned = !!cwd && cwdBelongsToExactRoot(cwd, roots);
+            codexHeaderEvidence = { bytes: Buffer.from(`${header}\n`, 'utf8'), fileIdentity: snapshot.fileIdentity,
+              size: snapshot.size, mtimeMs: snapshot.mtimeMs };
             const classification = {
               sourceId,
               fileIdentity: snapshot.fileIdentity,
@@ -908,12 +1424,32 @@ export function collectWhatISaidTranscripts(
           file,
           scannedFrom,
           captureSince: input.backfill === true ? new Date(0).toISOString() : status.enabledAt,
+          backfillRetention: status.retention,
+          codexHeaderEvidence,
+          candidateStartingBudget,
           exactRoots: roots,
           budget,
           result,
         });
       }
       lastProcessedSourceId = sourceId;
+      if (input.backfill === true && backfillCodexFingerprint) {
+        const complete = result.pendingFiles === pendingBefore && result.unreadable === unreadableBefore;
+        if (!complete && offset + batchIndex > 0) break;
+        codexVisited = complete ? codexVisited + 1 : 0;
+        if (!complete) backfillCodexSnapshot = codexCurrentSnapshot;
+        if (newClassifications.length) {
+          commitWhatISaidTranscriptClassifications({ ...input, items: newClassifications, now: scannedThrough });
+          newClassifications.length = 0;
+        }
+        const advanced = commitWhatISaidTranscriptCursor({
+          ...input, agent: 'codex', sourceIdentity: backfillCodexIdentity, expected: backfillCodexDiscovery,
+          next: { generation: (backfillCodexDiscovery?.generation ?? 0) + (backfillCodexDiscovery && !complete ? 1 : 0),
+            fileIdentity: `${backfillCodexFingerprint}:${backfillCodexSnapshot}:${sourceId}`, byteOffset: 0, lineNumber: codexVisited, anchor: Buffer.alloc(0) }, now: scannedThrough,
+        });
+        if (!advanced.committed) { result.hasMore = true; result.pendingFiles += 1; break; }
+        backfillCodexDiscovery = advanced.cursor;
+      }
     }
     // Persist classifications before advancing discovery. A crash in between
     // safely replays this batch; transcript receipts already make it idempotent.
@@ -923,6 +1459,10 @@ export function collectWhatISaidTranscripts(
       now: scannedThrough,
     });
     if (lastProcessedSourceId === null) break;
+    if (input.backfill === true) {
+      if (result.pendingFiles > 0) break;
+      continue;
+    }
     const advancedDiscovery = commitWhatISaidDiscoveryCursor({
       ...input,
       scope: "codex",
@@ -940,6 +1480,64 @@ export function collectWhatISaidTranscripts(
 
   // A partial scan must replay from the previous checkpoint. Source-event HMAC
   // receipts make that overlap idempotent without risking a skipped prompt.
+  if (scanStopped(input) && !result.hasMore) {
+    result.budgetExhausted = true;
+    result.hasMore = true;
+    result.pendingFiles += 1;
+  }
+  if (input.backfill === true && result.unreadable === 0 && result.pendingFiles === 0 && !result.budgetExhausted) {
+    // Before reporting completion, compare the discovered membership and
+    // file metadata with the start of each completed cycle. A concurrent
+    // append to an already visited file restarts that cycle fairly, without
+    // resetting it on every pass while it is still in progress.
+    const verifyCycle = (agent: 'claude' | 'codex', files: string[], expected: WhatISaidTranscriptCursor | null,
+      identity: string, membership: string | null, snapshot: string | null) => {
+      const candidates = files.map(file => ({ file, sourceId: deriveWhatISaidTranscriptSourceId({
+        ...input, agent, sourceIdentity: realpathSync(file),
+      }) })).sort((left, right) => left.sourceId.localeCompare(right.sourceId));
+      const currentMembership = createHash('sha256').update(JSON.stringify([status.retention, candidates.map(candidate => candidate.sourceId)])).digest('hex');
+      const currentSnapshot = discoverySnapshot(candidates);
+      if (currentMembership === membership && currentSnapshot === snapshot) return false;
+      const after = discoveryParts(expected?.fileIdentity)?.after ?? '';
+      const reset = commitWhatISaidTranscriptCursor({
+        ...input, agent, sourceIdentity: identity, expected,
+        next: { generation: expected ? expected.generation + 1 : 0,
+          fileIdentity: `${currentMembership}:${currentSnapshot}:${after}`, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+        now: scannedThrough,
+      });
+      if (!reset.committed) throw new Error('Discovery cursor changed concurrently');
+      return true;
+    };
+    try {
+      const claudeChanged = verifyCycle('claude', claudeCandidateFiles(), backfillClaudeDiscovery,
+        'what-i-said-backfill-claude-discovery-v1', backfillClaudeFingerprint, backfillClaudeSnapshot);
+      if (claudeChanged) {
+        result.snapshotChanged = true;
+        result.hasMore = true;
+        result.pendingFiles += 1;
+      }
+    } catch (error) {
+      if (error instanceof SnapshotBudgetExhausted) result.budgetExhausted = true;
+      else result.unreadable += 1;
+      result.hasMore = true;
+      result.pendingFiles += 1;
+    }
+  }
+  if (input.backfill === true && result.unreadable === 0 && result.pendingFiles === 0 && !result.budgetExhausted) {
+    try {
+      const freshMembership = createHash('sha256').update(JSON.stringify([status.retention,
+        codexCandidateFiles().map(file => deriveWhatISaidTranscriptSourceId({ ...input, agent: 'codex', sourceIdentity: realpathSync(file) })).sort()])).digest('hex');
+      if (freshMembership !== backfillCodexFingerprint || snapshotState?.membership !== freshMembership) {
+        saveSnapshotState('b', EMPTY_SNAPSHOT_HASH, EMPTY_SNAPSHOT_HASH, 0, true);
+        result.snapshotChanged = true; result.hasMore = true; result.pendingFiles += 1;
+      } else {
+        if (snapshotState?.phase === 'r') saveSnapshotState('v', snapshotState.baseline, EMPTY_SNAPSHOT_HASH, 0);
+        runSnapshotPage();
+      }
+    } catch {
+      result.unreadable += 1; result.hasMore = true; result.pendingFiles += 1;
+    }
+  }
   if (result.unreadable === 0 && result.pendingFiles === 0 && !result.budgetExhausted) {
     const advanced = advanceWhatISaidScan({
       appDataDir: input.appDataDir,
@@ -948,6 +1546,29 @@ export function collectWhatISaidTranscripts(
       scannedThrough,
     });
     result.scanAdvanced = advanced.lastScanAt === scannedThrough;
+    if (result.scanAdvanced && backfillClaudeDiscovery && backfillClaudeIdentity && backfillClaudeFingerprint) {
+      const reset = commitWhatISaidTranscriptCursor({
+        ...input, agent: 'claude', sourceIdentity: backfillClaudeIdentity, expected: backfillClaudeDiscovery,
+        next: { generation: backfillClaudeDiscovery.generation + 1,
+          fileIdentity: `${backfillClaudeFingerprint}:${backfillClaudeSnapshot}:`, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) },
+        now: scannedThrough,
+      });
+      if (!reset.committed) {
+        result.scanAdvanced = false;
+        result.hasMore = true;
+        result.pendingFiles += 1;
+      }
+    }
+    if (result.scanAdvanced && backfillCodexDiscovery && backfillCodexFingerprint) {
+      const reset = commitWhatISaidTranscriptCursor({
+        ...input, agent: 'codex', sourceIdentity: backfillCodexIdentity, expected: backfillCodexDiscovery,
+        next: { generation: backfillCodexDiscovery.generation + 1, fileIdentity: `${backfillCodexFingerprint}:${backfillCodexSnapshot}:`, byteOffset: 0, lineNumber: 0, anchor: Buffer.alloc(0) }, now: scannedThrough,
+      });
+      if (!reset.committed) { result.scanAdvanced = false; result.hasMore = true; result.pendingFiles += 1; }
+    }
+    if (result.scanAdvanced && snapshotState && snapshotCursor) {
+      saveSnapshotState('b', EMPTY_SNAPSHOT_HASH, EMPTY_SNAPSHOT_HASH, 0, true);
+    }
   }
 
   return result;

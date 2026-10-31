@@ -11,7 +11,7 @@ import type {WorkroomEffortMode} from './workroomEffortMode';
 export function externalCliPrompt(frame: EffortFrame | null): string | null {
   if (!frame || workroomScreenAwaitsAnswer(frame.rows)) return null;
   const line = frame.rows[frame.cursorRow] ?? '';
-  const prefix = /^\s*[›❯>] /.exec(line)?.[0];
+  const prefix = /^\s*[›»❯>] /.exec(line)?.[0];
   if (!prefix) return null;
   const text = line.slice(prefix.length);
   if (!text || /[\x00-\x1f\x7f]/.test(text) || text.length > 4000 || stringWidth(line) !== frame.cursorCol) return null;

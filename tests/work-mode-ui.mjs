@@ -89,23 +89,23 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   assert.match(await page.getByTestId('work-mode-screen-status').innerText(),/AgentsToZ Screen이 꺼져 있어요/);
   await page.getByTestId('work-mode-screen-open').click();
   await page.getByText('AgentsToZ Screen 실행 중 · 화면 제어 꺼짐',{exact:true}).waitFor();
-  await page.getByText('조작하려면 손쉬운 사용 권한이 필요해요',{exact:true}).waitFor();
+  await page.getByText('조작하려면 손쉬운 사용·입력 모니터링 권한이 필요해요',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').map(c=>c.args)),[{}],'opening takes no arguments');
   // The panel reads the helper again when it opens.
   const reopen=async()=>{await page.getByTestId('work-mode-open').click();await page.getByTestId('work-mode-open').click();await page.getByTestId('work-mode-screen-status').waitFor();};
   await page.evaluate(()=>window.setScreenHelper({state:{power:'on',viewing:true,devices:2,capture:true,control:true,loginItem:'approval'}}));
   await reopen();
-  await page.getByText('화면 제어 켜짐 · 연결할 수 있는 기기 2대',{exact:true}).waitFor();
-  await page.getByText('지금 기기가 이 Mac 화면을 보고 있어요',{exact:true}).waitFor();
+  await page.getByText('화면 제어 켜짐 · 등록된 기기 2대',{exact:true}).waitFor();
+  await page.getByText('현재 연결 1대 · 이 Mac 화면을 보고 있어요',{exact:true}).waitFor();
   await page.getByText(/시스템 설정에서 허용해야/).waitFor();
-  assert.equal(await page.getByText('조작하려면 손쉬운 사용 권한이 필요해요',{exact:true}).count(),0);
+  assert.equal(await page.getByText('조작하려면 손쉬운 사용·입력 모니터링 권한이 필요해요',{exact:true}).count(),0);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'the screen section wraps in the dock');
   await page.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-screen.png`});
   // On, but the Mac is off an approved network: no device can connect, so no count of devices that can.
   await page.evaluate(()=>window.setScreenHelper({state:{power:'waiting',viewing:false,devices:2,capture:true,control:true,loginItem:'on'}}));
   await reopen();
   await page.getByText(/지금 네트워크에서는 연결을 받지 않아요/).waitFor();
-  assert.equal(await page.getByText(/연결할 수 있는 기기 2대/).count(),0,'waiting is not shown as ready for devices');
+  assert.equal(await page.getByText(/등록된 기기 2대/).count(),0,'waiting is not shown as ready for devices');
   // Asked but not yet seen running: say where to look, neither success nor failure.
   await page.evaluate(()=>window.unverifiedScreenOpen=true);await page.getByTestId('work-mode-screen-open').click();
   await page.getByText(/메뉴 막대의 화면 아이콘을 확인하세요/).waitFor();
@@ -134,14 +134,17 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await main.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-main.png`});
   // The QR remote-control dialog is where people look for AgentsToZ Screen (2026-10-25): the same status and 「열기」.
   const qr=await browser.newPage({viewport:{width:960,height:720}}),qrErrors=[];qr.on('pageerror',e=>qrErrors.push(e.message));
-  await qr.goto(server.url+'?qr-remote=1');await qr.getByText('현재 꺼져 있습니다',{exact:true}).waitFor();
+  await qr.goto(server.url+'?qr-remote=1');await qr.getByTestId('qr-remote-control-lan-folded').waitFor();
+  // 꺼진 같은 Wi‑Fi 웹 원격은 접혀 있고(2026-11-01), 펼치면 예전 켜기 화면이 그대로 나온다.
+  assert.equal(await qr.getByTestId('qr-remote-control-enable').count(),0,'folded: no LAN enable button');
+  await qr.getByTestId('qr-remote-control-lan-expand').click();await qr.getByText('현재 꺼져 있습니다',{exact:true}).waitFor();await qr.getByTestId('qr-remote-control-enable').waitFor();
   await qr.getByTestId('qr-remote-screen-status').waitFor();
   assert.match(await qr.getByTestId('qr-remote-screen-status').innerText(),/AgentsToZ Screen이 꺼져 있어요/);
   await qr.getByTestId('qr-remote-screen-open').click();
   await qr.getByText('AgentsToZ Screen 실행 중 · 화면 제어 꺼짐',{exact:true}).waitFor();
   assert.deepEqual(await qr.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').map(c=>c.args)),[{}],'the dialog opens it the same way');
   await qr.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-qr-remote-screen.png`});
-  await qr.goto(server.url+'?qr-remote=1&browser=1');await qr.getByText('현재 꺼져 있습니다',{exact:true}).waitFor();
+  await qr.goto(server.url+'?qr-remote=1&browser=1');await qr.getByTestId('qr-remote-control-lan-folded').waitFor();
   assert.equal(await qr.getByTestId('qr-remote-screen').count(),0,'no Screen entry in a browser');
   assert.equal(await qr.evaluate(()=>window.nativeCalls.filter(c=>c.command==='get_screen_helper').length),0,'a browser never asks for the helper');
   assert.deepEqual(qrErrors,[]);

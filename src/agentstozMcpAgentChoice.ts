@@ -102,11 +102,11 @@ export type McpAgentExecutionRoute = 'agentstoz_use_start_workroom_session' | 'a
 export interface McpAgentLaunchDraft {agent?: AiTerminalAgent; surface?: TeamLaunchSurface; hermesVariant?: McpHermesVariant}
 type Unchecked = {performed: false; preparationOnly: true; readiness: 'choices-only'; installation: 'not-checked'; credentials: 'not-checked'};
 type AgentQuestion = {stage: 'agent'; effect: 'agent-selection-required'; choices: AgentChoice[]};
-type SurfaceQuestion = {stage: 'surface'; effect: 'surface-selection-required'; choices: Array<{surface: TeamLaunchSurface; label: string; support: TeamLaunchSupport; executionRoutes: McpAgentExecutionRoute[]; singleLaunch: boolean; hermesVariantSupported?: boolean}>};
+type SurfaceQuestion = {stage: 'surface'; effect: 'surface-selection-required'; choices: Array<{surface: TeamLaunchSurface; label: string; support: TeamLaunchSupport; supportScope: 'team'; supportNote?: string; executionRoutes: McpAgentExecutionRoute[]; singleLaunch: boolean; hermesVariantSupported?: boolean}>};
 type VariantQuestion = {stage: 'variant'; effect: 'hermes-variant-selection-required'; executionRoutes: McpAgentExecutionRoute[]; choices: Array<{hermesVariant: McpHermesVariant; label: string; supported: boolean; unsupportedReason?: string}>};
 export type McpAgentLaunchPreparation = Unchecked & (
   | ({success: false; ready: false; selectionRequired: true; question: string; draft: McpAgentLaunchDraft} & (AgentQuestion | SurfaceQuestion | VariantQuestion))
-  | {success: true; ready: true; selectionRequired: false; effect: 'agent-launch-prepared'; note: string; draft: Required<Pick<McpAgentLaunchDraft, 'agent' | 'surface'>> & Pick<McpAgentLaunchDraft, 'hermesVariant'>; support: TeamLaunchSupport; executionRoutes: McpAgentExecutionRoute[]; singleLaunch: boolean; launchModel?: AiTerminalLaunchModel}
+  | {success: true; ready: true; selectionRequired: false; effect: 'agent-launch-prepared'; note: string; draft: Required<Pick<McpAgentLaunchDraft, 'agent' | 'surface'>> & Pick<McpAgentLaunchDraft, 'hermesVariant'>; support: TeamLaunchSupport; supportScope: 'team'; executionRoutes: McpAgentExecutionRoute[]; singleLaunch: boolean; launchModel?: AiTerminalLaunchModel}
   | {success: false; ready: false; selectionRequired: false; effect: 'agent-launch-refused'; error: string}
 );
 const unchecked: Unchecked = {performed: false, preparationOnly: true, readiness: 'choices-only', installation: 'not-checked', credentials: 'not-checked'};
@@ -116,6 +116,9 @@ const executionRoutes = (surface: TeamLaunchSurface): McpAgentExecutionRoute[] =
   : surface === 'app' || surface === 'orca-floating' || surface === 'orca-worktree'
     ? ['agentstoz_use_open_code_app', 'agentstoz_use_create_team'] : ['agentstoz_use_create_team'];
 const singleLaunch = (surface: TeamLaunchSurface) => executionRoutes(surface).some(route => route !== 'agentstoz_use_create_team');
+// Team Orca Claude accepts model/effort argv; open_code_app is a different route and has neither parameter.
+const teamOnlyOrcaOptionsNote = (surface: TeamLaunchSurface, agent: AiTerminalAgent) => agent === 'claude' && (surface === 'orca-floating' || surface === 'orca-worktree')
+  ? '모델·에포트 선택은 팀 실행에서만 전달되며 단독 open_code_app에는 적용되지 않습니다. 실제 적용은 별도로 확인해야 합니다.' : undefined;
 
 /**
  * Resolve only explicit selections against project-open's shared static catalog. Missing choices produce questions;
@@ -136,7 +139,7 @@ export function prepareMcpAgentLaunch(rawArgs: unknown, windows = false): McpAge
   if (agent !== 'hermes' && hermesVariant !== undefined) return refused('Hermes 변형은 Hermes를 선택했을 때만 지정할 수 있습니다.');
   if (!surface) return {...unchecked, success: false, ready: false, selectionRequired: true, stage: 'surface', effect: 'surface-selection-required', draft,
     question: `${launchChoiceLabel(agent)}를 어디에서 실행할까요? 실행 위치를 골라 주세요.`,
-    choices: surfaces.map(where => {const support = teamLaunchSupport(where, agent); return {surface: where, label: teamSurfaceName(where, agent), support, executionRoutes: executionRoutes(where), singleLaunch: singleLaunch(where),
+    choices: surfaces.map(where => {const support = teamLaunchSupport(where, agent), supportNote = teamOnlyOrcaOptionsNote(where, agent); return {surface: where, label: teamSurfaceName(where, agent), support, supportScope: 'team' as const, ...(supportNote ? {supportNote} : {}), executionRoutes: executionRoutes(where), singleLaunch: singleLaunch(where),
       ...(agent === 'hermes' && hermesVariant && hermesVariant !== 'default' ? {hermesVariantSupported: support.model && support.provider} : {})};})};
   const support = teamLaunchSupport(surface, agent);
   if (agent === 'hermes' && hermesVariant === undefined) return {...unchecked, success: false, ready: false, selectionRequired: true, stage: 'variant', effect: 'hermes-variant-selection-required', draft, executionRoutes: executionRoutes(surface),
@@ -146,7 +149,8 @@ export function prepareMcpAgentLaunch(rawArgs: unknown, windows = false): McpAge
       return {hermesVariant: variant ?? 'default', label: variant ? launchChoiceLabel(choice) : `${launchChoiceLabel(choice)} · 기본 설정(현재 CLI·앱 설정 그대로)`, supported,
         ...(!supported ? {unsupportedReason: '이 실행 위치는 Hermes 모델·provider 지정을 지원하지 않습니다. 실행 위치를 바꾸지 않습니다.'} : {})};})};
   if (agent === 'hermes' && hermesVariant && hermesVariant !== 'default' && !(support.model && support.provider)) return refused('이 실행 위치는 Hermes Claude·Codex 모델 지정을 지원하지 않습니다. 기본 설정을 고르거나 실행 위치를 명시적으로 다시 선택해 주세요.');
-  return {...unchecked, success: true, ready: true, selectionRequired: false, effect: 'agent-launch-prepared', draft: {...draft, agent, surface}, support, executionRoutes: executionRoutes(surface), singleLaunch: singleLaunch(surface),
-    note: '선택 준비만 끝났으며 실행·요청 전달은 하지 않았습니다.' + (surface === 'app' ? ` 앱 기능 안내(실행 전): ${workroomAppConfirmMessage(agent, '선택한 프로젝트', '요청')}` : ''),
+  const supportNote = teamOnlyOrcaOptionsNote(surface, agent);
+  return {...unchecked, success: true, ready: true, selectionRequired: false, effect: 'agent-launch-prepared', draft: {...draft, agent, surface}, support, supportScope: 'team', executionRoutes: executionRoutes(surface), singleLaunch: singleLaunch(surface),
+    note: '선택 준비만 끝났으며 실행·요청 전달은 하지 않았습니다.' + (supportNote ? ` ${supportNote}` : '') + (surface === 'app' ? ` 앱 기능 안내(실행 전): ${workroomAppConfirmMessage(agent, '선택한 프로젝트', '요청')}` : ''),
     ...(agent === 'hermes' && hermesVariant && hermesVariant !== 'default' ? {launchModel: hermesVariantModel(hermesVariant)} : {})};
 }

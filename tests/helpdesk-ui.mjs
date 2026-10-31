@@ -50,6 +50,34 @@ for(const [engineName,engine]of [['chromium',chromium],['webkit',webkit]])for(co
   browser=await engine.launch();const page=await browser.newPage({viewport:{width,height:950}});page.setDefaultTimeout(8000);page.on('pageerror',e=>errors.push(e.message));await page.goto(server.url.href);
   await page.getByRole('log',{name:'헬프데스크 대화'}).getByText('안녕하세요! 아젠투지를 처음 쓰시나요?',{exact:true}).waitFor();
   assert.equal(installs.length,0);assert.equal(loginCalls,0);assert.equal(answers.length,0);await page.screenshot({path:join(output,engineName+'-'+width+'-welcome.png')});
+  await page.getByLabel('헬프데스크 질문').fill('연결하면서 작성한 질문');
+  await page.getByRole('button',{name:'iPad·iPhone Mac 화면 연결',exact:true}).click();
+  const screenGuide=page.getByRole('region',{name:'Mac 화면 연결 안내',exact:true});
+  await screenGuide.getByText('단계 1 / 5',{exact:true}).waitFor();
+  assert.equal(await screenGuide.getByRole('button',{name:'이전 단계',exact:true}).isDisabled(),true);
+  await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).click();
+  await screenGuide.getByText('단계 2 / 5',{exact:true}).waitFor();
+  await screenGuide.getByRole('button',{name:'“화면 등록 QR이 아닙니다”',exact:true}).click();
+  await screenGuide.getByText('단계 1 / 4',{exact:true}).waitFor();
+  await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).click();
+  await screenGuide.getByText(/오래된 iPad·iPhone 앱이 새 Mac QR 형식을 읽지 못할 수/).waitFor();
+  await page.screenshot({path:join(output,engineName+'-'+width+'-screen-qr-help.png')});
+  await screenGuide.getByRole('button',{name:'LTE·외부에서 연결 준비',exact:true}).click();
+  for(let n=0;n<3;n++)await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).click();
+  await screenGuide.getByText('단계 4 / 6',{exact:true}).waitFor();
+  await screenGuide.getByText(/같은 Wi-Fi라는 사실만으로 직접 연결이라고 판단하지 않으며/).waitFor();
+  await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).click();
+  await screenGuide.getByText('단계 5 / 6',{exact:true}).waitFor();
+  await screenGuide.getByText(/Cloudflare 로그인만으로 앱 연결이 완료되지는 않습니다/).waitFor();
+  await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).click();
+  await screenGuide.getByText('단계 6 / 6',{exact:true}).waitFor();
+  assert.equal(await screenGuide.getByRole('button',{name:'다음 단계',exact:true}).count(),0);
+  await screenGuide.getByText(/근거리 성공이나 터널 Healthy만으로/).waitFor();
+  assert.equal(answers.length,0);assert.equal(loginCalls,0);assert.equal(installs.length,0);
+  assert.equal(serviceRequests.some(r=>!['list','setup-status'].includes(r.operation)),false,'Screen guidance cannot enroll a device or invoke account setup');
+  await screenGuide.getByRole('button',{name:'질문으로 돌아가기',exact:true}).click();
+  assert.equal(await page.getByLabel('헬프데스크 질문').inputValue(),'연결하면서 작성한 질문','Returning from guidance preserves the question draft');
+  await page.getByLabel('헬프데스크 질문').fill('');
   await page.getByRole('button',{name:'iPhone 로그인·연결 도와주세요',exact:true}).click();
   const mobile=page.getByRole('region',{name:'모바일 로그인·연결 준비',exact:true});await mobile.getByText('앱 데이터 저장소: 설정 필요',{exact:true}).waitFor();
   assert.equal(serviceRequests.some(r=>!['list','setup-status'].includes(r.operation)),false,'Opening mobile help reads status without login, account changes or AI');
@@ -108,3 +136,7 @@ for(const [engineName,engine]of [['chromium',chromium],['webkit',webkit]])for(co
  }finally{await browser?.close();browser=null;await host.shutdown();await cloud.shutdown();if(setup.status().view.active)await setup.act({operation:'cancel',expectedRevision:setup.status().view.revision});server.stop(true);}
 }
 }finally{await browser?.close();writeFileSync(join(output,'results.json'),JSON.stringify({source:'real-host-real-components-synthetic-auth-installers-AI',results},null,2));rmSync(root,{recursive:true,force:true});}
+
+// 헬프데스크 도움받기 screens share this check (the manifest is at its check limit): tests/helpdesk-assist-ui.mjs.
+const assistScreens=Bun.spawnSync(['bun',join(import.meta.dir,'helpdesk-assist-ui.mjs')],{stdout:'inherit',stderr:'inherit'});
+if(assistScreens.exitCode!==0)throw new Error('helpdesk assist screens failed');

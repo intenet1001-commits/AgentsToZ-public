@@ -78,7 +78,19 @@ for(const provider of ['github','vercel','supabase'] as const)test(provider+' ne
   const done=await f.complete(id);expect(done.state).toBe('completed');expect(done.email).toBe('newcomer@example.test');expect(done.account?.verifiedEmail).toBe('newcomer@example.test');
   if(provider==='supabase')expect(f.store.deviceDefaults()).toEqual({});else expect(f.store.deviceDefaults()[provider]?.accountId).toBe(done.account!.id);
   await f.login.start(provider,undefined,id,provider==='supabase'?'app-sync-account':'project-cli',true);expect(f.spawned).toHaveLength(1);
-  expect(()=>validatePlatformCliRequest({operation:'login-onboarding-start',provider,requestId:id},true)).toThrow('앱');
+  // An AI chat may start the person's own browser sign-in to add a project account; the app's sync account and
+  // the newcomer path that fills this Mac's default stay in the app.
+  expect(validatePlatformCliRequest({operation:'login-add-start',provider,requestId:id,targetId:'project-1'},true).operation).toBe('login-add-start');
+  expect(()=>validatePlatformCliRequest({operation:'login-add-start',provider,requestId:id,purpose:'app-sync-account'},true)).toThrow('앱');
+  expect(()=>validatePlatformCliRequest({operation:'login-onboarding-start',provider,requestId:id},true)).toThrow('앱에서');
+});
+test('adding another account through the browser never changes which account this Mac uses',async()=>{
+  const f=fixture(),id=rid();f.setEmail('added@example.test');
+  const view=await f.login.start('github',undefined,id,'project-cli',true,false);expect(view.email).toBe('');
+  const done=await f.complete(id);expect(done.state).toBe('completed');expect(done.account?.verifiedEmail).toBe('added@example.test');
+  expect(f.store.deviceDefaults()).toEqual({});
+  // The same request ID cannot be replayed as the newcomer path that would fill the default.
+  await expect(f.login.start('github',undefined,id,'project-cli',true,true)).rejects.toThrow('같은 로그인 요청 ID');
 });
 test('newcomer authentication preserves an existing device default for a different account',async()=>{
  const f=fixture(),id=rid();await f.store.setDefault('github','keep@example.test',null,rid());await f.login.start('github',undefined,id,'project-cli',true);expect((await f.complete(id)).state).toBe('completed');expect(f.store.deviceDefaults().github).toEqual({email:'keep@example.test',accountId:null});
@@ -92,8 +104,9 @@ test('email proof uses verified GitHub addresses and rejects missing identity an
   await expect(platformCliVerifiedEmail('github',token,email,async()=>[{email,verified:false}])).rejects.toThrow('일치');
   await expect(platformCliVerifiedEmail('supabase',supabaseToken,email,async()=>[])).rejects.toThrow('일치');
 });
-test('browser login, codes and device defaults cannot be invoked through an agent MCP request',()=>{
-  for(const operation of ['set-default','login-start','login-status','login-code','login-cancel'])expect(()=>validatePlatformCliRequest({operation},true)).toThrow('앱');
+test('an agent may run the person\'s browser sign-in, never set a default or read credentials directly',()=>{
+  for(const operation of ['set-default','create','check','list','native-github-accounts','connect-github','google-client-save','supabase-client-key'])expect(()=>validatePlatformCliRequest({operation},true)).toThrow('앱');
+  for(const request of [{operation:'login-start',provider:'github',email,requestId:'r1'},{operation:'login-status',loginId:'login-0001'},{operation:'login-code',loginId:'login-0001',code:'ABCD-1234'},{operation:'login-cancel',loginId:'login-0001'},{operation:'archive',accountId:'pcli_x',requestId:'r2'},{operation:'native-status'},{operation:'native-switch',provider:'github',accountId:'pcli_gh_octo',requestId:'r3'},{operation:'native-git-setup',requestId:'r4'}])expect(validatePlatformCliRequest({...request,targetId:'project-1'},true).operation).toBe(request.operation);
 });
 test.skipIf(process.platform==='win32')('real private PTY captures synthetic output and accepts one confirmation without a transcript',async()=>{
   let output='';const child=spawnPlatformLogin({executable:process.execPath,args:['-e',"process.stdout.write('PRIVATE_SYNTHETIC_READY\\n'); process.stdin.once('data',()=>process.exit(0));"],env:{...process.env},cwd:tmpdir(),account:{id:'synthetic',provider:'supabase',label:'test',identity:null,state:'unchecked',revision:''}},s=>{output+=s;});

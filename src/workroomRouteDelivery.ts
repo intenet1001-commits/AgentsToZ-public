@@ -50,7 +50,7 @@ export function workroomScreenAwaitsAnswer(lines: readonly string[] | null | und
   // Claude repeats the user's last prompt after "> ", so a numbered prompt read as a menu before.
   let idleAt = -1;
   for (let index = tail.length - 1; index >= 0; index--) {
-    if (/^[>›❯](?:$|\s+(?:ask codex to do anything|type your message|send a message)\b)/i.test(tail[index]!)) { idleAt = index; break; }
+    if (/^[>›»❯](?:$|\s+(?:ask codex to do anything|type your message|send a message)\b)/i.test(tail[index]!)) { idleAt = index; break; }
   }
   const live = tail.slice(idleAt + 1);
   const text = live.join('\n');

@@ -38,7 +38,7 @@ describe('VOC 2026-09-01 15:38 — 두 가져오기 버튼의 차이가 화면�
   });
 
   test('backfill 은 실제로 처음부터 다시 읽는다 — 설명이 구현과 어긋나면 안 된다', () => {
-    expect(collectorSource).toContain('let expected = input.backfill === true ? null : readWhatISaidTranscriptCursor({');
+    expect(collectorSource).toContain('progressSourceIdentity = `backfill:${sourceId}`');
     expect(collectorSource).toContain('? new Date(0).toISOString()');
     expect(collectorSource).toContain('...(input.backfill === true ? { allowBeforeEnabled: true } : {}),');
   });
@@ -69,7 +69,7 @@ describe('VOC 2026-09-01 08:10 — 기기 정보가 함께 기록되는지 화�
   test('수집 경로가 실제로 기기 신원을 함께 저장한다', () => {
     const capture = apiSource.slice(
       apiSource.indexOf('const result = collectWhatISaidTranscripts({'),
-      apiSource.indexOf('lastWhatISaidScanByMemoryId.set('),
+      apiSource.indexOf('if (result.budgetExhausted && !options.background)'),
     );
     expect(capture).toContain('...whatISaidDeviceIdentity(),');
     // 저장 시점에 값이 없으면 지어내지 않고 null 로 떨어뜨린다.

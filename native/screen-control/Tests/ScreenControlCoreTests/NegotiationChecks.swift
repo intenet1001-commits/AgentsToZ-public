@@ -13,9 +13,13 @@ let negotiationMatrix: [(phone: VersionPolicy, mac: VersionPolicy, settled: UInt
     (.only(1), .only(1), 1, "two version-1 builds"),
     (.only(1), .current, 1, "a version-2 Mac serves a version-1 phone"),
     (.current, .only(1), 1, "a version-2 phone works with a version-1 Mac"),
-    (.current, .current, 2, "two version-2 builds"),
-    (.upTo(3), .current, 2, "a newer phone settles on what this Mac speaks"),
-    (.current, .upTo(3), 2, "a newer Mac settles on what this phone speaks"),
+    (.upTo(2), .current, 2, "a version-3 Mac serves a version-2 phone"),
+    (.current, .upTo(2), 2, "a version-3 phone works with a version-2 Mac"),
+    (.upTo(3), .current, 3, "a v4 Mac serves a v3 phone"),
+    (.current, .upTo(3), 3, "a v4 phone works with a v3 Mac"),
+    (.current, .current, 4, "two version-4 builds"),
+    (.upTo(5), .current, 4, "a newer phone settles on what this Mac speaks"),
+    (.current, .upTo(5), 4, "a newer Mac settles on what this phone speaks"),
 ]
 
 func offersVersions(_ policy: VersionPolicy) -> Bool {
@@ -100,7 +104,7 @@ extension ScreenControlChecks {
         // Raising the phone's offer still breaks the Mac's signature: the offer is inside T.
         let raised = fixture.device()
         var louder = try LengthPrefixed.decode(raised.hello, count: 4)
-        louder[2] = VersionStamp.stamped(louder[2], version: 3)
+        louder[2] = VersionStamp.stamped(louder[2], version: ScreenControlProtocol.version + 1)
         let (overRaised, _) = try await fixture.mac.respond(to: LengthPrefixed.encode(louder))
         try await expectError(HandshakeError.badSignature) { _ = try await raised.finish(macHello: overRaised, signer: counting) }
 

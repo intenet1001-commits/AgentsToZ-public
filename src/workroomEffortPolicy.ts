@@ -16,8 +16,11 @@ import {splitWorkroomAttachmentBlock} from './workroomImageAttachments';
  */
 
 export type WorkroomEffortTier = 'low' | 'medium' | 'high';
-/** The levels auto ever passes to a CLI (each is accepted by Claude, Codex catalog models and Hermes). */
-export type WorkroomEffortLevel = WorkroomEffortTier;
+/**
+ * Every level a launch can carry. Auto passes only WORKROOM_EFFORT_AUTO_LEVELS (accepted by Claude, every Codex catalog model
+ * and Hermes); xhigh, max and ultra come only from a person's pin, offered per model (src/teamEffortCatalog.ts).
+ */
+export type WorkroomEffortLevel = WorkroomEffortTier | 'xhigh' | 'max' | 'ultra';
 export const WORKROOM_EFFORT_AUTO_LEVELS: readonly WorkroomEffortLevel[] = ['low', 'medium', 'high'];
 
 export type WorkroomEffortHighReason = 'concurrency' | 'security' | 'migration' | 'unclear-failure' | 'design-review';
@@ -99,9 +102,9 @@ export function classifyWorkroomEffort(text: string): WorkroomEffortDecision | n
  * The level a CLI receives for a tier, or null for none. `allowed` narrows it to what the model is proven to offer
  * (Codex, src/codexEffortModel.ts): a level outside it is never passed — the CLI keeps its own default instead.
  */
-export function workroomEffortLevel(agent: AiTerminalAgent, tier: WorkroomEffortTier, allowed?: readonly string[]): WorkroomEffortLevel | null {
+export function workroomEffortLevel(agent: AiTerminalAgent, tier: WorkroomEffortLevel, allowed?: readonly string[]): WorkroomEffortLevel | null {
   if (WORKROOM_EFFORT_SUPPORT[agent] !== 'launch') return null;
-  if (!WORKROOM_EFFORT_AUTO_LEVELS.includes(tier)) return null;
+  if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(tier)) return null;
   if (allowed && !allowed.includes(tier)) return null;
   return tier;
 }

@@ -67,3 +67,17 @@ describe('Orca context-session lookup', () => {
     ] }, { paneKey, tabId, worktreeId }).kind).toBe('ambiguous');
   });
 });
+
+describe('Orca split panes', () => {
+  test('a runtime record of another leaf in the same tab is never this session', () => {
+    const binding = { paneKey, tabId, worktreeId };
+    const leaf = paneKey.slice(tabId.length + 1);
+    expect(inspectLiveOrcaTerminal({ terminals: [
+      { handle: 'term_left', tabId, worktreeId, leafId: leaf, connected: true },
+      { handle: 'term_right', tabId, worktreeId, leafId: 'another-leaf', connected: true },
+    ] }, binding)).toEqual({ kind: 'one', value: { handle: 'term_left', tabId, worktreeId } });
+    expect(findLiveOrcaTerminal({ terminals: [
+      { handle: 'term_right', tabId, worktreeId, leafId: 'another-leaf', connected: true },
+    ] }, binding)).toBeNull();
+  });
+});

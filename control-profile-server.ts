@@ -3,7 +3,7 @@ import {join,dirname,basename,isAbsolute} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ControlProfileStore,readControlProfileSeed,controlMemoryRevision,type ControlProfileCandidate,type ControlProfileSeed} from './src/controlProfileStore';
 import {CONTROL_PROFILE_PRIVATE_PATH,CONTROL_PROFILE_MARKER,ControlProfileError} from './src/controlProfileContract';
-import {detectProjectMemory,detectProjectMemoryIdentity,initializeProjectMemory,readProjectMemorySnapshot,readMemoryDocument,writeMemoryDocument,pullProjectMemory,pushProjectMemory,runWithTimeout} from './project-memory-server';
+import {detectProjectMemory,detectProjectMemoryIdentity,initializeProjectMemory,readProjectMemorySnapshot,readMemoryDocument,writeMemoryDocument,pullProjectMemory,pushProjectMemory,runWithTimeout,previewProjectMemoryConflict,resolveProjectMemoryConflict} from './project-memory-server';
 import {parseProjectMemoryEntries,recallProjectMemoryEntries} from './src/projectMemoryRecall';
 import {isAgentsToZControlProject} from './buzz-agent-bootstrap-server';
 import {LEGACY_OPS_FOLDER_NAMES,OPS_FOLDER_NAME,isOpsFolderName} from './src/opsFolderName';
@@ -11,6 +11,11 @@ import {PINNED_REPOSITORY_KEY_CONFIG,canonicalProjectRepositoryKey,pinnedProject
 import {gitHubRepositoryPath} from './src/githubUrls';
 
 type Registration={id:string;name?:string;folderPath?:string;worktreePath?:string};
+/**
+ * A Pull that found local and remote OPS memory changed apart. It says only what is true and what the person can do: Pull
+ * overwrote neither side and the local memory stays in use. The dedicated local OPS review compares both versions before applying.
+ */
+export const CONTROL_SYNC_CONFLICT_PROBLEM='로컬과 원격 운영 기억이 다릅니다. 어느 쪽도 덮어쓰지 않았고 로컬 기억은 유지됩니다. 아젠투지 설정에서 운영 기억을 비교한 뒤 적용할 수 있습니다.';
 export type ControlProfileHostOptions={
  appDataDir:string;portalDataFile:string;gitPath:string;ghPath:string;
  registered():Promise<Registration[]>;
@@ -18,6 +23,8 @@ export type ControlProfileHostOptions={
  lease<T>(root:string,label:string,operation:()=>Promise<T>):Promise<T>;
  command?: (argv:string[],cwd:string,timeout:number)=>Promise<{stdout:string;exitCode:number}>;
  pullMemory?: typeof pullProjectMemory;
+ previewConflict?: typeof previewProjectMemoryConflict;
+ resolveConflict?: typeof resolveProjectMemoryConflict;
  deviceRecall?:(query:string)=>Array<{entryId:string;title:string;body:string;scope:string;revision:string|null;updatedAt:string;deviceId:string;memoryId:string}>;
 };
 export function createControlProfileHost(options:ControlProfileHostOptions){
@@ -143,7 +150,7 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
    if(!memory.config?.autoBackup)return {state:'not-configured',lastCheckedAt,problem:null};
    try{
     const result=await options.lease(root,'Control memory refresh',()=> (options.pullMemory??pullProjectMemory)({folderPath:root,portalDataFile:options.portalDataFile,projectName:'AgentsToZ'}));
-    return result.success===true?{state:'current',lastCheckedAt,problem:null}:{state:'needs-attention',lastCheckedAt,problem:'로컬과 원격 운영 기억이 다릅니다. 장기기억의 충돌 검토에서 확인하세요.'};
+    return result.success===true?{state:'current',lastCheckedAt,problem:null}:{state:'needs-attention',lastCheckedAt,problem:CONTROL_SYNC_CONFLICT_PROBLEM};
    }catch{return {state:'needs-attention',lastCheckedAt,problem:'원격 운영 기억을 확인하지 못했습니다. 로컬 기억은 유지됩니다. 연결 후 다시 확인하세요.'};}
   },
   initialize:async(root,memoryId)=>options.lease(root,'Control local memory preparation',async()=>{
@@ -186,5 +193,35 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
   catch{return {backedUp:false,reason:'needs-attention'};}
  };
  const prepare=async(projectId?:string)=>{const wasReady=store.status().state==='ready';const result=await store.prepare(projectId);return result.state==='ready'?store.synchronize(wasReady):result;};
- return {store,recall,profile,backup,prepare};
+ const conflictBinding=(expectedProfileId:unknown,expectedMemoryId:unknown)=>{
+  const current=store.read();
+  if(current.status.state!=='ready'||current.binding.backend!=='control-folder'
+   ||current.binding.profileId!==expectedProfileId||current.binding.memoryId!==expectedMemoryId)
+   throw new ControlProfileError('CONTROL_PROFILE_SURFACE_MISMATCH','운영 기억 연결이 바뀌었습니다. 비교 화면을 다시 여세요.');
+  return current.binding;
+ };
+ /** Local human review only: the route gates management origin; no MCP action exposes this method. */
+ const conflict=async(value:unknown)=>{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new ControlProfileError('CONTROL_PROFILE_INPUT_INVALID','운영 기억 비교 요청을 확인하세요.',400);
+  const r=value as Record<string,unknown>,base=['operation','expectedProfileId','expectedMemoryId'];
+  const allowed=r.operation==='preview'?base:[...base,'strategy','expectedLocalHash','expectedRemoteRevisionId','expectedRemoteContentHash','mergedContent','reviewed'];
+  if(!['preview','resolve'].includes(String(r.operation))||Object.keys(r).some(k=>!allowed.includes(k)))throw new ControlProfileError('CONTROL_PROFILE_INPUT_INVALID','운영 기억 비교 요청을 확인하세요.',400);
+  const bound=conflictBinding(r.expectedProfileId,r.expectedMemoryId);
+  const result=await options.lease(bound.root,'Control memory conflict review',async()=>{
+   const latest=conflictBinding(r.expectedProfileId,r.expectedMemoryId);
+   if(latest.root!==bound.root)throw new ControlProfileError('CONTROL_PROFILE_SURFACE_MISMATCH','운영 기억 위치가 바뀌었습니다. 다시 확인하세요.');
+   if(r.operation==='preview')return {comparison:await (options.previewConflict??previewProjectMemoryConflict)({folderPath:bound.root,portalDataFile:options.portalDataFile})};
+   if(r.reviewed!==true||!['keep-local','use-remote','merged'].includes(String(r.strategy))
+    ||typeof r.expectedLocalHash!=='string'||!/^[a-f0-9]{64}$/.test(r.expectedLocalHash)
+    ||typeof r.expectedRemoteRevisionId!=='string'||!/^[a-f0-9-]{36}$/.test(r.expectedRemoteRevisionId)
+    ||typeof r.expectedRemoteContentHash!=='string'||!/^[a-f0-9]{64}$/.test(r.expectedRemoteContentHash)
+    ||(r.strategy==='merged'&&(typeof r.mergedContent!=='string'||Buffer.byteLength(r.mergedContent,'utf8')>1_000_000))
+    ||(r.strategy!=='merged'&&r.mergedContent!==undefined))throw new ControlProfileError('CONTROL_PROFILE_INPUT_INVALID','비교한 두 버전과 적용할 내용을 확인하세요.',400);
+   return {resolution:await (options.resolveConflict??resolveProjectMemoryConflict)({folderPath:bound.root,portalDataFile:options.portalDataFile,projectName:'AgentsToZ',expectedMemoryId:bound.memoryId,strategy:r.strategy as 'keep-local'|'use-remote'|'merged',expectedLocalHash:r.expectedLocalHash,expectedRemoteRevisionId:r.expectedRemoteRevisionId,expectedRemoteContentHash:r.expectedRemoteContentHash,...(r.strategy==='merged'?{mergedContent:r.mergedContent as string}:{})})};
+  });
+  // A changed binding while a network read was pending cannot publish another OPS profile's comparison.
+  conflictBinding(r.expectedProfileId,r.expectedMemoryId);
+  return result;
+ };
+ return {store,recall,profile,backup,prepare,conflict};
 }

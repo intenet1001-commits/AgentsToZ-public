@@ -2,12 +2,14 @@ import {readFileSync, statSync, existsSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
+import {TEAM_CODEX_EXTRA_EFFORT_MODELS, TEAM_CODEX_LMH_MODELS, teamCodexEffortLevels} from './teamEffortCatalog';
 
 /**
  * Codex rejects a reasoning effort its model does not offer («Reasoning effort `X` is not supported for model `Y`»),
- * so 「에포트 자동」 (w16) passes `-c model_reasoning_effort` only when the model is proven to be a bundled catalog model.
- * Every catalog model of codex-cli 0.162.1 offers low, medium and high (strings of the installed binary, 2026-10-16);
- * auto never chooses anything else. Anything unproven — another model, provider, profile, catalog file, base URL, a
+ * so 「에포트 자동」 (w16) passes `-c model_reasoning_effort` only when the model is proven to be a catalog model.
+ * The catalog is Codex's own model metadata (src/teamEffortCatalog.ts: `~/.codex/models_cache.json` of codex-cli 0.163.0,
+ * re-read 2026-10-28, which lists this Mac's configured default `gpt-6.1-terra`); every catalog model offers low, medium
+ * and high, and auto never chooses anything else. Anything unproven — another model, provider, profile, catalog file, base URL, a
  * launch argument that picks a model, a line we cannot parse, a file we cannot read — answers `ok:false` (no flag).
  * `launchModel` is the `-m` the app itself passes (a team member's chosen model): it replaces every config `model`, so
  * it is the one proven against the catalog, while the provider, profile, catalog and base-URL checks still apply.
@@ -19,11 +21,9 @@ import type {WorkroomEffortLevel} from './workroomEffortPolicy';
 
 export const CODEX_EFFORT_CONFIG_MAX_BYTES = 64 * 1024;
 const LMH: readonly WorkroomEffortLevel[] = ['low', 'medium', 'high'];
-/** Bundled catalog of codex-cli 0.162.1 → the auto levels each offers (all three; xhigh+ vary and are never chosen). */
-export const CODEX_EFFORT_CATALOG: Readonly<Record<string, readonly WorkroomEffortLevel[]>> = {
-  'gpt-6-astra': LMH, 'gpt-6.1-sol': LMH, 'gpt-6-sol': LMH, 'gpt-6-luna': LMH, 'gpt-5.6-sol': LMH, 'gpt-5.6-terra': LMH,
-  'gpt-5.6-luna': LMH, 'gpt-daybreak-blue-latest': LMH, 'gpt-daybreak-red-latest': LMH, 'gpt-5.5': LMH, 'codex-auto-review': LMH,
-};
+/** Model-specific proven levels. The automatic classifier itself still chooses only low, medium or high. */
+export const CODEX_EFFORT_CATALOG: Readonly<Record<string, readonly WorkroomEffortLevel[]>> =
+  Object.fromEntries([...TEAM_CODEX_EXTRA_EFFORT_MODELS, ...TEAM_CODEX_LMH_MODELS].map(model => [model, teamCodexEffortLevels(model)!]));
 export const CODEX_MANAGED_CONFIG_PATH = '/etc/codex/managed_config.toml';
 
 export type CodexEffortUnknown = 'model' | 'provider' | 'profile' | 'catalog' | 'base-url' | 'launch-args' | 'unparsed' | 'unreadable';

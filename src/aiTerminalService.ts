@@ -1,13 +1,17 @@
+import {effortComposerEmpty} from './workroomEffortRuntime';
+import type {ScheduleSnapshot} from './workroomScheduleHost';
+import type {WorkroomSchedule,WorkroomScheduleRun} from './workroomScheduleProtocol';
+import {claudeInputChangesConversation,normalizeContextCommandRequest,type ContextCommandBinding} from './contextSessionCommand';
 import {parseUseReferenceId} from './projectUseMention';
 import {cliInfoFromScreen} from './workroomCliCommands';
-import {changeWorkroomEffort} from './workroomEffortRuntime';
+import {changeWorkroomEffort,WorkroomEffortNotReadyError,WORKROOM_EFFORT_READY_WAIT_MS} from './workroomEffortRuntime';
 import {workroomEffortRuntimeSupport} from './workroomEffortRuntimeSupport';
 import {classifyWorkroomEffort,workroomEffortRequestText} from './workroomEffortPolicy';
 import type {DesktopEffortMode,WorkroomEffortMode} from './workroomEffortMode';
 import { createHash, randomUUID } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, realpathSync, statSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join, dirname } from 'node:path';
 import { terminalOutputPage } from './aiTerminalOutput';
 import { AiTerminalScreen } from './aiTerminalScreen';
 import { stripViewerTerminalReplies, type ViewerReplyFilterState } from './aiTerminalReplyFilter';
@@ -28,12 +32,15 @@ import {splitWorkroomAttachmentBlock,withSuffixBeforeWorkroomAttachments,workroo
 import {WORKROOM_LAUNCH_SCOPE,WORKROOM_LAUNCH_SUBMISSION_FEATURE,WORKROOM_SUBMISSION_FEATURE,WORKROOM_SUBMISSION_RECENT_FEATURE,submissionDigest,submissionManifestHash} from './workroomSubmissionProtocol';
 import type {CorrectionTaskExposure,CorrectionTaskGuidance} from './projectMemoryCorrectionContext';
 import {WORKROOM_ACTIVITY_SAMPLE_MS,WorkroomActivityBoard,normalizeWorkroomActivityRequest,workroomInputIsRequest,workroomSampleInputs,workroomSampleWantsRows,type WorkroomActivityCursor,type WorkroomActivityPage,type WorkroomExitCause,type WorkroomSampleMemory} from './aiTerminalActivity';
-import {WORKROOM_TRANSCRIPT_TICK_BYTES,type WorkroomTurnSignals} from './aiTerminalActivityTranscript';
+import {WORKROOM_TRANSCRIPT_TICK_BYTES,verifyWorkroomTranscriptWitness,type WorkroomTranscriptWitness,type WorkroomTurnSignals} from './aiTerminalActivityTranscript';
+import {savedWorkroomConversation} from './workroomConversationIdentity';
 import {codexEffortModel as readCodexEffortModel,type CodexEffortModel} from './codexEffortModel';
 import {normalizeWorkroomEffortRequest,type WorkroomEffortSettingStore} from './workroomEffortSetting';
 import {hermesVariantOf,type HermesVariant} from './hermesVariants';
 import {noteWorkroomEffortRequest,observeWorkroomEffortScreen,planWorkroomEffort,workroomEffortInputIsManual,workroomEffortRecord,type WorkroomEffortRecord,type WorkroomEffortState,type WorkroomLaunchEffort} from './workroomEffortSession';
 import {workroomEffortView,type WorkroomEffortView} from './workroomEffortView';
+import {WORKROOM_CONTEXT_SAVE_REFUSALS,type WorkroomSavedPurpose} from './workroomSavedReceipt';
+import {reconcileAgyCliUnfinishedWork} from './agentstozInvocationInstaller';
 
 /**
  * Only reachable when the Windows PTY runtime is missing from the install.
@@ -162,6 +169,8 @@ export interface AiTerminalDependencies {
   threadEnded?:(sessionId:string)=>Promise<void>;
   history?: import('./workroomConversationHost').WorkroomHistoryObserver;
   accounts?: CliAccountManager;
+  /** The project's own gh·supabase·vercel·gws account routing for a Workroom (platformCliWorkroom.ts); never a token. */
+  cliAccountEnvironment?: (input:{targetId:string;cwd:string;env:Record<string,string|undefined>})=>Promise<Record<string,string>>;
   resolveTarget(id: string): Promise<AiTerminalResolvedTarget>;
   resolveUseReference?(projectId: string, serviceKey: string): Promise<{cwd: string; label: string}>;
   executable(agent: AiTerminalAgent): string | null;
@@ -174,7 +183,10 @@ export interface AiTerminalDependencies {
   /** Tests: whether the Codex binary knows `--dangerously-bypass-hook-trust` (default: ask `codex --help` once). */
   codexHookTrustSupported?: (executable: string, env: Record<string, string | undefined>) => Promise<boolean>;
   rememberEnded?: (session:{sessionId:string;targetId:string;cwd:string;agent:AiTerminalAgent})=>void;
-  verifySavedBeforeClose?: (session:{id:string;targetId:string;cwd:string;inputRevision:number},requestId:string,owner:string)=>Promise<void>;
+  verifyContextSync?:(cwd:string)=>Promise<void>;
+  /** `close` checks the whole project since the save; `context` (the dock's /compact·/clear) only this conversation, and
+   *  returns when that save started (src/workroomSavedReceipt.ts). */
+  verifySavedBeforeClose?: (session:{id:string;targetId:string;cwd:string;inputRevision:number},requestId:string,owner:string,purpose?:WorkroomSavedPurpose)=>Promise<void|{startedAt:number|null}>;
   activity?: (cwd: string, agent: AiTerminalAgent) => void;
   /** Which conversation a 「다시 시작」 continues (src/aiTerminalResume.ts); null starts a fresh one. */
   resume?: (source: AiTerminalResumeSource) => Promise<AiTerminalResume | null>;
@@ -204,6 +216,8 @@ interface Session {
   requestKeys: Set<string>;
   inputRevision:number; suppressMemoryOnExit?:boolean;
   completedInputRevision?:number;
+  completedTranscriptWitness?:WorkroomTranscriptWitness;
+  completedObservedModel?:string;
   pendingThreadCompletion?:{key:string;resultText:string;revision:number;retryAt:number};
   closing?: Promise<AiTerminalResponse>;
   revalidate?: AiTerminalResolvedTarget['revalidate'];
@@ -244,6 +258,9 @@ interface RetiredSession {
   /** The newest AI_TERMINAL_TAIL_RAW_CHARS of its output, with the original sequence numbers. */
   chunks: {seq: number; text: string}[]; next: number;
 }
+type AiTerminalStartGuard=(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|(()=>void)|Promise<void|(()=>void)>;
+/** The schedule owner serializes this synchronous native effect with pause/stop. */
+export type AiTerminalEffectGate=<T>(effect:()=>T)=>T;
 export const AI_TERMINAL_MAX_REQUEST_HISTORY = 100_000;
 export const AI_TERMINAL_MAX_PENDING_MUTATIONS = 256;
 /** Newest raw output a tail read renders; enough for its byte budget after escape codes are gone. */
@@ -283,7 +300,7 @@ export const aiTerminalPasteCandidate = (data: string) => data.length > 1 && dat
  * Preserve single keystrokes, but submit a combined paste only after it settles.
  * The byte sequence (including bracketed paste for multi-line text) is `aiTerminalSubmitSteps`.
  */
-export async function writeAiTerminalInput(agent: AiTerminalAgent, terminal: Pick<Pty, 'write'>, data: string, screen: {bracketedPaste?: boolean} = {}, written?: () => void, requireComplete=false,allowed?:()=>boolean): Promise<void> {
+export async function writeAiTerminalInput(agent: AiTerminalAgent, terminal: Pick<Pty, 'write'>, data: string, screen: {bracketedPaste?: boolean} = {}, written?: () => void, requireComplete=false,allowed?:()=>boolean,effectGate?:AiTerminalEffectGate): Promise<void> {
   for (const step of aiTerminalSubmitSteps(agent, data, screen)) {
     if ('waitMs' in step) {
       // Bun hands a PTY write to the CLI only on a later event-loop turn. If the loop stalled before that turn, the
@@ -292,7 +309,7 @@ export async function writeAiTerminalInput(agent: AiTerminalAgent, terminal: Pic
       // body first, so the measured wait is counted from delivery, not from the write call.
       await new Promise(resolve => setTimeout(resolve, 0));
       await new Promise(resolve => setTimeout(resolve, step.waitMs));
-    } else {if(allowed&&!allowed())throw Error('입력 도중 권한 또는 연결이 변경되었습니다. 자동으로 다시 보내지 않습니다.');const count=terminal.write(step.write);if(requireComplete&&count!==Buffer.byteLength(step.write))throw Error('터미널 쓰기가 일부만 완료됐을 수 있습니다. 자동으로 다시 보내지 않습니다.');written?.(); }
+    } else {if(allowed&&!allowed())throw Error('입력 도중 권한 또는 연결이 변경되었습니다. 자동으로 다시 보내지 않습니다.');const count=effectGate?effectGate(()=>terminal.write(step.write)):terminal.write(step.write);if(requireComplete&&count!==Buffer.byteLength(step.write))throw Error('터미널 쓰기가 일부만 완료됐을 수 있습니다. 자동으로 다시 보내지 않습니다.');written?.(); }
   }
 }
 async function waitForTerminalExit(child:Child, timeoutMs:number, required=false) {
@@ -305,6 +322,8 @@ async function waitForTerminalExit(child:Child, timeoutMs:number, required=false
 }
 export class AiTerminalService {
   #sessions = new Map<string, Session>();
+  /** Restored PTYs remain bound to the original schedule only for this host process lifetime. */
+  #scheduleRestorations=new Map<string,{scheduleId:string;binding:WorkroomSchedule['binding'];providerConversationId:string;inputRevision:number;configFingerprint:string;accountFingerprint:string;targetFingerprint:string;model:{model:string;provider?:string}}>();
   #retired = new Map<string, RetiredSession>();
   /** 「다시 시작」 lineage, host-only: a session id → the session its `resumeFrom` start opened. Bounded like #retired. */
   #continuedBy = new Map<string, string>();
@@ -343,18 +362,20 @@ export class AiTerminalService {
    * as given (no reported-correction context appended, no correction lookup that could refuse it), as the raw input
    * path did: an instruction another AI composed may be a slash command whose arguments the suffix would change.
    */
-  async submitHostInstruction(input:{id:string;sessionId:string;data:string;receiptOwner:string;references?:readonly string[];skipCorrections?:boolean;revision?:number;active?:()=>boolean;validateTarget?:(targetId:string,cwd:string)=>void}):Promise<{state:import('./workroomSubmissionProtocol').WorkroomSubmissionReceipt['state'];session?:AiTerminalSummary}>{
-    const {state,session}=await this.#submitWhole({id:input.id,sessionId:input.sessionId,data:input.data,references:input.references??[],revision:input.revision,...(input.active?{authority:{owner:input.receiptOwner,targets:new Set([this.runningSession(input.sessionId)?.targetId??'']),isActive:input.active,deviceConsentActive:input.active,validateTarget:input.validateTarget}}:{}),receiptOwner:input.receiptOwner,skipCorrections:input.skipCorrections===true,changed:'같은 요청 ID에 다른 입력을 보낼 수 없습니다.'});
+  async submitHostInstruction(input:{id:string;sessionId:string;data:string;receiptOwner:string;references?:readonly string[];skipCorrections?:boolean;revision?:number;active?:()=>boolean;validateTarget?:(targetId:string,cwd:string)=>void;beforeInput?:()=>Promise<void>;writeEffectGate?:AiTerminalEffectGate}):Promise<{state:import('./workroomSubmissionProtocol').WorkroomSubmissionReceipt['state'];session?:AiTerminalSummary}>{
+    const {state,session}=await this.#submitWhole({id:input.id,sessionId:input.sessionId,data:input.data,references:input.references??[],revision:input.revision,...(input.active?{authority:{owner:input.receiptOwner,targets:new Set([this.runningSession(input.sessionId)?.targetId??'']),isActive:input.active,deviceConsentActive:input.active,validateTarget:input.validateTarget}}:{}),receiptOwner:input.receiptOwner,skipCorrections:input.skipCorrections===true,changed:'같은 요청 ID에 다른 입력을 보낼 수 없습니다.',beforeInput:input.beforeInput,writeEffectGate:input.writeEffectGate});
     return {state,...(session?{session}:{})};
   }
-  async #submitWhole(input:{id:string;sessionId:string;data:string;references:readonly string[];revision?:number;authority?:AiTerminalAuthority;receiptOwner?:string;skipCorrections?:boolean;changed:string}):Promise<{state:import('./workroomSubmissionProtocol').WorkroomSubmissionReceipt['state'];replayed:boolean;session?:AiTerminalSummary}>{
+  async #submitWhole(input:{id:string;sessionId:string;data:string;references:readonly string[];revision?:number;authority?:AiTerminalAuthority;receiptOwner?:string;skipCorrections?:boolean;changed:string;beforeInput?:()=>Promise<void>;writeEffectGate?:AiTerminalEffectGate}):Promise<{state:import('./workroomSubmissionProtocol').WorkroomSubmissionReceipt['state'];replayed:boolean;session?:AiTerminalSummary}>{
     if(!this.#submissions)throw Error('전체 요청 제출을 지원하지 않습니다.');
     const {id,sessionId,references,authority}=input;
     const owner=authority?.owner??input.receiptOwner!;
-    const run=(request:Record<string,unknown>)=>this.perform(request,authority,authority?{}:{receiptOwner:input.receiptOwner,...(input.skipCorrections?{skipCorrections:true}:{})});
+    const run=(request:Record<string,unknown>)=>this.perform(request,authority,{...(!authority?{receiptOwner:input.receiptOwner,...(input.skipCorrections?{skipCorrections:true}:{})}:{}),...(input.beforeInput?{beforeInput:input.beforeInput}:{}),...(input.writeEffectGate?{writeEffectGate:input.writeEffectGate}:{})});
     const bytes=Buffer.from(input.data,'utf8');
     const previous=this.#submissions.find(id,{owner,sessionId});
     if(previous&&previous.record.intentHash!==submissionManifestHash(bytes.length,submissionDigest(bytes),references))throw Error(input.changed);
+    // Refused before the write fence: the same id answers that refusal again, it is never written later.
+    if(previous?.receipt.state==='rejected')throw Error('이 요청은 앞서 터미널에 쓰기 전에 거절되었습니다. 같은 요청 ID로는 다시 쓰지 않습니다.');
     if(previous&&['written','unknown','write_started'].includes(previous.receipt.state)){
       const response=await run({operation:'submission',requestId:id+'_status',sessionId,submission:{phase:'status',id}});
       return {state:response.submission?.state??'unknown',replayed:true};
@@ -402,6 +423,145 @@ export class AiTerminalService {
     for(let i=s.chunks.length-1;i>=0&&characters<6000;i--){const chunk=s.chunks[i]!;characters+=chunk.text.length;recentOutputCursor=chunk.seq-1;}
     return {...s.summary,cwd:s.cwd,inputRevision:s.inputRevision,completedInputRevision:s.completedInputRevision??null,outputCursor:s.next,recentOutputCursor,lastOutputAt:s.lastOutputAt};
   }
+  #scheduleConfigFingerprint(s:Session):string|null {
+    const env=s.historyEnv??s.accountLaunch?.env??this.dependencies.env??process.env;
+    const cliHome=s.summary.agent==='codex'?env.CODEX_HOME??join(env.HOME??homedir(),'.codex'):env.CLAUDE_CONFIG_DIR??join(env.HOME??homedir(),'.claude');
+    if(!isAbsolute(cliHome))return null;
+    const configPaths=[join(cliHome,s.summary.agent==='codex'?'config.toml':'settings.json')];
+    let directory=s.cwd,complete=false,valid=true;
+    for(let depth=0;depth<32;depth++){
+      configPaths.push(join(directory,'.codex','config.toml'),join(directory,'.claude','settings.json'),join(directory,'.claude','settings.local.json'));
+      const parent=dirname(directory);if(parent===directory){complete=true;break;}directory=parent;
+    }
+    const configIdentity=configPaths.map(path=>{try{const f=lstatSync(path);if(!f.isFile()||f.isSymbolicLink())valid=false;return [path,f.dev,f.ino,f.size,f.mtimeMs];}catch(e:any){if(e.code!=='ENOENT')valid=false;return [path,e.code==='ENOENT'?'absent':'unavailable'];}});
+    return complete&&valid?createHash('sha256').update(JSON.stringify(configIdentity)).digest('hex'):null;
+  }
+  /** Host-only scheduler evidence. This projection neither creates a session nor copies terminal text. */
+  async scheduleSnapshot(id:string):Promise<ScheduleSnapshot>{
+    const s=this.#sessions.get(id);if(!s||s.summary.state!=='running'||s.closing||s.launchProfile||this.#closed)throw Error('실행 중인 일반 워크룸을 선택하세요. 종료된 터미널은 자동으로 열지 않습니다.');
+    if(!['codex','claude'].includes(s.summary.agent))throw Error('이 CLI는 현재 모델·계정·대화와 요청 완료를 확인하는 예약 어댑터가 아직 없습니다.');
+    const revision=s.inputRevision,cursor=s.next,frame=await s.screen?.plainRows();
+    const context=this.#historyContext(s),info=frame?cliInfoFromScreen(s.summary.agent,frame.rows):null;
+    const model=info?.model??s.launchModel?.model??'',configIdentity=this.#scheduleConfigFingerprint(s);
+    if(!configIdentity)throw Error('CLI 설정의 경로·소유 상태를 확인하지 못해 예약 실행을 허용하지 않습니다.');
+    const identity=createHash('sha256').update(JSON.stringify([s.summary.id,s.summary.createdAt,context.targetFingerprint,context.accountFingerprint,s.conversationId??null,model,s.launchModel?.provider??null,s.bypass,configIdentity])).digest('hex');
+    const activity=this.#board.tracker(id)?.activity.state;
+    const stable=revision===s.inputRevision&&cursor===s.next;
+    // A quiet TUI can still be waiting for a model/tool. Only a never-submitted fresh CLI, or this exact
+    // input revision's host-observed transcript completion, authorizes unattended input.
+    const turnComplete=s.inputRevision===0&&!s.firstRequest||s.completedInputRevision===s.inputRevision;
+    const ready=stable&&!!model&&!!frame&&effortComposerEmpty(frame,s.summary.agent)
+      &&turnComplete&&['idle','turn-finished'].includes(activity??'')&&!s.effort?.automaticPending&&!s.pendingThreadCompletion;
+    return {binding:{sessionId:id,targetId:s.summary.targetId,agent:s.summary.agent,model,accountId:s.summary.accountId??'host-default',identity,bypass:s.bypass},
+      inputRevision:revision,outputCursor:cursor,ready,canStartNew:!!s.launchModel&&(!info?.model||info.model===s.launchModel.model),
+      reason:!model?'현재 모델을 확인할 수 없습니다.':ready?'입력 대기 상태입니다.':'작업·작성 중인 입력·승인 화면이 있습니다. 원래 워크룸에서 확인하세요.'};
+  }
+  /** Absence is distinct from a live session whose original binding can no longer be proven. */
+  async inspectBoundSchedule(schedule:WorkroomSchedule,id:string):Promise<ScheduleSnapshot|null>{
+    const session=this.#sessions.get(id);
+    if(!session||session.summary.state!=='running')return null;
+    const snapshot=await this.scheduleSnapshot(id),expected=schedule.binding;
+    if(id!==expected.sessionId){
+      const bound=this.#scheduleRestorations.get(id),context=this.#historyContext(session);
+      if(!bound||bound.scheduleId!==schedule.id||bound.binding.identity!==expected.identity||session.inputRevision!==bound.inputRevision
+        ||session.conversationId!==bound.providerConversationId||context.accountFingerprint!==bound.accountFingerprint||context.targetFingerprint!==bound.targetFingerprint
+        ||this.#scheduleConfigFingerprint(session)!==bound.configFingerprint||!session.launchModel
+        ||session.launchModel.model!==bound.model.model||session.launchModel.provider!==bound.model.provider||session.bypass!==expected.bypass)
+        throw Error('복원한 워크룸과 원래 대화의 결속이 변경되었습니다.');
+      snapshot.binding={...bound.binding,sessionId:id};
+    }
+    const actual=snapshot.binding;
+    if(actual.identity!==expected.identity||actual.targetId!==expected.targetId||actual.agent!==expected.agent||actual.model!==expected.model||actual.accountId!==expected.accountId||actual.bypass!==expected.bypass)
+      throw Error('프로젝트·계정·모델·대화가 변경되어 예약을 멈췄습니다.');
+    return snapshot;
+  }
+  /** In-process recovery evidence only. Never project this into management or mobile responses. */
+  async scheduleRestoreFacts(id:string,schedule?:WorkroomSchedule){
+    const s=this.#sessions.get(id);
+    if(!s||s.closing||s.launchProfile||this.#closed||!['codex','claude'].includes(s.summary.agent)||!s.launchModel
+      ||(s.inputRevision===0&&!s.firstRequest)||s.completedInputRevision!==s.inputRevision||!s.completedTranscriptWitness||s.completedObservedModel!==s.launchModel.model||s.pendingThreadCompletion)
+      throw Error('원래 모델과 마지막 요청 완료를 확인하지 못했습니다.');
+    const revision=s.inputRevision,cursor=s.next,context=this.#historyContext(s),configFingerprint=this.#scheduleConfigFingerprint(s);
+    if(!configFingerprint)throw Error('원래 CLI 설정을 확인하지 못했습니다.');
+    if(schedule&&id!==schedule.binding.sessionId){
+      const bound=this.#scheduleRestorations.get(id);
+      if(!bound||bound.scheduleId!==schedule.id||bound.binding.identity!==schedule.binding.identity
+        ||bound.inputRevision!==revision||s.conversationId!==bound.providerConversationId||context.accountFingerprint!==bound.accountFingerprint
+        ||context.targetFingerprint!==bound.targetFingerprint||configFingerprint!==bound.configFingerprint
+        ||s.launchModel.model!==bound.model.model||s.launchModel.provider!==bound.model.provider||s.bypass!==schedule.binding.bypass)
+        throw Error('복원한 대화에 사람 입력이 있거나 대화 결속이 변경되었습니다.');
+    }
+    if(!verifyWorkroomTranscriptWitness(s.completedTranscriptWitness,s.completedTranscriptWitness.path))throw Error('마지막 응답 이후 저장된 대화가 변경되었습니다.');
+    const frame=s.summary.state==='running'?await s.screen?.plainRows():null;
+    const observed=frame?cliInfoFromScreen(s.summary.agent,frame.rows).model:undefined;
+    if(observed&&observed!==s.launchModel.model)throw Error('현재 모델이 원래 실행 모델과 다릅니다.');
+    const fresh=this.#historyContext(s);
+    if(s.inputRevision!==revision||s.next!==cursor||s.completedInputRevision!==revision||s.closing||this.#closed
+      ||fresh.accountFingerprint!==context.accountFingerprint||fresh.targetFingerprint!==context.targetFingerprint||this.#scheduleConfigFingerprint(s)!==configFingerprint)
+      throw Error('워크룸이 변경되어 대화 복원 근거를 확인하지 못했습니다.');
+    return {sessionId:id,context,launchModel:{...s.launchModel},inputRevision:revision,completedInputRevision:revision,configFingerprint,transcriptWitness:{...s.completedTranscriptWitness}};
+  }
+  /** Call only after the history service verified the saved provider ID and its exact resume receipt. */
+  async adoptRestoredSchedule(schedule:WorkroomSchedule,sessionId:string,providerConversationId:string,sourceId=schedule.binding.sessionId):Promise<ScheduleSnapshot>{
+    if(schedule.mode!=='continue'||sessionId===schedule.binding.sessionId||sessionId===sourceId||!providerConversationId)throw Error('대화 복원 결속을 확인하지 못했습니다.');
+    const original=this.#sessions.get(sourceId),restored=this.#sessions.get(sessionId);
+    if(!original||original.summary.state==='running'||!restored||restored.summary.state!=='running'||restored.inputRevision!==0||restored.firstRequest||restored.conversationId!==providerConversationId)
+      throw Error('원래 대화 또는 복원 워크룸의 상태를 확인하지 못했습니다.');
+    const facts=await this.scheduleRestoreFacts(sourceId,schedule),context=this.#historyContext(restored);
+    const saved=savedWorkroomConversation(original.summary.agent,facts.context.providerHome,facts.context.cwd,providerConversationId);
+    if(!saved||!verifyWorkroomTranscriptWitness(facts.transcriptWitness,saved))throw Error('원래 완료 이후 저장된 대화가 변경되어 복원을 멈췄습니다.');
+    const identity=createHash('sha256').update(JSON.stringify([original.summary.id,original.summary.createdAt,facts.context.targetFingerprint,facts.context.accountFingerprint,original.conversationId??null,facts.launchModel.model,facts.launchModel.provider??null,original.bypass,facts.configFingerprint])).digest('hex');
+    if((sourceId===schedule.binding.sessionId&&identity!==schedule.binding.identity)||facts.context.providerConversationId&&facts.context.providerConversationId!==providerConversationId
+      ||restored.summary.targetId!==schedule.binding.targetId||restored.summary.agent!==schedule.binding.agent||restored.bypass!==schedule.binding.bypass
+      ||context.accountFingerprint!==facts.context.accountFingerprint||context.targetFingerprint!==facts.context.targetFingerprint
+      ||this.#scheduleConfigFingerprint(restored)!==facts.configFingerprint||!restored.launchModel
+      ||restored.launchModel.model!==facts.launchModel.model||restored.launchModel.provider!==facts.launchModel.provider)
+      throw Error('복원한 대화의 계정·모델·설정이 원래 대화와 다릅니다.');
+    this.#scheduleRestorations.set(sessionId,{scheduleId:schedule.id,binding:{...schedule.binding},providerConversationId,inputRevision:0,configFingerprint:facts.configFingerprint,
+      accountFingerprint:context.accountFingerprint,targetFingerprint:context.targetFingerprint,model:{...facts.launchModel}});
+    try{return await this.inspectBoundSchedule(schedule,sessionId)??(()=>{throw Error('복원한 워크룸이 종료되었습니다.');})();}
+    catch(error){this.#scheduleRestorations.delete(sessionId);throw error;}
+  }
+  async dispatchSchedule(schedule:WorkroomSchedule,run:WorkroomScheduleRun,snapshot:ScheduleSnapshot,active:()=>boolean,effectGate:AiTerminalEffectGate){
+    if(typeof effectGate!=='function')throw Error('예약 실행 동기화 권한을 확인하지 못했습니다.');
+    const source=this.#sessions.get(snapshot.binding.sessionId);if(!source)throw Error('원래 워크룸이 없습니다.');
+    const expectedContext=this.#historyContext(source);
+    const expectedConfig=this.#scheduleConfigFingerprint(source);
+    const finalCheck=()=>{const current=this.#historyContext(source);if(this.#closed||source.closing||source.summary.state!=='running'||current.accountFingerprint!==expectedContext.accountFingerprint||current.targetFingerprint!==expectedContext.targetFingerprint||!expectedConfig||this.#scheduleConfigFingerprint(source)!==expectedConfig)throw Error('예약 실행 직전에 대상이 변경되었습니다.');};
+    const verify=async()=>{
+      if(!active())throw Error('예약 실행 권한이 종료되었습니다.');
+      const current=await this.inspectBoundSchedule(schedule,source.summary.id);
+      if(!current||!current.ready||current.binding.identity!==snapshot.binding.identity||current.inputRevision!==snapshot.inputRevision||current.outputCursor!==snapshot.outputCursor||!active())throw Error('예약 입력 직전에 워크룸이 변경되었습니다.');
+    };
+    await verify();
+    if(schedule.mode==='new-conversation'){
+      if(!source.launchModel)throw Error('원래 모델·공급자를 고정할 수 없습니다.');
+      const response=await this.perform({operation:'start',requestId:run.id,targetId:source.summary.targetId,agent:source.summary.agent,
+        accountId:source.summary.accountId,cols:source.summary.cols,rows:source.summary.rows,bypassPermissions:false,prompt:schedule.prompt},
+        undefined,{receiptOwner:'schedule:'+run.id,launchModel:source.launchModel,startEffectGate:effect=>effectGate(()=>{finalCheck();if(source.inputRevision!==snapshot.inputRevision||source.next!==snapshot.outputCursor)throw Error('예약 실행 직전에 워크룸이 변경되었습니다.');return effect();}),startGuard:async context=>{
+          await verify();if(context.accountFingerprint!==expectedContext.accountFingerprint||context.targetFingerprint!==expectedContext.targetFingerprint)throw Error('예약 대상의 계정 또는 프로젝트가 바뀌었습니다.');
+          return ()=>{const current=this.#historyContext(source);if(!active()||source.inputRevision!==snapshot.inputRevision||source.next!==snapshot.outputCursor||current.accountFingerprint!==expectedContext.accountFingerprint||current.targetFingerprint!==expectedContext.targetFingerprint||!expectedConfig||this.#scheduleConfigFingerprint(source)!==expectedConfig)throw Error('예약 실행 직전에 대상 또는 동의가 변경되었습니다.');};
+        }});
+      if(!response.session)throw Error('새 대화 실행 결과가 불명입니다.');
+      return {state:'submitted' as const,sessionId:response.session.id,inputRevision:0};
+    }
+    const result=await this.submitHostInstruction({id:run.id,sessionId:source.summary.id,data:schedule.prompt+'\r',revision:snapshot.inputRevision,
+      receiptOwner:'schedule:'+run.id,active,beforeInput:verify,writeEffectGate:effect=>effectGate(()=>{finalCheck();if(source.inputRevision!==snapshot.inputRevision+1)throw Error('예약 입력 중 워크룸이 변경되었습니다.');return effect();}),
+      validateTarget:(targetId,cwd)=>{const context=this.#historyContext(source);if(targetId!==source.summary.targetId||realpathSync(cwd)!==source.cwd||context.accountFingerprint!==expectedContext.accountFingerprint||context.targetFingerprint!==expectedContext.targetFingerprint||!expectedConfig||this.#scheduleConfigFingerprint(source)!==expectedConfig)throw Error('예약 대상이 바뀌었습니다.');}});
+    const restored=this.#scheduleRestorations.get(source.summary.id);if(result.state==='written'&&restored&&restored.scheduleId===schedule.id&&restored.inputRevision===snapshot.inputRevision)restored.inputRevision++;
+    return {state:result.state==='written'?'submitted' as const:'unknown' as const,sessionId:source.summary.id,inputRevision:snapshot.inputRevision+1};
+  }
+  /** Only this exact submitted turn's host-observed completion is a completed scheduled run. */
+  async reconcileSchedule(run:WorkroomScheduleRun):Promise<'completed'|'submitted'|'unknown'|'failed'>{
+    const s=this.#sessions.get(run.sessionId);if(!s)return 'unknown';
+    if(run.state==='dispatching')return 'unknown';
+    if(run.inputRevision!==undefined&&s.completedInputRevision===run.inputRevision)return 'completed';
+    if(run.inputRevision!==undefined&&s.inputRevision>run.inputRevision)return 'unknown';
+    // A process exit says nothing about whether the submitted turn already performed work.
+    // Without its exact completion (or a future proven failure receipt), keep the outcome unknown.
+    if(s.summary.state!=='running')return 'unknown';
+    return 'submitted';
+  }
   /** Host-only: this local request ID already started or typed into a session (start IDs stay fenced). */
   hasLocalRequest(requestId:string) { return this.#requests.has(`local:${requestId}`); }
   /** Host-only caller hint: the running session whose CLI (or its process group) is one of these processes. */
@@ -427,6 +587,56 @@ export class AiTerminalService {
   runningSession(id:string):AiTerminalSummary|null {
     const session=this.#sessions.get(id);
     return session&&session.summary.state==='running'?this.#summary(session):null;
+  }
+  /** Native context commands belong only to an exactly bound local Claude Workroom. */
+  contextCommandBindings():ContextCommandBinding[]{
+    if(!this.#submissions||!this.dependencies.verifySavedBeforeClose||!this.dependencies.verifyContextSync)return [];
+    return [...this.#sessions.values()].filter(s=>s.summary.agent==='claude'&&s.summary.state==='running'&&!s.launchProfile&&!!s.conversationId)
+      .map(s=>({providerSessionId:s.conversationId!,sessionId:s.summary.id,targetId:s.summary.targetId,inputRevision:s.inputRevision}));
+  }
+  async performContextCommand(value:unknown){
+    const request=normalizeContextCommandRequest(value);
+    if(request.operation==='context.status')return {bindings:this.contextCommandBindings()};
+    // sessionOpen: once the Workroom that took the request is closed, nothing more can reach it (src/contextSessionCommandClient.ts).
+    if(request.operation==='context.receipt')return {state:this.#submissions?.find('context_'+request.requestId,{owner:'local-context',sessionId:request.sessionId})?.receipt.state??'not-found',sessionOpen:!!this.runningSession(request.sessionId)};
+    if(request.operation!=='context.execute')throw Error('컨텍스트 저장은 기존 저장 dispatcher를 사용하세요.');
+    const session=this.#sessions.get(request.sessionId);
+    if(!session){
+      // Closed and pruned. A request it already took keeps that answer; anything else can no longer reach it.
+      const taken=this.#submissions?.find('context_'+request.requestId,{owner:'local-context',sessionId:request.sessionId})?.receipt.state;
+      if(taken)return taken==='written'||taken==='rejected'?{state:taken}:{state:'unknown',error:'워크룸 세션이 닫혀 전송 결과를 확인할 수 없습니다.'};
+      return {state:'rejected',error:'워크룸 세션이 닫혀 명령을 보내지 않았습니다.'};
+    }
+    if(session.summary.agent!=='claude'||session.launchProfile)return {state:'rejected',error:'이 Claude Code 워크룸을 정확히 확인하지 못했습니다. 명령을 보내지 않았습니다.'};
+    const command=`/${request.command}\r`,id='context_'+request.requestId;
+    const previous=this.#submissions?.find(id,{owner:'local-context',sessionId:request.sessionId});
+    if(!previous){
+      if(session.conversationId!==request.providerSessionId||session.inputRevision!==request.inputRevision)return {state:'rejected',error:'세션 또는 입력이 변경되어 명령을 보내지 않았습니다. 다시 저장 후 실행하세요.'};
+    }
+    const result=await this.submitHostInstruction({id,sessionId:request.sessionId,data:command,receiptOwner:'local-context',skipCorrections:true,revision:request.inputRevision,beforeInput:async()=>{
+      if(this.#closed||session.closing||session.summary.state!=='running'||session.conversationId!==request.providerSessionId||session.inputRevision!==request.inputRevision)throw Error('세션 또는 입력이 변경되어 명령을 보내지 않았습니다.');
+      if(!this.dependencies.verifySavedBeforeClose||!this.dependencies.verifyContextSync)throw Error('저장·동기화 확인을 지원하지 않는 호스트입니다.');
+      const saved={id:session.summary.id,targetId:session.summary.targetId,cwd:session.cwd,inputRevision:session.inputRevision};
+      await this.dependencies.verifySavedBeforeClose(saved,request.saveRequestId,'local','context');
+      await this.dependencies.verifyContextSync(session.cwd);
+      const frame=await session.screen?.plainRows();
+      const proof=await this.dependencies.verifySavedBeforeClose(saved,request.saveRequestId,'local','context');
+      const activity=this.#board.tracker(session.summary.id)?.activity;
+      if(!activity||!['idle','turn-finished'].includes(activity.state)||!effortComposerEmpty(frame??null,'claude')||session.inputRevision!==request.inputRevision)throw Error('Claude가 작업 중이거나 입력칸·승인 화면이 사용 중입니다. 입력 대기 상태에서 다시 실행하세요.');
+      // Only this conversation decides (not other worktrees or agents): a turn that ended, or work that began, after the
+      // save started may be missing from it. Same input revision alone cannot see output without new input.
+      const startedAt=proof?.startedAt;
+      if(typeof startedAt!=='number'||!Number.isFinite(startedAt)||activity.since>startedAt)throw Error(WORKROOM_CONTEXT_SAVE_REFUSALS.changed);
+    }}).catch(error=>{
+      if(request.command==='clear'){
+        try{const receipt=this.#submissions?.find(id,{owner:'local-context',sessionId:request.sessionId});if(receipt&&['write_started','written','unknown'].includes(receipt.receipt.state))session.conversationId=undefined;}
+        catch{session.conversationId=undefined;}
+      }
+      throw error;
+    });
+    // /clear rotates the provider's conversation. Never target the new one through the old row.
+    if(request.command==='clear'&&(result.state==='written'||result.state==='unknown'))session.conversationId=undefined;
+    return {state:result.state};
   }
   accountInUse(id: string): boolean { return [...this.#sessions.values()].some(s => s.summary.state === 'running' && s.summary.accountId === id); }
   selectedAccount(target: string, agent: AiTerminalAgent): string {
@@ -575,6 +785,8 @@ export class AiTerminalService {
     const revision=session.inputRevision;
     const allowed=()=>active()&&session.inputRevision===revision&&this.#effortMode()==='auto'&&!state.manual;
     state.automaticPending=true;state.runtimeStatus='deferred';
+    // Whether any key reached the CLI. Without one the CLI still runs at `seen`, and this request goes at that level.
+    let typed=false;
     try{
       const outcome=await (this.dependencies.effortRuntime??changeWorkroomEffort)({agent:session.summary.agent,level:decision.tier,current,
         read:()=>session.screen!.plainRows(),write:async data=>{
@@ -585,18 +797,41 @@ export class AiTerminalService {
             valid=realpathSync(binding.cwd)===session.cwd&&allowed();
           }catch{/* A resolver/filesystem failure must not expose a local path to a phone. */}
           if(!valid)throw Error('워크룸 프로젝트 또는 입력 권한이 변경되었습니다. 작성한 요청은 유지했습니다.');
-          session.child.terminal.write(data);
+          typed=true;session.child.terminal.write(data);
         },active:allowed,
-        idle:()=>['idle','turn-finished'].includes(this.#board.tracker(session.summary.id)?.activity.state??''),...support});
-      state.runtimeStatus=outcome;
-      if(outcome==='applied'){state.level=decision.tier;state.tier=decision.tier;state.reason=decision.reason;state.origin='runtime';state.seen=decision.tier;state.advice=undefined;delete state.skipped;}
-    }catch(error){state.runtimeStatus='unconfirmed';throw error;}
+        idle:()=>['idle','turn-finished'].includes(this.#board.tracker(session.summary.id)?.activity.state??''),timeoutMs:WORKROOM_EFFORT_READY_WAIT_MS,
+        cols:session.summary.cols,refusal:state.effortRefusal,refused:refusal=>{state.effortRefusal=refusal;},...support});
+      // The CLI cancelled or refused the change and its screen proves the level did not move: like a request with no key
+      // typed, it goes on at the current level and the advice says so (no new runtimeStatus — strict readers reject one).
+      if(outcome==='unchanged')state.runtimeStatus=undefined;
+      // A key typed without a confirmed change is a partial mutation: refused like any other unconfirmed change.
+      else if(outcome!=='applied'&&typed)throw Error('에포트 변경을 확인하지 못했습니다. 원본 워크룸을 확인하세요. 작성한 요청은 유지했습니다.');
+      else state.runtimeStatus=outcome;
+      if(outcome==='applied'){state.level=decision.tier;state.tier=decision.tier;state.reason=decision.reason;state.origin='runtime';state.seen=decision.tier;state.advice=undefined;delete state.skipped;return;}
+    }catch(error){
+      // No empty, idle composer in time and nothing typed: the CLI stays at its current effort, said by the advice line,
+      // and the next request is judged again. Holding it past every client timeout left it `prepared` and fenced the
+      // composer (2026-10-30). Any other failure — keys typed, picker or question — still refuses the request.
+      if(!(error instanceof WorkroomEffortNotReadyError&&!typed)){state.runtimeStatus='unconfirmed';throw error;}
+      state.runtimeStatus=undefined;
+    }
     finally{
-      // Establish a new observation baseline before the sampler resumes manual-change detection.
-      const rows=(await session.screen.plainRows())?.rows??[];
+      // Establish a new observation baseline before the sampler resumes manual-change detection. When no key was typed
+      // the CLI's level did not move: keep `seen`, so the next request still knows it (the effort row may be off screen).
+      const rows=(await session.screen.plainRows())?.rows??[],kept=typed?undefined:state.seen;
       delete state.phraseLines;delete state.seen;state.automaticPending=false;
+      if(kept)state.seen=kept;
       observeWorkroomEffortScreen(state,session.summary.agent,rows);
     }
+    // Not changed: the advice line says the effort stays as it is (never 「입력 대기」).
+    state.advice={tier:decision.tier,reason:decision.reason,at:new Date().toISOString()};
+    // Unchanged effort goes into a native Claude/Codex composer only when it is proven empty now (a dimmed native
+    // placeholder counts): a real, changed or unreadable draft would merge with the request. Refused before the write
+    // fence, so not one byte of it is typed and the person's draft stays (ROOT review, 2026-10-30). A CLI that cannot be
+    // switched at run time (no session picker, no default keys) keeps its plain write path.
+    const nativeTui=session.summary.agent==='claude'&&support.claudeSessionPicker||session.summary.agent==='codex'&&support.codexDefaultKeys;
+    if(nativeTui&&!effortComposerEmpty(await session.screen.plainRows(),session.summary.agent))
+      throw Error('CLI 입력칸에 작성 중이거나 확인할 수 없는 내용이 있어 요청을 입력하지 않았습니다. 원본 워크룸의 입력칸을 확인한 뒤 다시 보내세요. 작성한 요청은 유지했습니다.');
   }
   #effortAuto(): boolean { try { return this.dependencies.effortAuto?.get() ?? false; } catch { return false; } }
   /**
@@ -604,7 +839,7 @@ export class AiTerminalService {
    * holding `targetId` (the workspace gateway checked that grant) and another community Mac (its executor refuses `set`).
    * Answers the setting and, with a session of that target, its record. The session is checked before anything changes.
    */
-  workspaceEffort(input: {targetId: string; sessionId?: string; set?: boolean; mode?: WorkroomEffortMode; effortModes?: true}): WorkroomEffortView {
+  workspaceEffort(input: {targetId: string; sessionId?: string; set?: boolean; mode?: WorkroomEffortMode; effortModes?: true; effortExtended?: true}): WorkroomEffortView {
     if (this.#closed) throw new Error('터미널 서버가 종료 중입니다.');
     const session = input.sessionId === undefined ? undefined : this.#session(input.sessionId, input.targetId);
     if (input.mode !== undefined) {
@@ -618,7 +853,7 @@ export class AiTerminalService {
       try { setting.set(input.set); }
       catch { throw new Error('에포트 자동 설정을 저장하지 못했습니다. Mac에서 저장 공간과 앱 데이터 접근 권한을 확인한 뒤 다시 시도하세요.'); }
     }
-    return workroomEffortView(this.#effortAuto(), session ? workroomEffortRecord(session.summary.id, session.summary.agent, session.effort) : undefined, input.effortModes ? this.#effortMode() : undefined);
+    return workroomEffortView(this.#effortAuto(), session ? workroomEffortRecord(session.summary.id, session.summary.agent, session.effort) : undefined, input.effortModes ? this.#effortMode() : undefined, input.effortExtended === true);
   }
   /** One sweep (the 1 s timer calls this): rows at most once per running session, then bounded transcript tails. */
   sampleActivity(): Promise<void> {
@@ -658,7 +893,7 @@ export class AiTerminalService {
       try {
         const env = session.historyEnv ?? session.accountLaunch?.env ?? this.dependencies.env ?? process.env;
         const revision=session.inputRevision;
-        const {completions, bytes} = await signals.poll({sessionId: id, agent: session.summary.agent, cwd: session.cwd, env, createdAt: session.summary.createdAt,
+        const {completions, bytes,witness} = await signals.poll({sessionId: id, agent: session.summary.agent, cwd: session.cwd, env, createdAt: session.summary.createdAt,
           ...(session.conversationId ? {conversationId: session.conversationId} : {}), processGroup: session.child.pid,
           restricted: !!session.launchProfile, lastSubmitAt: tracker.lastSubmitAt}, budget);
         budget -= bytes;
@@ -668,6 +903,11 @@ export class AiTerminalService {
           const finished=this.#board.tracker(id)?.activity;
           if(changed&&finished?.state==='turn-finished'&&finished.exact&&finished.source==='transcript'){
             session.completedInputRevision=revision;
+            session.completedTranscriptWitness=witness?.key===completion.key?witness:undefined;
+            session.completedObservedModel=undefined;
+            const cursor=session.next,frame=await session.screen?.plainRows();
+            if(frame&&session.inputRevision===revision&&session.next===cursor&&session.summary.state==='running'&&!session.closing)
+              session.completedObservedModel=cliInfoFromScreen(session.summary.agent,frame.rows).model;
             if(completion.resultText&&this.dependencies.threadCompleted){
               const pending={key:completion.key,resultText:completion.resultText,revision,retryAt:this.#now()+15_000};session.pendingThreadCompletion=pending;
               const active=()=>!this.#closed&&!session.closing&&session.summary.state==='running'&&session.inputRevision===revision;
@@ -707,7 +947,7 @@ export class AiTerminalService {
    *  authority it names another community device driving this Workroom; with one it is the transport's stable principal
    *  (a LAN controller survives a restore that rotates `authority.owner`). It is a lookup key only — every grant, target
    *  and execution decision below reads `authority`, never this. */
-  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; launchModel?: AiTerminalLaunchModel; launchEffort?: WorkroomLaunchEffort; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>} = {}): Promise<AiTerminalResponse> {
+  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; launchModel?: AiTerminalLaunchModel; launchEffort?: WorkroomLaunchEffort; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:AiTerminalStartGuard;beforeInput?:()=>Promise<void>;writeEffectGate?:AiTerminalEffectGate;startEffectGate?:AiTerminalEffectGate;opsWorker?:boolean} = {}): Promise<AiTerminalResponse> {
     const request = normalizeAiTerminalRequest(value);
     if (options.receiptOwner !== undefined && (options.receiptOwner === 'local' || (authority
       ? typeof options.receiptOwner !== 'string' || options.receiptOwner.length < 3 || options.receiptOwner.length > 300 || /[\x00-\x1f\x7f]/.test(options.receiptOwner) || /^community(?::|$)/.test(options.receiptOwner)
@@ -727,6 +967,8 @@ export class AiTerminalService {
       const modelError = launchModelError(request.agent!, options.launchModel); if (modelError) throw new Error(modelError);
     }
     if (options.launchEffort && (authority || request.operation !== 'start' || request.resumeFrom || options.launchProfile || options.historyResume)) throw new Error('에포트 지정은 이 Mac의 새 워크룸 시작에만 쓸 수 있습니다.');
+    // Host-only: the OPS host starts the worker for a task another Mac handed over (opsWorkerToolApproval.ts).
+    if (options.opsWorker && (authority || request.operation !== 'start' || request.resumeFrom || request.bypassPermissions || options.launchProfile || options.historyResume)) throw new Error('OPS 작업 도구 허용은 이 Mac의 OPS 호스트가 여는 새 워크룸에만 쓸 수 있습니다.');
     if (options.historyResume && (authority || request.operation !== 'start' || request.resumeFrom || request.prompt !== undefined
       || request.references !== undefined || request.bypassPermissions !== undefined || options.launchProfile
       || request.agent !== options.historyResume.resume.agent || request.accountId !== options.historyResume.accountId)) throw new Error('대화 기록 재개는 로컬의 확인된 요청만 허용합니다.');
@@ -809,7 +1051,7 @@ export class AiTerminalService {
     // Stop does not wait for a stalled checkout proof or queued keystrokes.
     // The mutation fence below prevents those writes after close is requested.
     const effortInterrupt=!!session?.effort?.automaticPending&&request.operation==='input'&&request.data==='\x1b';
-    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard,options.launchModel,options.launchEffort));
+    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard,options.launchModel,options.launchEffort,options.beforeInput,options.writeEffectGate,options.startEffectGate,options.opsWorker === true));
     if (!closing&&!effortInterrupt) this.#queues.set(queueKey,promise);
     if (closing) session!.closing = promise;
     else {
@@ -830,7 +1072,7 @@ export class AiTerminalService {
     return !!authority && (!(authority.deviceConsentActive ? authority.deviceConsentActive() : this.remoteAllowed(authority.owner)) || authority.isActive?.()===false || this.#grantEpoch.get(authority.owner) !== epoch);
   }
   /** `remoteAttachmentIds` is host-only: the ids of an admitted submission (never read from a wire `input`). */
-  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:(context:import('./workroomConversationHost').WorkroomSessionContext)=>void|Promise<void>,launchModel?:AiTerminalLaunchModel,launchEffort?:WorkroomLaunchEffort): Promise<AiTerminalResponse> {
+  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:AiTerminalStartGuard,launchModel?:AiTerminalLaunchModel,launchEffort?:WorkroomLaunchEffort,beforeInput?:()=>Promise<void>,writeEffectGate?:AiTerminalEffectGate,startEffectGate?:AiTerminalEffectGate,opsWorker=false): Promise<AiTerminalResponse> {
     if (this.#authorityLost(authority, epoch)) throw new Error('원격 터미널 권한이 해제되었습니다.');
     if (authority && (r.operation === 'accounts' || r.accountId !== undefined) && !authority.accountSelectionAllowed?.()) throw new Error('계정 선택 권한이 해제되었습니다.');
     if(this.#closed)throw new Error('터미널 서버가 종료 중입니다.');
@@ -839,7 +1081,7 @@ export class AiTerminalService {
       if(r.memoryPolicy==='saved'){
         await this.#queues.get(session!.summary.id)?.catch(()=>{});
         if(!this.dependencies.verifySavedBeforeClose)throw new Error('종료 전 저장 확인을 지원하지 않는 호스트입니다.');
-        await this.dependencies.verifySavedBeforeClose({...session!.summary,cwd:session!.cwd,inputRevision:session!.inputRevision},r.saveRequestId!,authority?.owner??'local');
+        await this.dependencies.verifySavedBeforeClose({...session!.summary,cwd:session!.cwd,inputRevision:session!.inputRevision},r.saveRequestId!,authority?.owner??'local','close');
         if(authority&&(!(authority.deviceConsentActive?authority.deviceConsentActive():this.remoteAllowed(authority.owner))||authority.isActive?.()===false))throw new Error('원격 권한이 변경되었습니다.');
       }
       if(r.memoryPolicy)session!.suppressMemoryOnExit=true;
@@ -909,6 +1151,8 @@ export class AiTerminalService {
       delete env.SSH_CONNECTION; delete env.SSH_CLIENT; delete env.SSH_TTY;
       // Keep the CLI's ordinary user environment; never inherit this app's private control capabilities.
       for (const name of Object.keys(env)) if (/^(PORTMGR_|AGENTSTOZ_).*CAPABILITY|^(AGENTSTOZ_VOICE_API_KEY|SUPABASE_SERVICE_ROLE_KEY|VITE_SUPABASE_SERVICE_ROLE_KEY)$/.test(name)) delete (env as Record<string, unknown>)[name];
+      // The project's own CLI accounts win over this Mac's logins. A restricted (duty) session keeps this Mac's.
+      if (this.dependencies.cliAccountEnvironment && !(previous ? previous.launchProfile : launchProfile)) Object.assign(env, await this.dependencies.cliAccountEnvironment({targetId,cwd,env}));
       // A Workroom opened from another Mac has no approval bypass, so Codex stopped at its hook-trust menu in
       // every project carrying the AgentsToZ activity hook (3호, 2026-10-07). Skip that menu only when that
       // hook is all Codex would run (codexHookTrust.ts); any other hook keeps Codex's own question.
@@ -936,12 +1180,18 @@ export class AiTerminalService {
       // A restart keeps the restriction of the session it replaces; it never gains or loses it.
       const profile = previous ? previous.launchProfile : launchProfile;
       const model = previous ? previous.launchModel : launchModel;
+      const requestedPin = previous?.effort?.pinned ?? (launchEffort && 'pinned' in launchEffort ? launchEffort.pinned : undefined);
+      if (r.agent === 'claude' && (requestedPin === 'xhigh' || requestedPin === 'max') &&
+          (env.CLAUDE_CODE_DISABLE_THINKING === '1' || env.MAX_THINKING_TOKENS === '0'))
+        throw new Error('Claude의 thinking이 꺼져 있어 고정 에포트를 적용할 수 없습니다.');
       // 「에포트 자동」 (w16): decided from the person's first request (before `#` references), or kept from the session a
       // restart replaces. A team member brings a pinned level or the task text to classify (launchEffort). Read-only; a
-      // level a model may reject is never passed (codexEffortModel.ts) — a model we chose is proven against the catalog.
+      // level a model may reject is never passed (codexEffortModel.ts) — a model we chose is proven against the catalog, and a
+      // Hermes model and provider we chose against the levels its adapter carries (teamHermesEffortLevels).
       const effort = planWorkroomEffort({agent:r.agent!,...(r.prompt!==undefined?{prompt:r.prompt}:{}),auto:this.#effortAuto(),mode:this.#effortMode(),restricted:!!profile,historyResume:!!historyResume,
-        ...(previous?{previous:previous.effort??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,
+        ...(previous?{previous:previous.effort??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,...(r.agent==='hermes'&&model?{hermesModel:model}:{}),
         codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[],...(model?{launchModel:model.model}:{})});return proof.ok?proof.allowed:null;}catch{return null;}}});
+      if (effort.pinned && !effort.level) throw new Error(`고정 에포트 ${effort.pinned}를 적용할 수 없어 시작하지 않았습니다 (${effort.skipped ?? 'unsupported'}).`);
       // A restricted (duty) session talks to outsiders: its transcript is not the user's work, so it never
       // feeds session memory or 「내가 한 말」 capture.
       if (launchStart && this.#sessions.has(launchStart.sessionId)) throw new Error('이미 시작된 세션입니다. 자동으로 다시 시작하지 않습니다.');
@@ -970,7 +1220,7 @@ export class AiTerminalService {
         ?? (process.platform === 'win32'
           ? ((args,options) => spawnWindowsPty(args as string[],options as any) as any)
           : ((args,options) => (Bun.spawn as any)(args,options)));
-      const args = [executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null, model)];
+      const args = [executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null, model, opsWorker && !previous)];
       // Only the account feature introduced an authentication await here. Legacy adapters without
       // account management keep their original checkout proof and admission timing.
       if (accountLaunch) {
@@ -993,17 +1243,29 @@ export class AiTerminalService {
       let eof!:()=>void;const streamEnded=new Promise<void>(resolve=>{eof=resolve});
       if(startGuard){
         const proof=workroomSessionContext(summary,cwd,env,!!profile,resume?.conversationId);
-        await startGuard(proof);
+        const finalGuard=await startGuard(proof);
         if(this.#closed||this.#authorityLost(authority,epoch))throw Error('워크룸 시작 권한이 변경되었습니다.');
         const fresh=target.revalidate?await target.revalidate():await this.dependencies.resolveTarget(targetId);
         if(realpathSync(fresh.cwd)!==cwd)throw Error('워크룸 프로젝트가 변경되었습니다.');
         if(accountLaunch)this.dependencies.accounts!.validateLaunch(accountLaunch.accountId);
+        finalGuard?.();
+      }
+      // Refresh only this managed skill before launching. A real executable may
+      // create the CLI home under an existing safe .gemini even on its first run.
+      if(r.agent==='agy' && /^agy(?:\.exe)?$/i.test(basename(executable)) && env.AGENTSTOZ_SKIP_OUTPUT_STYLE_SYNC!=='1') {
+        try {
+          if(statSync(executable).isFile()) {
+            accessSync(executable, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+            reconcileAgyCliUnfinishedWork(env.HOME && isAbsolute(env.HOME) ? env.HOME : homedir(), {createCliHome:true});
+          }
+        } catch(error) { console.warn('[AgentsToZ] agy 스킬 맞춤 실패:', (error as Error)?.message ?? String(error)); }
       }
       historyResume?.launching();
       // A launch receipt crosses its write fence (prepared → write_started) here, right before the spawn: a crash
       // from now on reads as «unknown» and is never started again.
       launchStart?.started();
-      record.child = spawn(args,{cwd,env,detached:true,terminal:{cols:r.cols,rows:r.rows,exit:()=>eof(),data:(_pty:Pty,data:Uint8Array)=>append(record.decoder.decode(data,{stream:true}))}});
+      const spawnChild=()=>spawn(args,{cwd,env,detached:true,terminal:{cols:r.cols,rows:r.rows,exit:()=>eof(),data:(_pty:Pty,data:Uint8Array)=>append(record.decoder.decode(data,{stream:true}))}});
+      record.child=startEffectGate?startEffectGate(spawnChild):spawnChild();
       this.#sessions.set(summary.id,record);
       // Only a start that replaced a validated `previous` (same target, AI and folder) records a continuation.
       if(previous){this.#continuedBy.set(previous.summary.id,summary.id);while(this.#continuedBy.size>AI_TERMINAL_MAX_RETIRED_SESSIONS*4)this.#continuedBy.delete(this.#continuedBy.keys().next().value!);}
@@ -1030,7 +1292,7 @@ export class AiTerminalService {
       },async()=>{record.exitedAt=new Date().toISOString();summary.state='exited';summary.exitCode=-1;unmapPid();record.child.terminal.close();this.#forgetSessionRequests(record);
         this.#board.apply(summary.id,{type:'exit',at:this.#now(),turn:record.inputRevision,code:-1,cause:record.exitCause??'exit'});this.dependencies.turnSignals?.forget(summary.id);try{await this.dependencies.threadEnded?.(summary.id);}catch{}if(record.exitCause!=='shutdown')try{await this.dependencies.history?.ended(this.#historyContext(record));}catch{}});
       // Pruned sessions stay readable as retired (exited, last output) for a late read or wait.
-      for (const [id,old] of this.#sessions) if (this.#sessions.size>24 && old.summary.state==='exited') {old.screen?.dispose();this.#sessions.delete(id);this.#retire(old);this.#board.forget(id);}
+      for (const [id,old] of this.#sessions) if (this.#sessions.size>24 && old.summary.state==='exited') {old.screen?.dispose();this.#sessions.delete(id);this.#scheduleRestorations.delete(id);this.#retire(old);this.#board.forget(id);}
       if(this.dependencies.history){
         try {this.dependencies.history.started(this.#historyContext(record),historyResume?.logicalConversationId,previous&&resume?previous.summary.id:undefined);}
         catch(error){if(historyResume)throw error;}
@@ -1045,7 +1307,7 @@ export class AiTerminalService {
       // returns that receipt unchanged, even after the ids expired.
       this.#checkAttachmentsAtBegin(r.submission!,{owner:receiptOwner,sessionId:session!.summary.id},authority,receiptOwner,session!.summary.targetId);
       const receipt=await this.#submissions.perform(r.submission!,{owner:receiptOwner,sessionId:session!.summary.id,targetId:session!.summary.targetId,binding,revision:session!.inputRevision},r.references??[],async(data,start,references,meta)=>{
-        await this.#mutate({operation:'input',requestId:r.requestId,sessionId:r.sessionId,data,expectedInputRevision:session!.inputRevision,...(references.length?{references:[...references]}:{})},session,authority,epoch,undefined,undefined,start,receiptOwner,skipCorrections,undefined,meta.attachments);
+        await this.#mutate({operation:'input',requestId:r.requestId,sessionId:r.sessionId,data,expectedInputRevision:session!.inputRevision,...(references.length?{references:[...references]}:{})},session,authority,epoch,undefined,undefined,start,receiptOwner,skipCorrections,undefined,meta.attachments,undefined,undefined,undefined,beforeInput,writeEffectGate);
       });
       return {session:this.#summary(session!),submission:receipt};
     }
@@ -1090,17 +1352,20 @@ export class AiTerminalService {
           correction?.validate();
           // Last look before the write fence: every leased file is still this app's own regular file.
           lease?.recheck();
-          if(submissionWrite&&!workroomEffortInputIsManual(session!.summary.agent,typed))await this.#adjustEffort(session!,typed,()=>{
+          if(submissionWrite&&!beforeInput&&!workroomEffortInputIsManual(session!.summary.agent,typed))await this.#adjustEffort(session!,typed,()=>{
             if(this.#closed||session!.closing||session!.summary.state!=='running'||this.#authorityLost(authority,epoch))return false;
             try{authority?.validateTarget?.(session!.summary.targetId,cwd);}catch{return false;}
             return true;
           });
           if(submissionWrite&&session!.screen)bracketedPaste=aiTerminalPasteCandidate(data)&&(await session!.screen.settledModes()).bracketedPaste;
           const threadWritten=(submissionWrite||workroomInputIsRequest(typed))?await this.dependencies.threadInput?.(session!.summary.id,typed,session!.inputRevision+1):undefined;
+          await beforeInput?.();
+          const changesConversation=session!.summary.agent==='claude'&&typed.endsWith('\r')&&claudeInputChangesConversation(typed,await session!.screen?.plainRows());
           if(this.#closed||session!.closing||session!.summary.state!=='running'||this.#authorityLost(authority,epoch))throw Error('워크룸 입력 권한 또는 연결이 변경되었습니다.');
           authority?.validateTarget?.(session!.summary.targetId,cwd);
           correction?.validate();lease?.recheck();
           submissionWrite?.(correction?.exposure);
+          if(changesConversation)session!.conversationId=undefined;
           lease?.consume();
           session!.suppressMemoryOnExit=!!session!.launchProfile;session!.inputRevision++;
           // The first input of a session started without a request is a durable fact of the history (w14).
@@ -1108,7 +1373,7 @@ export class AiTerminalService {
           if(session!.screen)session!.viewerPaste=filterState;
           // After the body is written the CLI is (or is no longer) inside a viewer's paste; answers held meanwhile follow it.
           const written=()=>{const s=session!;s.ptyInViewerPaste=!!s.viewerPaste?.pasteOpen;if(s.ptyInViewerPaste||!s.heldReplies?.length)return;const held=s.heldReplies;s.heldReplies=[];for(const reply of held)s.child.terminal.write(reply);};
-          await writeAiTerminalInput(session!.summary.agent,session!.child.terminal,data,{bracketedPaste},written,!!submissionWrite,()=>!this.#closed&&!session!.closing&&session!.summary.state==='running'&&!this.#authorityLost(authority,epoch));
+          await writeAiTerminalInput(session!.summary.agent,session!.child.terminal,data,{bracketedPaste},written,!!submissionWrite,()=>!this.#closed&&!session!.closing&&session!.summary.state==='running'&&!this.#authorityLost(authority,epoch),writeEffectGate);
           // A request is a whole-request submission or text ended by Enter; any other input — a lone Enter included — is a
           // keystroke (it answers a menu, confirms a popup or edits the CLI's own line).
           this.#board.apply(session!.summary.id,{type:submissionWrite||workroomInputIsRequest(typed)?'submit':'keys',at:this.#now(),turn:session!.inputRevision});

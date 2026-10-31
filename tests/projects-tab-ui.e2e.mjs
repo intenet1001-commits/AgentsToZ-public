@@ -11,6 +11,7 @@
  *  4. 새 프로젝트·정리 검토·삭제 확인 대화상자가 Escape 로 닫히지 않았고, 새 프로젝트
  *     바깥 클릭은 입력한 기존 폴더 경로를 말없이 지웠다.
  *  5. 검색 결과 0건일 때 본문이 "왼쪽 목록에서 프로젝트를 선택하세요"라고 했다.
+ *  6. 도구 및 설정에서 연 대화상자 안을 누르면 뒤의 도구 및 설정 패널이 접혔다(`--tools-dialog-only`로 이것만 돌린다).
  *
  * 격리된 Vite 빌드 + 합성 API 만 쓴다 — 실사용 사이드카(3001)와 Supabase 에 닿지 않는다.
  *
@@ -53,7 +54,7 @@ let browser;
 const results = [];
 const pass = name => { results.push(name); console.log(`✓ ${name}`); };
 
-async function openApp({width = 1440, height = 900, preset = {}, ports = PORTS, opsProjectId = null} = {}) {
+async function openApp({width = 1440, height = 900, preset = {}, ports = PORTS, opsProjectId = null, portalErrors = []} = {}) {
   const context = await browser.newContext({viewport: {width, height}});
   await context.addInitScript(values => {
     try {
@@ -101,7 +102,7 @@ async function openApp({width = 1440, height = 900, preset = {}, ports = PORTS, 
       '/api/orca-worktrees': {success: true, worktrees: []},
       '/api/discover-registered-git-worktrees': {success: true, worktrees: [], nextCursor: null},
       '/api/cleanup-stale-worktrees': {success: true, removed: []},
-      '/api/client-errors': {ok: true},
+      '/api/client-errors': {ok: true, items: portalErrors},
       ...(opsProjectId ? {'/api/control-profile/status': {success: true, profile: {state: 'ready', projectId: opsProjectId, profileId: null, memoryId: null}}} : {}),
     };
     if (Object.hasOwn(values, u.pathname)) return route.fulfill({status: 200, json: values[u.pathname]});
@@ -135,8 +136,68 @@ function listMetrics(page) {
   });
 }
 
+// 6. 도구 및 설정에서 연 대화상자 안을 눌러도 패널이 접히지 않는다
+// (2026-10-31 v1601 실측: 대화상자의 입력칸을 누르자 패널의 바깥 클릭 처리가 그것을 바깥으로 보고 접었다).
+async function toolsDialogClicks() {
+  const {page, context} = await openApp();
+  const tools = page.locator('.workspace-sidebar-footer > .workspace-tools');
+  const health = page.getByTestId('channel-health-dialog');
+  await openTools(page);
+  await page.locator('.workspace-tools[open] [data-testid="btn-channel-health"]').click();
+  await health.waitFor({state: 'visible', timeout: 4000});
+  await health.locator('#channel-health-title').click();
+  assert.equal(await tools.evaluate(el => el.open), true, 'a click inside a dialog opened from the tools panel must not collapse the panel');
+  await page.keyboard.press('Escape');
+  await health.waitFor({state: 'hidden', timeout: 4000});
+  assert.equal(await tools.evaluate(el => el.open), true, 'closing the dialog with Escape leaves the tools panel open');
+  // 바깥 막을 눌러 닫아도 아래 패널은 그대로다.
+  await page.locator('.workspace-tools[open] [data-testid="btn-channel-health"]').click();
+  await health.waitFor({state: 'visible', timeout: 4000});
+  await health.click({position: {x: 4, y: 4}});
+  await health.waitFor({state: 'hidden', timeout: 4000});
+  assert.equal(await tools.evaluate(el => el.open), true, 'closing the dialog from its scrim leaves the tools panel open');
+  // 대화상자가 없을 때의 바깥 클릭은 여전히 패널을 접는다(화면의 다른 버튼을 누르지 않도록 body에 직접 보낸다).
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})));
+  assert.equal(await tools.evaluate(el => el.open), false, 'an ordinary outside click still collapses the tools panel');
+  pass('clicks inside a dialog opened from the tools panel keep the panel open');
+  await context.close();
+}
+
 try {
   browser = await chromium.launch();
+  const runScenarios = async () => {
+  if (process.argv.includes('--tools-dialog-only')) { await toolsDialogClicks(); return; }
+  if (process.argv.includes('--sidebar-metrics-only')) {
+    const {page, context} = await openApp({width: 1440, height: 900});
+    console.log('SIDEBAR_METRICS=' + JSON.stringify(await listMetrics(page)));
+    await context.close(); return;
+  }
+  // A phone report needs no knowledge of the tools menu. Use the actual App and isolated API, covering both the empty inbox and pending reports.
+  for (const count of [0, 2]) {
+    const {page, context, errors} = await openApp({width: 1024, height: 768,
+      portalErrors: Array.from({length: count}, (_, i) => ({id: `fixture-${i}`, resolved: false}))});
+    const badge = page.getByTestId('portal-errors-badge');
+    assert.equal(await page.locator('.workspace-sidebar-footer > .workspace-tools').evaluate(el => el.open), false);
+    if (count) {
+      await badge.waitFor({state: 'visible'});
+      assert.equal(await badge.getAttribute('aria-label'), '휴대폰 포털 오류 2건 확인');
+      for (const tab of ['tab-ports', 'tab-memory', 'tab-what-i-said']) {
+        await page.locator(`#${tab}`).click();
+        assert.equal(await badge.isVisible(), true, `pending report visible in ${tab} without opening tools`);
+      }
+      const bounds = await badge.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.y + bounds.height <= 768,
+        'badge fits the narrow sidebar footer');
+      await page.screenshot({path: join(dist, 'portal-errors-outside-tools.png')});
+      await badge.click();
+      await page.getByTestId('voc-banner').waitFor({state: 'visible'});
+      assert.equal(await page.locator('.workspace-sidebar-footer > .workspace-tools').evaluate(el => el.open), false);
+    } else { assert.equal(await badge.count(), 0); }
+    assert.deepEqual(errors.filter(e => !e.includes('fixture blocked')), []);
+    await context.close();
+  }
+  pass('pending phone reports are visible outside closed tools across tabs; empty inbox stays quiet');
+  if (process.argv.includes('--portal-errors-only')) return;
 
   // 1. 설정 첫 클릭
   {
@@ -246,6 +307,9 @@ try {
     await context.close();
   }
 
+  // 6. 도구 및 설정에서 연 대화상자 안의 클릭
+  await toolsDialogClicks();
+
   // 4b. 새 프로젝트 — 기존 폴더 입력 후 바깥 클릭은 입력을 지우지 않는다
   {
     const {page, context} = await openApp();
@@ -316,7 +380,7 @@ try {
     await page.getByRole('button', {name: '취소'}).last().click();
     await confirm.waitFor({state: 'hidden', timeout: 4000});
     pass('work roots reorder saves; remove is a neutral list-only confirmation');
-    await page.screenshot({path: '/private/tmp/claude-503/-Users-gwanli-product-2026-AgentsToZ-byCS/0c38fa1a-e6a6-419c-ad0e-af4b814aabaf/scratchpad/ui-work-roots.png'});
+    await page.screenshot({path: join(dist, 'ui-work-roots.png')});
     await context.close();
   }
 
@@ -331,7 +395,7 @@ try {
     const indent = await page.locator('[data-worktree-kind="branch"]').first().evaluate(el => getComputedStyle(el).marginLeft);
     assert.equal(indent, '14px');
     await main.scrollIntoViewIfNeeded();
-    await page.screenshot({path: '/private/tmp/claude-503/-Users-gwanli-product-2026-AgentsToZ-byCS/0c38fa1a-e6a6-419c-ad0e-af4b814aabaf/scratchpad/ui-worktrees.png'});
+    await page.screenshot({path: join(dist, 'ui-worktrees.png')});
     pass('main working folder vs indented worktrees are visually distinct');
     await context.close();
   }
@@ -367,6 +431,8 @@ try {
   }
 
   console.log(`\n${results.length} checks passed`);
+  };
+  await runScenarios();
 } finally {
   await browser?.close();
   server.stop(true);

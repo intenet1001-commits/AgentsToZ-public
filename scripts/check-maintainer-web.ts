@@ -1,5 +1,5 @@
 /** Owned Vite + synthetic API/browser fixtures only. Never use the running app's API. */
-import {mkdtempSync, mkdirSync, rmSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, realpathSync, rmSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {spawn, type ChildProcess} from 'node:child_process';
 import {createServer as createHttpServer, type Server as HttpServer} from 'node:http';
@@ -10,7 +10,7 @@ import {build, createServer, type ViteDevServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const suite = process.argv[2] ?? 'workroom';
-if (!['workroom', 'orchestration', 'tester', 'mobile', 'mobile-terminal', 'mobile-terminal-full', 'performance', 'memory-status', 'memory-journey', 'first-project', 'app-language', 'appearance-settings', 'prompt-origin', 'user-memory'].includes(suite)) throw Error('Unknown web suite');
+if (!['workroom', 'orchestration', 'tester', 'mobile', 'mobile-terminal', 'mobile-terminal-full', 'performance', 'memory-status', 'memory-journey', 'first-project', 'app-language', 'appearance-settings', 'prompt-origin', 'user-memory', 'computer-use', 'click-sweep'].includes(suite)) throw Error('Unknown web suite');
 const mobileTerminal = suite === 'mobile-terminal' || suite === 'mobile-terminal-full';
 const temporary = mkdtempSync(join(tmpdir(), 'agentstoz-maintainer-web-'));
 const evidence = join(root, '.agentstoz/maintainer');
@@ -78,7 +78,8 @@ async function ownedViteOrigin() {
       plugins:[{name:'maintainer-deny-live-api',configureServer(server){server.middlewares.use((req,res,next)=>{
         if(req.url?.startsWith('/api/')){res.statusCode=503;res.end('Unmocked fixture API rejected');return;}next();
       });}}],
-      server:{host:'127.0.0.1',port:0,strictPort:false,watch:{ignored:['**/.agentstoz/**','**/mobile/ios/build/**']}}});
+      // A linked checkout may share node_modules. Serve only its resolved dependencies, never the whole primary project.
+      server:{host:'127.0.0.1',port:0,strictPort:false,fs:{allow:[root,realpathSync(join(root,'node_modules'))]},watch:{ignored:['**/.agentstoz/**','**/mobile/ios/build/**']}}});
     await vite.listen();
   }
   const address=vite.httpServer!.address(); if(!address||typeof address==='string')throw Error('Missing owned fixture address');
@@ -96,14 +97,23 @@ async function remoteTerminalChecks(full: boolean) {
 }
 try {
   if(mobileTerminal) await run('workroom-number-keys', ['node','tests/workroom-number-keys.e2e.mjs']);
-  if (suite==='memory-status'||suite==='first-project') {
+  if (suite==='click-sweep') {
+    // 전수 클릭 검사 — 남은 인자(--update, --max-depth …)는 그대로 넘긴다.
     const dist=join(temporary,'desktop');
     await build({configFile:join(root,'vite.config.ts'),configLoader:'runner',root,envDir,mode:'maintainer-test',
       build:{outDir:dist,emptyOutDir:true},logLevel:'warn'});
-    if(suite==='first-project') await run('desktop-first-project-and-OPS', ['bun','tests/onboarding-first-project-app-ui.mjs',dist]);
+    await run('desktop-click-sweep', ['bun','tests/click-sweep.e2e.mjs',dist,...process.argv.slice(3)],{},1_500_000);
+  } else if (suite==='memory-status'||suite==='first-project') {
+    const dist=join(temporary,'desktop');
+    await build({configFile:join(root,'vite.config.ts'),configLoader:'runner',root,envDir,mode:'maintainer-test',
+      build:{outDir:dist,emptyOutDir:true},logLevel:'warn'});
+    if(suite==='first-project') {
+      await run('desktop-first-project-and-OPS', ['bun','tests/onboarding-first-project-app-ui.mjs',dist]);
+      await run('desktop-voice-dock-viewport', ['bun','tests/voice-dock-viewport.e2e.mjs',dist,join(root,'.agentstoz','maintainer','voice-dock-viewport')]);
+    }
     else await run('desktop-project-memory-status-retry', ['bun','tests/project-memory-hung-sidecar-ui.mjs',dist,
         join(root,'.agentstoz','maintainer','ui-evidence')]);
-  } else if (suite==='workroom'||suite==='orchestration'||suite==='tester'||suite==='appearance-settings'||suite==='app-language'||suite==='prompt-origin'||suite==='user-memory'||suite==='memory-journey'||mobileTerminal) {
+  } else if (suite==='workroom'||suite==='orchestration'||suite==='tester'||suite==='appearance-settings'||suite==='app-language'||suite==='prompt-origin'||suite==='user-memory'||suite==='computer-use'||suite==='memory-journey'||mobileTerminal) {
     const origin=await ownedViteOrigin();
     const environment={WORKROOM_TEST_ORIGIN:origin,WORKROOM_USABILITY_ORIGIN:origin,INTERNET_APPROVAL_TEST_ORIGIN:origin,AI_WORK_REQUEST_ORIGIN:origin};
     if(mobileTerminal) {
@@ -111,6 +121,9 @@ try {
     } else if(suite==='memory-journey') {
       await run('project-memory-first-save-and-recovery', ['node','tests/project-memory-journey-ui.mjs',origin]);
       await run('precompaction-recovery-consent-and-isolation', ['node','tests/recovery-checkpoint-ui.mjs',origin]);
+    } else if(suite==='computer-use') {
+      await run('computer-use-native-approval-panel',['node','tests/computer-use-panel-ui.mjs',origin]);
+      await run('workroom-schedule-and-desktop-effort',['node','tests/workroom-schedule-effort-ui.mjs',origin]);
     } else if(suite==='user-memory') {
       await run('user-memory-history', ['node','tests/user-memory-ui.mjs',origin]);
     } else if(suite==='prompt-origin') {

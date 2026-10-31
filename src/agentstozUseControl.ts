@@ -1,5 +1,5 @@
 import {AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from './agentstozMcpAgentChoice';
-import {userMemoryQuery} from './userMemoryRecall';
+import {userMemoryQuery, userMemoryRange, UserMemoryHistoryCursorError} from './userMemoryRecall';
 import {parseAgentMentionReference} from './agentstozMention';
 import {parseServiceUseRequest,type ServiceUseRequest} from './serviceUseProtocol';
 import {validatePlatformCliRequest} from './platformCliRequestValidation';
@@ -31,6 +31,7 @@ export const AGENTSTOZ_USE_ACTIONS = [
   "get-control-profile",
   "recall-control-context",
   "recall-user-memory",
+  "list-user-memory-history",
   "recall-user-profile",
   "list-control-memory-candidates",
   "propose-control-memory",
@@ -91,6 +92,7 @@ export type AgentsToZUseActionRequest = {
   reference?: import('./agentstozMention').AgentMentionReference;
   controllerPortId: string;
   controlQuery?: string;
+  userMemoryRange?: {start:string;end:string;cursor?:string;origin?:'all'|'human'};
   controlProposal?: {requestId:string;title:string;body:string;evidence:string;expectedRevision:string};
   portId: string | null;
   target?: 'ops';
@@ -333,7 +335,7 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
   const commonMemorySelections=action==='create-project'&&body.commonMemorySelections!==undefined?parseCommonSelections(body.commonMemorySelections):undefined;
   let commonMemoryIds:string[]|undefined;
   if(action==='create-project'&&body.commonMemoryIds!==undefined){if(!Array.isArray(body.commonMemoryIds)||body.commonMemoryIds.length>8)throw new AgentsToZUseControlError('공통기억은 최대 8개 선택하세요.','COMMON_MEMORY_INPUT_INVALID');commonMemoryIds=[...new Set(body.commonMemoryIds.map(commonMemoryId))];if(commonMemoryIds.length&&!projectGoal)throw new AgentsToZUseControlError('선택한 공통기억을 사용할 프로젝트 목표가 필요합니다.','COMMON_MEMORY_GOAL_REQUIRED');}
-  const requiresProject = action === 'service-use' || action === "recall-user-memory" || action === "recall-user-profile" || action === 'platform-cli' || action === "tester" || action === "project-status" || action==='sdk-project' || action==='common-memory'&&commonMemory?.op==='bind-project'
+  const requiresProject = action === 'service-use' || action === "recall-user-memory" || action === "list-user-memory-history" || action === "recall-user-profile" || action === 'platform-cli' || action === "tester" || action === "project-status" || action==='sdk-project' || action==='common-memory'&&commonMemory?.op==='bind-project'
     || action === 'list-workroom-accounts' || action === 'select-workroom-account'
     || action === "list-workroom-sessions"
     || action === "start-workroom-session"
@@ -565,6 +567,14 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     requestId = candidateRequestId;
   }
   let controlQuery:string|undefined;
+  let historyRange: AgentsToZUseActionRequest['userMemoryRange'];
+  if (action === 'list-user-memory-history') {
+    try { historyRange = userMemoryRange(body.start, body.end, body.cursor, body.origin); }
+    catch (error) {
+      if (error instanceof UserMemoryHistoryCursorError) throw new AgentsToZUseControlError('이어보기 값이 만료됐거나 다른 조회 조건의 것입니다. 이 기간을 처음부터 다시 조회하세요.', 'USER_MEMORY_CURSOR_EXPIRED', 400);
+      throw new AgentsToZUseControlError('조회 기간 또는 이어보기 값이 올바르지 않습니다.', 'USER_MEMORY_RANGE_INVALID', 400);
+    }
+  }
   if(action==='recall-user-memory'||action==='recall-user-profile'){
     try{controlQuery=userMemoryQuery(body.query);}
     catch{throw new AgentsToZUseControlError('조회할 주제와 짧은 검색어를 입력하세요.',action==='recall-user-profile'?'USER_PROFILE_INVALID_INPUT':'USER_MEMORY_QUERY_INVALID',400);}
@@ -583,7 +593,7 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
   if(tester && tester.portId !== portId) throw new AgentsToZUseControlError('테스터 프로젝트가 일치하지 않습니다.','TESTER_TARGET_MISMATCH');
   const overview=action==='tester-overview'?parseTesterOverviewRequest(body.testerOverview):undefined;
   const aiLabelJob=action==='read-ai-label-job'||action==='submit-ai-labels'?parseAiLabelJobRequest(action,body.aiLabelJob):undefined;
-  return { ...(team?{team}:{}), ...(platformCli?{platformCli}:{}), ...(aiLabelJob?{aiLabelJob}:{}), ...(overview?{testerOverview:overview}:{}), ...(tester?{tester}:{}), ...(controlQuery ? {controlQuery} : {}), ...(controlProposal ? {controlProposal} : {}), action, controllerPortId, portId, agent, projectName, ...(action==='register-existing-project'?{folderName}:{}), workspaceRootId, channelId, channelName, visibility, archiveMemory, sessionId, after, requestId, instruction, ...(shellCommand?{shellCommand}:{}),
+  return { ...(team?{team}:{}), ...(platformCli?{platformCli}:{}), ...(aiLabelJob?{aiLabelJob}:{}), ...(overview?{testerOverview:overview}:{}), ...(tester?{tester}:{}), ...(controlQuery ? {controlQuery} : {}), ...(historyRange ? {userMemoryRange:historyRange} : {}), ...(controlProposal ? {controlProposal} : {}), action, controllerPortId, portId, agent, projectName, ...(action==='register-existing-project'?{folderName}:{}), workspaceRootId, channelId, channelName, visibility, archiveMemory, sessionId, after, requestId, instruction, ...(shellCommand?{shellCommand}:{}),
     ...(action==='service-use'?{serviceUse:parseServiceUseRequest(body.serviceUse)}:{}),
     ...(action==='read-reference'?{reference:parseAgentMentionReference(body.reference)}:{}),
     ...(action==='resolve-target'?{targetAlias}:{}),

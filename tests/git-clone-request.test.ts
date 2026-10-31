@@ -108,7 +108,8 @@ describe('두 백엔드가 같은 방어를 한다', () => {
 
 describe('새 폴더 만들기 화면', () => {
   test('주소가 있으면 mkdir 대신 clone하고 git init을 다시 돌리지 않는다', () => {
-    expect(appSource).toContain('? await API.cloneRepository(cloneRequest.url, fullPath)\n        : await API.createFolder(fullPath);');
+    // A project being registered clones with the GitHub account chosen for it; otherwise git's own login.
+    expect(appSource).toContain('? await API.cloneRepository(cloneRequest.url, fullPath, registerAsProject ? newProjectCliChoice.github : undefined)\n        : await API.createFolder(fullPath);');
     expect(appSource).toContain('if (initializeNewProjectGit && !cloneRequest) {');
   });
 

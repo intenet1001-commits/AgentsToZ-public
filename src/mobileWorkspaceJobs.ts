@@ -35,7 +35,7 @@ export class MobileWorkspaceJobs {
   receipt(owner:string,targetId:string,requestId:string) {
     const row=this.read(digest(JSON.stringify([owner,requestId])));
     if(!row||row.target!==digest(JSON.stringify([owner,targetId])))return null;
-    return {result:this.outcome(row),completedAt:row.completedAt??null,binding:row.binding??null,evidence:row.evidence??null};
+    return {result:this.outcome(row),startedAt:row.at,completedAt:row.completedAt??null,binding:row.binding??null,evidence:row.evidence??null};
   }
   /**
    * `evidence` may be a function: it is then taken when the save finishes, not when it starts.

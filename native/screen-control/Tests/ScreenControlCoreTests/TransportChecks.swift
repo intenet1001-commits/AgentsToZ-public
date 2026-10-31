@@ -55,7 +55,7 @@ func rawConnection(to endpoint: NWEndpoint) async throws -> FramedConnection {
 }
 
 /// Fails the check unless the other end closes the connection within `seconds`.
-func waitForEnd(_ framed: FramedConnection, within seconds: Double = 3, line: Int = #line) async throws {
+func waitForEnd(_ framed: any ScreenFrameTransport, within seconds: Double = 3, line: Int = #line) async throws {
     _ = try await within(seconds, line: line) {
         do { while true { _ = try await framed.receive() } } catch {}
         return true
@@ -98,6 +98,32 @@ final class SilentListener: Sendable {
 }
 
 extension ScreenControlChecks {
+    func testConnectionWaitsForAUsablePathUntilCancelled() async throws {
+        // A Mac has no cellular path. This produces the same real NWConnection.waiting state as the
+        // iPad's initially prohibited LTE path, without contacting a device or changing network settings.
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .cellular
+        let connection = NWConnection(host: .ipv4(.loopback), port: 9, using: parameters)
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        let opening = Task {
+            defer { finished.withLock { $0 = true } }
+            try await connection.open(on: ScreenClient.queue)
+        }
+        defer { connection.cancel(); opening.cancel() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !finished.withLock({ $0 }), ContinuousClock.now < deadline {
+            if case .waiting = connection.state { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard case .waiting = connection.state else {
+            throw CheckFailure(description: "an unavailable path must keep opening pending, not cancel it")
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        try check(!finished.withLock { $0 }, "waiting is recoverable; the caller's deadline owns cancellation")
+        connection.cancel()
+        try await expectError(TransportError.closed) { try await within(2) { try await opening.value } }
+    }
+
     func testFrameReaderChecksEveryLengthBeforeBuffering() async throws {
         var reader = FrameReader(maxFrame: 8)
         let stream = FrameReader.frame(Data("one".utf8)) + FrameReader.frame(Data("two!".utf8)) + FrameReader.frame(Data(count: 8))
@@ -160,7 +186,7 @@ extension ScreenControlChecks {
         try check(try await received == burst, "concurrent sends all open on the other side")
 
         // Even after authentication a frame has a ceiling, and going over it ends the connection.
-        phone.framed.connection.send(content: UInt32(SecureConnection.maxFrame + 1).bigEndianData, completion: .idempotent)
+        (phone.framed as! FramedConnection).connection.send(content: UInt32(SecureConnection.maxFrame + 1).bigEndianData, completion: .idempotent)
         try await expectError(TransportError.badFrame) { _ = try await within(3) { try await mac.connection.receive() } }
         try await waitForEnd(phone.framed)
 

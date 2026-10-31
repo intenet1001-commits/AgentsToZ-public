@@ -4,6 +4,8 @@ import {isTauri} from './lib/env';
 import {phoneDateTime} from './phoneTime';
 import {automaticSaveNotices,type AutomaticSaveNotice as Notice} from './automaticSaveNotices';
 import {clearSaveRun,saveTargets,unsavedNoticeId,useUnsavedSessionMemory,type SaveItem,type SaveRun,type UnsavedProject} from './unsavedSessionMemory';
+import {MEMORY_SAVE_PROBLEM_TEXT,memorySaveNeedsRecovery} from './memorySaveProblem';
+import {MemorySaveRecoveryAction} from './MemorySaveRecoveryAction';
 import './AutomaticSaveNotice.css';
 
 /**
@@ -117,17 +119,22 @@ const itemLine:Record<SaveItem['status'],string>={pending:'대기',saving:'저�
 function SaveRunCard({run,open,onToggle}:{run:SaveRun;open:boolean;onToggle:()=>void}){
   const count=(...statuses:SaveItem['status'][])=>run.items.filter(i=>statuses.includes(i.status)).length;
   const done=count('saved','skipped','failed','unknown','stopped'),current=run.items.find(i=>i.status==='saving');
-  const trouble=count('failed','unknown');
+  const trouble=run.items.filter(memorySaveNeedsRecovery).length;
   const summary=run.running?`${current?.name??''} 저장 중…`:[`저장 ${count('saved')}`,count('skipped')?`건너뜀 ${count('skipped')}`:'',trouble?`확인 필요 ${trouble}`:'',count('stopped')?`시작 안 함 ${count('stopped')}`:''].filter(Boolean).join(' · ');
   return <li className="az-notice" data-kind="save-run" data-state={run.running?'running':trouble?'trouble':'done'} data-testid="dock-save-run">
     <button type="button" className="az-notice__body" aria-expanded={open} title={open?'접기':'자세히 보기'} onClick={onToggle}>
       <span className="az-notice__icon" aria-hidden="true">{run.running?<Loader2 size={16} className="az-notice__spin"/>:trouble?<AlertCircle size={16}/>:<CheckCircle2 size={16}/>}</span>
       <span className="az-notice__text" role="status">
-        <span className="az-notice__head"><strong>{run.running?`기억 저장 중 · ${done}/${run.items.length}`:'기억 저장 끝'}</strong></span>
+        <span className="az-notice__head"><strong>{run.running?`기억 저장 중 · ${done}/${run.items.length}`:trouble?'기억 저장 확인 필요':'기억 저장 결과'}</strong></span>
         <small>{summary}</small>
-        {(open||!run.running&&trouble>0)&&<span className="az-notice__items">{run.items.map(i=><span key={i.folder} data-status={i.status} title={i.message}>{i.name} · {itemLine[i.status]}{i.message&&i.status!=='saved'&&i.status!=='saving'?` — ${i.message}`:''}</span>)}</span>}
       </span>
     </button>
     {!run.running&&<button type="button" className="az-notice__close" aria-label="기억 저장 결과 닫기" title="닫기" onClick={clearSaveRun}><X size={13}/></button>}
+    {(open||!run.running&&trouble>0)&&<div className="az-notice__items az-notice__run-items" role="list" aria-label="프로젝트별 저장 결과">
+      {run.items.map(i=>{const attention=memorySaveNeedsRecovery(i);const message=attention?MEMORY_SAVE_PROBLEM_TEXT[i.problem??(i.status==='unknown'?'unknown':'state')]:i.message;return <div key={i.folder} role="listitem" className="az-notice__run-item" data-status={i.status} data-attention={attention||undefined}>
+        <span>{i.name} · {itemLine[i.status]}{message&&i.status!=='saving'?` — ${message}`:''}</span>
+        {attention&&!run.running&&<MemorySaveRecoveryAction item={i}/>}
+      </div>;})}
+    </div>}
   </li>;
 }

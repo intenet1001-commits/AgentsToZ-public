@@ -7,9 +7,10 @@ import {HERMES_VARIANT_NAME,HERMES_VARIANT_PROVIDER,hermesVariantModel,hermesVar
 import {useHermesVariants} from './hermesVariantsClient';
 import type {TeamAccountChoices} from './teamAccountChoices';
 import {normalizeTeamLaunchOptions,teamLaunchDefaults,teamLaunchManagement,teamLaunchReuseAvailable,teamLaunchSupport,teamLaunchSurfacesFor,TEAM_SURFACE_NAME,type TeamAppMode,type TeamLaunchManagement,type TeamLaunchManagementReason,type TeamLaunchOptions,type TeamLaunchSurface} from './teamLaunchOptions';
-import {LAUNCH_MODEL_NAME,TEAM_AGENT_LABEL,TEAM_EFFORT_LEVELS,TEAM_MAX_MEMBERS,TEAM_MODEL_CHOICES,readTeamBuilderDraft,teamLeaderInstruction,type TeamLeaderMember,type TeamMemberRole} from './workroomTeamInstruction';
+import {LAUNCH_MODEL_NAME,TEAM_AGENT_LABEL,TEAM_MAX_MEMBERS,TEAM_MODEL_CHOICES,readTeamBuilderDraft,teamLeaderInstruction,type TeamLeaderMember,type TeamMemberRole} from './workroomTeamInstruction';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
-import {hermesVariantCopy,workroomTeamCopy} from './i18n';
+import {teamEffortIsRequest,teamEffortLevels} from './teamEffortCatalog';
+import {hermesVariantCopy,workroomTeamCopy,type Lang} from './i18n';
 import {useAppLanguage} from './useAppLanguage';
 import './WorkroomTeamBuilder.css';
 
@@ -20,9 +21,10 @@ import './WorkroomTeamBuilder.css';
  * `surface`…`options`: where project open would run it and with what (src/teamLaunchOptions.ts). `accountId` '' names no
  * account: the member's new worktree has no account of its own, so its CLI starts on this Mac's default login (host-default) —
  * never «the account this Workroom selects». Bypass is off until the person turns it on for this member.
+ * `computerUse`: a desktop app member's opt-in (computerUseApprovals) — off until the person ticks it for that member.
  */
 export interface TeamBuilderRow {key:number;name?:string;agent:AiTerminalAgent;variant:HermesVariant|'';model:string;provider:string;custom:boolean;effort:WorkroomEffortLevel|'';role:TeamMemberRole;task:string;sessionId:string;
-  surface:TeamLaunchSurface;accountId:string;bypass:boolean;options:TeamLaunchOptions}
+  surface:TeamLaunchSurface;accountId:string;bypass:boolean;options:TeamLaunchOptions;computerUse?:boolean}
 type MemberRow=TeamBuilderRow;
 export const blankTeamRow=(key:number,agent:AiTerminalAgent,role:TeamMemberRole='worker'):MemberRow=>({key,agent,variant:'',model:'',provider:'',custom:false,effort:'',role,task:'',sessionId:'',surface:'internal',accountId:'',bypass:false,options:{}});
 const blankRow=blankTeamRow;
@@ -31,7 +33,7 @@ export function restoredTeamRows(members:readonly TeamLeaderMember[]):TeamBuilde
     variant:hermesVariantOf(member)??'',model:member.model??'',provider:member.provider??'',
     custom:!!member.model&&!TEAM_MODEL_CHOICES[member.agent].some(choice=>choice.model===member.model&&(choice.provider??'')===(member.provider??'')),
     effort:member.effort??'',task:member.task??'',sessionId:member.sessionId??'',surface:member.surface??'internal',
-    accountId:member.accountId??'',bypass:member.bypassPermissions===true,options:{...member.launchOptions}}));
+    accountId:member.accountId??'',bypass:member.bypassPermissions===true,options:{...member.launchOptions},computerUse:member.computerUseApprovals===true}));
 }
 /** A running Workroom of this project that may join. `linked`: it runs in its own worktree, so it may take work, not only review.
  * `checkout`: which folder it runs in — sessions sharing one share a worktree, and only one of them may take work there. */
@@ -70,8 +72,23 @@ export function teamRowMember(row:TeamBuilderRow,context:{open?:TeamOpenSession;
   if(row.agent==='hermes'&&provider&&context.variants.some(item=>item.provider===provider&&item.available===false))return {problem:'variant-missing'};
   return {member:{agent:row.agent,...name,...(model?{model}:{}),...(provider?{provider}:{}),...(row.effort?{effort:row.effort}:{}),...role,...(task?{task}:{}),
     ...(account?{accountId:account.id,accountLabel:account.label}:{}),...(row.bypass?{bypassPermissions:true}:{}),
-    ...(row.surface!=='internal'?{surface:row.surface}:{}),...(Object.keys(row.options).length?{launchOptions:{...row.options}}:{})}};
+    ...(row.surface!=='internal'?{surface:row.surface}:{}),...(Object.keys(row.options).length?{launchOptions:{...row.options}}:{}),
+    ...(row.computerUse?{computerUseApprovals:true}:{})}};
 }
+/**
+ * The desktop app member opt-in, kept here so the shared i18n table stays untouched. Only one-time approvals, only through
+ * an application-scoped computer session that Control still asks the person to approve; never always-allow, bypass,
+ * network/full access, login or macOS system prompts.
+ */
+const COMPUTER_USE_COPY:Readonly<Record<Lang,{label:string;title:string}>>={
+  ko:{label:'리더가 이 앱 팀원의 1회성 승인만 컴퓨터 유즈로 응답할 수 있음',title:'켜면 리더가 이 앱의 1회성 승인(이 팀 워크트리의 폴더 신뢰, 한 번 실행)만 그 앱으로 한정한 컴퓨터 유즈로 응답합니다. 세션마다 Control 승인이 따로 필요하고, 항상 허용·권한 우회·네트워크·로그인·시스템 창은 사람이 답합니다.'},
+  en:{label:'Leader may answer only this app member\'s one-time approvals with computer use',title:'When on, the leader may answer only this app\'s one-time approvals (folder trust for the team worktree, run once) with computer use limited to that app. Each session still needs approval in Control; always-allow, bypass, network, login and system prompts stay with you.'},
+  ja:{label:'リーダーはこのアプリ担当の一回限りの承認だけをコンピューター操作で応答できる',title:'オンにすると、リーダーはこのアプリの一回限りの承認(チームのワークツリーのフォルダー信頼、一度だけ実行)だけを、そのアプリに限ったコンピューター操作で応答します。セッションごとに Control での承認が必要です。常に許可・権限の回避・ネットワーク・ログイン・システムの画面は人が応答します。'},
+  'zh-CN':{label:'负责人只能用电脑操作回应此应用成员的一次性批准',title:'开启后，负责人只能用限定于该应用的电脑操作回应其一次性批准（信任团队工作树文件夹、仅运行一次）。每个会话仍需在 Control 中批准；始终允许、绕过权限、网络、登录和系统提示由你处理。'},
+  es:{label:'El líder solo puede responder con uso del ordenador a las aprobaciones puntuales de este miembro de app',title:'Activado, el líder solo responde a las aprobaciones puntuales de esta app (confiar en la carpeta del worktree del equipo, ejecutar una vez) con uso del ordenador limitado a esa app. Cada sesión necesita aprobación en Control; permitir siempre, omitir permisos, red, inicio de sesión y avisos del sistema quedan para ti.'},
+  fr:{label:'Le chef peut répondre par contrôle de l’ordinateur aux seules approbations ponctuelles de ce membre app',title:'Activé, le chef ne répond qu’aux approbations ponctuelles de cette app (confiance dans le dossier du worktree de l’équipe, exécuter une fois) par un contrôle limité à cette app. Chaque session reste à approuver dans Control ; toujours autoriser, ignorer les autorisations, réseau, connexion et invites système restent à vous.'},
+  de:{label:'Leiter darf nur einmalige Freigaben dieses App-Mitglieds per Computersteuerung beantworten',title:'Eingeschaltet beantwortet der Leiter nur einmalige Freigaben dieser App (Ordnervertrauen für das Team-Worktree, einmal ausführen) mit auf diese App begrenzter Computersteuerung. Jede Sitzung braucht weiter eine Freigabe in Control; Immer erlauben, Berechtigungen umgehen, Netzwerk, Anmeldung und Systemdialoge bleiben bei dir.'},
+};
 /** 빠른 구성: one tap fills the members from the AIs other than the leader. Tasks stay blank — the leader divides the work. */
 const PRESETS=[['split',['worker','worker']],['build-review',['worker','reviewer']],['cross-review',['reviewer','reviewer']]] as const;
 type Preset=typeof PRESETS[number][0];
@@ -90,7 +107,7 @@ const LAUNCH_CHOICES=workroomLaunchChoices();
 export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessions=[],leaderCheckout,accounts,accountsLoading=false,hermesVariants,onCompose,onClose}:{leader:AiTerminalAgent;initialGoal:string;disabled?:boolean;openSessions?:readonly TeamOpenSession[];leaderCheckout?:string;
   /** Absent for an AI: its list could not be read (or is still being read while `accountsLoading`). */accounts?:TeamAccountChoices;accountsLoading?:boolean;
   /** This Mac's variant items when the parent already has them; otherwise the builder asks. */hermesVariants?:readonly HermesVariantItem[];onCompose:(text:string)=>void;onClose:()=>void}){
-  const [lang]=useAppLanguage(),copy=workroomTeamCopy(lang),variantCopy=hermesVariantCopy(lang);
+  const [lang]=useAppLanguage(),copy=workroomTeamCopy(lang),variantCopy=hermesVariantCopy(lang),computerUseCopy=COMPUTER_USE_COPY[lang]??COMPUTER_USE_COPY.en;
   const asked=useHermesVariants(0,!hermesVariants),variantItems=hermesVariants??asked.items;
   const surfaces=useMemo(()=>teamLaunchSurfacesFor(isWindowsClient()),[]);
   const [initial]=useState(()=>{try{return {...readTeamBuilderDraft(initialGoal),error:''};}catch(reason){return {goal:'',members:undefined,error:reason instanceof Error?reason.message:String(reason)};}});
@@ -120,11 +137,24 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
     const {agent,variant}=launchChoiceTarget(value),surface=row.surface;
     update(row.key,{agent,sessionId:'',variant:variant??'',model:'',provider:'',custom:false,effort:'',surface,options:teamLaunchDefaults(surface,agent),...(variant?hermesVariantModel(variant):{})});
   };
-  // Outside the Workroom nothing picks a model or an effort (project open has none there), so those lists read 「워크룸에서만」.
+  // Outside the Workroom only Claude on Orca picks a model and an effort (project open has none elsewhere), so those lists read
+  // 「워크룸에서만」. A pinned effort survives the move only when the new place offers it for the model the row keeps: Claude's CLI
+  // default offers xhigh/max on Orca (a request there) but not in the Workroom (src/teamEffortCatalog.ts), and a level the list
+  // no longer shows would otherwise stay chosen, unseen, until compose refuses it.
   // The account and the bypass stay: compose refuses them where they do not apply, and the row still shows them to change.
   const pickSurface=(row:MemberRow,surface:TeamLaunchSurface)=>{
-    const support=teamLaunchSupport(surface,row.agent);
-    update(row.key,{surface,options:teamLaunchDefaults(surface,row.agent),...(support.model?{}:{model:'',provider:'',custom:false}),...(support.effort?{}:{effort:''})});
+    const support=teamLaunchSupport(surface,row.agent),model=support.model?row.model:'';
+    const effort=support.effort&&row.effort&&effortChoices({...row,model},surface).includes(row.effort)?row.effort:'';
+    update(row.key,{surface,options:teamLaunchDefaults(surface,row.agent),...(support.model?{}:{model:'',provider:'',custom:false}),effort});
+  };
+  // The levels the row can pin: the model and provider it would start with (a variant names both, even before one is typed).
+  const effortChoices=(row:MemberRow,surface:TeamLaunchSurface=row.surface)=>teamEffortLevels(row.agent,row.model.trim()||(row.variant?hermesVariantModel(row.variant).model:''),surface,
+    row.variant?HERMES_VARIANT_PROVIDER[row.variant]:row.provider.trim()||undefined);
+  // Hermes levels depend on the provider (src/teamEffortCatalog.ts): an edited provider keeps a pin it still offers and clears
+  // one it does not, so the list never shows 「자동」 over a level compose would then refuse.
+  const pickProvider=(row:MemberRow,provider:string)=>{
+    const effort=row.effort&&effortChoices({...row,provider}).includes(row.effort)?row.effort:'';
+    update(row.key,{provider,effort});
   };
   const setOption=(row:MemberRow,patch:TeamLaunchOptions)=>update(row.key,{options:normalizeTeamLaunchOptions(row.surface,row.agent,{...row.options,...patch})});
   const problemText=(problem:TeamRowProblem,index:number,row:MemberRow)=>{
@@ -159,14 +189,16 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
   // The model list shows a preset by its index, '' for the CLI default, 'custom' while the person types one.
   const modelValue=(row:MemberRow)=>row.custom?'custom':row.model?String(TEAM_MODEL_CHOICES[row.agent].findIndex(choice=>choice.model===row.model&&(choice.provider??'')===row.provider)):'';
   const pickModel=(row:MemberRow,value:string)=>{
-    if(value==='custom')return update(row.key,{custom:true});
+    if(value==='custom')return update(row.key,{custom:true,effort:''});
     const choice=value===''?undefined:TEAM_MODEL_CHOICES[row.agent][Number(value)];
-    update(row.key,{custom:false,model:choice?.model??'',provider:choice?.provider??''});
+    update(row.key,{custom:false,model:choice?.model??'',provider:choice?.provider??'',effort:''});
   };
   const choiceLabel=(choice:string)=>{const {agent,variant}=launchChoiceTarget(choice);return variant?`${TEAM_AGENT_LABEL.hermes} · ${HERMES_VARIANT_NAME[variant]}`:TEAM_AGENT_LABEL[agent];};
   const surfaceLabel=(surface:TeamLaunchSurface,agent:AiTerminalAgent)=>surface==='internal'?copy.surfaceWorkroom:surface==='orca-floating'?`Orca · ${copy.surfaceFloating}`
     :surface==='orca-worktree'?`Orca · ${copy.surfaceSidebar}`:surface==='app'?fill(copy.surfaceApp,{app:APP_PRODUCT[agent]}):TEAM_SURFACE_NAME[surface];
-  const effortLabel:Record<WorkroomEffortLevel,string>={low:copy.effortLow,medium:copy.effortMedium,high:copy.effortHigh};
+  // Every pinned level reads 「고정 · …」; xhigh, max and ultra keep the CLI's own word (팀 현황 uses the same words).
+  const effortLabel:Record<WorkroomEffortLevel,string>={low:`${copy.effortLow} · low`,medium:`${copy.effortMedium} · medium`,high:`${copy.effortHigh} · high`,
+    xhigh:fill(copy.effortPinned,{level:'xhigh'}),max:fill(copy.effortPinned,{level:'max'}),ultra:fill(copy.effortPinned,{level:'ultra'})};
   const appModeLabel:Record<TeamAppMode,string>={new:copy.appModeNew,reopen:copy.appModeReopen,open:copy.appModeOpen};
   const managementLabel:Record<TeamLaunchManagement,string>={managed:copy.managed,'awaiting-connection':copy.awaiting,manual:copy.manual};
   const reasonLabel:Record<TeamLaunchManagementReason,string>={workroom:copy.reasonWorkroom,'orca-cli':copy.reasonOrca,'cmux-control':copy.reasonCmux,'claude-bg':copy.reasonBg,
@@ -188,7 +220,7 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
      const accountWrong=!!row.accountId&&(!support.account||!chosen),variantWrong=!!row.variant&&row.surface!=='internal';
      return <div className="workroom-team__row" key={row.key} data-testid="workroom-team-member">
      <span className="workroom-team__index" aria-hidden="true">{index+1}</span>
-     {/* Another AI has other models, and Antigravity takes no effort: a new AI starts from its defaults. */}
+     {/* Another AI has other models and levels (Antigravity's effort is its model variant): a new AI starts from its defaults. */}
      <select aria-label={label(index,copy.agent)} value={row.sessionId?`session:${row.sessionId}`:launchChoiceId(row.agent,row.variant||null)} onChange={event=>pickAgent(row,event.target.value)}>
       {LAUNCH_CHOICES.map(choice=>{
        const item=variantItems.find(entry=>entry.choice===choice),missing=item&&!item.available;
@@ -199,7 +231,7 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
      </select>
      {row.sessionId?<span className="workroom-team__attached" data-testid="workroom-team-attached">{copy.attachedModel}</span>
      :!support.model?<>
-      {/* Project open takes no model or effort outside the Workroom: the app or terminal keeps its own. */}
+      {/* Project open takes no model or effort on this surface (only the Workroom and Claude on Orca do): the app or terminal keeps its own. */}
       <select aria-label={label(index,copy.model)} value="" disabled title={copy.workroomOnlyTitle}><option value="">{copy.workroomOnly}</option></select>
       <select className="workroom-team__effort" aria-label={label(index,copy.effort)} value="" disabled title={copy.workroomOnlyTitle}><option value="">{copy.workroomOnly}</option></select></>
      :<>
@@ -209,16 +241,16 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
       <option value="custom">{copy.modelCustom}</option>
      </select>
      {support.effort
-      ?<select className="workroom-team__effort" aria-label={label(index,copy.effort)} value={row.effort} onChange={event=>update(row.key,{effort:event.target.value as MemberRow['effort']})}>
-        <option value="">{copy.effortAuto}</option>
-        {TEAM_EFFORT_LEVELS.map(level=><option key={level} value={level}>{effortLabel[level]}</option>)}
+      ?<select className="workroom-team__effort" aria-label={label(index,copy.effort)} title={teamEffortIsRequest(row.agent,row.surface)?copy.effortRequested:undefined} value={row.effort} onChange={event=>{const effort=event.target.value as MemberRow['effort'];update(row.key,{effort,...(row.agent==='agy'&&effort?{model:row.model.replace(/-(low|medium|high|xhigh|max)$/,`-${effort}`)}:{})});}}>
+        <option value="">{row.agent==='agy'?copy.effortInModel:row.surface!=='internal'?copy.effortDefault:copy.effortAuto}</option>
+        {effortChoices(row).map(level=><option key={level} value={level}>{effortLabel[level]}</option>)}
        </select>
       :<select className="workroom-team__effort" aria-label={label(index,copy.effort)} value="" disabled title={copy.effortInModelTitle}><option value="">{copy.effortInModel}</option></select>}</>}
      <button type="button" className="workroom-team__icon" aria-label={fill(copy.remove,{n:index+1})} disabled={rows.length<=1} onClick={()=>setRows(current=>current.filter(item=>item.key!==row.key))}><X size={13}/></button>
      {row.custom&&support.model&&<div className="workroom-team__custom">
-      <input aria-label={label(index,copy.modelName)} value={row.model} placeholder={copy.modelName} spellCheck={false} autoCapitalize="off" onChange={event=>update(row.key,{model:event.target.value})}/>
+      <input aria-label={label(index,copy.modelName)} value={row.model} placeholder={copy.modelName} spellCheck={false} autoCapitalize="off" onChange={event=>update(row.key,{model:event.target.value,effort:''})}/>
       {/* A variant's provider is the variant itself; plain Hermes types one. */}
-      {row.agent==='hermes'&&!row.variant&&<input aria-label={label(index,copy.provider)} value={row.provider} placeholder={copy.providerPlaceholder} spellCheck={false} autoCapitalize="off" onChange={event=>update(row.key,{provider:event.target.value})}/>}
+      {row.agent==='hermes'&&!row.variant&&<input aria-label={label(index,copy.provider)} value={row.provider} placeholder={copy.providerPlaceholder} spellCheck={false} autoCapitalize="off" onChange={event=>pickProvider(row,event.target.value)}/>}
      </div>}
      {/* Where it runs and with what: only the options project open has on that surface for that AI. An open session keeps its own. */}
      {!row.sessionId&&<div className="workroom-team__launch" data-testid="workroom-team-launch">
@@ -238,6 +270,8 @@ export function WorkroomTeamBuilder({leader,initialGoal,disabled=false,openSessi
        {support.appModes.map(mode=><option key={mode} value={mode}>{appModeLabel[mode]}</option>)}
       </select>}
       {(support.bypass||row.bypass)&&<label className="workroom-team__check" title={copy.bypassTitle}><input type="checkbox" aria-label={label(index,copy.bypass)} aria-invalid={!support.bypass||undefined} checked={row.bypass} onChange={event=>update(row.key,{bypass:event.target.checked})}/>{copy.bypass}</label>}
+      {/* Desktop app members only, default off. A choice left on after a move away from the app stays visible for compose to refuse. */}
+      {(row.surface==='app'||!!row.computerUse)&&<label className="workroom-team__check" title={computerUseCopy.title} data-testid="workroom-team-computer-use"><input type="checkbox" aria-label={label(index,computerUseCopy.label)} aria-invalid={row.surface!=='app'||undefined} checked={row.computerUse===true} onChange={event=>update(row.key,{computerUse:event.target.checked})}/>{computerUseCopy.label}</label>}
       {/* Product flags keep their own names in every language. */}
       {support.bg&&<label className="workroom-team__check"><input type="checkbox" aria-label={label(index,'Claude --bg')} checked={row.options.bgMode===true} onChange={event=>setOption(row,{bgMode:event.target.checked})}/>Claude --bg</label>}
       {support.tmux&&<label className="workroom-team__check"><input type="checkbox" aria-label={label(index,'tmux')} checked={row.options.tmuxMode===true} disabled={row.options.bgMode===true} onChange={event=>setOption(row,{tmuxMode:event.target.checked})}/>tmux</label>}

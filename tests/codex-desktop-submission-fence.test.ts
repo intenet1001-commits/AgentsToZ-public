@@ -1,6 +1,21 @@
 import { expect, test } from 'bun:test';
 import { submitCodexDesktopDraft } from '../src/codexDesktopSubmissionFence';
 
+test('a durable receipt retains the submission fence until confirmation',async()=>{
+  const store=fixture();let retained='';
+  await submitCodexDesktopDraft({store,projectKey:'/project',retainSubmissionFence:true,
+    submit:async()=>({ok:true}),findCreatedThread:async()=> 'new-thread',retainCreatedThread:id=>{retained=id;}});
+  expect(retained).toBe('new-thread');expect(store.load('/project')).not.toBeNull();
+});
+
+test('a proven pre-submit revoked authority clears the fence without finding or retaining a thread',async()=>{
+  const store=fixture();let lookedUp=false;
+  await expect(submitCodexDesktopDraft({store,projectKey:'/project',retainSubmissionFence:true,
+    submit:async()=>({ok:false,code:'CODEX_DESKTOP_AUTHORITY_REVOKED',error:'revoked'}),
+    findCreatedThread:async()=>{lookedUp=true;return 'new-thread';},retainCreatedThread:()=>{throw new Error('not sent');}})).rejects.toMatchObject({code:'CODEX_DESKTOP_AUTHORITY_REVOKED'});
+  expect(lookedUp).toBe(false);expect(store.load('/project')).toBeNull();
+});
+
 function fixture() {
   const pending = new Map<string, string>();
   return {

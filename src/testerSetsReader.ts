@@ -2,7 +2,7 @@ import {constants} from 'node:fs';
 import {lstat,open,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-import type {TesterSets} from './testerAgentContract';
+import type {TesterClickSweepSet,TesterSets} from './testerAgentContract';
 
 const name=/^[a-z0-9][a-z0-9-]{0,63}$/;
 const commonScenarios=['conflict-markers','json-valid','python-syntax'];
@@ -90,6 +90,33 @@ export async function readProjectTesterSets(root:string,clean:(value:unknown,lim
     const drafts=await read('.agentstoz/maintainer/persona-evolution-v1.json');
     if(drafts){const value=object(drafts);if(value.schemaVersion!==1||!Array.isArray(value.candidates)||value.candidates.length>64)throw Error('페르소나 후보 형식을 확인하세요.');result.personas.candidates=value.candidates.length;result.personas.needsChecks=value.candidates.filter((c:any)=>Array.isArray(c?.checkIds)&&!c.checkIds.length).length;result.personas.candidateRoles=value.candidates.slice(0,12).map((c:any)=>clean(c.profile?.role??c.goal,120));}
   }catch(e){result.personas.state='invalid';result.personas.problem=clean(e instanceof Error?e.message:e,160);}
+  // 세 번째 세트(전수 클릭): 설정과 실행마다 남는 작은 요약만 읽는다. 기준선(수백 KB)은 있는지만 본다.
+  const sweep:TesterClickSweepSet={state:'none',engine:'absent',surfaces:[]};
+  result.clickSweep=sweep;
+  const exists=async(relative:string)=>{try{const st=await lstat(join(root,relative));return st.isFile()&&!st.isSymbolicLink();}catch(e:any){if(e.code==='ENOENT')return false;throw e;}};
+  const count=(v:unknown)=>typeof v==='number'&&Number.isInteger(v)&&v>=0?Math.min(v,1_000_000):0;
+  try{
+    if(await exists('scripts/agentstoz-click-sweep.mjs'))sweep.engine='present';
+    const raw=await read('.agentstoz/click-sweep.json',64_000);
+    if(raw){
+      const config=object(raw);
+      if(config.schemaVersion!==1||!Array.isArray(config.surfaces)||!config.surfaces.length||config.surfaces.length>8)throw Error('전수 클릭 설정 형식을 확인하세요.');
+      const ids=new Set<string>();
+      for(const s of config.surfaces){
+        if(!s||typeof s.id!=='string'||!name.test(s.id)||ids.has(s.id))throw Error('전수 클릭 화면 ID를 확인하세요.');
+        ids.add(s.id);
+        const kind=Array.isArray(s.command)?'command':typeof s.url==='string'?'url':null;
+        if(!kind)throw Error('전수 클릭 화면의 실행 방법(url 또는 command)을 확인하세요.');
+        const baseline=typeof s.baseline==='string'?s.baseline:`.agentstoz/click-sweep/${s.id}.json`;
+        if(baseline.startsWith('/')||baseline.split(/[\\/]/).includes('..'))throw Error('전수 클릭 기준선 경로를 확인하세요.');
+        let last:TesterClickSweepSet['surfaces'][number]['last']=null;
+        const summary=await read(`.agentstoz/maintainer/click-sweep/${s.id}/summary.json`,16_000);
+        if(summary){try{const v=object(summary);if(v.schemaVersion===1&&typeof v.at==='string')last={at:clean(v.at,40),passed:v.passed===true,elements:count(v.elements),clicked:count(v.clicked),failures:count(v.failures),updated:v.updated===true};}catch{}}
+        sweep.surfaces.push({id:s.id,label:clean(s.label??s.id,80),kind,baselinePresent:await exists(baseline),last});
+      }
+      sweep.state='configured';
+    }
+  }catch(e){Object.assign(sweep,{state:'invalid',problem:clean(e instanceof Error?e.message:e,160),surfaces:[]});}
   const provided:Record<string,boolean>={};
   for(const file of ['AGENTS.md','CLAUDE.md','GEMINI.md']){
     // Match the runner's guide-only budget. Configuration limits and the total

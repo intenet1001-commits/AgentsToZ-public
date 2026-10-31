@@ -156,7 +156,7 @@ test('verified signing creates a digest and remains explicitly unnotarized and u
     const command = plan[index++]!;
     return { exitCode: 0, stdout: command.operation === 'inspect' ? inspection(app, command.code) : '', stderr: '', timedOut: false, outputTruncated: false };
   } });
-  expect(result).toMatchObject({ mode: 'developer-id-base', nestedCodeSigned: 5, screenHelperPreserved: true, enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false });
+  expect(result).toMatchObject({ mode: 'developer-id-base', nestedCodeSigned: 6, screenHelperPreserved: true, enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false });
   expect(result.bundleDigest).toMatch(/^[0-9a-f]{64}$/);
 });
 
@@ -191,7 +191,7 @@ test('base pipeline rejects unpublished/private/moving sources before issuing a 
       buildSidecars: async () => {}, stageIcons: async () => { if (fault === 'icons-failed') throw Error('icon staging failed'); }, run: async () => { commands++; }, assertFresh: () => { if (fault === 'stale-app') throw Error('stale'); }, now: () => 100,
       readVersion: () => fault === 'invalid-version' ? '../unsafe' : '1516.0.0',
       stageScreenHelper: async (app, version, resolved) => { expect(commands).toBe(2); expect(app).toBe(join(root, 'release/bundle/macos/AgentsToZ_byCS.app')); expect(version).toBe('1516.0.0'); expect(resolved).toEqual(identity()); if (fault === 'screen-failed') throw Error('Screen staging failed'); },
-      sign: async () => { signCalls++; if (fault === 'sign-failed') throw Error('sign failed'); return { schemaVersion: 1, mode: 'developer-id-base', result: 'signed-awaiting-notarization', appSigned: true, nestedCodeSigned: 5, screenHelperPreserved: true, bundleDigest: 'a'.repeat(64), enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false }; },
+      sign: async () => { signCalls++; if (fault === 'sign-failed') throw Error('sign failed'); return { schemaVersion: 1, mode: 'developer-id-base', result: 'signed-awaiting-notarization', appSigned: true, nestedCodeSigned: 6, screenHelperPreserved: true, bundleDigest: 'a'.repeat(64), enhancedRuntimeEnabled: false, notarized: false, installed: false, ready: false }; },
     };
     if (fault === 'none') {
       const receipt = await executeMacOSBaseAppPipelineForTest(root, dependencies);

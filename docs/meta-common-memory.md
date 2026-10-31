@@ -63,6 +63,31 @@ MCP `agentstoz_use_recall_common_memory`, 휴대폰. 끝은 모두 `common-memor
 - **revision 캐시**: 파싱한 revision 8개 · 60초 · 8 MB(LRU). head가 그대로면 다시 받지 않는다.
 - **목록 페이지**: `listPage`는 size+1행 한 번. 체인 마감은 `withCommonMemoryDeadline`(기본 20초, 읽기마다 15초).
 
+## 주제 발견 — 같은 교훈 묶음 (2026-11-01)
+
+「교집합·카테고리 후보 확인」과 MCP `recommend_common_memory_topics`(op `topic-candidates`)는 읽기 전용이다. 카탈로그 한 쪽의 원본
+8개(또는 고른 `memoryIds` 최대 16개)를 읽고, 한 조회는 500개 항목·2 MB(`COMMON_MEMORY_DISCOVERY_MAX_ENTRIES`·`_BYTES`)에서 멈춘다.
+
+- **방법**(`src/commonMemoryLessonClusters.ts`의 `clusterCrossMemoryLessons`, 순수·결정적): 제목+본문을 정규화(마크다운·코드 블록·경로·URL·
+  날짜·id·버전·숫자 제거)하고, 공백을 뺀 문자 n-gram(한글은 3자, 라틴 문자에서 시작하면 5자)의 Jaccard가 `LESSON_CLUSTER_THRESHOLD`(0.1)
+  이상인 **다른 장기기억**의 항목끼리 단일 연결로 묶는다. 두 기억 이상에 걸친 묶음만 후보이고, 한 기억 안의 반복은 후보가 아니다. 묶음은 16개까지다.
+- **상투문**: 조회한 기억의 75%(최소 4개)에 있는 n-gram은 버리고, 그 때문에 60% 이상을 잃은 항목은 뺀다. 앱이 생성하는 제목(지침 블록 제목,
+  `Review remote version:`)은 처음부터 뺀다. 기억이 3개 이하면 비율 규칙이 상투문과 공유 교훈을 구분하지 못하므로 생성 제목 목록만 지킨다.
+- **후보 모양은 그대로다** — `key·name·category·sourceMemoryIds·evidence·method·needsSemanticReview`(+ 서버의 `existingGroups`), 키를 더하지 않았고
+  MCP 계약(1.39.0)도 그대로다. 이름은 대표 항목(다른 항목과 가장 비슷한 것)의 제목, 분류는 키워드 주제가 항목 절반 이상에 맞으면 그 분류이고 아니면
+  「공통 교훈」이다. 근거는 기억마다 한 항목씩 먼저 싣고(최대 16), 원본의 `revisionId`·`entryId`·`contentHash`를 그대로 지녀 `propose-source-entry`에 쓸 수 있다.
+- **키워드 주제 7개는 폴백이다** — 그 조회에 같은 교훈이 하나도 없을 때만 예전 정규식 주제(`source-entry-topic-intersection`)가 나온다. 섞으면 넓은 주제가
+  구체적인 교훈을 같은 7자리에서 밀어낸다. 후보와 응답 최상위의 `method`(`cross-memory-lesson-cluster` 또는 `source-entry-topic-intersection`)가 어느 쪽인지 말한다.
+- **왜 라틴 문자는 5자이고 문턱은 0.1인가**(실측 2026-11-01, 읽기 전용, 기억 103개 중 항목이 있는 48개·1,038항목의 모든 기억 간 쌍): 3-gram만 쓰면
+  서로 무관한 영어 항목이 0.20–0.25로 실제 공유 교훈(0.22–0.23)과 같은 높이에 섞여 어떤 문턱도 둘을 가르지 못했다. 지금 방식에서는 무관한 쌍이 0.08 미만이고,
+  0.07–0.1 사이에는 같은 교훈(0.069–0.096)과 주제만 같은 쌍(최대 0.093)이 섞이며, 0.1 이상은 같은 절차를 다른 프로젝트에 적은 두 쌍뿐이었다.
+  사람이 후보를 모두 읽으므로 정밀도를 택했다. 바꿔 쓴 시험 교훈은 0.19–0.32, 조금 고친 사본은 0.5 이상이다.
+- ⚠️ **한계 — 쪽 경계**: 한 번에 그 쪽의 원본만 비교한다. 실측에서 전체를 한꺼번에 비교하면(조회 한도 밖, 오프라인) 묶음이 1개(기억 3개)였지만 그 세 기억은
+  memoryId 순서로 15·57·98번째라 어느 쪽에서도 만나지 않았다 — 13쪽 모두 키워드 주제로 돌아가 예전과 같은 41개를 냈다. 범위를 `memoryIds`로 고르면
+  그 안에서는 찾는다. 쪽을 넘는 비교(앞 쪽 항목의 n-gram 요약 보관 등)는 다음 단계다.
+- 검증: `tests/common-memory-lesson-clusters.test.ts`(한국어·영어 바꿔 쓰기, 무관한 교훈, 모든 기억의 상투문, 같은 기억의 반복, 500개·2 MB 한도와 순서 무관,
+  클라우드 서비스의 근거 참조와 쓰기 없음). 폴백 경로는 기존 `tests/common-memory-topics.test.ts`·`tests/common-memory-cloud-topics-ui.mjs`가 지킨다.
+
 ## 호스트 디스패치와 능력
 
 `common-memory-dispatch.ts`의 `createCommonMemoryDispatch`가 HTTP·MCP·휴대폰 요청을 받는다(api-server는 연결만 한다).

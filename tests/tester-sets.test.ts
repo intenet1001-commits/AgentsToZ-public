@@ -79,3 +79,26 @@ test('cache admission remains bounded even if every row subscribes at once',asyn
  const subscriptions=Array.from({length:1000},(_,i)=>cache.watch({portId:'project-'+i},s=>{if(s.error)busyErrors++;}));
  expect(busyErrors).toBe(936);expect(waiting.length).toBe(2);for(const unsubscribe of subscriptions)unsubscribe();for(const done of waiting)done({sets});await turn();expect(waiting.length).toBe(2);
 });
+test('the third set (click sweep) reports configuration, baselines and the last run summary without reading the baseline itself',async()=>{
+ const {root,save}=fixture();const read=()=>readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n));
+ // Not configured: an explicit 「구성 전」, never a pass.
+ let sweep=(await read()).clickSweep!;expect(sweep).toEqual({state:'none',engine:'absent',surfaces:[]});
+ save('.agentstoz/click-sweep.json',{schemaVersion:1,surfaces:[{id:'desktop',label:'데스크톱',command:['bun','private-harness.ts'],baseline:'tests/click-sweep/desktop.json'},{id:'web',url:'http://127.0.0.1:5173/'}]});
+ mkdirSync(join(root,'tests/click-sweep'),{recursive:true});writeFileSync(join(root,'tests/click-sweep/desktop.json'),'x'.repeat(900_000)); // larger than any read budget: only its existence is checked
+ mkdirSync(join(root,'scripts'));writeFileSync(join(root,'scripts/agentstoz-click-sweep.mjs'),'// engine');
+ mkdirSync(join(root,'.agentstoz/maintainer/click-sweep/desktop'),{recursive:true});
+ save('.agentstoz/maintainer/click-sweep/desktop/summary.json',{schemaVersion:1,at:'2026-11-01T02:00:00.000Z',passed:false,updated:false,elements:476,clicked:441,failures:2});
+ const sets=await read();sweep=sets.clickSweep!;
+ expect(sweep.state).toBe('configured');expect(sweep.engine).toBe('present');
+ expect(sweep.surfaces).toEqual([
+  {id:'desktop',label:'데스크톱',kind:'command',baselinePresent:true,last:{at:'2026-11-01T02:00:00.000Z',passed:false,elements:476,clicked:441,failures:2,updated:false}},
+  {id:'web',label:'web',kind:'url',baselinePresent:false,last:null},
+ ]);
+ expect(JSON.stringify(sets)).not.toContain('private-harness');
+ const revision=sets.revision;
+ save('.agentstoz/maintainer/click-sweep/desktop/summary.json',{schemaVersion:1,at:'2026-11-01T03:00:00.000Z',passed:true,updated:false,elements:476,clicked:441,failures:0});
+ expect((await read()).revision).not.toBe(revision); // a new run refreshes cached rows
+ for(const bad of [{schemaVersion:1,surfaces:[]},{schemaVersion:1,surfaces:[{id:'Bad Id',url:'x'}]},{schemaVersion:1,surfaces:[{id:'a'}]},{schemaVersion:1,surfaces:[{id:'a',url:'x',baseline:'../out.json'}]}]){
+  save('.agentstoz/click-sweep.json',bad);const invalid=(await read()).clickSweep!;expect(invalid.state).toBe('invalid');expect(invalid.surfaces).toEqual([]);expect(invalid.problem).toBeTruthy();
+ }
+});

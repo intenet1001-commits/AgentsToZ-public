@@ -46,8 +46,10 @@ test('the badge says what the session was started with, and why', () => {
     [{tier: 'high', reason: 'security', skipped: 'env-override'}, '에포트 자동 · CLAUDE_CODE_EFFORT_LEVEL 설정이 우선'],
     [{agent: 'codex', tier: 'high', reason: 'security', skipped: 'model-unknown'}, '에포트 자동 · 모델을 확인하지 못해 CLI 기본값'],
     // A level without a tier was pinned by the person (팀 작전 member); the Mac's mode does not apply to it.
-    [{level: 'high', origin: 'launch'}, '에포트 고정 · 높음'],
-    [{level: 'low', origin: 'restart', mode: 'off'}, '에포트 고정 · 낮음'],
+    [{level: 'high', origin: 'launch'}, '에포트 요청 · 높음 · 적용 확인 전'],
+    [{level: 'low', origin: 'restart', mode: 'off'}, '에포트 요청 · 낮음 · 적용 확인 전'],
+    [{level: 'max', seen: 'high', origin: 'launch'}, '에포트 요청 · max · CLI 표시 높음'],
+    [{level: 'max', seen: 'max', origin: 'launch'}, '에포트 요청 · max · CLI 표시 max'],
     [{level: 'medium', origin: 'launch', manual: true}, '에포트 직접 설정'],
     // A session with no decision at all says nothing.
     [{}, null],
@@ -72,6 +74,30 @@ test('advice names the level a request needs, what runs now and how this CLI cha
   expect(workroomEffortAdviceText(undefined)).toBeNull();
 });
 
+test('under Auto, advice states only that Auto did not change the effort — never 「입력 대기」 nor an applied level; recommend reads as before', () => {
+  // The request went at the CLI's xhigh (no idle composer within 4 s, or the CLI cannot be switched at run time).
+  const sent = session({mode: 'auto', tier: 'high', reason: 'design-review', level: 'high', origin: 'launch', seen: 'xhigh', advice: {tier: 'medium', reason: 'standard'}});
+  expect(workroomEffortBadgeText(sent)).toBe('에포트 자동 · 이번 요청은 변경 안 함');
+  expect(workroomEffortAdviceText(sent)).toBe('에포트는 지금 xhigh 그대로입니다 · 이번 요청의 권장 보통으로 바꾸지 않았습니다 · 바꾸려면 「에포트 변경」');
+  expect(workroomEffortAdviceText({...sent, runtimeStatus: 'unsupported', agent: 'codex', advice: {tier: 'high', reason: 'security'}}))
+    .toBe('에포트는 지금 xhigh 그대로입니다 · 이번 요청의 권장 높음 (보안·권한)으로 바꾸지 않았습니다 · 바꾸려면 「모델·에포트 변경」');
+  expect(workroomEffortAdviceText(session({mode: 'auto', skipped: 'no-request', advice: {tier: 'low', reason: 'typo'}})))
+    .toBe('에포트는 지금 그대로입니다 · 이번 요청의 권장 낮음 (오타)으로 바꾸지 않았습니다 · 바꾸려면 「에포트 변경」');
+  // Still changing, or refused: those keep their own words, and the advice stays a suggestion.
+  expect(workroomEffortBadgeText({...sent, runtimeStatus: 'deferred'})).toBe('에포트 자동 변경 · 입력 대기');
+  expect(workroomEffortBadgeText({...sent, runtimeStatus: 'unconfirmed'})).toBe('에포트 자동 변경 · 확인 필요');
+  expect(workroomEffortAdviceText({...sent, runtimeStatus: 'unconfirmed'})).toBe('이번 요청은 보통이 맞아 보입니다 · 지금 xhigh · 바꾸려면 「에포트 변경」');
+  // Applied: no advice, and the badge names the level Auto set.
+  expect(workroomEffortBadgeText(session({mode: 'auto', tier: 'medium', reason: 'standard', level: 'medium', origin: 'runtime', seen: 'medium', runtimeStatus: 'applied'}))).toBe('에포트 자동 변경 · 보통');
+  // An override that forbids the change keeps its reason in the badge.
+  expect(workroomEffortBadgeText(session({mode: 'auto', tier: 'high', reason: 'security', skipped: 'env-override', advice: {tier: 'low', reason: 'typo'}}))).toBe('에포트 자동 · CLAUDE_CODE_EFFORT_LEVEL 설정이 우선');
+  // Recommend and an older peer (no mode) read exactly as before.
+  expect(workroomEffortAdviceText({...sent, mode: 'recommend'})).toBe('이번 요청은 보통이 맞아 보입니다 · 지금 xhigh · 바꾸려면 「에포트 변경」');
+  expect(workroomEffortBadgeText({...sent, mode: 'recommend', skipped: 'recommend'})).toBe('에포트 추천제공');
+  expect(workroomEffortAdviceText({...sent, mode: undefined})).toBe('이번 요청은 보통이 맞아 보입니다 · 지금 xhigh · 바꾸려면 「에포트 변경」');
+  expect(workroomEffortBadgeText({...sent, mode: undefined})).toBe('에포트 자동 · 높음 (설계·리뷰) · CLI 표시 xhigh');
+});
+
 test('the options button says whether auto is on only once the Mac has answered', () => {
   expect(workroomEffortOptionsSuffix(true, true)).toBe(' · 에포트 자동');
   expect(workroomEffortOptionsSuffix(true, false)).toBe(' · 에포트 자동 꺼짐');
@@ -89,7 +115,7 @@ test('the wire view is strict: exactly these keys and values, nothing a phone co
     {auto: true, session: {agent: 'claude'}}, // manual is required
     {auto: true, session: {agent: 'gpt', manual: false}},
     {auto: true, session: {agent: 'claude', manual: false, tier: 'max'}},
-    {auto: true, session: {agent: 'claude', manual: false, level: 'xhigh'}},
+    {auto: true, session: {agent: 'claude', manual: false, level: 'turbo'}},
     {auto: true, session: {agent: 'claude', manual: false, reason: 'because'}},
     {auto: true, session: {agent: 'claude', manual: false, skipped: 'later'}},
     {auto: true, session: {agent: 'claude', manual: false, origin: 'voice'}},
@@ -127,4 +153,10 @@ test('rolling upgrades keep legacy phone responses within the old strict effort 
   expect(workroomEffortView(true,record,'auto').session).toMatchObject({mode:'auto',origin:'runtime',runtimeStatus:'applied'});
   expect(workroomEffortView(false,{...record,skipped:'recommend'}).session).not.toHaveProperty('skipped');
   expect(workroomEffortView(false,{...record,skipped:'recommend'},'recommend').session).toHaveProperty('skipped','recommend');
+  const extended = {...record,agent:'claude' as const,level:'max' as const,origin:'launch' as const};
+  expect(workroomEffortView(true,extended,'auto').session).not.toHaveProperty('level');
+  const local = workroomEffortView(true,extended,'auto',true);
+  expect(local.session?.level).toBe('max');
+  expect(workroomEffortBadgeText(local.session)).toBe('에포트 요청 · max · 적용 확인 전');
+  expect(normalizeWorkroomEffortView(local)).toEqual(local);
 });

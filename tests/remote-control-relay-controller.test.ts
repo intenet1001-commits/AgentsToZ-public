@@ -7,6 +7,7 @@ import {
   type RemoteControlRelayEnvelope,
 } from '../src/remoteControlRelayContract';
 import {
+  EXTENDED_CAPABILITY_RETRY_MS,
   REMOTE_CONTROL_ACTION_RESULT_ATTEMPTS,
   REMOTE_CONTROL_HOST_SILENT_MS,
   REMOTE_CONTROL_HOST_UPDATE_REQUIRED,
@@ -754,6 +755,139 @@ describe('a request the Mac never answers must not wedge the controller', () => 
     transport.onSend = null;
     expect(controller.status().supportedFeatures).toEqual(supportedFeatures);
   }
+
+  test('new Codex action is blocked for old hosts and preserves the caller request id for an advertised host', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver, hostReceive} = connection;
+    await deliver('1', 1, ready);
+    await controller.refresh();
+    const before = transport.sent.length;
+    await expect(controller.sendAction('codex.thread.start.v2', 'C'.repeat(43), undefined, undefined, undefined, 'saved-request-id'))
+      .rejects.toThrow('업데이트');
+    expect(transport.sent).toHaveLength(before);
+    await advertiseFeatures(connection, ['codex-new-receipt-v1']);
+    expect(controller.status().extendedCapabilitiesChecked).toBe(false);
+    await expect(controller.sendAction('codex.thread.start.v2', 'C'.repeat(43), undefined, undefined, undefined, 'saved-request-id')).rejects.toThrow('업데이트');
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key: hostReceive, envelope, now})));
+      expect(request.action).toBe('protocol.capabilities.extended');
+      await deliver('3', 3, {type:'action.result', actionId:request.actionId, ok:true, supportedFeatures:['codex-new-receipt-v1']});
+    };
+    await controller.probeSupportedFeatures(false, true);
+    expect(controller.status().extendedCapabilitiesChecked).toBe(true);
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key: hostReceive, envelope, now})));
+      expect(request.action).toBe('codex.thread.start.v2');
+      expect(request.actionId).toBe('saved-request-id');
+      await deliver('4', 4, {type:'action.result', actionId:request.actionId, ok:true, project:null});
+    };
+    expect(await controller.sendAction('codex.thread.start.v2', 'C'.repeat(43), undefined, undefined, undefined, 'saved-request-id'))
+      .toMatchObject({ok:true, actionId:'saved-request-id'});
+  });
+
+  test('an extended capability network failure remains unconfirmed, not an old-host verdict', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver} = connection;
+    await deliver('1', 1, ready); await controller.refresh();
+    await advertiseFeatures(connection, ['workspace-v1']);
+    transport.onSend = async () => { throw new Error('temporary network failure'); };
+    await expect(controller.probeSupportedFeatures(false, true)).rejects.toThrow('temporary network failure');
+    expect(controller.status().supportedFeatures).toEqual(['workspace-v1']);
+    expect(controller.status().extendedCapabilitiesChecked).toBe(false);
+  });
+
+  // 2026-11-01: one dropped extended answer left 기록 → 공통기억·기기 기억 saying 「Mac 앱을 업데이트」 for the whole session,
+  // because nothing asked again (capabilityProbeOwed only looked at the legacy list).
+  test('an extended capability probe that failed is owed again after the retry wait, not every poll', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver, hostReceive, setClock} = connection;
+    await deliver('1', 1, ready); await controller.refresh();
+    await advertiseFeatures(connection, ['workspace-v1']);
+    expect(controller.capabilityProbeOwed()).toBe(false);
+    // The Mac answers the extended read with a transient refusal (not ACTION_NOT_ALLOWED): unknown, not 「old Mac」.
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key: hostReceive, envelope, now})));
+      expect(request.action).toBe('protocol.capabilities.extended');
+      await deliver('3', 3, {type: 'action.result', actionId: request.actionId, ok: false,
+        error: {code: 'RATE_LIMITED', message: '잠시 뒤 다시 시도하세요.'}});
+    };
+    await expect(controller.probeSupportedFeatures(false, true)).rejects.toThrow('잠시 뒤');
+    expect(controller.status().extendedCapabilitiesChecked).toBe(false);
+    // Not hammered on the next 1 s poll.
+    expect(controller.capabilityProbeOwed()).toBe(false);
+    setClock(now + EXTENDED_CAPABILITY_RETRY_MS - 1);
+    expect(controller.capabilityProbeOwed()).toBe(false);
+    setClock(now + EXTENDED_CAPABILITY_RETRY_MS);
+    expect(controller.capabilityProbeOwed()).toBe(true);
+    // The retry re-asks only the extended read (the legacy list is already in).
+    const asked: string[] = [];
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key: hostReceive, envelope, now: now + EXTENDED_CAPABILITY_RETRY_MS})));
+      asked.push(request.action);
+      await deliver('4', 4, {type: 'action.result', actionId: request.actionId, ok: true,
+        supportedFeatures: ['workspace-v1', 'goal-common-memory-v1', 'device-memory-v1']});
+    };
+    await controller.probeSupportedFeatures(false, true);
+    expect(asked).toEqual(['protocol.capabilities.extended']);
+    expect(controller.status().extendedCapabilitiesChecked).toBe(true);
+    expect(controller.status().supportedFeatures).toEqual(['workspace-v1', 'goal-common-memory-v1', 'device-memory-v1']);
+    expect(controller.capabilityProbeOwed()).toBe(false);
+  });
+
+  test('an old Mac refusing the extended probe is a verdict, not owed again', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver, hostReceive, setClock} = connection;
+    await deliver('1', 1, ready); await controller.refresh();
+    await advertiseFeatures(connection, ['workspace-v1']);
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key: hostReceive, envelope, now})));
+      await deliver('3', 3, {type: 'action.result', actionId: request.actionId, ok: false,
+        error: {code: 'ACTION_NOT_ALLOWED', message: '허용되지 않은 동작입니다.'}});
+    };
+    await controller.probeSupportedFeatures(false, true);
+    expect(controller.status().extendedCapabilitiesChecked).toBe(true);
+    setClock(now + 10 * EXTENDED_CAPABILITY_RETRY_MS);
+    expect(controller.capabilityProbeOwed()).toBe(false);
+  });
+
+  test('a session restored with a stored feature list confirms the extended manifest again', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver} = connection;
+    await deliver('1', 1, ready); await controller.refresh();
+    // The page closed after the legacy answer, before the extended one (an iPhone app sent to the background).
+    await advertiseFeatures(connection, ['workspace-v1']);
+    const resumed = new RemoteControlRelayController({
+      transport,
+      restoredSession: controller.snapshot(),
+      controllerName: '내 iPhone',
+      now: () => now,
+    });
+    expect(resumed.status().supportedFeatures).toEqual(['workspace-v1']);
+    expect(resumed.status().extendedCapabilitiesChecked).toBe(false);
+    expect(resumed.capabilityProbeOwed()).toBe(true);
+  });
+
+  test('a saved unsent start blocks cancellation without discarding the outbox', async () => {
+    const connection = await connected();
+    const {controller, transport, deliver, hostReceive} = connection;
+    await deliver('1', 1, ready); await controller.refresh();
+    await advertiseFeatures(connection, ['codex-new-receipt-v1']);
+    transport.onSend = async envelope => {
+      const request = JSON.parse(decoder.decode(await decryptRemoteControlRelayEnvelope({key:hostReceive,envelope,now})));
+      if (request.action === 'protocol.capabilities.extended') {
+        await deliver('3',3,{type:'action.result',actionId:request.actionId,ok:true,supportedFeatures:['codex-new-receipt-v1']});
+      }
+    };
+    await controller.probeSupportedFeatures(false,true);
+    transport.failNextSendAfterCommit = true;
+    await expect(controller.sendAction('codex.thread.start.v2','C'.repeat(43),undefined,undefined,undefined,'saved-action-1')).rejects.toThrow();
+    const snapshot = controller.snapshot()!;
+    expect(snapshot.pendingOutbound).not.toBeNull();
+    const count = transport.sent.length;
+    await expect(controller.sendAction('codex.thread.cancel.v2','C'.repeat(43),undefined,'saved-action-1')).rejects.toThrow();
+    expect(transport.sent).toHaveLength(count);
+    expect(controller.snapshot()!.pendingOutbound).toEqual(snapshot.pendingOutbound);
+  });
 
   test('extended capability refusal preserves the authenticated legacy features and causes no app-update error',async()=>{
     const connection=await connected();const {controller,transport,deliver,hostReceive}=connection;await deliver('1',1,ready);await controller.refresh();

@@ -1,5 +1,6 @@
 import {OnboardingAppDataSection} from './OnboardingAppDataSection';
 import {PlatformCliSettings} from './PlatformCliSettings';
+import {MacCliAccountSwitcher} from './PlatformAccountSwitcher';
 import {AppLanguagePicker} from './useAppLanguage';
 import {isAppLanguagePersisted,subscribeAppLanguage,t,type Lang} from './i18n';
 import { BROWSER_PREFERENCE_KEY, readPreferredBrowser, savePreferredBrowser, type PreferredBrowser } from './browserPreference';
@@ -69,6 +70,7 @@ export function AppearanceSettings({ language, projects = [],onOpenData }: { lan
         <p className="mt-2 text-[11.5px] leading-5 text-[var(--ink-3)]">{t(language,'browserPreferenceHelp')}</p>
       </div>}
       {open && !isDeployedWeb() && <OnboardingAppDataSection language={language} onOpen={onOpenData?()=>{setOpen(false);onOpenData();}:undefined}/>}
+      {open && !isDeployedWeb() && <MacCliAccountSwitcher language={language}/>}
       {open && !isDeployedWeb() && <PlatformCliSettings language={language} projects={projects}/>}
 
       <p role="status" className="mt-4 text-[11.5px] text-[var(--ink-3)]">{saved && languageSaved ? (t(language,'savedPreference')) : (t(language,'preferenceNotSaved'))}</p>

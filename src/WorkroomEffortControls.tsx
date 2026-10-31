@@ -31,6 +31,23 @@ export const WORKROOM_EFFORT_INITIAL: WorkroomEffortState = {supported: null, au
 type EffortRequest = (input: {targetId: string; sessionId?: string; set?: boolean; mode?: WorkroomEffortMode; effortModes?: true}) => Promise<WorkroomEffortView>;
 interface EffortTarget {targetId: string; sessionId?: string}
 
+/** Negotiate the wider level enum only on a fresh read. Never retry a setting write. */
+export function createWorkroomEffortRequest(transport: WorkroomTransport, extended: boolean): EffortRequest {
+  let extendedAvailable = extended;
+  return async input => {
+    const ask = (includeExtended:boolean) => transport({operation: 'workspace', requestId: crypto.randomUUID(), targetId: input.targetId,
+      workspace: {action: 'workroom.effort', effortModes: true, ...(includeExtended ? {effortExtended:true as const} : {}), ...(input.mode ? {mode: input.mode} : {}), ...(input.sessionId ? {sessionId: input.sessionId} : {}), ...(input.set !== undefined ? {set: input.set} : {})}});
+    let result;
+    try {result = await ask(extendedAvailable);}
+    catch (error) {
+      if (!extendedAvailable || input.set !== undefined || input.mode !== undefined || !workroomEffortUnsupported(error)) throw error;
+      extendedAvailable = false; result = await ask(false);
+    }
+    if (result.action !== 'workroom.effort' || !result.effort) throw new Error('에포트 자동 응답을 확인하지 못했습니다.');
+    return result.effort;
+  };
+}
+
 /**
  * The reader behind the hook, without React: one read at a time (asks that arrive meanwhile fold into one more), an answer for
  * a target it has left keeps only the Mac-wide setting, and a change is sent only after the Mac has answered, once at a time.
@@ -92,23 +109,18 @@ export function createWorkroomEffortReader(request: EffortRequest, publish: (sta
 }
 
 /** One per panel and Mac (a new transport — another Mac on the phone — starts over). */
-export function useWorkroomEffort({transport, targetId, sessionId, visible, readOnly}: {transport: WorkroomTransport; targetId: string | undefined; sessionId: string | undefined; visible: boolean; readOnly: boolean}) {
+export function useWorkroomEffort({transport, targetId, sessionId, visible, readOnly, extended = false}: {transport: WorkroomTransport; targetId: string | undefined; sessionId: string | undefined; visible: boolean; readOnly: boolean; extended?: boolean}) {
   const [state, setState] = useState<WorkroomEffortState>(WORKROOM_EFFORT_INITIAL);
   const readerRef = useRef<ReturnType<typeof createWorkroomEffortReader> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const visibleRef = useRef(visible); visibleRef.current = visible;
   // The effect owns its reader: replacing a transport (another Mac) or StrictMode's cleanup retires pending replies.
   useEffect(() => {
-    const reader = createWorkroomEffortReader(async input => {
-      const result = await transport({operation: 'workspace', requestId: crypto.randomUUID(), targetId: input.targetId,
-        workspace: {action: 'workroom.effort', effortModes: true, ...(input.mode ? {mode: input.mode} : {}), ...(input.sessionId ? {sessionId: input.sessionId} : {}), ...(input.set !== undefined ? {set: input.set} : {})}});
-      if (result.action !== 'workroom.effort' || !result.effort) throw new Error('에포트 자동 응답을 확인하지 못했습니다.');
-      return result.effort;
-    }, setState, {readOnly});
+    const reader = createWorkroomEffortReader(createWorkroomEffortRequest(transport, extended), setState, {readOnly});
     readerRef.current = reader;
     setState(reader.state());
     return () => { reader.dispose(); clearTimeout(timer.current); if (readerRef.current === reader) readerRef.current = null; };
-  }, [transport, readOnly]);
+  }, [transport, readOnly, extended]);
   // Asked when the screen shows, the project or session changes, and the window comes back — no timer.
   useEffect(() => {
     const reader = readerRef.current;
@@ -173,9 +185,11 @@ export function WorkroomSettings({children,onOpen}:{children:React.ReactNode;onO
     if(!open)return;
     const place=()=>{const host=root.current,panel=body.current;if(!host||!panel)return;const box=host.getBoundingClientRect(),width=Math.min(360,window.innerWidth-32),height=Math.min(panel.scrollHeight,window.innerHeight*.7);panel.style.left=Math.max(16,Math.min(box.left,window.innerWidth-width-16))+'px';panel.style.top=Math.max(16,Math.min(box.bottom+6,window.innerHeight-height-16))+'px';};
     const outside=(e:PointerEvent)=>{if(root.current&&!root.current.contains(e.target as Node))root.current.open=false;};
-    const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'&&root.current){e.preventDefault();e.stopPropagation();root.current.open=false;root.current.querySelector('summary')?.focus();}};
+    const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.isComposing&&e.keyCode!==229&&root.current?.open){e.preventDefault();e.stopPropagation();root.current.open=false;root.current.querySelector('summary')?.focus();}};
     place();document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
     return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);};
   },[open]);
-  return <details ref={root} className="workroom-settings" data-testid="workroom-settings" onToggle={event=>{setOpen(event.currentTarget.open);if(event.currentTarget.open)onOpen?.();}}><summary>워크룸 설정</summary><div ref={body} className="workroom-settings-body">{children}</div></details>;
+  // Native <details> opens before React's toggle/effect attaches the document listener. Handle a
+  // keyboard Escape within the control synchronously, so the parent session does not close first.
+  return <details ref={root} className="workroom-settings" data-testid="workroom-settings" onToggle={event=>{setOpen(event.currentTarget.open);if(event.currentTarget.open)onOpen?.();}} onKeyDown={event=>{if(event.key==='Escape'&&!event.nativeEvent.isComposing&&event.keyCode!==229&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>워크룸 설정</summary><div ref={body} className="workroom-settings-body">{children}</div></details>;
 }

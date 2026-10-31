@@ -147,7 +147,7 @@ export interface WhatISaidFeedPage {
   };
 }
 
-const STORE_SCHEMA_VERSION = 6;
+const STORE_SCHEMA_VERSION = 7;
 const ENCRYPTED_FEED_KEY_SENTINEL = "encrypted-v3";
 const STORAGE_DIRECTORY = "what-i-said";
 const MAX_MEMORY_ID_BYTES = 512;
@@ -186,6 +186,9 @@ interface SettingsRow {
   feed_registration_id: unknown;
   feed_token_updated_at: unknown;
   index_epoch: unknown;
+  collection_epoch: unknown;
+  collection_attempt: unknown;
+  collection_receipt: unknown;
   updated_at: unknown;
 }
 
@@ -338,7 +341,7 @@ export function whatISaidFeedRegistrationReadOnly(input: WhatISaidLocation): str
     if (!identity) return null;
     db = new Database(identity.databasePath, { readonly: true, create: false });
     const version = Number((db.query("PRAGMA user_version").get() as { user_version?: unknown } | null)?.user_version ?? 0);
-    if (version !== 3 && version !== 4 && version !== 5 && version !== STORE_SCHEMA_VERSION) fail("WHAT_I_SAID_SCHEMA_UNSUPPORTED");
+    if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== STORE_SCHEMA_VERSION) fail("WHAT_I_SAID_SCHEMA_UNSUPPORTED");
     const row = db.query(`
       SELECT schema_version, identity_hash, memory_id, key_version, key_verifier,
              feed_enabled, feed_token_hash, feed_key_nonce, feed_key_ciphertext,
@@ -481,7 +484,7 @@ export function whatISaidStoreAllowsInitialKey(input: WhatISaidLocation): boolea
     if (!identity) return true;
     db = new Database(identity.databasePath, { readonly: true, create: false });
     const version = Number((db.query("PRAGMA user_version").get() as { user_version?: unknown } | null)?.user_version ?? 0);
-    if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== STORE_SCHEMA_VERSION) return false;
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== STORE_SCHEMA_VERSION) return false;
     const row = db.query(`SELECT * FROM what_i_said_settings WHERE singleton = 1`).get() as Record<string, unknown> | null;
     if (!row
       || row.schema_version !== version
@@ -515,7 +518,8 @@ export function whatISaidStoreAllowsInitialKey(input: WhatISaidLocation): boolea
     if (Number((db.query(`SELECT count(*) AS count FROM what_i_said_events`).get() as { count?: unknown } | null)?.count ?? -1) !== 0) {
       return false;
     }
-    if (version === STORE_SCHEMA_VERSION) {
+    if (version >= 6) {
+      if (version >= 7 && (row.collection_attempt !== null || row.collection_receipt !== null)) return false;
       for (const table of [
         "what_i_said_transcript_cursors",
         "what_i_said_discovery_cursors",
@@ -611,6 +615,9 @@ function initialSchema(db: Database, identity: StoreIdentity, memoryId: string):
         feed_registration_id TEXT,
         feed_token_updated_at TEXT,
         index_epoch TEXT NOT NULL,
+        collection_epoch TEXT NOT NULL,
+        collection_attempt TEXT,
+        collection_receipt TEXT,
         updated_at TEXT NOT NULL,
         CHECK((capture_enabled = 0) OR (capture_enabled_at IS NOT NULL AND last_scan_at IS NOT NULL)),
         CHECK((feed_enabled = 0 AND feed_token_hash IS NULL
@@ -686,14 +693,15 @@ function initialSchema(db: Database, identity: StoreIdentity, memoryId: string):
         analysis_allowed,
         feed_enabled, feed_token_hash, feed_key_nonce, feed_key_ciphertext,
         feed_key_auth_tag, feed_registration_id, feed_token_updated_at,
-        index_epoch, updated_at
+        index_epoch, collection_epoch, updated_at
       ) VALUES (1, ?, ?, ?, 1, NULL, 0, NULL, NULL, NULL, ?, 0,
-                0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)
+                0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
     `).run(
       STORE_SCHEMA_VERSION,
       identity.identityHash,
       memoryId,
       retentionStorageValue(DEFAULT_RETENTION),
+      randomUUID(),
       randomUUID(),
       now,
     );
@@ -739,7 +747,8 @@ function readSettingsRow(db: Database, identity: StoreIdentity, memoryId: string
     || (row.feed_enabled !== 0 && row.feed_enabled !== 1)
     || (!feedDisabledFieldsValid && !feedEnabledFieldsValid)
     || typeof row.index_epoch !== "string"
-    || row.index_epoch.length < 16) {
+    || row.index_epoch.length < 16
+    || typeof row.collection_epoch !== 'string' || row.collection_epoch.length < 16) {
     fail("WHAT_I_SAID_STORE_UNAVAILABLE");
   }
   return row;
@@ -854,6 +863,20 @@ function migrateSchema5To6(db: Database): void {
   });
 }
 
+/** A timestamp alone never proves a scan finished. Old databases start without a receipt. */
+function migrateSchema6To7(db: Database): void {
+  runTransaction(db, () => {
+    db.exec(`
+      ALTER TABLE what_i_said_settings ADD COLUMN collection_epoch TEXT NOT NULL DEFAULT '';
+      ALTER TABLE what_i_said_settings ADD COLUMN collection_attempt TEXT;
+      ALTER TABLE what_i_said_settings ADD COLUMN collection_receipt TEXT;
+      UPDATE what_i_said_settings SET schema_version = 7,
+        collection_epoch = lower(hex(randomblob(16))), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+      PRAGMA user_version = 7;
+    `);
+  });
+}
+
 function ensureSchema(db: Database, identity: StoreIdentity, memoryId: string): void {
   let version = Number((db.query("PRAGMA user_version").get() as { user_version?: unknown } | null)?.user_version ?? 0);
   if (version === 0) initialSchema(db, identity, memoryId);
@@ -877,6 +900,10 @@ function ensureSchema(db: Database, identity: StoreIdentity, memoryId: string): 
     if (version === 5) {
       migrateSchema5To6(db);
       version = 6;
+    }
+    if (version === 6) {
+      migrateSchema6To7(db);
+      version = 7;
     }
     if (version !== STORE_SCHEMA_VERSION) fail("WHAT_I_SAID_SCHEMA_UNSUPPORTED");
   }
@@ -1085,7 +1112,7 @@ function bindOrVerifyDatabaseKey(
                content_hash, nonce, ciphertext, auth_tag, retention_until, prompt_origin
         FROM what_i_said_events
         WHERE purged_at IS NULL AND seq > CAST(? AS INTEGER)
-        ORDER BY seq ASC LIMIT 250
+        ORDER BY what_i_said_events.seq ASC LIMIT 250
       `).all(afterSeq) as EventRow[];
       if (!rows.length) break;
       for (const row of rows) {
@@ -1202,6 +1229,103 @@ export function readWhatISaidStatus(input: WhatISaidLocation & { now?: string })
   return withDatabase(input, (db, identity) => publicStatus(db, identity, input.memoryId, now));
 }
 
+export interface WhatISaidCollectionTicket { attempt: string; revision: string }
+export interface WhatISaidCollectionSummary {
+  revision: string;
+  /** Earliest expiry of a currently visible row, or null if none expires. */
+  nextExpiryAt: string | null;
+  /** Lifetime content-free receipts; these do not prove what was collected historically. */
+  historicalWithheld: number;
+  complete?: boolean;
+  unreadable: number;
+  withheld: number;
+  scannedFrom?: string | null;
+  scannedThrough?: string | null;
+}
+
+/** Invalidate the previous proof before any scan work; a crash must leave an unknown result. */
+export function beginWhatISaidCollection(input: WhatISaidLocation): WhatISaidCollectionTicket | null {
+  return withDatabase(input, (db, identity) => runTransaction(db, () => {
+    const settings = readSettingsRow(db, identity, input.memoryId);
+    if (settings.capture_enabled !== 1) return null;
+    const attempt = randomUUID(), revision = String(settings.collection_epoch);
+    db.query('UPDATE what_i_said_settings SET collection_attempt = ?, collection_receipt = NULL WHERE singleton = 1').run(attempt);
+    return { attempt, revision };
+  }));
+}
+
+/** The latest attempt wins. Consent changes and overlapping collectors cannot certify each other. */
+export function finishWhatISaidCollection(input: WhatISaidLocation & {
+  ticket: WhatISaidCollectionTicket; scope: string;
+  result: { complete: boolean; unreadable: number; withheld: number; scannedFrom: string | null; scannedThrough: string | null };
+}): boolean {
+  if (!SHA256.test(input.scope) || typeof input.result.complete !== 'boolean'
+    || ![input.result.unreadable, input.result.withheld].every(value => Number.isSafeInteger(value) && value >= 0)) fail('WHAT_I_SAID_INPUT_INVALID');
+  const result = { ...input.result, scannedFrom: input.result.scannedFrom === null ? null : iso(input.result.scannedFrom),
+    scannedThrough: input.result.scannedThrough === null ? null : iso(input.result.scannedThrough) };
+  return withDatabase(input, (db, identity) => runTransaction(db, () => {
+    const settings = readSettingsRow(db, identity, input.memoryId);
+    if (settings.capture_enabled !== 1 || settings.collection_epoch !== input.ticket.revision || settings.collection_attempt !== input.ticket.attempt) return false;
+    if (result.complete && (result.unreadable !== 0 || result.withheld !== 0
+      || !result.scannedFrom || !result.scannedThrough || result.scannedFrom > result.scannedThrough
+      || settings.last_scan_at !== result.scannedThrough)) fail('WHAT_I_SAID_INPUT_INVALID');
+    const receipt = JSON.stringify({ ...result, ...input.ticket, scope: input.scope, lastScanAt: settings.last_scan_at });
+    return db.query(`UPDATE what_i_said_settings SET collection_receipt = ?
+      WHERE singleton = 1 AND capture_enabled = 1 AND collection_epoch = ? AND collection_attempt = ?`)
+      .run(receipt, input.ticket.revision, input.ticket.attempt).changes === 1;
+  }));
+}
+
+/** No DB creation, schema migration, key access, transcript import or inference from timestamps. */
+export function probeWhatISaidCollectionReadOnly(input: WhatISaidLocation & { scope: string; now?: string }): WhatISaidCollectionSummary | null {
+  let db: Database | null = null;
+  try {
+    const identity = existingStoreIdentity(input);
+    if (!identity || !SHA256.test(input.scope)) return null;
+    db = new Database(identity.databasePath, { readonly: true, create: false });
+    if ((db.query('PRAGMA user_version').get() as { user_version: number }).user_version !== STORE_SCHEMA_VERSION) return null;
+    // The settings epoch, row expiry bound and receipt must describe the same
+    // SQLite snapshot, even when another connection mutates rows mid-probe.
+    db.exec('BEGIN');
+    const settings = readSettingsRow(db, identity, input.memoryId);
+    // Bind the scan proof to both capture policy and destructive row changes.
+    // New prompt inserts deliberately do not rotate index_epoch: history can
+    // keep discovering them above its current high-water mark.
+    const revision = createHash('sha256').update(`${settings.collection_epoch}:${settings.index_epoch}:${input.scope}`).digest('hex');
+    const historicalWithheld = count(db, 'SELECT count(*) AS count FROM what_i_said_events WHERE withheld_reason IS NOT NULL');
+    // No ciphertext is read and no expiry is extended. The cursor uses this
+    // as an upper bound on how long an already-returned row can remain valid.
+    const row = db.query(`SELECT MIN(retention_until) AS next_expiry FROM what_i_said_events
+      WHERE deleted_at IS NULL AND purged_at IS NULL AND retention_until > ?`).get(iso(input.now)) as { next_expiry?: unknown } | null;
+    if (!row || !(row.next_expiry === null || typeof row.next_expiry === 'string')) return null;
+    const nextExpiryAt = row.next_expiry as string | null;
+    const unknown: WhatISaidCollectionSummary = { revision, unreadable: 0, withheld: 0, historicalWithheld, nextExpiryAt };
+    if (settings.capture_enabled !== 1 || typeof settings.collection_receipt !== 'string' || settings.collection_receipt.length > 4096) return unknown;
+    const receipt = JSON.parse(settings.collection_receipt);
+    if (receipt.attempt !== settings.collection_attempt || receipt.revision !== settings.collection_epoch || receipt.scope !== input.scope
+      || receipt.lastScanAt !== settings.last_scan_at || typeof receipt.complete !== 'boolean'
+      || ![receipt.unreadable, receipt.withheld].every(value => Number.isSafeInteger(value) && value >= 0)
+      || ![receipt.scannedFrom, receipt.scannedThrough].every(value => value === null || typeof value === 'string' && Number.isFinite(Date.parse(value)))) return unknown;
+    const summary = { revision, complete: receipt.complete, unreadable: receipt.unreadable, withheld: receipt.withheld, historicalWithheld, nextExpiryAt,
+      scannedFrom: receipt.scannedFrom, scannedThrough: receipt.scannedThrough };
+    db.exec('COMMIT');
+    // A writer may commit after the snapshot is released. Do not certify a
+    // stale receipt or epoch if that happened before this final observation.
+    const current = readSettingsRow(db, identity, input.memoryId);
+    if (current.collection_epoch !== settings.collection_epoch || current.index_epoch !== settings.index_epoch
+      || current.collection_attempt !== settings.collection_attempt || current.collection_receipt !== settings.collection_receipt
+      || current.last_scan_at !== settings.last_scan_at) {
+      return { ...summary, revision: createHash('sha256').update(`${current.collection_epoch}:${current.index_epoch}:${input.scope}`).digest('hex'), complete: false };
+    }
+    return summary;
+  } catch { return null; }
+  finally { db?.close(); }
+}
+
+function invalidateCollectionForPolicy(db: Database): void {
+  db.query(`UPDATE what_i_said_settings SET collection_epoch = ?, collection_attempt = NULL, collection_receipt = NULL WHERE singleton = 1`).run(randomUUID());
+}
+
 export function enableWhatISaidCapture(input: WhatISaidLocation & {
   retention?: WhatISaidRetention;
   now?: string;
@@ -1211,6 +1335,7 @@ export function enableWhatISaidCapture(input: WhatISaidLocation & {
   if (!validRetention(retention)) fail("WHAT_I_SAID_INPUT_INVALID");
   return withDatabase(input, (db, identity) => runTransaction(db, () => {
     const settings = readSettingsRow(db, identity, input.memoryId);
+    if (settings.capture_enabled !== 1 || parseRetention(settings.retention_policy) !== retention) invalidateCollectionForPolicy(db);
     const enabledAt = settings.capture_enabled === 1 && typeof settings.capture_enabled_at === "string"
       ? settings.capture_enabled_at
       : now;
@@ -1251,6 +1376,7 @@ export function configureWhatISaidCapture(input: WhatISaidLocation & {
   }
   return withDatabase(input, (db, identity) => runTransaction(db, () => {
     const settings = readSettingsRow(db, identity, input.memoryId);
+    if (settings.capture_enabled !== (input.enabled ? 1 : 0) || parseRetention(settings.retention_policy) !== input.retention) invalidateCollectionForPolicy(db);
     const enabledAt: string | null = input.enabled
       ? settings.capture_enabled === 1 && typeof settings.capture_enabled_at === "string"
         ? settings.capture_enabled_at
@@ -1286,6 +1412,8 @@ export function setWhatISaidRetention(input: WhatISaidLocation & {
   const now = iso(input.now);
   if (!validRetention(input.retention)) fail("WHAT_I_SAID_INPUT_INVALID");
   return withDatabase(input, (db, identity) => runTransaction(db, () => {
+    const settings = readSettingsRow(db, identity, input.memoryId);
+    if (parseRetention(settings.retention_policy) !== input.retention) invalidateCollectionForPolicy(db);
     db.query(`
       UPDATE what_i_said_settings SET retention_policy = ?, updated_at = ? WHERE singleton = 1
     `).run(retentionStorageValue(input.retention), now);
@@ -1678,12 +1806,13 @@ export function commitWhatISaidTranscriptClassifications(input: WhatISaidCryptoL
 
 export function disableWhatISaidCapture(input: WhatISaidLocation & { now?: string }): WhatISaidStatus {
   const now = iso(input.now);
-  return withDatabase(input, (db, identity) => {
+  return withDatabase(input, (db, identity) => runTransaction(db, () => {
+    if (readSettingsRow(db, identity, input.memoryId).capture_enabled === 1) invalidateCollectionForPolicy(db);
     db.query(`
       UPDATE what_i_said_settings SET capture_enabled = 0, updated_at = ? WHERE singleton = 1
     `).run(now);
     return publicStatus(db, identity, input.memoryId, now);
-  });
+  }));
 }
 
 export type CaptureWhatISaidResult =
@@ -1942,7 +2071,7 @@ export function listWhatISaidEntries(input: WhatISaidCryptoLocation & {
       WHERE seq > CAST(? AS INTEGER)
         AND deleted_at IS NULL AND purged_at IS NULL
         AND (retention_until IS NULL OR retention_until > ?)
-      ORDER BY seq ASC LIMIT ?
+      ORDER BY what_i_said_events.seq ASC LIMIT ?
     `).all(afterSeq, now, limit) as EventRow[];
     const items = rows.map(row => ({
       id: String(row.event_id),
@@ -1984,7 +2113,7 @@ export function listRecentWhatISaidEntries(input: WhatISaidCryptoLocation & {
       WHERE (? IS NULL OR seq < CAST(? AS INTEGER))
         AND deleted_at IS NULL AND purged_at IS NULL
         AND (retention_until IS NULL OR retention_until > ?)
-      ORDER BY seq DESC LIMIT ?
+      ORDER BY what_i_said_events.seq DESC LIMIT ?
     `).all(beforeSeq, beforeSeq, now, limit) as EventRow[];
     const items = rows.map(row => ({
       id: String(row.event_id),
@@ -2179,7 +2308,7 @@ export function purgeExpiredWhatISaidDatabases(input: {
         SELECT schema_version, key_verifier FROM what_i_said_settings WHERE singleton = 1
       `).get() as { schema_version?: unknown; key_verifier?: unknown } | null;
       if (settings?.schema_version !== 3 && settings?.schema_version !== 4
-        && settings?.schema_version !== 5 && settings?.schema_version !== STORE_SCHEMA_VERSION) {
+        && settings?.schema_version !== 5 && settings?.schema_version !== 6 && settings?.schema_version !== STORE_SCHEMA_VERSION) {
         unavailable += 1;
         continue;
       }
@@ -2458,7 +2587,7 @@ export function revokeWhatISaidFeedByRegistrationId(input: {
       assertRegularDatabaseFiles(path);
       db = new Database(path, { readonly: true, create: false });
       const version = Number((db.query("PRAGMA user_version").get() as { user_version?: unknown } | null)?.user_version ?? 0);
-      if (version !== 3 && version !== 4 && version !== 5 && version !== STORE_SCHEMA_VERSION) {
+      if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== STORE_SCHEMA_VERSION) {
         const legacy = db.query(`SELECT feed_enabled FROM what_i_said_settings WHERE singleton = 1`)
           .get() as { feed_enabled?: unknown } | null;
         if (legacy?.feed_enabled === 1) ambiguous = true;
@@ -2774,7 +2903,7 @@ export function readWhatISaidFeed(input: WhatISaidCryptoLocation & {
         WHERE seq > CAST(? AS INTEGER)
           AND deleted_at IS NULL AND purged_at IS NULL
           AND (retention_until IS NULL OR retention_until > ?)
-        ORDER BY seq ASC LIMIT ?
+        ORDER BY what_i_said_events.seq ASC LIMIT ?
       `).all(scanSeq, now, batchSize) as EventRow[];
       if (!rows.length) break;
       for (const row of rows) {

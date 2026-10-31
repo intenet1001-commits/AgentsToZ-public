@@ -44,7 +44,7 @@ const results = [];
 const readOnlyRoutes = new Set(['global-status', 'status', 'remote/status', 'remote-key/status', 'list']);
 async function fixture() {
   const context = await browser.newContext({viewport: {width: 1000, height: 1050}, serviceWorkers: 'block'});
-  const state = {requests: [], unexpected: [], errors: [], statusHook: null};
+  const state = {requests: [], unexpected: [], errors: [], statusHook: null, syncHook: null};
   await context.route('**/*', async route => {
     const request = route.request(); const url = new URL(request.url());
     if (url.origin !== origin) { state.unexpected.push(`${request.method()} ${url.origin}${url.pathname}`); return route.abort('blockedbyclient'); }
@@ -64,7 +64,10 @@ async function fixture() {
       return respond({enabled: true, cryptoState: 'ready', retentionDays: 90, analysisAllowed: false, count: (index + 1) * 11, lastCaptureAt: `2026-09-0${index + 1}T00:00:00Z`, scan: {complete: true, unreadable: 0, withheld: 0}});
     }
     if (path === 'list') return respond({items: [], hasMore: false, nextBeforeSeq: null, capture: {lastCaptureAt: '2026-09-06T00:00:00Z'}});
-    if (path === 'sync') return respond({requested: body.memoryIds.length, succeeded: body.memoryIds.length, captured: 4, pushed: 4});
+    if (path === 'sync') {
+      if (state.syncHook) { const override = await state.syncHook(body); if (override) return respond(override.body, override.status); }
+      return respond({requested: body.memoryIds.length, succeeded: body.memoryIds.length, captured: 4, pushed: 4});
+    }
     state.unexpected.push(`${request.method()} ${url.pathname}`);
     return respond({error: 'Unmocked API request; real user data is never accessed'}, 503);
   });
@@ -193,6 +196,35 @@ try {
     assert.deepEqual(syncCalls(state)[0].body, {memoryIds: ['memory-a', 'memory-c'], backfill: true});
     assert.equal(confirmations.length, 2);
     assert.ok(mutations(state).every(r => r.path === 'sync'));
+  });
+
+  await run('sync-partial-failure-explains-per-memory-reason', async ({page, bulk, state}) => {
+    state.syncHook = async () => ({status: 207, body: {requested: 3, succeeded: 2, captured: 0, pushed: 0,
+      items: [{name: '기억 A', code: 'WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE', error: '공유 저장 동의를 확인할 수 없습니다.'}]}});
+    page.once('dialog', dialog => dialog.accept());
+    await bulk.getByTestId('what-i-said-backfill').click();
+    await until(async () => (await page.getByText(/기억 A: 공유 저장 동의를 확인할 수 없습니다/).count()) > 0,
+      'The partial sync must explain the selected memory and its actual failure');
+  });
+
+  await run('sync-continues-only-memories-the-api-did-not-start', async ({page, bulk, state}) => {
+    // The local API shares one request deadline (desktop proxy: 35 s) and hands back what it did not start.
+    state.syncHook = async body => body.memoryIds.length === 3
+      ? {status: 207, body: {requested: 3, succeeded: 2, captured: 3, pushed: 3, continuation: {memoryIds: ['memory-c']}, items: [
+        {memoryId: 'memory-a', name: '기억 A', captured: 2, pushed: 2, error: null},
+        {memoryId: 'memory-b', name: '기억 B', captured: 1, pushed: 1, error: null},
+        {memoryId: 'memory-c', name: '기억 C', captured: 0, pushed: 0, deferred: true, incomplete: true, code: 'WHAT_I_SAID_SYNC_DEFERRED', error: '이번 요청 시간 안에 시작하지 못했습니다. 이어서 요청하면 진행합니다.'},
+      ]}}
+      : {status: 200, body: {requested: 1, succeeded: 1, captured: 4, pushed: 4, continuation: null, items: [
+        {memoryId: 'memory-c', name: '기억 C', captured: 4, pushed: 4, error: null},
+      ]}};
+    await bulk.getByRole('button', {name: '선택한 3개 기억 수집·동기화', exact: true}).click();
+    await until(async () => (await page.getByText('3개 중 3개 기억 동기화 완료 · 새 수집 7개 · 업로드 7개').count()) > 0,
+      'The continuation must finish the same confirmed sync and report all three memories');
+    assert.deepEqual(syncCalls(state).map(call => call.body), [
+      {memoryIds: ['memory-a', 'memory-b', 'memory-c'], backfill: false},
+      {memoryIds: ['memory-c'], backfill: false},
+    ]);
   });
 
   await run('separate-cards-at-saved-125-percent', async ({page, bulk, status, state}) => {

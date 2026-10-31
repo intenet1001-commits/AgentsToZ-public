@@ -61,3 +61,5 @@ ol.helpdesk-checklist{list-style:decimal;}
 .helpdesk-task .helpdesk-actions a{display:inline-flex;align-items:center;justify-content:center;}
 .helpdesk-steps button{min-height:44px;flex-wrap:wrap;}
 .helpdesk-task .helpdesk-button{min-height:44px;}
+.helpdesk-assist-entry{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-shrink:0;padding:12px 20px 0;font-size:12px;color:var(--ink-2);}
+.helpdesk-assist-entry span{flex-basis:100%;}

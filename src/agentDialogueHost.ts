@@ -5,6 +5,7 @@ import {createProductionPromptGuideKeyProvider,promptGuideDirectory,readPromptGu
 import {describeAgentDialogueRpcError} from './agentDialogueDatabaseState';
 import {parseAgentDialogueRequest,type AgentDialogueRequest,type AgentDialogueTarget} from './agentDialogueContract';
 import {communityDeviceRef,communityDeviceRows} from './communityDeviceRef';
+import {withAgentDialoguePairingStates} from './agentDialoguePairingRows';
 import {COMMUNITY_CONTROL_ACTIVE_WINDOW_MS} from './agentDialogueControl';
 import {COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE,COMMUNITY_CONTROL_RESPONSE_TOO_LARGE_MESSAGE} from './opsRequestProtocol';
 
@@ -968,6 +969,8 @@ export class AgentDialogueHost {
     // An expired grant was re-approved by the user for this exact room and connection: reopen it
     // instead of asking again for every following message.
     else if(request.roomId&&(operation==='send'||operation==='wait'))grantRoom(request.roomId);
+    // The SQL leaves every pending pairing as `waiting-peer`; say which side must accept, as the app's screen does.
+    if(operation==='pairings'&&Array.isArray(result.pairings))return {...result,pairings:withAgentDialoguePairingStates(result.pairings)};
     return result;
   }
 }

@@ -24,6 +24,66 @@ GitHub의 같은 사용자명이 앱 연결 계정과 기존 CLI 로그인에 �
 
 계정의 `목록에서 제외`는 목록만 숨긴다. 기존 프로젝트 연결과 기기 기본값의 계정 ID는 보존하여 실행을 차단하며, 다른 계정으로 대체하지 않는다. OS 자격 증명 원본을 지우거나 서비스의 토큰을 폐기하지 않는다. 토큰 갱신은 새 계정을 추가·확인한 뒤 프로젝트를 재연결한다. 같은 표시명은 기존 계정을 제외한 후 재사용한다.
 
+## 계정 전환 — 이 Mac 전체와 프로젝트별 (2026-10-31)
+
+같은 계정 목록을 세 곳에서 고른다. 고르면 바로 적용되고, 이미 로그인해 둔 계정은 다시 로그인하지 않는다.
+
+| 위치 | 화면 | 바뀌는 것 |
+|---|---|---|
+| 이 Mac 전체 | 설정 → 「CLI 계정 전환 · 이 Mac 전체」(프로젝트 화면의 「이 Mac 전체 계정 바꾸기」에서도 열림) | gh·supabase·vercel 자신의 로그인. 프로젝트 계정이 없는 폴더에서 터미널·다른 앱·아젠투지가 모두 이 계정을 쓴다 |
+| 한 프로젝트 | 프로젝트 화면 → 「CLI 계정 · 이 프로젝트」 | 그 프로젝트의 계정 연결(binding). 그 폴더에서는 워크룸·터미널·VS Code·git 어디서든 이 계정. 이 Mac 로그인은 그대로 |
+| 만들 프로젝트 | 프로젝트 추가 → 새 프로젝트·기존 폴더 등록 탭의 「계정」 | 등록 직후 같은 연결을 만든다. 복제할 때는 고른 GitHub 계정으로 clone한다 |
+
+**우선순위는 프로젝트 계정 → 이 Mac 로그인 → 그 밖의 어떤 것도 아님**이다. 프로젝트가 고른 계정이 사라지거나 깨지면 다른 계정으로 대체하지 않고 멈춘다.
+
+### 이 Mac 전체 전환 (`native-status`·`native-switch`)
+
+- GitHub: `gh auth switch`. gh가 모르는 연결 계정은 먼저 `gh auth login --with-token`으로 넣는다(토큰은 stdin으로만). git push는 macOS 키체인 계정을 먼저 쓰므로, 화면의 「git push도 이 전환을 따르게」(`native-git-setup` = `gh auth setup-git`)를 사람이 누를 때만 git 설정을 바꾼다.
+- Supabase: `~/.supabase/profile` 선택자가 아젠투지가 만든 descriptor 파일을 가리키고, 그 프로필의 키체인 항목(`Supabase CLI`)은 `security -i`에 stdin으로 쓴다. 원래 프로필(`supabase`)은 「기존 프로필」로 남아 다시 고를 수 있다.
+- Vercel: 계정마다 auth.json과 config.json의 currentTeam을 갈아 끼운다. 바뀌기 전 로그인은 먼저 연결 계정으로 남기거나 백업한다.
+- 같은 요청 ID는 `native-switch.json` 영수증으로 한 번만 실행된다. 전환하면 아젠투지 기기 기본값도 그 계정을 따른다(어긋나 있으면 「이 Mac 계정으로 맞추기」).
+- gws는 계정 전환 기능이 없다 — 기기 기본값(`set-default`)만 바꾸며 아젠투지·워크룸 실행에만 적용된다.
+
+### 프로젝트 계정 (`project`·`bind`)
+
+- 이미 로그인된 계정(gh 기존 로그인·연결 계정)을 고르면 그 자리에서 연결된다. 새 로그인도, 비밀 복사도 없다.
+- 「＋ 다른 계정 로그인해서 추가…」는 공식 브라우저 로그인(`login-add-start`)을 열고, 승인한 실제 이메일을 확인한 뒤 그 계정을 바로 이 프로젝트에 연결한다. **계정 추가는 이 Mac 기본값을 바꾸지 않는다** — 빈 기기 기본값을 채우는 것은 처음 설치 흐름(`login-onboarding-start`)뿐이다.
+- 연결 계정의 「목록에서 제외」(`archive`)는 두 번 눌러야 한다. 그 계정을 쓰던 프로젝트는 다른 계정으로 바뀌지 않고 멈춘다.
+
+### 어디서든 — 등록 프로젝트 폴더라면 터미널·VS Code·git 모두 (`src/platformCliEverywhere.ts`)
+
+프로젝트 계정은 워크룸뿐 아니라 **그 폴더를 어떻게 열든** 적용된다. 처음으로 어떤 프로젝트가 자기 계정을 고르면 설치된 앱이 아래 두 가지를 넣는다. 사람이 「워크룸에서만 쓰기」로 끄면 둘 다 지우고, 끈 뒤에는 새 연결이 생겨도 다시 켜지 않는다(`everywhere.json`의 mode — 없으면 auto).
+
+- **터미널**: `~/.zprofile`·`~/.zshrc`(로그인 셸이 zsh면 없을 때 만든다)와, 이미 있으면 `~/.bash_profile`·`~/.bashrc` 맨 끝에 `# >>> AgentsToZ CLI accounts >>>` 블록을 둔다. 블록은 워크룸과 같은 shim 폴더를 PATH 맨 앞에 놓을 뿐이다. 그래서 Terminal·iTerm·VS Code 터미널(대화형 셸 → `.zshrc`)과 Codex 같은 AI 앱의 `zsh -lc`(로그인 셸 → `.zprofile`)가 모두 같은 shim을 쓴다. 이미 열려 있던 터미널은 새로 열어야 한다.
+- **git**: 전역 git 설정 맨 끝에 `include.path = <APP_DATA>/platform-cli-v1/git/github.gitconfig` 하나를 둔다. 그 파일은 github.com 도우미 목록을 비우고 같은 폴더의 `credential-helper` 스크립트를 넣는다. 스크립트는 `agentstoz-use-mcp git-credential`을 부르고, 연결된 프로젝트 폴더면 그 계정으로 답하고 그 밖에는 이 Mac의 원래 도우미(`git config --show-origin`에서 아젠투지 include를 뺀 체인)에 그대로 넘긴다. VS Code의 소스 제어처럼 git을 부르는 앱도 같다. 아젠투지가 지워져 런처가 없으면 스크립트가 원래 도우미를 직접 차례대로 부른다(git이 깨지지 않게 — 이때는 프로젝트 계정도 적용되지 않는다).
+- **다른 도구가 뒤에 끼어들면** — `gh auth setup-git`이 도우미를 아젠투지 include 뒤에 덧붙이거나, 다른 설치기가 블록 뒤에 PATH 줄을 넣으면 — 상태가 「일부만 적용」이 되고, 앱 시작·「git push도 이 전환을 따르게」 뒤·「다시 적용」에서 **아젠투지 블록·include만** 맨 끝으로 옮긴다. 남의 줄은 고치지 않는다.
+- 셸 시작 파일이 심볼릭 링크(dotfiles 관리)면 링크를 유지하고 실제 파일만 바꾼다. 블록 표식이 깨져 있으면 그 파일은 건드리지 않고 알린다.
+- 비용: 등록 프로젝트 밖에서 `gh`를 부르면 실제 CLI가 그대로 실행되며 shim을 거치는 비용은 약 30–40ms다(컴파일한 런처, 2026-10-31 실측).
+- **개발·테스트 서버는 스스로 켜지 않는다**(`autoApply`는 설치 앱 사이드카만). 사람이 화면에서 켤 때만 적용한다.
+
+### 워크룸 안에서 프로젝트 계정이 적용되는 방식
+
+토큰을 워크룸 환경 변수에 넣지 않는다(`src/platformCliWorkroom.ts`).
+
+- 워크룸 PATH 맨 앞에 `gh`·`supabase`·`vercel`·`gws` shim(`APP_DATA/platform-cli-v1/shims`)이 있다. 각 shim은 `~/.agentstoz/bin/agentstoz-use-mcp cli-exec <provider> --real <실제 CLI>`를 부르고, 런처가 없으면 실제 CLI를 그대로 실행한다.
+- `cli-exec`는 **호출할 때마다** cwd로 등록 프로젝트를 찾는다. 연결된 계정이 있으면 그 계정의 환경으로 실제 CLI를 터미널에 붙여 실행하고, 없으면 손대지 않고 실행한다. 그래서 프로젝트 화면에서 바꾸면 워크룸을 다시 시작하지 않아도 다음 명령부터 적용된다.
+- `gh auth token`·`gh auth git-credential`·`gh auth status -t/--show-token`은 막는다(계정은 쓰되 보여주지 않는다).
+- git: `GIT_CONFIG_COUNT/KEY/VALUE`로 github.com 자격 도우미 목록을 비우고 `agentstoz-use-mcp git-credential`을 넣는다. 원래 github.com 도우미 체인은 `AGENTSTOZ_GIT_CREDENTIAL_FALLBACK`(JSON)으로 넘긴다. 연결된 프로젝트의 `get`에는 프로젝트 계정으로 답하고 `store`/`erase`는 무시해 키체인을 오염시키지 않는다. 연결이 없거나 github.com이 아니면 원래 도우미에 그대로 넘긴다. 연결된 계정이 깨졌으면 `quit=1`로 멈춘다.
+- 제한 세션(대직)과 Windows에는 적용하지 않는다.
+
+### 한계 (의도된 것)
+
+- 셸을 거치지 않고 `gh`를 직접 실행하는 GUI 앱(launchd의 기본 PATH만 가진 앱)은 shim을 보지 못해 이 Mac 로그인을 쓴다. 터미널·IDE 터미널·셸을 여는 AI 앱·git은 위 「어디서든」으로 프로젝트 계정을 쓴다. fish 같은 다른 셸 설정은 바꾸지 않는다. 저장소 자체 설정(`.git/config`)에 github.com 도우미를 따로 둔 저장소는 그 설정이 우선한다.
+- Windows는 워크룸에서만 적용된다.
+- 워크룸 안의 에이전트는 `git credential fill`로 연결 계정의 토큰을 얻을 수 있다. 이 Mac에서 `gh auth token`이 주는 노출과 같은 수준이며, 막는 것은 토큰을 화면에 출력하는 gh 명령뿐이다.
+- gws는 이 Mac 전체 전환이 없다.
+
+### MCP로 (AI 채팅에서)
+
+`agentstoz_use_platform_cli`의 `native-status`·`native-switch`(사람이 그 계정을 원할 때만)·`native-git-setup`·`everywhere-set {enabled}`(사람이 원할 때만)·`project`·`bind`·`login-add-start`→`login-status`(Supabase는 `login-code`)·`login-cancel`·`archive`. 토큰은 어떤 응답에도 없다. AI가 여는 로그인은 프로젝트 작업용뿐이며 앱 동기화 계정과 처음 설치 흐름은 앱에서 한다.
+
+검증: `tests/platform-cli-native-switch.test.ts`(가짜 gh·supabase·vercel·security로 세 CLI 전환·영수증·되돌리기), `tests/platform-cli-workroom.test.ts`(실제 git으로 shim·자격 도우미·실패 시 멈춤), `tests/platform-cli-login.test.ts`(계정 추가가 기본값을 바꾸지 않음), `tests/platform-cli-everywhere.test.ts`(실제 zsh·bash·git으로 로그인/대화형 셸의 shim, 프로젝트 안팎 git, 뒤에 끼어든 도우미·PATH 줄, 심볼릭 링크, 끄기 후 원상 복구, 런처 없을 때 원래 도우미), `tests/platform-account-switcher-ui.mjs`(Chromium·WebKit, 390/1120px — 이 Mac 전환, 프로젝트 즉시 전환·새 로그인 없음, 계정 추가 후 연결, 새 프로젝트 선택). 테스터 검사 `platform-cli-contracts`·`platform-cli-screen`에 들어 있다.
+
 ## 에이전트·외부 CLI·SDK
 
 ### Google Console 파일로 계정 연결

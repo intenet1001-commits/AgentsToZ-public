@@ -42,7 +42,18 @@ describe('agentstoz_use MCP server version comes from the build', () => {
     // 1.60.0 gives a team member the project launch choices (accountId, bypassPermissions, surface, launchOptions)
     // and the manual path an external surface needs (confirm_team_member, report manual: true).
     // 1.61.0 separates confirmed personal preferences from OPS and historical instructions.
-    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.61.0');
+    // 1.62.0 adds human-approved, MCP-connection-scoped native control.
+    // 1.63.0 adds bounded, dated local user instruction history.
+    // 1.64.0 adds model-specific explicit team effort choices.
+    // 1.65.0 adds approved-window capture and capture-bound click with a Control capability signal.
+    // 1.66.0 adds separately approved desktop/application computer sessions.
+    // 1.67.0 adds team_member keys, the app member computerUseApprovals opt-in and the own-host refusal.
+    // 1.70.0 exposes whether the collection receipt reaches the requested end.
+    // 1.71.0 adds the optional bounded guardSamples diagnostic to computer-session action receipts (no new input or authority).
+    // 1.72.0 adds computer-session request-access, which only asks for the scope the person switched on.
+    // 1.73.0 adds guardReason to refused computer-session receipts and lets focus-app leave the AI's own host app.
+    // 1.75.0 lets an AI chat add, switch and remove CLI accounts through platform_cli.
+    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.75.0');
     expect(AGENTSTOZ_USE_MCP_SERVER_VERSION.startsWith(`${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.`)).toBe(true);
   });
 

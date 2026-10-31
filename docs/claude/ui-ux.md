@@ -16,6 +16,15 @@
   검증: `vite build --outDir <dir> && bun tests/portal-bookmarks-layout.e2e.mjs <dir>`.
 - **도움말(가이드) 모드는 VOC 모드처럼 세션 한정이다** — 저장하면 다음 실행에서 모든 클릭이 막힌다.
   정적 `data-help-key`는 전부 `GUIDE_CONTENT` 항목이 있어야 한다(`tests/guide-content-coverage.test.ts`).
+- **「도구 및 설정」(`WorkspaceTools` 접이식 패널)은 그 위의 모달을 누른 것을 바깥 클릭으로 세지 않는다 (2026-10-31)** —
+  패널에서 연 대화상자(앱 열기 단축키·채널 연동 상태·작업공간 잠금 복구·AI 사용량 등)는 패널 바깥에 그려진다.
+  예전에는 그 안을 누르기만 해도 패널의 `pointerdown` 바깥 클릭 처리가 패널을 접어, 대화상자를 닫고 나면 패널을 다시 열어야 했다
+  (v1601 Codex 클릭 QA: 단축키 입력칸 클릭 → Esc). 판정은 `isModalLayerTarget`(`src/dialogEscape.ts`)이다.
+  `aria-modal="true"` 요소 안이거나 그것을 **직계 자식**으로 둔 바깥 막이면 모달 층으로 본다.
+  ⚠️ 새 대화상자는 `aria-modal="true"`를 대화상자 자신이나 바깥 막의 직계 자식에 둘 것 — 더 깊이 두면 바깥 막 클릭이 패널을 접는다.
+  검증: `tests/dialog-escape.test.ts`, `tests/projects-tab-ui.e2e.mjs --tools-dialog-only`.
+  ⚠️ 포커스된 입력칸이 대화상자와 함께 지워지면 WebKit은 blur를 보내지 않는다 — `onBlur`로 푸는 상태(예: 단축키 「기록 중」)는
+  대화상자 닫힘에서도 풀 것. Esc가 기록 칸에서 대화상자를 닫게 된 뒤(949ce0b5) 다시 열면 「키를 누르세요...」가 남았다(v1603 QA, 닫힘 effect로 해결).
 - **디자인 시스템 (2026-09 리디자인)**: 정본은 Claude Design 프로젝트
   `https://claude.ai/design/p/ccba361f-f7c9-4c63-b089-dcbedf5a0f9b`의 `AgentsToZ Redesign.dc.html` ·
   `AgentsToZ Mobile.dc.html` · `Design Tokens & Components.dc.html` 세 파일이다.

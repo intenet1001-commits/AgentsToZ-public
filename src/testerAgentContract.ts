@@ -63,6 +63,12 @@ export interface TesterSets {
   general:{state:'none'|'configured'|'invalid';problem?:string;count:number;unconfigured:number;commonVersion:string|null;commonCount:number;commonModified:number;commonItems:{id:string;title:string}[];projectScenarioCount:number;profiles:{id:string;checks:string[]}[];checks:{id:string;covers:string[];configured:boolean}[]};
   personas:{state:'none'|'configured'|'invalid';problem?:string;count:number;commonVersion:string|null;commonModified:number;templates:{id:string;title:string}[];items:{id:string;role:string;goal:string;templateId?:string;reason:string;situation:string;journey:string[];successCriteria:string[];checks:string[];embeddedTests:number}[];truncated:boolean;candidates:number;needsChecks:number;candidateRoles:string[]};
   agents:{id:'codex'|'claude'|'hermes'|'agy';label:string;instructionsProvided:boolean}[];
+  /** 세 번째 공통 세트(전수 클릭). 옛 호스트는 이 칸을 주지 않는다 — 없음은 「구성 전」이 아니라 「모름」이다. */
+  clickSweep?:TesterClickSweepSet;
+}
+export interface TesterClickSweepSet {
+  state:'none'|'configured'|'invalid';problem?:string;engine:'present'|'absent';
+  surfaces:{id:string;label:string;kind:'command'|'url';baselinePresent:boolean;last:{at:string;passed:boolean;elements:number;clicked:number;failures:number;updated:boolean}|null}[];
 }
 export interface TesterPersonaEvolution {supported:true;commonPersonas?:TesterCommonPersonaPack;projectRevision?:string;context:{revision:string;changedPaths:string[];changesTruncated?:boolean;memoryTitles:string[];failedChecks:string[];checks:{id:string;covers:string[];paths:string[];kind:'contract'|'screen'}[]};candidates:TesterPersonaCandidate[];existing:{id:string;goal:string;extends?:string;role?:string}[];automaticAI:false;candidateLimit:number;discoveredLimit?:number;personaLimit:number;additionalCandidates?:number;droppedCandidates?:number}
 /** 자동 발견된 제안 하나. 받아들이기 전에는 어떤 프로필에서도 돌지 않는다. */

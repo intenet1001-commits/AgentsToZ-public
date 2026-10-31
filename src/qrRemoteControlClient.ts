@@ -66,6 +66,31 @@ async function remoteControlManagementRequest<T>(path: QrRemoteControlPath, body
   return payload as T;
 }
 
+export type CodexNewLocalReceipt = {state: 'started' | 'completed'; revision: string};
+
+/** The Mac reviews only this registered project's bounded receipt, never the original conversation. */
+export async function reviewCodexNewLocalReceipt(portId: string): Promise<CodexNewLocalReceipt | null> {
+  const payload = asObject(await remoteControlManagementRequest<unknown>(QR_REMOTE_CONTROL_PATHS.codexNewReview, {portId}));
+  if (!payload || payload.success !== true || !Object.prototype.hasOwnProperty.call(payload, 'receipt')) {
+    throw new Error('새 대화 요청의 확인 결과가 올바르지 않습니다.');
+  }
+  if (payload.receipt === null) return null;
+  const receipt = asObject(payload.receipt);
+  if (!receipt || !['started', 'completed'].includes(String(receipt.state))
+    || typeof receipt.revision !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.revision)) {
+    throw new Error('새 대화 요청의 확인 결과가 올바르지 않습니다.');
+  }
+  return {state: receipt.state as CodexNewLocalReceipt['state'], revision: receipt.revision};
+}
+
+/** Called only after the user explicitly confirms the completed result on this Mac. */
+export async function resolveCodexNewLocalReceipt(portId: string, expectedRevision: string): Promise<void> {
+  if (!/^[a-f0-9]{64}$/.test(expectedRevision)) throw new Error('확인한 요청이 바뀌었습니다. 다시 확인하세요.');
+  const payload = asObject(await remoteControlManagementRequest<unknown>(QR_REMOTE_CONTROL_PATHS.codexNewResolve,
+    {portId, expectedRevision, confirmed: true}));
+  if (!payload || payload.success !== true) throw new Error('새 대화 요청 확인을 완료하지 못했습니다.');
+}
+
 export interface QrRemoteControlApi {
   status(): Promise<QrRemoteControlStatus>;
   interfaces(): Promise<QrRemoteControlInterface[]>;

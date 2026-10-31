@@ -18,7 +18,7 @@ test('on, off and starting, with what still needs doing', () => {
   expect(screenHelperLines(running({...base, power: 'off'}), ko).line).toBe(ko.screenOff);
   expect(screenHelperLines(running({...base, power: 'starting'}), ko).line).toBe(ko.screenStarting);
   expect(screenHelperLines(running({...base, power: 'on'}), ko).line).toBe(ko.screenOnNone);
-  expect(screenHelperLines(running({...base, power: 'on', devices: 3}), ko).line).toBe('화면 제어 켜짐 · 연결할 수 있는 기기 3대');
+  expect(screenHelperLines(running({...base, power: 'on', devices: 3}), ko).line).toBe('화면 제어 켜짐 · 등록된 기기 3대');
   expect(screenHelperLines(running({...base, power: 'on', devices: 1, viewing: true, capture: false, control: false, loginItem: 'approval'}), ko).notes)
     .toEqual([ko.screenViewing, ko.screenNoCapture, ko.screenNoControl, ko.screenLoginApproval]);
 });

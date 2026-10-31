@@ -61,9 +61,9 @@ test('requests are exact: member bounds, agents, model only with a valid name, p
   expect(create([{agent: 'hermes', task: '테스트', model: 'anthropic/claude-sonnet-4', provider: 'anthropic'}]).op).toBe('create');
   // effort: absent is 「자동」; a level pins it; Antigravity picks effort with its model variant.
   expect((create([{agent: 'codex', task: 'x', model: 'gpt-6.1-sol', effort: 'high'}]) as Extract<WorkroomTeamRequest, {op: 'create'}>).members[0]).toMatchObject({effort: 'high'});
-  expect(() => create([{agent: 'codex', task: 'x', effort: 'xhigh'}])).toThrow('effort는');
-  expect(() => create([{agent: 'claude', task: 'x', effort: 'auto'}])).toThrow('effort는');
-  expect(() => create([{agent: 'agy', task: 'x', effort: 'low'}])).toThrow('Antigravity는 에포트를 모델 이름으로');
+  expect(() => create([{agent: 'codex', task: 'x', effort: 'xhigh'}])).toThrow('확인된 에포트');
+  expect(() => create([{agent: 'claude', task: 'x', effort: 'auto'}])).toThrow('확인된 에포트');
+  expect(() => create([{agent: 'agy', task: 'x', effort: 'low'}])).toThrow('확인된 에포트');
   expect(() => parseWorkroomTeamRequest({op: 'read'})).toThrow('하나로');
   expect(() => parseWorkroomTeamRequest({op: 'wait', teamId: 'team_0123456789ab', timeoutMs: 60_000})).toThrow('timeoutMs');
   expect(() => parseWorkroomTeamRequest({op: 'report', teamId: 'team_0123456789ab', memberId: 'm7', status: 'done', summary: 'x'})).toThrow('memberId');

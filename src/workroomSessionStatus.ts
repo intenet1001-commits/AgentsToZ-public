@@ -1,3 +1,4 @@
+import {claudeSnapshotUsedTokens,measuredContextPercent} from './contextUsageReading';
 /** Display evidence only. Never use terminal text to authorize or schedule a save. */
 export function codexContextUsedFromFooter(lines:readonly string[]):number|null {
   for(const line of [...lines].reverse()){
@@ -51,6 +52,8 @@ export function withWorkroomAutomaticSaveMessage<T extends WorkroomSessionStatus
 
 export function claudeWorkroomContext(session:{id:string;cwd:string;createdAt:string},snapshot:any,now=Date.now()):WorkroomSessionStatus['context'] {
  const p=snapshot?.contextWindow?.used_percentage,at=Date.parse(snapshot?.capturedAt);
- if(snapshot?.sessionId!==session.id||snapshot?.cwd!==session.cwd||typeof p!=='number'||!Number.isFinite(p)||p<0||p>100||!Number.isFinite(at)||at<Date.parse(session.createdAt)||at>now+5000)return {usedPercent:null,observedAt:null,source:'unavailable'};
+ // Claude reports 0 until its first reply after a start, resume or compaction: that is 「확인 불가」, not 0%.
+ if(snapshot?.sessionId!==session.id||snapshot?.cwd!==session.cwd||typeof p!=='number'||!Number.isFinite(p)||p<0||p>100||!Number.isFinite(at)||at<Date.parse(session.createdAt)||at>now+5000
+  ||measuredContextPercent({usedPercent:p,usedTokens:claudeSnapshotUsedTokens(snapshot?.contextWindow)})===null)return {usedPercent:null,observedAt:null,source:'unavailable'};
  return {usedPercent:p,observedAt:snapshot.capturedAt,source:'claude-statusline'};
 }

@@ -114,6 +114,22 @@ test('an old settled reveal without outcome is never upgraded by a fresh probe o
   expect(fake.calls.reveal).toHaveLength(1);
 });
 
+test('uncertain and legacy unconfirmed keys block a fresh submit across runtime restarts without changing the journal', async () => {
+  for (const legacy of [false, true]) {
+    const fake = fixture({keys: async () => ({outcome: 'unknown'})}), receipt = await fake.runtime.launch(input());
+    await fake.runtime.keys(receipt.executionRef, 'uncertain-keys', ['down']);
+    if (legacy) delete fake.records.get('exec-one')!.operations.find(op => op.id === 'uncertain-keys')!.outcome;
+    const before = clone(fake.records.get('exec-one')!);
+    const restarted = createTeamExternalRuntime(fake.deps);
+    const blocked = await restarted.submit(receipt.executionRef, {operationId: 'new-instruction', text: 'A distinct instruction'});
+    expect(blocked.reason).toBe('EXTERNAL_KEYS_UNKNOWN');
+    expect(fake.calls.submit).toHaveLength(0);
+    expect(fake.records.get('exec-one')).toEqual(before);
+    await restarted.submit(receipt.executionRef, {operationId: 'new-instruction', text: 'A distinct instruction'});
+    expect(fake.calls.submit).toHaveLength(0);
+  }
+});
+
 test('late generation change prevents a completed callback from persisting performed evidence', async () => {
   const fake = fixture(), receipt = await fake.runtime.launch(input());
   fake.deps.reveal = async plan => {fake.calls.reveal.push(clone(plan)); fake.setCurrent(false);};
@@ -373,6 +389,32 @@ test('a completed empty read is read evidence while unknown agent identity remai
     expect(fake.calls.read).toHaveLength(1);
     if (!agentVerified) expect(result.receipt.reason).toBe('EXTERNAL_AGENT_IDENTITY_UNVERIFIED');
   }
+});
+
+test('identity recovery clears only the stale identity reason without turning a read into a working claim', async () => {
+  const fake = fixture(), receipt = await fake.runtime.launch(input());
+  fake.deps.probe = async () => ({native: receipt.executionRef.native!, connection: 'connected', agentVerified: false, activity: 'idle'});
+  expect(await fake.runtime.probe(receipt.executionRef)).toMatchObject({agentVerified: false, state: 'awaiting-ack', reason: 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED'});
+  fake.deps.probe = async () => ({native: receipt.executionRef.native!, connection: 'connected', agentVerified: true, activity: 'working'});
+  const read = await fake.runtime.read(receipt.executionRef);
+  expect(read).toMatchObject({outcome: 'read', text: 'member output', receipt: {agentVerified: true, state: 'awaiting-ack', reason: null}});
+  expect(fake.records.get('exec-one')!.receipt.reason).toBe('EXTERNAL_AGENT_IDENTITY_UNVERIFIED'); // read-only
+  expect(await fake.runtime.probe(receipt.executionRef)).toMatchObject({agentVerified: true, state: 'working', reason: null});
+});
+
+test('identity recovery preserves an uncertain delivery and its no-replay boundary', async () => {
+  const fake = fixture(), create = fake.deps.create;
+  fake.deps.create = async plan => ({...await create(plan), delivery: {outcome: 'unknown'}});
+  const receipt = await fake.runtime.launch(input());
+  expect((await fake.runtime.read(receipt.executionRef)).receipt).toMatchObject({agentVerified: true, state: 'unknown', reason: 'EXTERNAL_DELIVERY_UNKNOWN'});
+  fake.deps.probe = async () => ({native: receipt.executionRef.native!, connection: 'connected', agentVerified: false, activity: 'idle'});
+  expect(await fake.runtime.probe(receipt.executionRef)).toMatchObject({state: 'unknown', reason: 'EXTERNAL_AGENT_IDENTITY_UNVERIFIED'});
+  fake.deps.probe = async () => ({native: receipt.executionRef.native!, connection: 'connected', agentVerified: true, activity: 'working'});
+  expect((await fake.runtime.read(receipt.executionRef)).receipt).toMatchObject({agentVerified: true, state: 'unknown', reason: 'EXTERNAL_DELIVERY_UNKNOWN'});
+  expect(await fake.runtime.probe(receipt.executionRef)).toMatchObject({agentVerified: true, state: 'unknown', reason: 'EXTERNAL_DELIVERY_UNKNOWN'});
+  await fake.runtime.submit(receipt.executionRef, {operationId: 'later-send', text: 'follow-up'});
+  expect(fake.calls.submit).toHaveLength(0);
+  expect(fake.calls.create).toHaveLength(1);
 });
 
 test('read capability absence is unavailable without invoking the underlying reader', async () => {

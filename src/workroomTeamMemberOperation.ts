@@ -28,6 +28,8 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
   if(!team||!member)throw new WorkroomTeamError('팀원을 찾지 못했습니다.','WORKROOM_TEAM_MEMBER_NOT_FOUND',404);
   // Also the session the leader's own 「다시 시작」 continued in (leadsTeam), never another one on its target.
   if(caller&&!leadsTeam(team,caller.sessionId,host.service.host))throw new WorkroomTeamError('이 팀의 리더가 팀원 실행을 확인합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
+  // Keys answer a one-time prompt on a member's screen: only the leader's own Workroom asks, which a request without a caller cannot show.
+  if(request.operation==='keys'&&!caller)throw new WorkroomTeamError('팀원 화면의 키 입력은 이 팀을 이끄는 워크룸에서만 요청합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
   if(request.operation!=='read'&&team.state!=='active')throw new WorkroomTeamError('정리된 팀에는 지시를 보내지 않습니다.','WORKROOM_TEAM_CLOSED',409);
   const ref=member.execution;
   if(ref?.kind==='external'){
@@ -38,6 +40,12 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
     if(request.operation==='reveal'){
       const result=await host.external.reveal(ref,request.requestId);
       return {memberId:member.id,surface:ref.surface,success:result.outcome==='requested',performed:result.outcome==='requested',effect:`reveal-${result.outcome}`};
+    }
+    if(request.operation==='keys'){
+      // `unknown` is never retried here or under this requestId; read the screen and decide again.
+      const result=await host.external.keys(ref,request.keys,request.requestId);
+      return {memberId:member.id,surface:ref.surface,keys:request.keys.length,outcome:result.outcome,reason:result.reason,
+        success:result.outcome==='sent',performed:result.outcome==='sent',effect:`keys-${result.outcome}`};
     }
     const sent=await host.external.send!(ref,request.text!,request.requestId!);
     return {memberId:member.id,surface:ref.surface,...sent,performed:sent.delivery==='verified',success:sent.delivery==='verified'};
@@ -65,6 +73,8 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
     return {memberId:member.id,surface:'internal',session:after,text:result.text.slice(-(request.limit??4000)),cursor:`${sessionId}:${result.nextCursor}`,agentVerified:verified};
   }
   if(request.operation==='reveal')return {memberId:member.id,surface:'internal',sessionId:member.sessionId,effect:'open-workroom-session-required',performed:false};
+  // A Workroom member takes keys through agentstoz_use_send_workroom_keys, which reads and guards that session's own screen.
+  if(request.operation==='keys')return {memberId:member.id,surface:'internal',sessionId:member.sessionId,effect:'send-workroom-keys-required',performed:false,success:false};
   const delivery=await host.service.host.instruct({sessionId:member.sessionId,prompt:request.text!,requestId:request.requestId!});
   return {memberId:member.id,surface:'internal',delivery:delivery==='written'?'verified':'unknown',performed:delivery==='written',success:delivery==='written'};
 }

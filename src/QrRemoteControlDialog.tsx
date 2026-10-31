@@ -109,6 +109,9 @@ export function QrRemoteControlDialog({
   const [pairingIssue, setPairingIssue] = useState<QrRemoteControlPairingIssue | null>(null);
   const [busy, setBusyState] = useState<BusyAction>(null);
   const [initialLoading, setInitialLoading] = useState(false);
+  // 같은 Wi‑Fi 웹 원격은 화면 보기(Screen)·외부 인터넷 원격과 겹친다 — 꺼져 있으면 접어 두고, 펼칠 때만 켜는 길을 보인다(2026-11-01 사용자 검토).
+  // 켜져 있거나 멈춤(stalled — 켜 두었는데 주소를 다시 잡지 못함)이면 쓰는 사람이므로 처음부터 펼친다.
+  const [lanExpanded, setLanExpanded] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -392,6 +395,7 @@ export function QrRemoteControlDialog({
             </h2>
             <p id="qr-remote-control-description" className="m-0 mt-0.5 text-xs text-zinc-400">
               휴대폰이나 iPad에서 등록 프로젝트·워크트리의 프로세스를 제어하고 이 Mac의 허용된 앱으로 엽니다.
+              파일 내용·Git 변경·AI 대화·자격증명·장기기억·프롬프트 데이터에는 접근 권한을 주지 않습니다.
             </p>
           </div>
           <button
@@ -408,15 +412,16 @@ export function QrRemoteControlDialog({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
-          <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] p-3 text-xs leading-5 text-amber-100">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" aria-hidden="true" />
-            <p className="m-0">
-              같은 신뢰할 수 있는 개인 Wi‑Fi에서만 사용하세요. 공용·게스트 Wi‑Fi에서는 켜지 마세요.
-              파일 내용·Git 변경·AI 대화·자격증명·장기기억·프롬프트 데이터에는 접근 권한을 주지 않습니다.
-            </p>
-          </div>
-
           <ScreenHelperEntry />
+
+          {(status?.enabled || status?.stalled || lanExpanded) && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] p-3 text-xs leading-5 text-amber-100">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" aria-hidden="true" />
+              <p className="m-0">
+                같은 신뢰할 수 있는 개인 Wi‑Fi에서만 사용하세요. 공용·게스트 Wi‑Fi에서는 켜지 마세요.
+              </p>
+            </div>
+          )}
 
           {notice && (
             <div
@@ -449,6 +454,31 @@ export function QrRemoteControlDialog({
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />다시 확인
               </button>
             </div>
+          ) : !status.enabled && !lanExpanded && !status.stalled ? (
+            <section aria-labelledby="qr-remote-control-lan-folded-title" data-testid="qr-remote-control-lan-folded" className="rounded-2xl border border-[rgb(var(--surface-highlight-rgb))]/[0.08] bg-[rgb(var(--surface-highlight-rgb))]/[0.02] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <h3 id="qr-remote-control-lan-folded-title" className="m-0 text-sm font-semibold text-zinc-200">같은 Wi‑Fi 웹 원격제어 · 꺼짐</h3>
+                    <p className="m-0 mt-1 text-xs leading-5 text-zinc-400">
+                      휴대폰 브라우저로 같은 Wi‑Fi에서 프로젝트를 실행·중지하는 예전 방식입니다. 이 Mac 화면은 위의 AgentsToZ Screen으로,
+                      밖에서의 프로젝트 제어는 「외부 인터넷 QR 원격제어」로 하세요.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="qr-remote-control-lan-expand"
+                  aria-expanded="false"
+                  onClick={() => setLanExpanded(true)}
+                  disabled={busy !== null}
+                  className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-[rgb(var(--surface-highlight-rgb))]/10 bg-[rgb(var(--surface-highlight-rgb))]/[0.04] px-4 text-sm text-zinc-100 hover:bg-[rgb(var(--surface-highlight-rgb))]/[0.07] disabled:cursor-wait disabled:opacity-40"
+                >
+                  같은 Wi‑Fi로 켜기…
+                </button>
+              </div>
+            </section>
           ) : !status.enabled ? (
             <section aria-labelledby="qr-remote-control-off-title" className="rounded-2xl border border-[rgb(var(--surface-highlight-rgb))]/[0.08] bg-[rgb(var(--surface-highlight-rgb))]/[0.02] p-4 sm:p-5">
               <div className="flex items-start gap-3">
@@ -645,7 +675,7 @@ export function QrRemoteControlDialog({
           )}
         </div>
 
-        {status && !status.enabled && (
+        {status && !status.enabled && (lanExpanded || status.stalled) && (
           <footer className="shrink-0 border-t border-[rgb(var(--surface-highlight-rgb))]/[0.07] bg-[var(--bg-elevated)] px-4 py-3 sm:px-5">
             <button
               type="button"

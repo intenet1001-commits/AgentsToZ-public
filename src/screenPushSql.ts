@@ -41,7 +41,7 @@ create index if not exists portmgr_screen_push_commands_expiry on public.portmgr
 -- Signed requests seen: replay protection and rate limits.
 create table if not exists public.portmgr_screen_push_requests (
   rate_key text not null check (rate_key ~ '^[0-9a-f]{64}$'),
-  kind text not null check (kind in ('register', 'unregister', 'notify', 'fetch', 'command', 'result')),
+  kind text not null check (kind in ('register', 'unregister', 'notify', 'fetch', 'command', 'result', 'usage')),
   nonce text not null check (nonce ~ '^[0-9a-f]{32}$'),
   created_at timestamptz not null default now(),
   primary key (rate_key, kind, nonce)

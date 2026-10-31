@@ -162,15 +162,16 @@ describe('smaller shell fixes', () => {
 // simulator (App Attest, Face ID), so this pins the layout that keeps the Mac's own signals out of the picture.
 describe('AgentsToZ Screen: the Mac\'s signals sit outside its picture, and turning off says what it does', () => {
   const viewer = read('mobile/ios/App/ScreenViewerView.swift');
-  const body = between(viewer, '    var body: some View {', '    /// Leaving the foreground ends the session at once');
+  const body = between(viewer, '    private var screenContent: some View {', '    private var runningContent: some View {');
   const band = between(viewer, '    private var macSignalBand: some View {', '    private var toolbar: some View {');
-  const lockText = 'Mac이 잠겨 있습니다. 암호는 열쇠 버튼의 입력칸으로 보내세요.';
-  const pauseText = 'Mac 앞에서 마우스나 키보드를 쓰는 중이라 조작을 잠시 멈췄습니다.';
+  const lockText = 'Mac이 잠겨 있습니다. 보안 입력 중에는 원격 조작이 제한될 수 있습니다.';
+  const pauseText = 'Mac에서 조작을 잠시 멈췄습니다. Mac의 입력·권한 상태를 확인하세요.';
   // Before: both banners floated in the toolbar's overlay over a full-screen picture, so in landscape (an iPhone with a
   // 16:10 Mac) and at any zoom a fake lock strip drawn by a process on the Mac showed where the real banner would.
   test('the lock and pause banners are a band above the picture, never an overlay on it', () => {
     expect(band).toContain(lockText);
     expect(band).toContain(pauseText);
+    expect(band).toContain("reason.viewerMessage");
     expect(viewer.split(lockText).length - 1).toBe(1);
     expect(viewer.split(pauseText).length - 1).toBe(1);
     const overlays = body.split('.overlay(').slice(1);

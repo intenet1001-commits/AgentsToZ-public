@@ -11,6 +11,8 @@
 //   action-copy      — confirms and notices are sentences per action, not 「Pull 기능을 실행할까요?」/「Pull 요청을 완료」
 //   ops-dates        — one Korean date format, also on an English-region phone
 //   korean-labels    — no 「MAC APPROVAL REQUIRED」 or 「PROJECT」 badge
+//   records-checking — 기록 → 공통기억 on a current Mac whose extended feature answer has not come in says 「확인하는 중」, not
+//                      「Mac 앱을 업데이트」, and a reopened page asks again instead of keeping the legacy list (2026-11-01)
 //
 // Isolated: a portal build with fixture VITE_* values, every request routed by Playwright; no real
 // network, no 3001, no live Supabase.
@@ -59,7 +61,7 @@ async function fixtureMac(opt = {}) {
   const projects = [proj];
   const state = { hostSend: null, hostReceive: null, hostSequence: 0, deliveries: [], accepted: new Map(), messages: [],
     approval: opt.approval ?? 'approved', hostLastSeenAt: () => new Date().toISOString(), listDelayMs: 0,
-    capabilityFailures: opt.capabilityFailures ?? 0, memberHangMs: 0, memberChecks: 0 };
+    capabilityFailures: opt.capabilityFailures ?? 0, extendedFailures: opt.extendedFailures ?? 0, memberHangMs: 0, memberChecks: 0 };
   const reply = async message => {
     state.hostSequence += 1;
     const seq = state.hostSequence;
@@ -89,6 +91,14 @@ async function fixtureMac(opt = {}) {
         return now({ ...base, ok: false, error: { code: 'RATE_LIMITED', message: '잠시 뒤 다시 시도하세요.' } });
       }
       if (message.action === 'protocol.capabilities') return now({ ...base, ok: true, supportedFeatures: opt.features ?? [] });
+      // Without `extendedFeatures` this fake is a Mac that predates the extended manifest (it refuses the read).
+      if (message.action === 'protocol.capabilities.extended' && opt.extendedFeatures) {
+        if (state.extendedFailures > 0) {
+          state.extendedFailures -= 1;
+          return now({ ...base, ok: false, error: { code: 'RATE_LIMITED', message: '잠시 뒤 다시 시도하세요.' } });
+        }
+        return now({ ...base, ok: true, supportedFeatures: opt.extendedFeatures });
+      }
       if (message.action === 'projects.list') return now({ ...base, ok: true, projects, page: message.page ?? 0, projectCount: projects.length, nextPage: null });
       if (message.action === 'workspace-roots.list') return now({ ...base, ok: true, workspaceRoots: [] });
       if (message.action === 'ops.status') return now({ ...base, ok: true, ops: opt.ops ?? { state: 'ready', backend: 'app-data', pendingCount: 0, lastSavedAt: null, syncState: null } });
@@ -296,6 +306,35 @@ try {
         await shot(page, `list-loading-no-mac-${ENGINE.name()}`);
       } finally { await context.close(); }
     }
+  });
+
+  await scenario('records-checking', async () => {
+    // A current Mac: the legacy eight never carry 공통기억 (goal-common-memory-v1); the extended answer fails once.
+    const legacy = ['workspace-v1', 'meta-memory-v1'];
+    const mac = await fixtureMac({ features: legacy, extendedFeatures: [...legacy, 'goal-common-memory-v1', 'device-memory-v1'], extendedFailures: 1 });
+    const { page, context, errors } = await openPortal(browser, mac);
+    const openCommon = async () => {
+      await page.locator('.workspace-navigation [data-workspace-tab="records"]').click();
+      await page.getByRole('group', { name: '기록 종류' }).getByRole('button', { name: '공통기억', exact: true }).click();
+      return page.getByTestId('remote-cloud-common-memory');
+    };
+    try {
+      await connected(page);
+      const panel = await openCommon();
+      await page.waitForFunction(() => /확인하는 중/.test(document.querySelector('[data-testid="remote-cloud-common-memory"]')?.textContent ?? ''), null, { timeout: 10_000 })
+        .catch(async error => { throw new Error(`${error.message}\n${await text(panel)}`); });
+      assert.doesNotMatch(await text(panel), /업데이트/, 'a current Mac is not told to update');
+      await shot(page, `records-checking-${ENGINE.name()}`);
+      // Reopened (an iPhone app back from the background): the stored legacy list is not the last word.
+      await page.reload();
+      // The pill lives on 원격 작업; the reopened page may land elsewhere, so the panel's own words are the check.
+      const reopened = await openCommon();
+      await page.waitForFunction(() => /연결한 Mac: 테스트 Mac/.test(document.querySelector('[data-testid="remote-cloud-common-memory"]')?.textContent ?? ''), null, { timeout: 25_000 })
+        .catch(async error => { throw new Error(`${error.message}\n${await text(reopened)}`); });
+      assert.doesNotMatch(await text(reopened), /업데이트하면/);
+      assert.ok(mac.state.messages.filter(m => m.action === 'protocol.capabilities.extended').length >= 2, 'the extended manifest was asked again');
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
   });
 
   await scenario('community-states', async () => {

@@ -83,7 +83,8 @@ describe("targeted project-memory updates", () => {
     expect(runner).toContain("300_000,\n      prompt,");
     expect(runner).not.toContain('.codex-memory-');
     expect(runner).not.toContain('"-o"');
-    expect(runner).toContain('return result.stdout;');
+    expect(runner).toContain('return projectMemoryAgentOutput(agent,result);');
+    expect(runner).not.toContain('result.stderr.trim()');
     expect(updater).toContain("return ONLY the complete updated section");
     expect(updater).toContain("projectUpdateContext(root)");
     expect(updater).toContain("replaceProjectMemorySection(");

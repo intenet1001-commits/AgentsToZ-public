@@ -4,6 +4,7 @@ import {
   resolveProjectMemorySessionAction,
   resolveProjectMemorySyncDirection,
   type ProjectMemoryRemoteState,
+  type ProjectMemorySyncDirection,
 } from '../projectMemorySyncState';
 
 /**
@@ -34,6 +35,34 @@ export type SessionMemoryAction =
   | 'pull'
   | 'conflict';
 
+/**
+ * Local ↔ Supabase alone. Unsaved activity is a separate question (「지금 저장」), so a row that still has something to
+ * remember can be fully synced: then 「동기화」 has nothing to do. Null until the memory has been read.
+ */
+export function sessionMemorySyncDirection(memoryState?: SessionMemoryStatusState): ProjectMemorySyncDirection | null {
+  if (memoryState?.kind !== 'ready') return null;
+  const status = memoryState.status;
+  return resolveProjectMemorySyncDirection({
+    localExists: status.exists,
+    localUpdatedAt: status.modifiedAt || status.config?.lastUpdatedAt || null,
+    localContentHash: status.contentHash ?? null,
+    lastSyncedHash: status.config?.lastSyncedHash ?? null,
+    autoBackup: status.config?.autoBackup !== false,
+    remote: memoryState.remote,
+  });
+}
+
+/**
+ * The dock row's 「동기화」. Both sides already the same (`synced`): nothing to do, so it reads 「동기화됨」 and stays off
+ * until either side changes — a save, the 30-second recheck or a manual refresh reads it again. Unknown (backup off, a
+ * failed comparison) stays on: the server compares again and moves only in a safe direction.
+ */
+export function dockSyncButtonState(canSync: boolean, memoryState?: SessionMemoryStatusState): { enabled: boolean; synced: boolean } {
+  const direction = sessionMemorySyncDirection(memoryState);
+  const synced = canSync && direction === 'synced';
+  return { enabled: canSync && !synced && direction !== 'checking', synced };
+}
+
 export function sessionMemoryAction(
   folderPath: string | null,
   memoryState?: SessionMemoryStatusState,
@@ -45,21 +74,11 @@ export function sessionMemoryAction(
     return memoryState.code === PROJECT_ROOT_MISSING ? 'missing' : 'retry';
   }
   const status = memoryState.status;
-  const autoBackup = status.config?.autoBackup !== false;
-  const localUpdatedAt = status.modifiedAt || status.config?.lastUpdatedAt || null;
-  const syncDirection = resolveProjectMemorySyncDirection({
-    localExists: status.exists,
-    localUpdatedAt,
-    localContentHash: status.contentHash ?? null,
-    lastSyncedHash: status.config?.lastSyncedHash ?? null,
-    autoBackup,
-    remote: memoryState.remote,
-  });
   const action = resolveProjectMemorySessionAction({
     localExists: status.exists,
     needsRemember: status.activity.needsRemember,
-    autoBackup,
-    syncDirection,
+    autoBackup: status.config?.autoBackup !== false,
+    syncDirection: sessionMemorySyncDirection(memoryState)!,
   });
   // Offering to initialize memory in a thread's scratch folder would write it
   // where nobody will look again. Say what the folder is instead.

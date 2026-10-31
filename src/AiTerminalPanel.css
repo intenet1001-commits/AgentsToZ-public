@@ -384,6 +384,19 @@
   flex:1 0 auto; min-height:auto; padding:10px 12px; gap:8px;
 }
 :is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-body > * { flex-shrink:0; }
+/* With the browser open, the session header keeps one line: its wrapped view controls took two or three rows
+   (71-114px) of the 800x814 window that must still give the page its 200px. The controls scroll sideways like the key
+   row, Tab still reaches each one, and the session name shortens first. The 4px padding on every side, taken back out of
+   the body's own padding by the negative margin, holds the 2px focus ring and its 2px offset inside this scroller; the
+   frame scrolls a keyboard-focused control fully into view (WorkroomBrowserFrame.tsx). */
+:is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-body:has(> .workroom-browser-frame:not([data-layout=terminal])) > .ai-terminal-current {
+  flex-wrap:nowrap; overflow:auto hidden; overscroll-behavior-x:contain; scrollbar-width:thin; padding:4px; margin:-4px;
+}
+:is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-body:has(> .workroom-browser-frame:not([data-layout=terminal])) > .ai-terminal-current > .ai-terminal-tab-owner { flex:none; }
+:is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-body:has(> .workroom-browser-frame:not([data-layout=terminal])) > .ai-terminal-current > .ai-terminal-current-label {
+  flex:0 1 auto; min-width:3em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+:is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-body:has(> .workroom-browser-frame:not([data-layout=terminal])) > .ai-terminal-current > .ai-terminal-view-controls { flex:none; flex-wrap:nowrap; max-width:none; }
 :is(.workroom-popout, .workroom-session-dialog-content) .ai-terminal-panel .ai-terminal-surface {
   /* Device/account controls and retained session tabs share the laptop viewport with the input.
      Leave a usable terminal floor on short windows, then let it expand with the available space. */
@@ -577,9 +590,19 @@
 /* It gives room to the tools beside it, but never shrinks below a 44px touch target (measured 40px wide on a 390pt phone). */
 .ai-terminal-session-view-switcher { display: flex; flex: 1 1 auto; min-width: 44px; }
 .ai-terminal-session-view-switcher .ai-terminal-select { width: 100%; }
-.ai-terminal-panel.ai-terminal-session-view .ai-terminal-view-controls { flex: 0 0 auto; flex-wrap: nowrap; order: 0; margin-left: auto; }
+.ai-terminal-panel.ai-terminal-session-view .ai-terminal-view-controls {
+  flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; justify-content: flex-start; order: 0; margin-left: auto;
+  overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+}
+/* Keep each action readable and reachable by horizontal scroll instead of squeezing its label into tall vertical text. */
+.ai-terminal-panel.ai-terminal-session-view .ai-terminal-view-controls > * { flex-shrink: 0; }
+.ai-terminal-panel.ai-terminal-session-view .ai-terminal-view-controls > .ai-terminal-btn { white-space: nowrap; overflow-wrap: normal; }
 /* Wide enough (iPhone landscape, iPad): the tools join the first row and the bar is one row. */
-@container workroom (min-width: 700px) { .ai-terminal-session-view-tools { flex: 0 1 auto; } .ai-terminal-session-view-switcher { width: 260px; flex: 0 1 auto; } }
+@container workroom (min-width: 700px) {
+  .ai-terminal-panel.ai-terminal-session-view .ai-terminal-session-view-title { max-width: 220px; }
+  .ai-terminal-session-view-tools { flex: 1 1 0; }
+  .ai-terminal-session-view-switcher { width: 160px; flex: 0 1 160px; }
+}
 /* A 320pt screen: the size reset (「12」) gives its room to the session switcher; A−/A+ stay. */
 @container workroom (max-width: 360px) { .ai-terminal-panel.ai-terminal-session-view .ai-terminal-font-size { display: none; } }
 .ai-terminal-session-view-status { display: grid; flex: 0 0 auto; gap: 6px; padding: 8px 12px 0; }

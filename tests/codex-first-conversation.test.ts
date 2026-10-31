@@ -100,6 +100,12 @@ function fakeAppServer(options: {
 }
 
 describe('Codex first-conversation bridge', () => {
+  test('recovery verifies the durable turn without changing a user-edited title',async()=>{
+    const fake=fakeAppServer();
+    await finalizeCodexDesktopFirstConversation({codexPath:'codex',folderPath:'/Users/test/Product',projectName:'Product',threadId:THREAD_ID,readOnly:true,spawn:fake.spawn,timeoutMs:2_000});
+    expect(fake.requests.some(request=>request.method==='thread/read')).toBe(true);
+    expect(fake.requests.some(request=>request.method==='thread/name/set'||request.method==='turn/start')).toBe(false);
+  });
   test('names and verifies a Codex Desktop-created project thread without creating another thread', async () => {
     const fake = fakeAppServer();
     const result = await finalizeCodexDesktopFirstConversation({

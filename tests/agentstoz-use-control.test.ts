@@ -830,6 +830,11 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
     expect(description("send_workroom_keys")).toContain("trust");
     expect(description("close_workroom_session")).toContain("saveMemory");
     expect(description("start_workroom_session")).toContain("reuse");
+    // An external MCP connection can create a team, but cannot impersonate a leading Workroom to send keys.
+    expect(description("team_member")).toContain("Keys require the team's actual leading Workroom session");
+    expect(description("team_member")).toContain("external MCP client without a Workroom caller cannot use keys");
+    expect(description("team_member")).toContain("WORKROOM_TEAM_MEMBER_OPERATION_DENIED");
+    expect(description("team_member")).not.toContain("Use the same operation from any locally connected MCP client");
     // People read the 단톡방 too (VOC 2026-10-25: a build receipt was a wall of hashes).
     expect(description("send_dialogue_message")).toContain("plain sentences");
   });
@@ -874,6 +879,8 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_wait_dialogue_messages",
       "agentstoz_use_leave_dialogue",
       "agentstoz_use_close_dialogue",
+      "agentstoz_use_computer",
+      "agentstoz_use_computer_session",
       "agentstoz_use_list_ops_devices",
       "agentstoz_use_submit_ops_request",
       "agentstoz_use_get_ops_request_result",
@@ -906,6 +913,7 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_get_control_profile",
       "agentstoz_use_recall_user_profile",
       "agentstoz_use_recall_user_memory",
+      "agentstoz_use_list_user_memory_history",
       "agentstoz_use_recall_control_context",
       "agentstoz_use_list_control_memory_candidates",
       "agentstoz_use_propose_control_memory",
@@ -950,6 +958,33 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_open_code_app",
       "agentstoz_use_open_buzz_dev",
     ]);
+    const historyAction = agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-24T00:00:00Z', end: '2026-10-28T00:00:00Z',
+    }, 'controller-id');
+    expect(historyAction).toEqual({ action: 'list-user-memory-history', controllerPortId: 'controller-id', portId: 'study-id',
+      start: '2026-10-24T00:00:00.000Z', end: '2026-10-28T00:00:00.000Z' });
+    expect(parseAgentsToZUseActionRequest(historyAction).userMemoryRange).toEqual({ start: '2026-10-24T00:00:00.000Z', end: '2026-10-28T00:00:00.000Z' });
+    const humanAction = agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-24T09:00:00+09:00', end: '2026-10-28T00:00:00Z', origin: 'human', cursor: null,
+    }, 'controller-id');
+    expect(parseAgentsToZUseActionRequest(humanAction).userMemoryRange).toEqual({ start: '2026-10-24T00:00:00.000Z', end: '2026-10-28T00:00:00.000Z', origin: 'human' });
+    expect(() => agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-24T00:00:00Z', end: '2026-10-28T00:00:00Z', origin: 'agentstoz',
+    }, 'controller-id')).toThrow();
+    expect(() => parseAgentsToZUseActionRequest({ ...historyAction, origin: 'unknown' })).toThrow();
+    // A malformed continuation is reported with the same code as an expired one, on both paths.
+    expect(() => agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-24T00:00:00Z', end: '2026-10-28T00:00:00Z', cursor: 'umh1_bad',
+    }, 'controller-id')).toThrow('USER_MEMORY_CURSOR_EXPIRED');
+    let malformed: unknown;
+    try { parseAgentsToZUseActionRequest({ ...historyAction, cursor: 'not-a-cursor' }); } catch (error) { malformed = error; }
+    expect(malformed).toMatchObject({ code: 'USER_MEMORY_CURSOR_EXPIRED', status: 400 });
+    expect(() => agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-28T00:00:00Z', end: '2026-10-24T00:00:00Z',
+    }, 'controller-id')).toThrow();
+    expect(() => agentsToZUseMcpActionForTool('agentstoz_use_list_user_memory_history', {
+      portId: 'study-id', start: '2026-10-24T00:00:00Z', end: '2026-10-28T00:00:00Z', folderPath: '/tmp/ignored',
+    }, 'controller-id')).toThrow();
     expect(agentsToZUseMcpActionForTool("agentstoz_use_open_code_app", {
       portId: "study-id",
       agent: "codex",
@@ -1092,6 +1127,9 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
     // Contract 1.32.0 adds five bounded meta common memory tools.
     // Contract 1.33.0 adds goal-based cloud memory and managed SDK tools.
     expect((listed as any).result.tools).toHaveLength(AGENTSTOZ_USE_MCP_TOOLS.length);
+    const memberTool = (listed as any).result.tools.find((tool: {name: string}) => tool.name === 'agentstoz_use_team_member');
+    expect(memberTool.description).toContain("external MCP client without a Workroom caller cannot use keys");
+    expect(memberTool.description).toContain("WORKROOM_TEAM_MEMBER_OPERATION_DENIED");
   });
 
   test("maps the cross-agent Workroom tools and rejects anything outside their bounds", () => {

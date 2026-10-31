@@ -1,3 +1,11 @@
+// Establish the private native channel and CLOEXEC before any child-spawning dependency evaluates.
+import {inheritedComputerUseMainLink} from './src/computerUseMainLink';
+import {runWhatISaidExplicitBackfill, runWhatISaidSyncBatch, whatISaidBackfillOutcome, WHAT_I_SAID_SYNC_PUSH_RESERVE_MS, WHAT_I_SAID_SYNC_REQUEST_BUDGET_MS} from './src/whatISaidExplicitBackfill';
+import {ComputerUseRuntime} from './src/computerUseRuntime';
+import {ComputerUseRecovery} from './src/computerUseRecovery';
+import {handleComputerUse} from './src/computerUseApi';
+import {computerCallerOrigin,createComputerCallerHostResolver} from './src/computerUseCallerHost';
+import {COMPUTER_USE_PATH,COMPUTER_USE_AGENT_PATH} from './src/computerUseProtocol';
 import { BrowserContextHost } from './src/browserContextHost';
 import { WorkroomBrowserHost } from './src/workroomBrowserHost';
 import {assertMacosBrowserUpgrade} from './src/macosBrowserUpgrade';
@@ -29,6 +37,14 @@ import {isWorkroomThreadAction,WorkroomThreadAdmissionError} from './src/workroo
 import {normalizeWorkroomThreadPublish,normalizeWorkroomThreadRead} from './src/workroomThreadMcp';
 import {workroomThreadTerminalAdapter} from './src/workroomThreadTerminalAdapter';
 import {workroomThreadLifecycleHost,workroomThreadSaveConsent} from './src/workroomThreadLifecycleHost';
+import {WorkroomScheduleStore} from './src/workroomScheduleStore';
+import {WorkroomScheduleHost} from './src/workroomScheduleHost';
+import {createWorkroomScheduleAdapter} from './src/workroomScheduleIntegration';
+import {WORKROOM_SCHEDULE_PATH} from './src/workroomScheduleProtocol';
+import {handleWorkroomSchedules} from './src/workroomScheduleApi';
+import {DesktopEffortHost} from './src/desktopEffortHost';
+import {DESKTOP_EFFORT_PATH} from './src/desktopEffortProtocol';
+import {handleDesktopEffort} from './src/desktopEffortApi';
 import {recallProjectMemoryWithCommon} from './project-memory-server';
 import {referenceExcerpt} from './src/agentstozMention';
 import {OpsRequestHost,callerOpsRequestDispatch,opsRequestScope,opsRequestsAllowed} from './src/opsRequestHost';
@@ -87,8 +103,10 @@ import {listControlMemoryEntries, readControlMemoryEntry} from './src/controlMem
 import {resolveOpsSurfaceProject} from './src/controlProfileSurface';
 import {shouldUseOrcaFloatingTerminal} from './src/orcaFloatingTerminal';
 import {claudeWorkroomContext,workroomAutomaticSaves,withWorkroomAutomaticSaveMessage} from './src/workroomSessionStatus';
+import {verifyWorkroomSaveReceipt} from './src/workroomSavedReceipt';
 import {MobileWorktreeCleanup} from './src/mobileWorktreeCleanup';
 import {createMobileWorkspaceGateway} from './src/mobileWorkspaceGateway';
+import {createWeeklyUsageRemoteReader} from './src/weeklyUsageRemoteHost';
 import {MobileWorkspaceJobs} from './src/mobileWorkspaceJobs';
 import {normalizeMobileWorkspaceRequest,normalizeWorkspaceScopes,type MobileWorkspaceRequest,type MobileWorkspaceResult} from './src/mobileWorkspaceProtocol';
 import {agentsToZUseMcpLauncherPath,agentsToZUseMcpLauncherScript} from './src/agentsToZUseMcpLauncher';
@@ -102,6 +120,8 @@ import {pathEntryExists} from './src/remoteControlHostVault';
 import {remoteTerminalGrantValid,remoteTerminalGrantAllowsTarget,remoteTerminalGrantTargetsForSave,remoteTerminalHistoryGrantScope,REMOTE_TERMINAL_GRANT_TTL_MS,type RemoteTerminalGrantBinding} from './src/remoteTerminalGrant';
 import { validDutyOperation } from './src/csDutyOperations';
 import {openProjectCodexWorkspace, ProjectCodexLaunchError} from './src/projectLaunchCoordinator';
+import {CodexNewChatReceiptStore, CodexNewChatReceiptError, canCancelUndispatchedCodexRequest} from './src/codexNewChatReceipts';
+import {withCodexProjectLaunchLock} from './src/codexProjectLaunchLock';
 import {runAppDeepLinkCommand} from './src/appDeepLinkLauncher';
 import {FileProjectLaunchReceiptStore, ProjectCreationCoordinator, ProjectLaunchReceiptError, projectCreationFingerprint, projectLaunchDirectoryIdentity} from './src/projectLaunchReceipt';
 import {createLocalCsDuty} from './src/csDutyHost';
@@ -130,6 +150,7 @@ import {observeIncrementalMemoryTranscript} from './src/memorySaveIncrementalObs
 import { projectMemoryCloseEvidence,applyProjectMemorySession,readProjectMemoryJournal } from './project-memory-server';
 import type { TimelineOutcome } from './src/userMemoryTimeline';
 import { recallUserInstructions } from './src/userMemoryRecall';
+import { bracketUserMemoryHistoryScan, listUserInstructionHistory, UserMemoryHistoryCursorError } from './src/userMemoryHistoryServer';
 import { createRecentSessionFileDiscovery } from './src/recentSessionFiles';
 import { WhatISaidAutoCapture, resolveWhatISaidCaptureHint } from "./src/whatISaidAutoCapture";
 import { CONTROL_CENTER_PROJECT_NAME, controlCenterTemplateFiles, findExistingOpsProject } from "./src/controlCenterProject";
@@ -155,6 +176,12 @@ import {createAiTerminalRemoteGateway} from './src/aiTerminalRemoteGateway';
 import {remoteTerminalOwners} from './src/remoteTerminalOwners';
 import {AgentRuntimeQuickLabels} from './packages/runtime-sdk';
 import { AiTerminalService, bindAiTerminalTarget, aiTerminalRegistrationEvidence } from './src/aiTerminalService';
+import {isInternalContextSessionSource} from './src/contextSessionVisibility';
+import {CONTEXT_SESSION_COMMAND_PATH,isContextOrcaRequest,normalizeContextCommandRequest} from './src/contextSessionCommand';
+import {performContextOrcaCommand,type ContextOrcaHost} from './src/contextOrcaCommand';
+import {WEEKLY_USAGE_PATH} from './src/weeklyUsage';
+import {WeeklyUsageHost,readWeeklyUsageRequest} from './src/weeklyUsageHost';
+import {WeeklyUsagePushHost} from './src/weeklyUsagePushHost';
 import { isWorkroomActivityOperation } from './src/aiTerminalActivity';
 import { isWorkroomEffortOperation,projectEffortAdviceContext } from './src/workroomEffortSetting';
 import {createProjectAgentTerminal} from './src/projectAgentTerminal';
@@ -164,13 +191,17 @@ import {CliAccountStore} from './src/cliAccountStore';
 import {PlatformCliStore} from './src/platformCliStore';
 import {PlatformCliHost} from './src/platformCliHost';
 import {PlatformGithubPush} from './src/platformGithubPush';
-import {PLATFORM_CLI_PATH,platformCliPublicError} from './src/platformCliProtocol';
-import {handlePlatformCliRequest} from './src/platformCliRequest';
+import {PLATFORM_CLI_DEFAULT_ACCOUNT,PLATFORM_CLI_PATH,platformCliPublicError} from './src/platformCliProtocol';
+import {handlePlatformCliRequest,platformNativeSwitch,registerPlatformNativeSwitch} from './src/platformCliRequest';
+import {PlatformNativeSwitch} from './src/platformCliNativeSwitch';
+import {platformCliRealExecutable,platformCliWorkroomEnvironment} from './src/platformCliWorkroom';
+import {PlatformCliEverywhere,platformCliEverywhere,registerPlatformCliEverywhere} from './src/platformCliEverywhere';
 import {readSupabaseSetup} from './src/platformCliSetup';
 import {CliAccountManager} from './src/cliAccountManager';
 import {cliAccountAgent, HOST_CLI_ACCOUNT_ID} from './src/cliAccountProtocol';
 import { WorkroomSharedShell } from './src/workroomSharedShell';
 import { AI_TERMINAL_PREFIX, type AiTerminalSummary } from './src/aiTerminalProtocol';
+import {MEMORY_SAVE_NOTICE_RECOVERY_PATH,MEMORY_SAVE_NOTICE_RECOVERY_BYTES,MemorySaveNoticeRecoveryError,performMemorySaveNoticeRecovery} from './src/memorySaveNoticeRecoveryRoute';
 import {WorkroomConversationService} from './src/workroomConversationService';
 import {WORKROOM_HISTORY_PATH} from './src/workroomConversationProtocol';
 import {handleWorkroomConversationRequest} from './src/workroomConversationApi';
@@ -181,7 +212,7 @@ import { assertWorkroomImageAttachments } from './src/workroomImages';
 import { assertWorkroomFileAttachments } from './src/workroomFiles';
 import { handleWorkroomAttachmentRequest } from './src/workroomAttachmentHost';
 import { keepTailUtf8, renderTerminalPlainText } from './src/terminalPlainText';
-import { WORKROOM_KEY_INTERVAL_MS, waitForWorkroomSettle, workroomKeySequence, workroomWaitBudgetMs } from './src/workroomOrchestration';
+import { WORKROOM_KEY_INTERVAL_MS, waitForWorkroomSettle, workroomKeyChoosesExit, workroomKeySequence, workroomWaitBudgetMs } from './src/workroomOrchestration';
 import { WorkroomRequestLedger } from './src/workroomRequestLedger';
 import { deliverAgentsToZUseWorkroomInstruction } from './src/agentstozUseWorkroomInstruction';
 import { parseWorkroomCallerHint, type WorkroomCallerHint } from './src/workroomCaller';
@@ -228,6 +259,7 @@ import { readFile as readFileAsync, realpath as realpathAsync, stat as statAsync
 import { homedir, hostname, networkInterfaces, tmpdir } from "node:os";
 import { createClient } from "@supabase/supabase-js";
 import {AGENT_DIALOGUE_CONTROL_MOBILE_TIMEOUT_MS,AgentDialogueHost,AgentDialogueHostError} from './src/agentDialogueHost';
+import {AGENT_DIALOGUE_HEARTBEAT_MS} from './src/communityDeviceLiveness';
 import {createCommunityControlExecutor,communityControlPollDelay} from './src/agentDialogueControl';
 import {workroomProjectsFromPorts} from './src/workroomProjects';
 import {parseAgentDialogueRequest,parseAgentDialogueTarget,AgentDialogueContractError} from './src/agentDialogueContract';
@@ -265,6 +297,7 @@ import {
   pushProjectMemory,
   remoteProjectMemoryStatus,
   preflightProjectMemoryRecovery,
+  previewProjectMemoryConflict,
   resolveProjectMemoryConflict,
   resolveProjectMemoryWorktreeRoots,
   restoreProjectMemoryRevision,
@@ -452,6 +485,7 @@ import {
   purgeExpiredWhatISaidDatabases,
   purgeExpiredWhatISaidEntries,
   probeWhatISaidLastCaptureReadOnly,
+  probeWhatISaidCollectionReadOnly,
   probeWhatISaidMaxSeqReadOnly,
   purgeWhatISaidEntries,
   readWhatISaidFeed,
@@ -480,10 +514,17 @@ import {
   whatISaidRemotePushAllowed,
   whatISaidRemoteUploadEnabled,
   whatISaidRemoteRow,
+  whatISaidUnstartedUploadPending,
   withWhatISaidProjectExcluded,
   type WhatISaidRemotePolicy,
 } from "./src/whatISaidRemotePolicy";
-import { WhatISaidRemoteMutationLock } from "./src/whatISaidRemoteMutationLock";
+import {
+  WHAT_I_SAID_REMOTE_FILE_LOCK_RETRY_MS,
+  WhatISaidRemoteMutationLock,
+  WhatISaidRemoteWaitExpiredError,
+  whatISaidRemoteFileLockAttempts,
+  whatISaidRemoteFileLockFailure,
+} from "./src/whatISaidRemoteMutationLock";
 import { loadOrCreateProductionWhatISaidKey } from "./src/whatISaidKeyProvider";
 import {
   normalizeWhatISaidMemoryIds,
@@ -495,6 +536,7 @@ import {
 } from "./src/whatISaidSharedPolicy";
 import {
   collectWhatISaidTranscripts,
+  whatISaidCollectionScope,
   type WhatISaidTranscriptCollectionResult,
 } from "./src/whatISaidTranscriptCollector";
 import { WhatISaidPromptOriginRegistry } from "./src/whatISaidPromptOriginRegistry";
@@ -633,6 +675,7 @@ import {
   resolveCodexSessionNavigation,
 } from "./src/contextSessionNavigation";
 import { findLiveOrcaTerminal, findOrcaSessionBinding } from "./src/orcaSessionLookup";
+import { readOrcaWorkspaceSessionState } from "./src/orcaProfileState";
 import {
   formatOrcaFloatingFallbackNotice,
   isOrcaWorktreeSelectorMissing,
@@ -671,6 +714,7 @@ import {
   parseClaudeSessionMetadata,
   type ContextSessionMetadata,
 } from "./src/contextSessionMetadata";
+import {nextClaudeConversations,scanClaudeCompactionRange} from './src/contextCommandEvidence';
 import {
   classifyProjectCodexSession,
   selectLatestProjectCodexThread,
@@ -746,6 +790,13 @@ import { CodexLoginHost } from "./src/onboardingCodexLoginHost";
 import {MacSetupHost} from './src/macSetupHost';
 import {HelpdeskHost,readHelpdeskRequest} from './src/helpdeskHost';
 import {createHelpdeskClaude} from './src/helpdeskClaude';
+import {HelpdeskAssistHost} from './src/helpdeskAssistHost';
+import {HelpdeskAssistStore} from './src/helpdeskAssistStore';
+import {EgoAssistDriver} from './src/helpdeskAssistEgo';
+import {OwnedAssistDriver,HELPDESK_ASSIST_SESSION} from './src/helpdeskAssistOwnedBrowser';
+import {createAssistVerifier,createAssistAiStatus} from './src/helpdeskAssistVerifiers';
+import {resolveCodexLoginExecutable} from './src/onboardingCodexLoginRuntime';
+import {HELPDESK_ASSIST_PATH} from './src/helpdeskAssistProtocol';
 import {createMacSetupEffects} from './src/macSetupEffects';
 import {handleMacSetup} from './src/macSetupHttp';
 import { CodexLoginStore } from "./src/onboardingCodexLoginStore";
@@ -847,6 +898,7 @@ import { WorkroomTeamError, WorkroomTeamService, WorkroomTeamStore, parseWorkroo
 import { createWorkroomTeamHost } from "./src/workroomTeamHost";
 import {createTeamExternalFileJournal,createTeamExternalHostRuntime} from './src/teamExternalHost';
 import {createTeamRuntimeBridge} from './src/teamRuntimeBridge';
+import {createTeamOrcaRecoveryInspect} from './src/teamOrcaRecoveryRead';
 import {createTeamProjectLauncher} from './src/teamProjectLauncher';
 import {createTeamCmuxManualLauncher} from './src/teamCmuxManualLauncher';
 import {runTeamMemberOperation} from './src/workroomTeamMemberOperation';
@@ -4460,7 +4512,7 @@ async function getLiveCodexRateLimits(force = false): Promise<CodexUsagePayload>
   }
   if (codexLiveRateLimitInFlight) return codexLiveRateLimitInFlight;
 
-  const task = readCodexLiveRateLimits(resolveAgentBin('codex')).then(result => {
+  const task = readCodexLiveRateLimits(resolveAgentBin('codex'), undefined, APP_DATA_DIR).then(result => {
     const payload: CodexUsagePayload = {
       rateLimits: result.rateLimits,
       checkedAt: result.checkedAt,
@@ -4686,6 +4738,14 @@ function resolveGitHubCliPath(): string | null {
 // Windows: %APPDATA%\com.portmanager.portmanager
 // Linux/AWS Ubuntu: ${XDG_CONFIG_HOME:-~/.config}/com.portmanager.portmanager
 const APP_DATA_DIR = resolveAppDataDirFromEnvironment();
+// 「휴대폰 알림」: per Mac, OFF by default; handed to AgentsToZ Screen (macOS only), which signs and sends through the screen-push relay.
+const weeklyUsagePushHost=process.platform==='darwin'?new WeeklyUsagePushHost({root:join(APP_DATA_DIR,'weekly-usage'),
+  screenStatusPath:join(homedir(),'Library','Application Support','AgentsToZ Screen','status.json'),log:message=>console.warn(message)}):null;
+const weeklyUsageHost=new WeeklyUsageHost({appDataDir:APP_DATA_DIR,home:homedir(),python:Bun.which('python3'),available:provider=>provider==='claude'?!!CLAUDE_PATH:!!Bun.which('agy'),codex:()=>getLiveCodexRateLimits(false),...(weeklyUsagePushHost?{alerts:weeklyUsagePushHost}:{})});
+// A connected Mac gets the current hook (and with it the dock's Claude context capture) without reconnecting.
+weeklyUsageHost.upgradeHook();
+// Reads by itself every 5 minutes only while the switch is on; off costs one small file read.
+weeklyUsagePushHost?.start(()=>weeklyUsageHost.status());
 const remoteProjectCreateReceipts = new FileProjectLaunchReceiptStore(APP_DATA_DIR);
 const remoteProjectCreation = new ProjectCreationCoordinator(remoteProjectCreateReceipts);
 const memorySaveDispatcher = new MemorySaveDispatcher();
@@ -4762,7 +4822,9 @@ const commonMemoryProjectManager=createCommonMemoryProjectManager({
     if(cloud.scopeId!==scopeId||!cloud.projects.some((p:any)=>p.memoryId===member.memoryId&&p.revisionId===member.revisionId&&p.githubUrl&&normalizeGitHubRepositoryUrl(p.githubUrl)===member.githubUrl))throw new CommonMemoryError('COMMON_MEMORY_SOURCE_CHANGED','Clone 중 원본 기억·GitHub 주소가 바뀌었습니다. 현재 프로젝트를 보존하고 계획을 다시 확인하세요.');
     const own=detectProjectMemory(path);if(own.config&&own.config.memoryId!==member.memoryId)throw new CommonMemoryError('COMMON_MEMORY_PROJECT_CONFLICT','저장소의 기존 장기기억 ID가 원본과 다릅니다. 기존 기억을 보존했습니다.');
     assertActive();initializeProjectMemory({folderPath:path,projectName:member.name,agent:'codex',autoBackup:true,memoryId:member.memoryId});
-    await pullProjectMemory({portalDataFile:PORTAL_DATA_FILE,folderPath:path,projectName:member.name,githubUrl:member.githubUrl,expectedMemoryId:member.memoryId,expectedRevisionId:member.revisionId,expectedSupabaseScope:scopeId,assertActive});
+    const pulled:any=await pullProjectMemory({portalDataFile:PORTAL_DATA_FILE,folderPath:path,projectName:member.name,githubUrl:member.githubUrl,expectedMemoryId:member.memoryId,expectedRevisionId:member.revisionId,expectedSupabaseScope:scopeId,assertActive});
+    // A clone that already carries a different memory document is not replaced: Pull answers a conflict instead.
+    if(pulled?.conflict===true)throw new CommonMemoryError('COMMON_MEMORY_PROJECT_CONFLICT','가져온 저장소에 원본과 다른 장기기억이 들어 있어 덮어쓰지 않았습니다. 가져온 폴더와 두 기억을 보존했습니다.');
     const originalBinding=await service.binding(member.memoryId);
     if(originalBinding&&!existsSync(join(path,'.agent-memory','common-memory.json'))){await installProjectCommonMemory({assertActive,root:path,scopeId:originalBinding.scopeId,projectGoal:originalBinding.projectGoal,selections:originalBinding.selections,recall:(id,goal,revisionId)=>service.recall(id,goal,revisionId,originalBinding.scopeId)});if(!existsSync(join(path,'.agentstoz','project-intent.json'))){assertActive();installProjectIntent(path,originalBinding.projectGoal);}}
     if(detectProjectMemory(path).config?.memoryId!==member.memoryId)throw new CommonMemoryError('COMMON_MEMORY_PROJECT_CONFLICT','복원된 장기기억 계보가 계획과 다릅니다. 등록을 중단했습니다.');
@@ -4886,6 +4948,28 @@ const agentDialogueHost = new AgentDialogueHost({
     return data as Record<string,unknown>;
   },
 });
+
+/**
+ * The 싱크 routes' answer (`/api/project-memory/sync` and `/thread/sync`) after their Pull or Push ran. A run that
+ * stopped on a conflict is the conflict at the top level — the panel, the dock and the generated skills read
+ * `conflict` there to open the comparison or stop; nested under `result` they saw only 「요청 실패 (409)」. A
+ * `conflict` direction whose Pull found nothing to protect (equal bytes, an untouched template, local still at the
+ * last agreement) adopted Supabase, so it is answered as that Pull — never `conflict: true` over a file it replaced.
+ */
+function projectMemorySyncAnswer(input: {
+  direction: string;
+  action: 'push' | 'pull';
+  result: any;
+  extra?: Record<string, unknown>;
+  headers: HeadersInit;
+}): Response {
+  const { direction, action, result, extra = {}, headers } = input;
+  if (result?.conflict === true) {
+    return new Response(JSON.stringify({ ...result, ...extra, ok: false, direction, action: 'none', conflict: true }), { status: 409, headers });
+  }
+  const ok = result?.success === true;
+  return new Response(JSON.stringify({ ...extra, ok, direction, action, result }), { status: ok ? 200 : 502, headers });
+}
 
 function assertGenericProjectMemoryMutationAllowed(folderPath: unknown): void {
   if (controlProfileHost.store.protectsSharedRoot(folderPath)) {
@@ -6250,10 +6334,8 @@ installProjectMetaMemoryReader(async(memoryId, root, query) => {
 },true);
 const ORCA_FLOATING_TERMINALS_FILE = join(APP_DATA_DIR, "orca-floating-terminals.json");
 const ORCA_FLOATING_TERMINALS_LOCK_FILE = join(APP_DATA_DIR, "orca-floating-terminals.json.lock");
-const ORCA_LOCAL_SESSION_FILE = join(
-  homedir(),
-  'Library/Application Support/orca/profiles/local-default/orca-data.json',
-);
+// profile-state.db since Orca 1.4 (orca-data.json before it); src/orcaProfileState.ts picks the current one.
+const ORCA_LOCAL_PROFILE_DIR = join(homedir(), 'Library/Application Support/orca/profiles/local-default');
 
 const projectMemoryPrivateArchiveQueue = new Map<string, Promise<void>>();
 
@@ -6557,7 +6639,7 @@ async function readCodexAutoRememberObservations(): Promise<CodexAutoRememberObs
     const meta = summary?.meta ?? null;
     const turn = summary?.turn ?? null;
     const tokenEvent = summary?.tokenEvent ?? null;
-    if (!meta || meta.thread_source === 'subagent' || !tokenEvent?.payload?.info) continue;
+    if (!meta || isInternalContextSessionSource(meta.thread_source) || !tokenEvent?.payload?.info) continue;
     const sessionId = typeof meta.id === 'string'
       ? meta.id
       : typeof meta.session_id === 'string' ? meta.session_id : null;
@@ -6925,6 +7007,8 @@ async function createCodexDesktopProjectConversation(input: {
   folderPath: string;
   projectName: string;
   retainCreatedThread: (threadId: string) => void;
+  retainSubmissionFence?: boolean;
+  assertActive?: () => Promise<void>;
 }): Promise<{ threadId: string }> {
   // Check before opening a fresh draft as well as immediately before Return.
   if (remoteCodexSubmissionFence.load(input.folderPath)) {
@@ -6966,11 +7050,12 @@ async function createCodexDesktopProjectConversation(input: {
   return submitCodexDesktopDraft({
     store: remoteCodexSubmissionFence,
     projectKey: input.folderPath,
-    submit: submitCodexDesktopProjectComposer,
+    submit: () => submitCodexDesktopProjectComposer(input.assertActive),
     findCreatedThread: () => waitForFreshChatGptProjectConversation(
       input.folderPath, existingThreadIds, startedAtMs, projectReady.projectTaskId,
     ),
     retainCreatedThread: input.retainCreatedThread,
+    retainSubmissionFence: input.retainSubmissionFence,
   });
 }
 
@@ -7025,10 +7110,14 @@ async function runVoiceAutomation(
   };
 }
 
-async function submitCodexDesktopProjectComposer(): Promise<
+async function submitCodexDesktopProjectComposer(assertActive?: () => Promise<void>): Promise<
   { ok: true; method: 'accessibility-project-composer-return' | 'accessibility-project-composer-send-button' }
   | { ok: false; code: CodexDesktopComposerAutomationErrorCode; error: string }
 > {
+  const authorityCheck=async()=>{
+    try {await assertActive?.();return null;}
+    catch {return {ok:false as const,code:'CODEX_DESKTOP_AUTHORITY_REVOKED' as const,error:'원격 연결 또는 프로젝트 권한이 바뀌어 첫 메시지를 보내지 않았습니다.'};}
+  };
   let command: string[];
   if (process.platform === 'darwin') {
     const helper = resolveCodexDesktopAccessibilityHelper();
@@ -7044,6 +7133,7 @@ async function submitCodexDesktopProjectComposer(): Promise<
         const code = classifyCodexDesktopComposerAutomationError(detail);
         return { ok: false, code, error: describeCodexDesktopComposerAutomationFailure(code) };
       }
+      const revoked=await authorityCheck();if(revoked)return revoked;
       const result = await runVoiceAutomation(
         [helper, '--pid', pid],
         12_000,
@@ -7075,6 +7165,7 @@ async function submitCodexDesktopProjectComposer(): Promise<
     };
   }
 
+  const revoked=await authorityCheck();if(revoked)return revoked;
   const result = await runVoiceAutomation(command, 12_000);
   if (result.success && result.output === 'accessibility-project-composer-return') {
     return { ok: true, method: 'accessibility-project-composer-return' };
@@ -7335,6 +7426,17 @@ function readClaudeSessionMetadataTail(filePath: string, size: number): string {
   return buffer.toString('utf-8');
 }
 
+function readClaudeTranscriptRange(filePath: string, position: number, length: number): Uint8Array {
+  const buffer = Buffer.alloc(Math.max(0, length));
+  const fd = openSync(filePath, 'r');
+  try {
+    const read = readSync(fd, buffer, 0, buffer.length, position);
+    return buffer.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function readClaudeSessionMetadata(sessionId: string): ContextSessionMetadata | null {
   let filePath = refreshClaudeSessionMetadataPathIndex().get(sessionId);
   if (!filePath) filePath = refreshClaudeSessionMetadataPathIndex(true).get(sessionId);
@@ -7349,12 +7451,24 @@ function readClaudeSessionMetadata(sessionId: string): ContextSessionMetadata | 
 
   try {
     const parsed = parseClaudeSessionMetadata(readClaudeSessionMetadataTail(filePath, stamp.size));
+    // A compaction writes its summary and re-attached files right after its boundary row (418 KB measured 2026-10-31),
+    // so the row can leave the bounded tail before the next read. Search only the appended bytes this tail did not
+    // cover, and only for that row (src/contextCommandEvidence.ts): the dock reads it to report a /compact outcome.
+    const appendedFrom = cached && cached.filePath === filePath && cached.stamp && stamp.size >= cached.stamp.size
+      ? cached.stamp.size : null;
+    const tailStart = stamp.size - Math.min(stamp.size, CLAUDE_SESSION_METADATA_TAIL_BYTES);
+    const lastCompaction = parsed.lastCompaction
+      ?? (appendedFrom !== null && tailStart > appendedFrom
+        ? scanClaudeCompactionRange((position, length) => readClaudeTranscriptRange(filePath, position, length), appendedFrom, tailStart, stamp.size)
+        : null)
+      ?? (appendedFrom !== null ? cached?.metadata.lastCompaction ?? null : null);
     // A long live transcript can push a previously observed relocation event
     // out of the bounded tail. Keep the last known title/relocation for this
     // process until a newer metadata event replaces it.
     const metadata: ContextSessionMetadata = {
       threadTitle: parsed.threadTitle ?? cached?.metadata.threadTitle ?? null,
       projectHint: parsed.projectHint ?? cached?.metadata.projectHint ?? null,
+      ...(lastCompaction ? { lastCompaction } : {}),
     };
     claudeSessionMetadataCache.set(sessionId, { filePath, stamp, metadata });
     return metadata;
@@ -7435,15 +7549,14 @@ async function inspectOrcaContextSurfacePresence(
       };
     }
 
-    let sessionState: unknown;
-    try {
-      sessionState = JSON.parse(readFileSync(ORCA_LOCAL_SESSION_FILE, 'utf8'));
-    } catch {
+    const persisted = readOrcaWorkspaceSessionState(ORCA_LOCAL_PROFILE_DIR);
+    if (persisted.kind !== 'ok') {
       return {
         presence: inspectOrcaContextSessionPresence(targets, { kind: 'unverified' }),
         runtimeState: 'unverified',
       };
     }
+    const sessionState = persisted.state;
     const listed = await nodeOrcaRunJson(cli, ['terminal', 'list', '--limit', String(ORCA_CONTEXT_TERMINAL_LIMIT)], 8_000);
     if (!listed.ok) {
       return {
@@ -7880,11 +7993,11 @@ async function focusOrcaWorktreeContextSession(
   if (!paneKey || typeof snapshotWorktreeId !== 'string' || !snapshotWorktreeId) {
     return { success: false, code: 'ORCA_TARGET_UNAVAILABLE', error: 'Orca 세션 식별자가 완전하지 않습니다.' };
   }
-  let state: unknown;
-  try { state = JSON.parse(readFileSync(ORCA_LOCAL_SESSION_FILE, 'utf8')); } catch {
+  const persisted = readOrcaWorkspaceSessionState(ORCA_LOCAL_PROFILE_DIR);
+  if (persisted.kind !== 'ok') {
     return { success: false, code: 'ORCA_TARGET_UNAVAILABLE', error: 'Orca의 현재 세션 정보를 읽지 못했습니다. 이동하지 않았습니다.' };
   }
-  const binding = findOrcaSessionBinding(state, sessionId, paneKey);
+  const binding = findOrcaSessionBinding(persisted.state, sessionId, paneKey);
   if (!binding || binding.worktreeId !== snapshotWorktreeId) {
     return { success: false, code: 'ORCA_TARGET_STALE', error: 'Orca의 저장된 세션과 현재 컨텍스트가 일치하지 않습니다. 이동하지 않았습니다.' };
   }
@@ -9151,9 +9264,14 @@ const cliAccountManager: CliAccountManager = new CliAccountManager({
     : resolveLocalExecutable(agent,[join(homedir(),'.local/bin',agent),'/opt/homebrew/bin/'+agent,'/usr/local/bin/'+agent]),
   inUse: (id): boolean => aiTerminalService.accountInUse(id),
 });
-const platformCliHost = new PlatformCliHost({
+const platformCliHost: PlatformCliHost = new PlatformCliHost({
   store:new PlatformCliStore(APP_DATA_DIR),
-  executable:provider=>{const name=({github:'gh',vercel:'vercel',supabase:'supabase','google-workspace':'gws'})[provider];return resolveLocalExecutable(name,[join(homedir(),'.local/bin',name),'/opt/homebrew/bin/'+name,'/usr/local/bin/'+name]);},
+  executable:provider=>{
+    const name=({github:'gh',vercel:'vercel',supabase:'supabase','google-workspace':'gws'})[provider],shims=join(APP_DATA_DIR,'platform-cli-v1','shims');
+    const found=resolveLocalExecutable(name,[join(homedir(),'.local/bin',name),'/opt/homebrew/bin/'+name,'/usr/local/bin/'+name]);
+    // A PATH taken from a login shell starts with AgentsToZ's own shims; the app always runs the real CLI.
+    return found&&dirname(found)===shims?platformCliRealExecutable(provider,process.env,shims):found;
+  },
   resolveProject:async(targetId,folderPath)=>{
     let target=await resolveAgentRuntimeRegisteredTarget(targetId);
     if(folderPath&&realpathSync(folderPath)!==target.cwd){
@@ -9164,7 +9282,15 @@ const platformCliHost = new PlatformCliHost({
     }
     return {id:targetId,cwd:target.cwd,label:target.projectLabel};
   },
+  // Vercel rotates refresh tokens: while an account is this Mac's live login, its one copy is the native folder.
+  nativeVercelConfig:(account):Promise<string|null>=>platformNativeSwitch(platformCliHost).vercelLive(account),
 });
+registerPlatformNativeSwitch(platformCliHost,new PlatformNativeSwitch(platformCliHost,{git:GIT_PATH}));
+// A project's own CLI account in every terminal and in git, not only Workrooms (docs/platform-cli-accounts.md).
+// Only the installed app applies the default by itself; a dev or test server waits until the person turns it on.
+registerPlatformCliEverywhere(platformCliHost,new PlatformCliEverywhere({store:platformCliHost.store,launcher:agentsToZUseMcpLauncherPath(homedir()),git:GIT_PATH,
+  executable:provider=>platformCliHost.deps.executable(provider),autoApply:IS_BUNDLED_API_SIDECAR}));
+setTimeout(()=>{void platformCliEverywhere(platformCliHost)?.reconcile('start').then(s=>{if(s.message)console.warn('[CLI 계정] 어디서든 적용:',s.message);}).catch(error=>console.warn('[CLI 계정] 어디서든 적용 확인 실패:',error instanceof Error?error.message:error));},5_000).unref?.();
 const onboardingCloudHost = new OnboardingCloudHost(join(APP_DATA_DIR,'helpdesk','onboarding'),createOnboardingCloudEffects(platformCliHost,{
   configured:()=>!!readPortalJson(PORTAL_DATA_FILE).supabaseUrl||!!loadServiceRoleKey(APP_DATA_DIR),
   connected:job=>readPortalJson(PORTAL_DATA_FILE).supabaseUrl===`https://${job.ref}.supabase.co`&&!!loadServiceRoleKey(APP_DATA_DIR),
@@ -9198,7 +9324,8 @@ const workroomConversationService = new WorkroomConversationService({
   contexts: () => aiTerminalService.historySessions(),
   prepare: record => aiTerminalService.prepareHistoryContext(record),
   launch: (record,requestId,cols,rows,historyResume) => aiTerminalService.perform({operation:'start',requestId,
-    targetId:record.targetId,agent:record.agent,accountId:record.accountId,cols,rows},undefined,{historyResume}),
+    targetId:record.targetId,agent:record.agent,accountId:record.accountId,cols,rows},undefined,{historyResume,
+      ...(historyResume.launchModel?{launchModel:historyResume.launchModel}:{}),...(historyResume.startGuard?{startGuard:historyResume.startGuard}:{}),...(historyResume.startEffectGate?{startEffectGate:historyResume.startEffectGate}:{})}),
 });
 // Phone history list/resume over the same local review → execute path; see src/workroomHistoryRemoteHost.ts.
 const remoteWorkroomHistory = createRemoteWorkroomHistoryHost(workroomConversationService);
@@ -9213,8 +9340,38 @@ const workroomRemoteAttachments = new WorkroomRemoteAttachmentLedger({
   resolveTarget: targetId => resolveAiTerminalRegisteredTarget(targetId),
   log: line => console.log(line),
 });
+/** Local and Supabase project memory agree (the dock's native /compact·/clear and the Workroom's verifyContextSync). */
+async function verifyContextMemorySynced(cwd:string){
+  const local=detectProjectMemory(cwd);
+  if(!local.exists||!local.config)throw Error('프로젝트 기억을 확인하지 못했습니다.');
+  const remote=await remoteProjectMemoryStatus({portalDataFile:PORTAL_DATA_FILE,folderPath:local.projectRoot});
+  if(resolveProjectMemorySyncDirection({localExists:true,localContentHash:local.contentHash??null,lastSyncedHash:local.config.lastSyncedHash??null,localUpdatedAt:local.modifiedAt||local.config.lastUpdatedAt||null,autoBackup:true,remote:{kind:'ready',status:remote}})!=='synced')throw Error('로컬·Supabase 기억의 동기화 완료를 확인하지 못했습니다. 컨텍스트를 유지합니다.');
+}
+/** Orca Claude rows of the dock: the server finds the terminal again from the row's own capture (src/contextOrcaCommand.ts). */
+const contextOrcaHost:ContextOrcaHost={
+  snapshot:readClaudeContextSnapshot,
+  sessionState:()=>readOrcaWorkspaceSessionState(ORCA_LOCAL_PROFILE_DIR),
+  cli:()=>IS_WIN?null:resolveOrcaCli(),
+  run:async(cli,args,timeoutMs)=>{
+    const r=await nodeOrcaRun(cli,[...args,'--json'],timeoutMs,'/'),parsed=r.ok?parseCliJsonOutput(r.stdout):null;
+    if(!parsed)throw Error('Orca 실행 결과를 확인하지 못했습니다.');
+    return parsed;
+  },
+  verifyMemory:async snapshot=>{
+    const folder=typeof snapshot.projectDir==='string'&&snapshot.projectDir?snapshot.projectDir:typeof snapshot.cwd==='string'&&snapshot.cwd?snapshot.cwd:null;
+    if(!folder)throw Error('이 대화의 프로젝트 폴더를 확인하지 못했습니다. 명령을 보내지 않았습니다.');
+    const local=detectProjectMemory(folder);
+    if(!local.exists||!local.config)throw Error('이 프로젝트의 장기기억을 확인하지 못했습니다. 명령을 보내지 않았습니다.');
+    if(local.activity.needsRemember)throw Error('저장할 새 활동이 있습니다. 먼저 「지금 저장」과 「동기화」를 마치세요. 명령을 보내지 않았습니다.');
+    await verifyContextMemorySynced(folder);
+  },
+  journal:()=>workroomConversationService.submissionJournal(),
+  lock:withOrcaLock,
+};
 const aiTerminalService: AiTerminalService = createProjectAgentTerminal({appDataDir: APP_DATA_DIR, dependencies: {
   history: workroomConversationService,
+  // A project's own CLI account inside its Workrooms: shims and git's helper ask at each call, never a token in env.
+  cliAccountEnvironment:({cwd,env})=>platformCliWorkroomEnvironment({shimDirectory:join(platformCliHost.store.root,'shims'),launcher:agentsToZUseMcpLauncherPath(homedir()),cwd,env,git:GIT_PATH,executable:provider=>platformCliHost.deps.executable(provider)}),
   threadInput:(sessionId,text,revision)=>workroomThreadService.linkedSession(sessionId)?workroomThreadService.prepareInput(sessionId,text,revision):Promise.resolve(undefined),
   threadQuestion:(id,rows,revision)=>workroomThreadService.linkedSession(id)?workroomThreadService.questionScreen(id,rows,revision):Promise.resolve(),
   threadCompleted:(id,completion,revision,active)=>workroomThreadService.linkedSession(id)?workroomThreadService.completed(id,completion,revision,active):Promise.resolve(),
@@ -9228,12 +9385,12 @@ const aiTerminalService: AiTerminalService = createProjectAgentTerminal({appData
     return prepareProjectMemoryCorrectionTask(cwd,text);
   },
   accounts: cliAccountManager,
-  verifySavedBeforeClose:async(session,requestId,owner)=>{
-    const receipt=mobileWorkspaceJobs.receipt(owner+':workroom:'+session.id,session.targetId,requestId);
-    if(!receipt?.result.localSaved||receipt.binding!==session.inputRevision)throw new Error('현재 입력까지 저장된 결과가 확인되지 않아 터미널을 유지합니다.');
-    const target=await resolveAiTerminalRegisteredTarget(session.targetId);
-    if(realpathSync(target.cwd)!==session.cwd||!receipt.evidence||projectMemoryCloseEvidence(session.cwd)!==receipt.evidence)throw new Error('저장 이후 활동 또는 프로젝트 변경이 있습니다. 다시 저장 후 종료하세요.');
-  },
+  verifyContextSync:verifyContextMemorySynced,
+  // Close compares the whole project; the dock's /compact·/clear only this conversation (src/workroomSavedReceipt.ts).
+  verifySavedBeforeClose:(session,requestId,owner,purpose='close')=>verifyWorkroomSaveReceipt({purpose,inputRevision:session.inputRevision,
+    receipt:mobileWorkspaceJobs.receipt(owner+':workroom:'+session.id,session.targetId,requestId),
+    sameFolder:async()=>realpathSync((await resolveAiTerminalRegisteredTarget(session.targetId)).cwd)===session.cwd,
+    projectEvidence:()=>projectMemoryCloseEvidence(session.cwd)}),
 
   resolveTarget: resolveAiTerminalRegisteredTarget,
   resolveUseReference: async (projectId, serviceKey) => {
@@ -9307,6 +9464,14 @@ const workroomThreadService:WorkroomThreadService=new WorkroomThreadService({
     },
   }),
 });
+const workroomScheduleHost=new WorkroomScheduleHost(new WorkroomScheduleStore(APP_DATA_DIR),
+  createWorkroomScheduleAdapter(aiTerminalService,workroomConversationService),
+  {enabled:()=>!remoteControlApiShutdown&&(IS_BUNDLED_API_SIDECAR||process.env.AGENTSTOZ_WORKROOM_SCHEDULES==='1')});
+process.once('exit',()=>workroomScheduleHost.dispose());
+// Registration requires the native app's session policy AND native composer witness. A gateway connection,
+// installed executable, or a user-supplied adapter name is not sufficient evidence to register an Auto adapter.
+const desktopEffortHost=new DesktopEffortHost();
+process.once('exit',()=>desktopEffortHost.dispose());
 // Other devices' OPS tasks run only in the installed app's sidecar (or with AGENTSTOZ_OPS_REQUESTS=1):
 // a source or worktree server shares the real app data and must not recover or start that work.
 const OPS_REQUESTS_ENABLED=opsRequestsAllowed({bundledSidecar:IS_BUNDLED_API_SIDECAR,env:process.env});
@@ -9323,7 +9488,8 @@ const opsRequestHost=new OpsRequestHost({
   },
   peerActive:origin=>agentDialogueHost.controlPeerActive(origin.endpointId,origin.deviceId),
   start:async input=>{
-    const result=await aiTerminalService.perform({operation:'start',...input,cols:100,rows:28,bypassPermissions:false});
+    // No bypass. Only the AgentsToZ tools a handover needs skip the CLI's per-tool approval (opsWorkerToolApproval.ts).
+    const result=await aiTerminalService.perform({operation:'start',...input,cols:100,rows:28,bypassPermissions:false},undefined,{opsWorker:true});
     if(!result.session)throw Error('OPS 워크룸 시작 영수증이 없습니다.');return result.session;
   },
   inspect:async(sessionId,targetId)=>{
@@ -9350,6 +9516,15 @@ const workroomSharedShell = new WorkroomSharedShell({
   resolveTarget: resolveAiTerminalRegisteredTarget,
   runningSession: id => aiTerminalService.runningSession(id),
 });
+let computerUseRuntime:ComputerUseRuntime|null=null;
+let computerUseRecovery:ComputerUseRecovery|null=null;
+function currentComputerUseRuntime(){
+  // callerHost: a connection's own host app (process ancestry of its loopback socket) is never a computer use target.
+  return computerUseRuntime??=new ComputerUseRuntime(inheritedComputerUseMainLink??{available:false,request:async()=>({success:false,code:'signed-main-link-required',notDispatched:true}),dispose(){}},computerUseRecovery??=new ComputerUseRecovery(join(APP_DATA_DIR,'computer-use-recovery.sqlite')),
+    {callerHost:createComputerCallerHostResolver()});
+}
+const computerUseReaper=setInterval(()=>computerUseRuntime?.reap(),10000);computerUseReaper.unref();
+process.once('exit',()=>{clearInterval(computerUseReaper);computerUseRuntime?.dispose();computerUseRecovery?.close();});
 const workroomBrowserRecovery=new WorkroomBrowserRecovery(join(APP_DATA_DIR,'workroom-browser-recovery.sqlite'));
 const workroomBrowserHost=new WorkroomBrowserHost({runningSession:id=>aiTerminalService.runningSession(id),recovery:workroomBrowserRecovery});
 const workroomBrowserReaper=setInterval(()=>workroomBrowserHost.reap(),60000);workroomBrowserReaper.unref();
@@ -9371,7 +9546,31 @@ const agentsToZUseReuseLedger = new WorkroomRequestLedger<{
   /** Settles once the first attempt chose a running session (null: none, so it started one with this requestId). */
   choice: Promise<{sessionId: string; targetId: string} | null>;
 }>(AGENTSTOZ_USE_WORKROOM_LEDGER_LIMITS);
-const agentsToZUseKeyLedger = new WorkroomRequestLedger<{fingerprint: string; sequences: (string | undefined)[]}>(AGENTSTOZ_USE_WORKROOM_LEDGER_LIMITS);
+const agentsToZUseKeyLedger = new WorkroomRequestLedger<{fingerprint: string; result: Promise<Awaited<ReturnType<typeof aiTerminalService.perform>>>}>(AGENTSTOZ_USE_WORKROOM_LEDGER_LIMITS);
+// Independent MCP key requests for the same PTY must not interleave between screen checks and writes.
+// This queue does not exclude the person's input or other input paths, which retain their own authority.
+const agentsToZUseKeyQueues = new Map<string, {tail: Promise<void>; pending: number}>();
+// Keep the observation across separate requests as well as within one request. Never silently
+// evict a live session's unresolved navigation: doing so would let a later Enter bypass it.
+const agentsToZUseKeyNavigation = new Map<string, {cursor: number; selection: string | null; ambiguous: boolean}>();
+function agentsToZUseSelectedRow(rows: readonly string[]): string | null {
+  return rows.map(row => row.replace(/[│┃║╭╮╰╯─━═┌┐└┘├┤┬┴┼▌▐]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean).slice(-14).map(row => /^[❯›>▶➤]\s*(.+)$/.exec(row)?.[1] ?? null).filter(Boolean).at(-1) ?? null;
+}
+function queueAgentsToZUseKeys<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  let queue = agentsToZUseKeyQueues.get(sessionId);
+  if (!queue) { queue = {tail: Promise.resolve(), pending: 0}; agentsToZUseKeyQueues.set(sessionId, queue); }
+  if (queue.pending >= 32) return Promise.reject(new AgentsToZUseControlError('이 워크룸의 키 입력 대기열이 가득 찼습니다.', 'AGENTSTOZ_USE_WORKROOM_KEYS_BUSY', 409));
+  queue.pending++;
+  const current = queue;
+  const result = current.tail.then(run);
+  current.tail = result.then(() => undefined, () => undefined);
+  void current.tail.then(() => {
+    current.pending--;
+    if (current.pending === 0 && agentsToZUseKeyQueues.get(sessionId) === current) agentsToZUseKeyQueues.delete(sessionId);
+  });
+  return result;
+}
 /**
  * The session and text a send_workroom_instruction requestId was first sent with. Its whole-request submission
  * id is derived from the requestId and the chosen session, so without this a retry that picked another session
@@ -9594,7 +9793,11 @@ function workroomTeams(): WorkroomTeamService {
       return {opened:true,surface:plan.scope.surface,taskApplied:false};
     },
   });
-  workroomTeamBridge=createTeamRuntimeBridge({journal,runtime,hostInstanceId:teamHostInstanceId,binding});
+  const inspectAfterHostRestart=createTeamOrcaRecoveryInspect({resolveOrcaCli,runOrca,bindingStillMatches:ref=>{
+    const b=binding(ref.teamId,ref.memberId);
+    return !!b&&b.active&&b.targetId===ref.targetId&&b.cwd===ref.cwd&&b.agent===ref.agent&&b.surface===ref.surface&&b.generation===ref.generation;
+  }});
+  workroomTeamBridge=createTeamRuntimeBridge({journal,runtime,hostInstanceId:teamHostInstanceId,binding,inspectAfterHostRestart});
   return workroomTeamService = new WorkroomTeamService(createWorkroomTeamHost({
     gitPath: GIT_PATH, terminal: aiTerminalService,
     resolveProject: async portId => { const project = await resolveRegisteredUseProject(portId); return {projectId: project.projectId, projectName: project.projectName, canonicalPath: project.canonicalPath}; },
@@ -9603,6 +9806,11 @@ function workroomTeams(): WorkroomTeamService {
     withLease: (path, label, work) => withManagedWorkspaceLease(path, label, () => work()),
     externalRuntime:workroomTeamBridge,
     createExternalWorktree,
+    // The same read as 「AI별 MCP 사용 설정」: only a known not-configured AI is told to write its result for the leader.
+    teamTool: async agent => {
+      const connection = await controlProfileConnections().inspect(agent);
+      return connection.state === 'configured' ? 'connected' : connection.state === 'not-configured' ? 'missing' : 'unknown';
+    },
   }), store);
 }
 function agentsToZUseCallerSession(hint: WorkroomCallerHint): AiTerminalSummary | null {
@@ -9775,6 +9983,27 @@ const helpdeskHost=new HelpdeskHost(helpdeskDirectory,{
     return result.finalSummary;
   },
 });
+// 헬프데스크 도움받기: its own built-in browser host (no Workroom). The view's session is accepted only while the run
+// that chose this browser is unfinished; its run id is the target, so another run never inherits the page.
+let helpdeskAssist:HelpdeskAssistHost|null=null;
+const helpdeskAssistBrowserHost=new WorkroomBrowserHost({runningSession:id=>{if(id!==HELPDESK_ASSIST_SESSION||!helpdeskAssist)return null;const run=helpdeskAssist.activeOwnedRun();return run?{targetId:run}:null;}});
+try{
+  helpdeskAssist=new HelpdeskAssistHost({store:new HelpdeskAssistStore(helpdeskDirectory),
+    drivers:{ego:()=>new EgoAssistDriver(),agentstoz:()=>new OwnedAssistDriver(helpdeskAssistBrowserHost)},
+    // Sign-in status from each official CLI (Codex: the onboarding login host's own probe); a runtime compatibility probe is not a sign-in.
+    verify:createAssistVerifier({platform:value=>handlePlatformCliRequest(platformCliHost,platformGithubPush,value),ai:createAssistAiStatus({claude:()=>helpdeskClaude.check(),codex:{executable:()=>resolveCodexLoginExecutable(),probe:createCodexLoginEffects(APP_DATA_DIR).probe}})}),
+    planner:{claude:(prompt,signal)=>helpdeskClaude.answer(prompt,signal),claudeState:async()=>{const s=await helpdeskClaude.check();return s==='unsupported'?'unknown':s;}},
+    browser:async(runId,request)=>{
+      const workspaceId=helpdeskAssistBrowserHost.trustedWorkspace(HELPDESK_ASSIST_SESSION);
+      const value=request.operation==='connect-owned'?{operation:'connect-owned',sessionId:HELPDESK_ASSIST_SESSION,targetId:runId,port:request.port,pageId:request.pageId}
+        :!workspaceId?null:request.operation==='select'?{operation:'select',workspaceId,pageId:request.pageId,confirmProfile:true}:{operation:request.operation,workspaceId};
+      if(!value)return {success:true};
+      const result=await helpdeskAssistBrowserHost.perform(value);
+      // The panel shows who holds the page and where; page text and element lists stay in the host.
+      if(result.success&&result.workspace){delete (result.workspace as any).observation;delete result.workspace.activity;}
+      return result;
+    }});
+}catch(error){console.error('[helpdesk-assist] storage unavailable:',error instanceof Error?error.message:error);}
 const remoteTerminalGrantStore=new PrivateRemoteTerminalGrantStore(APP_DATA_DIR);
 function remoteTerminalBinding(owner:string):RemoteTerminalGrantBinding|null {
   if(owner.startsWith('lan:')) {
@@ -9978,6 +10207,8 @@ const mobileWorktreeCleanup=new MobileWorktreeCleanup(runGitForStatus,async path
 const mobileWorkspaceJobs=new MobileWorkspaceJobs(join(APP_DATA_DIR,'mobile-workspace-jobs'));
 const remoteControlTerminalGateway=createMobileWorkspaceGateway({testerSupported:true,terminal:remoteControlBaseTerminalGateway,
   history:(request,targetId,owner,access)=>remoteWorkroomHistory({action:request.workspace.action,history:request.workspace.history},targetId,owner,access),active:owner=>remoteTerminalBinding(owner)!==null,resolve:resolveRemoteControlTaskTargetAuthorities,consent:resolveMobileDeviceConsent,perform:performMobileWorkspace,
+  // 휴대폰 홈의 「주간 잔여」 — 릴레이 폴링을 붙잡지 않도록 마지막 status() 스냅샷으로 답하고 새로 읽기는 최대 2초만 기다린다.
+  weeklyUsage:createWeeklyUsageRemoteReader({status:()=>weeklyUsageHost.status()}),
   deviceMemory:(request,owner,active,canImport)=>metaCommonMemoryRemoteHost.perform(owner,request,active,'device',canImport),
   metaMemory:(request,owner,active)=>metaCommonMemoryRemoteHost.perform(owner,request,active),
   commonMemory:(request,owner,active,canAdd)=>metaCommonMemoryRemoteHost.perform(owner,request,active,'cloud',canAdd),
@@ -10168,7 +10399,7 @@ async function performMobileWorkspace(request:MobileWorkspaceRequest,targetId:st
   if(action==='workroom.effort'){
     // 「에포트 자동」 (w16): this Mac's setting and, with a session of this project, its record. A phone holding the project
     // may change it; another community Mac's request never carries `set` (its executor refuses it before this point).
-    const effort=aiTerminalService.workspaceEffort({targetId,...(request.workspace.sessionId!==undefined?{sessionId:request.workspace.sessionId}:{}),...(request.workspace.set!==undefined?{set:request.workspace.set}:{}),...(request.workspace.mode!==undefined?{mode:request.workspace.mode}:{}),...(request.workspace.effortModes?{effortModes:true as const}:{})});
+    const effort=aiTerminalService.workspaceEffort({targetId,...(request.workspace.sessionId!==undefined?{sessionId:request.workspace.sessionId}:{}),...(request.workspace.set!==undefined?{set:request.workspace.set}:{}),...(request.workspace.mode!==undefined?{mode:request.workspace.mode}:{}),...(request.workspace.effortModes?{effortModes:true as const}:{}),...(request.workspace.effortExtended?{effortExtended:true as const}:{})});
     if(!active())throw new Error('모바일 작업 권한이 변경되었습니다.');
     return {kind:'workspace',action,effort};
   }
@@ -10778,6 +11009,10 @@ process.once('exit',()=>{void browserContextHost.dispose();});
 const AGENT_RUNTIME_TASK_ID_PATH_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
 function isAllowedAgentRuntimeManagementRoute(method: string, url: URL): boolean {
+  if(url.pathname===DESKTOP_EFFORT_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
+  if(url.pathname===WORKROOM_SCHEDULE_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
+  if(url.pathname===WEEKLY_USAGE_PATH)return method==='POST'&&url.search==='';
+  if(url.pathname===COMPUTER_USE_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===WORKROOM_BROWSER_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===BROWSER_CONTEXT_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===PROJECT_STATE_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
@@ -10787,7 +11022,8 @@ function isAllowedAgentRuntimeManagementRoute(method: string, url: URL): boolean
   if(url.pathname===WORKROOM_APP_DISPATCH_PATH)return method==='POST'&&url.search==='';
   if(url.pathname===WORKROOM_HISTORY_PATH)return method==='POST'&&url.search==='';
   if(url.pathname===CORRECTION_OUTCOMES_PATH)return method==='POST'&&url.search==='';
-  if (url.pathname === GEMINI_VOICE_SETTINGS_PATH || url.pathname === AI_TERMINAL_PREFIX || url.pathname === AI_TERMINAL_PREFIX+'/access' || url.pathname === AI_TERMINAL_PREFIX+'/accounts' || url.pathname === AI_TERMINAL_PREFIX+'/memory' || url.pathname === AI_TERMINAL_PREFIX+WORKROOM_IMAGE_ENDPOINT_SUFFIX || url.pathname === '/api/agent-runtime/helpdesk' || url.pathname === '/api/agent-runtime/quick-labels' || url.pathname === WORKROOM_TEAM_PANEL_PATH || url.pathname === HERMES_VARIANTS_PATH || url.pathname === '/api/agent-runtime/cs-duty') return method === 'POST' && url.search === '';
+  if(url.pathname===MEMORY_SAVE_NOTICE_RECOVERY_PATH)return method==='POST'&&url.search==='';
+  if (url.pathname === CONTEXT_SESSION_COMMAND_PATH || url.pathname === GEMINI_VOICE_SETTINGS_PATH || url.pathname === AI_TERMINAL_PREFIX || url.pathname === AI_TERMINAL_PREFIX+'/access' || url.pathname === AI_TERMINAL_PREFIX+'/accounts' || url.pathname === AI_TERMINAL_PREFIX+'/memory' || url.pathname === AI_TERMINAL_PREFIX+WORKROOM_IMAGE_ENDPOINT_SUFFIX || url.pathname === '/api/agent-runtime/helpdesk' || url.pathname === HELPDESK_ASSIST_PATH || url.pathname === '/api/agent-runtime/quick-labels' || url.pathname === WORKROOM_TEAM_PANEL_PATH || url.pathname === HERMES_VARIANTS_PATH || url.pathname === '/api/agent-runtime/cs-duty') return method === 'POST' && url.search === '';
   if (url.pathname === `${AGENT_RUNTIME_HTTP_PREFIX}/targets`) {
     return method === 'GET' && (url.search === '' || url.search === '?productUses=1');
   }
@@ -11465,7 +11701,6 @@ interface ResolvedWhatISaidProject {
   location: WhatISaidLocation;
 }
 
-const lastWhatISaidScanByMemoryId = new Map<string, WhatISaidTranscriptCollectionResult>();
 
 /**
  * The global What-I-said view used to resolve every registered project before
@@ -12422,7 +12657,7 @@ function formatWhatISaidPublicStatus(
   status: WhatISaidStatus,
   cryptoState: 'ready' | 'unavailable' | 'not-initialized' = 'ready',
 ) {
-  const scan = lastWhatISaidScanByMemoryId.get(project.location.memoryId) ?? null;
+  const scan = whatISaidScanSummary([project]);
   return {
     enabled: status.enabled,
     enabledAt: status.enabledAt,
@@ -12430,8 +12665,8 @@ function formatWhatISaidPublicStatus(
     analysisAllowed: status.analysisAllowed,
     count: status.counts.active,
     lastCaptureAt: status.lastCaptureAt,
-    scan: scan ? {
-      complete: scan.scanAdvanced && scan.unreadable === 0 && !scan.hasMore,
+    scan: typeof scan?.complete === 'boolean' ? {
+      complete: scan.complete,
       unreadable: scan.unreadable,
       withheld: scan.withheld,
     } : null,
@@ -12461,10 +12696,13 @@ function whatISaidPublicStatus(project: ResolvedWhatISaidProject) {
 
 async function captureRegisteredWhatISaid(
   folderPath: unknown,
-  options: { onlyIfConfigured?: boolean; backfill?: boolean; skipRemotePush?: boolean; background?: boolean } = {},
+  options: { onlyIfConfigured?: boolean; backfill?: boolean; backfillContinuation?: boolean; skipRemotePush?: boolean; background?: boolean; scanDeadlineAt?: number; backfillBinding?: { enabledAt: string | null; retention: ReturnType<typeof readWhatISaidStatus>['retention'] }; onBackfillBinding?: (binding: { enabledAt: string | null; retention: ReturnType<typeof readWhatISaidStatus>['retention'] }) => void } = {},
 ): Promise<WhatISaidTranscriptCollectionResult | null> {
   const project = await resolveRegisteredWhatISaidProject(folderPath);
-  const shared = await sharedWhatISaidCapturePolicy(project);
+  const shared = await sharedWhatISaidCapturePolicy(project, { forceFresh: options.backfill === true });
+  if (options.backfill === true && !shared.ready && !whatISaidLocalOnlyConfiguration()) {
+    throw whatISaidRequestError('WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE', '공유 저장 동의를 확인할 수 없어 과거 가져오기를 중단했습니다. 연결을 확인한 뒤 다시 요청해 주세요.', 503);
+  }
   if (shared.ready && shared.policy?.configured) {
     applyWhatISaidSharedPolicyToLocalProject(project, shared.policy);
     if (!shared.policy.enabled) return null;
@@ -12516,6 +12754,10 @@ async function captureRegisteredWhatISaid(
     };
   }
   const status = readWhatISaidStatus(project.location);
+  if (options.backfillBinding && (!status.enabled || status.enabledAt !== options.backfillBinding.enabledAt || status.retention !== options.backfillBinding.retention)) {
+    throw whatISaidRequestError('WHAT_I_SAID_CONSENT_CHANGED', '저장 동의 또는 보존 기간이 변경되어 과거 가져오기를 중단했습니다. 다시 확인해 주세요.', 409);
+  }
+  if (status.enabled && options.backfill === true) options.onBackfillBinding?.({ enabledAt: status.enabledAt, retention: status.retention });
   if (!status.enabled) return {
     enabled: false,
     enabledAt: status.enabledAt,
@@ -12549,37 +12791,102 @@ async function captureRegisteredWhatISaid(
       additionalClaudeProjectsDirs:cliAccountManager.transcriptDirectories('claude'),
       additionalCodexSessionsDirs:cliAccountManager.transcriptDirectories('codex'),
       ...(options.backfill === true ? { backfill: true } : {}),
+      ...(options.backfill === true && options.backfillContinuation === true ? { backfillContinuation: true } : {}),
+      ...(options.scanDeadlineAt !== undefined ? { scanDeadlineAt: options.scanDeadlineAt } : {}),
     });
-    lastWhatISaidScanByMemoryId.set(project.location.memoryId, result);
     if (result.budgetExhausted && !options.background) scheduleWhatISaidCaptureFollowUp(project.location.projectRoot);
-    // 원격 적재는 수집 뒤에 붙는다. 실패해도 수집 결과를 되돌리지 않는다 —
-    // 커서를 원격에서 되읽으므로 다음 수집이 밀린 분을 그대로 따라잡는다.
-    //
-    // 순환 수집(15초)이 매번 원격을 두드리지 않도록 두 겹으로 거른다:
-    // ① 차단기가 열려 있으면(최근 원격 실패) 건너뛴다 — 밀린 분은 게이트가 기억한다.
-    // ② 새로 저장한 것이 없고 로컬 seq 도 올린 지점을 넘지 않았으면 건너뛴다.
-    if (!options.skipRemotePush && !whatISaidRemoteBreaker.isOpen()) {
-      const memoryId = project.location.memoryId;
-      const probe = probeWhatISaidMaxSeqReadOnly(project.location);
-      const localMaxSeq = probe.readable ? probe.maxSeq : null;
-      if (whatISaidRemotePushGate.shouldPush(memoryId, { stored: result.stored, localMaxSeq })) {
-        try {
-          const push = await whatISaidRemoteMutations.run(
-            memoryId,
-            () => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project)),
-          );
-          recordWhatISaidPushOutcome(memoryId, localMaxSeq, push);
-          if (push.error) devLog(`[WhatISaidRemote] push failed: ${push.error}`);
-        } catch (error: any) {
-          whatISaidRemotePushGate.recordFailure(memoryId);
-          devLog(`[WhatISaidRemote] push threw: ${error?.message ?? String(error)}`);
-        }
-      }
-    }
+    if (!options.skipRemotePush) await pushWhatISaidAfterCapture(project, result.stored);
     return result;
   } finally {
     key.fill(0);
   }
+}
+
+/**
+ * One upload inside a request that has a deadline (a manual sync or an explicit
+ * import). The wait for this memory's mutation queue and the wait for the
+ * cross-sidecar file lock both end at `deadlineAt`, and the push does not start
+ * reading the remote after it. `null` means it did not start: nothing was
+ * uploaded and nothing was learned about the remote, so callers record no
+ * outcome. Remote calls already started are not interrupted; each has its own
+ * 8 s timeout.
+ */
+async function pushWhatISaidRemoteBefore(
+  project: ResolvedWhatISaidProject,
+  options: { explicit?: boolean; deadlineAt: number },
+): Promise<WhatISaidRemotePushResult | null> {
+  if (Date.now() >= options.deadlineAt) return null;
+  try {
+    const push = await whatISaidRemoteMutations.run(
+      project.location.memoryId,
+      () => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project, options), options.deadlineAt),
+      { waitUntil: options.deadlineAt },
+    );
+    return push.notStarted ? null : push;
+  } catch (error) {
+    if (error instanceof WhatISaidRemoteWaitExpiredError) return null;
+    throw error;
+  }
+}
+
+// 원격 적재는 수집 뒤에 붙는다. 실패해도 수집 결과를 되돌리지 않는다 —
+// 커서를 원격에서 되읽으므로 다음 수집이 밀린 분을 그대로 따라잡는다.
+//
+// 순환 수집(15초)이 매번 원격을 두드리지 않도록 두 겹으로 거른다:
+// ① 차단기가 열려 있으면(최근 원격 실패) 건너뛴다 — 밀린 분은 게이트가 기억한다.
+// ② 새로 저장한 것이 없고 로컬 seq 도 올린 지점을 넘지 않았으면 건너뛴다.
+// `deadlineAt`이 있으면 `pushWhatISaidRemoteBefore`로 그 시각 안에서만 한다 — 남은 분은 게이트가 기억한다.
+async function pushWhatISaidAfterCapture(project: ResolvedWhatISaidProject, stored: number, deadlineAt?: number): Promise<void> {
+  if (whatISaidRemoteBreaker.isOpen()) return;
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) return;
+  const memoryId = project.location.memoryId;
+  const probe = probeWhatISaidMaxSeqReadOnly(project.location);
+  const localMaxSeq = probe.readable ? probe.maxSeq : null;
+  if (!whatISaidRemotePushGate.shouldPush(memoryId, { stored, localMaxSeq })) return;
+  try {
+    const push = deadlineAt === undefined
+      ? await whatISaidRemoteMutations.run(
+        memoryId,
+        () => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project)),
+      )
+      : await pushWhatISaidRemoteBefore(project, { deadlineAt });
+    // Not started before the request deadline: nothing is recorded, so the gate still sees those rows as pending.
+    if (!push) return;
+    recordWhatISaidPushOutcome(memoryId, localMaxSeq, push);
+    if (push.error) devLog(`[WhatISaidRemote] push failed: ${push.error}`);
+  } catch (error: any) {
+    whatISaidRemotePushGate.recordFailure(memoryId);
+    devLog(`[WhatISaidRemote] push threw: ${error?.message ?? String(error)}`);
+  }
+}
+
+async function captureExplicitWhatISaidBackfill(folderPath: string, options: {
+  skipRemotePush: boolean;
+  signal?: AbortSignal;
+  /** Collection stops cooperatively here (and within the runner's own 15 s). */
+  captureDeadlineAt?: number;
+  /** The one upload after collection stops between pages here. */
+  pushDeadlineAt?: number;
+}) {
+  let binding: { enabledAt: string | null; retention: ReturnType<typeof readWhatISaidStatus>['retention'] } | undefined;
+  const result = await runWhatISaidExplicitBackfill(async (deadlineAt, pass) => {
+    return captureRegisteredWhatISaid(folderPath, {
+      // Passes never upload. Pushing after each of up to 32 passes ignored the
+      // request deadline; one bounded upload follows the whole request below.
+      backfill: true, background: true, skipRemotePush: true,
+      backfillContinuation: pass > 0,
+      scanDeadlineAt: deadlineAt,
+      ...(binding ? { backfillBinding: binding } : {}),
+      onBackfillBinding: current => { binding ??= current; },
+    });
+  }, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.captureDeadlineAt !== undefined ? { deadlineAt: options.captureDeadlineAt } : {}),
+  });
+  if (!options.skipRemotePush && result?.enabled && !options.signal?.aborted) {
+    await pushWhatISaidAfterCapture(await resolveRegisteredWhatISaidProject(folderPath), result.stored, options.pushDeadlineAt);
+  }
+  return result;
 }
 
 interface WhatISaidManualSyncItem {
@@ -12588,63 +12895,121 @@ interface WhatISaidManualSyncItem {
   captured: number;
   pushed: number;
   error: string | null;
+  code?: string;
+  incomplete?: boolean;
+  budgetInsufficient?: boolean;
+  verificationUncertain?: boolean;
+  /** Not started within this request; it is listed in the response continuation. */
+  deferred?: boolean;
+  /** The raw upload failure, separate from the capture reason in `code`. */
+  remoteError?: string;
+  /** The upload stopped at the request deadline or was not started; a later sync continues it. */
+  uploadIncomplete?: boolean;
 }
 
 async function syncRegisteredWhatISaid(input: {
   memoryIds: unknown;
   backfill?: boolean;
+  signal?: AbortSignal;
 }): Promise<{
   requested: number;
   succeeded: number;
   captured: number;
   pushed: number;
   items: WhatISaidManualSyncItem[];
+  /** Memories this request did not start. Sending them again continues the same user request. */
+  continuation: { memoryIds: string[] } | null;
 }> {
   const projects = await resolveRegisteredWhatISaidTargets(input.memoryIds);
-  const items: WhatISaidManualSyncItem[] = [];
-  for (const project of projects) {
-    try {
-      const captured = await captureRegisteredWhatISaid(project.location.projectRoot, {
-        ...(input.backfill === true ? { backfill: true } : {}),
-        skipRemotePush: true,
-      });
-      if (!captured?.enabled) {
-        throw whatISaidRequestError(
-          'WHAT_I_SAID_CAPTURE_DISABLED',
-          `${project.name} 장기기억의 프롬프트 저장을 먼저 켜세요.`,
-          409,
-        );
+  // The desktop panel reaches this route through the management proxy's 35 s
+  // read timeout. Memories share one deadline instead of ~15 s + an upload each.
+  const deferred = (project: ResolvedWhatISaidProject, reason: 'deadline' | 'aborted'): WhatISaidManualSyncItem => ({
+    memoryId: project.location.memoryId,
+    name: project.name,
+    captured: 0,
+    pushed: 0,
+    incomplete: true,
+    deferred: true,
+    code: 'WHAT_I_SAID_SYNC_DEFERRED',
+    error: reason === 'aborted'
+      ? '요청 연결이 끊겨 이 장기기억은 시작하지 않았습니다.'
+      : '이번 요청 시간 안에 시작하지 못했습니다. 이어서 요청하면 진행합니다.',
+  });
+  const batch = await runWhatISaidSyncBatch(projects, {
+    ...(input.signal ? { signal: input.signal } : {}),
+    defer: deferred,
+    run: async (project, window): Promise<WhatISaidManualSyncItem> => {
+      try {
+        const captured = input.backfill === true
+          ? await captureExplicitWhatISaidBackfill(project.location.projectRoot, {
+            skipRemotePush: true,
+            ...(input.signal ? { signal: input.signal } : {}),
+            captureDeadlineAt: window.captureDeadlineAt,
+          })
+          : await captureRegisteredWhatISaid(project.location.projectRoot, { skipRemotePush: true, scanDeadlineAt: window.captureDeadlineAt });
+        if (!captured?.enabled) {
+          // A dropped request returns before the first pass. That is not a
+          // disabled store and must not tell the user to turn saving on.
+          if (input.signal?.aborted) return deferred(project, 'aborted');
+          throw whatISaidRequestError(
+            'WHAT_I_SAID_CAPTURE_DISABLED',
+            `${project.name} 장기기억의 프롬프트 저장을 먼저 켜세요.`,
+            409,
+          );
+        }
+        // 사용자가 누른 동기화는 차단기와 게이트를 무시하고 항상 시도한다. 결과는 반영한다.
+        // 요청 기한 안에 시작하지 못하면(기한이 지났거나 큐·잠금 대기가 기한에 걸림) null — 다음 동기화가 원격 커서부터 이어 올린다.
+        const probe = probeWhatISaidMaxSeqReadOnly(project.location);
+        const localMaxSeq = probe.readable ? probe.maxSeq : null;
+        const remote = await pushWhatISaidRemoteBefore(project, { explicit: true, deadlineAt: window.pushDeadlineAt });
+        if (remote) recordWhatISaidPushOutcome(project.location.memoryId, localMaxSeq, remote);
+        const outcome = input.backfill === true ? whatISaidBackfillOutcome(captured) : { complete: true as const };
+        const remoteError = remote?.error ?? null;
+        // A started push confirmed the upload applies. One that never started
+        // says "unfinished" only when that is known without the network.
+        const uploadIncomplete = !remoteError && (remote
+          ? remote.attempted && remote.complete === false
+          : whatISaidUnstartedUploadPending({
+            remoteConfigured: !whatISaidLocalOnlyConfiguration() && whatISaidDeviceIdentity().deviceId !== null,
+            excludedMemoryIds: whatISaidRemoteExclusionsCache.peek() ?? null,
+            memoryId: project.location.memoryId,
+            mayHaveRowsToUpload: whatISaidRemotePushGate.shouldPush(project.location.memoryId, { stored: captured.stored, localMaxSeq }),
+          }));
+        return {
+          memoryId: project.location.memoryId,
+          name: project.name,
+          captured: captured.stored,
+          pushed: remote?.pushed ?? 0,
+          incomplete: !outcome.complete,
+          budgetInsufficient: captured.minimumBudgetInsufficient === true,
+          verificationUncertain: captured.verificationUncertain === true,
+          ...(!outcome.complete ? { code: outcome.code } : remoteError ? { code: 'WHAT_I_SAID_REMOTE_PUSH_FAILED' } : {}),
+          ...(remoteError ? { remoteError } : {}),
+          ...(uploadIncomplete ? { uploadIncomplete: true } : {}),
+          error: [remoteError, outcome.complete ? null : outcome.error].filter(Boolean).join(' ') || null,
+        };
+      } catch (error: any) {
+        return {
+          memoryId: project.location.memoryId,
+          name: project.name,
+          captured: 0,
+          pushed: 0,
+          error: typeof error?.message === 'string' ? error.message : '업데이트·동기화를 완료하지 못했습니다.',
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        };
       }
-      // 사용자가 누른 동기화는 차단기와 게이트를 무시하고 항상 시도한다. 결과는 반영한다.
-      const probe = probeWhatISaidMaxSeqReadOnly(project.location);
-      const remote = await whatISaidRemoteMutations.run(
-        project.location.memoryId,
-        () => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project, { explicit: true })),
-      );
-      recordWhatISaidPushOutcome(project.location.memoryId, probe.readable ? probe.maxSeq : null, remote);
-      items.push({
-        memoryId: project.location.memoryId,
-        name: project.name,
-        captured: captured.stored,
-        pushed: remote.pushed,
-        error: remote.error,
-      });
-    } catch (error: any) {
-      items.push({
-        memoryId: project.location.memoryId,
-        name: project.name,
-        captured: 0,
-        pushed: 0,
-        error: typeof error?.message === 'string' ? error.message : '업데이트·동기화를 완료하지 못했습니다.',
-      });
-    }
-  }
+    },
+  });
+  const items = batch.items;
   return {
     requested: items.length,
     succeeded: items.filter(item => item.error === null).length,
     captured: items.reduce((total, item) => total + item.captured, 0),
     pushed: items.reduce((total, item) => total + item.pushed, 0),
     items,
+    continuation: !input.signal?.aborted && batch.remaining.length
+      ? { memoryIds: batch.remaining.map(project => project.location.memoryId) }
+      : null,
   };
 }
 
@@ -12769,6 +13134,8 @@ interface WhatISaidProjectListScan {
   items: WhatISaidLocalListItem[];
   scannedBeforeSeq: string | null;
   hasUnscanned: boolean;
+  clockAt: number | null;
+  clockReversed: boolean;
 }
 
 interface WhatISaidGlobalCursorPayload {
@@ -13084,26 +13451,41 @@ function compareWhatISaidItemsNewest(a: WhatISaidLocalListItem, b: WhatISaidLoca
 }
 
 function whatISaidScanSummary(projects: readonly ResolvedWhatISaidProject[]) {
+  const observedAt = Date.now();
   let unreadable = 0;
   let withheld = 0;
+  let historicalWithheld = 0;
   let complete = true;
   let found = false;
+  let unknown = false;
+  const revisions: string[] = [];
+  let scannedThrough: string | null = null;
+  let nextExpiryAt: string | null = null;
   for (const project of projects) {
-    const scan = lastWhatISaidScanByMemoryId.get(project.location.memoryId);
-    if (!scan) continue;
+    const scan = probeWhatISaidCollectionReadOnly({ ...project.location, now: new Date(observedAt).toISOString(), scope: whatISaidCollectionScope({
+      projectRoot: project.location.projectRoot,
+      additionalClaudeProjectsDirs: cliAccountManager.transcriptDirectories('claude'),
+      additionalCodexSessionsDirs: cliAccountManager.transcriptDirectories('codex'),
+    }) });
+    if (!scan) { unknown = true; continue; }
     found = true;
+    revisions.push(scan.revision);
+    if (typeof scan.complete !== 'boolean') unknown = true;
     unreadable += scan.unreadable;
     withheld += scan.withheld;
-    if (scan.unreadable > 0 || !scan.scanAdvanced) complete = false;
+    historicalWithheld += scan.historicalWithheld;
+    if (scan.complete === false || scan.unreadable > 0 || scan.withheld > 0) complete = false;
+    if (scan.scannedThrough && (!scannedThrough || scan.scannedThrough < scannedThrough)) scannedThrough = scan.scannedThrough;
+    if (scan.nextExpiryAt && (!nextExpiryAt || scan.nextExpiryAt < nextExpiryAt)) nextExpiryAt = scan.nextExpiryAt;
   }
-  return found ? { complete, unreadable, withheld } : null;
+  return found ? { ...(!complete ? { complete: false } : !unknown ? { complete: true } : {}), unreadable, withheld,
+    revision: createHash('sha256').update(JSON.stringify(revisions.sort())).digest('hex'), scannedThrough, historicalWithheld, nextExpiryAt, observedAt } : null;
 }
 
 /**
  * 라이브러리가 얼마나 오래됐는지의 근거는 저장소에 남은 `last_capture_at` 하나다.
- * 위의 `whatISaidScanSummary`가 보는 `lastWhatISaidScanByMemoryId`는 이 프로세스가
- * 사는 동안만 남으므로 sidecar를 다시 띄우면 비고, 그러면 "몇 주 동안 수집이 없었다"와
- * "방금 켰다"가 같은 화면이 된다 — 오래된 라이브러리가 정상으로 보이던 바로 그 실패다.
+ * 수집 완료 근거는 별도 영속 receipt로 읽는다. 여기서는 완료 여부를 추측하지 않고
+ * 최근 수집 시각만 읽는다. 시각이 존재한다는 사실만으로 정상 수집을 단정할 수 없다.
  *
  * 하나도 읽지 못했으면 null(=모름)을 돌려준다. 화면은 그때 "아직 수집된 적 없음"이라고
  * 단정하지 않는다. 범위가 비어 있을 때도 할 말이 없으므로 null이다.
@@ -13146,6 +13528,7 @@ function listWhatISaidProjectMatches(input: {
   filter: WhatISaidListFilter;
   key?: Buffer;
   opaqueId?: string;
+  clockAt?: number;
 }): WhatISaidProjectListScan {
   if (!input.preserveExpired) purgeExpiredWhatISaidEntries(input.project.location);
   const key = input.key ?? whatISaidProductionKey(input.project.location);
@@ -13156,13 +13539,24 @@ function listWhatISaidProjectMatches(input: {
     let scanned = 0;
     let scannedBeforeSeq: string | null = beforeSeq;
     let hasUnscanned = false;
+    let clockAt: number | null = input.clockAt ?? null;
+    let clockReversed = false;
     while (items.length < input.limit + 1 && scanned < WHAT_I_SAID_LOCAL_SCAN_LIMIT) {
-      const pageSize = Math.min(200, WHAT_I_SAID_LOCAL_SCAN_LIMIT - scanned);
+      // With no filters, every decrypted row is a match: at most limit + 1
+      // rows are needed to produce this page and establish whether more exist.
+      // Filtered searches still scan full batches to find sparse matches.
+      const unfiltered = !input.filter.query && !input.filter.agent && !input.filter.origin;
+      const pageSize = Math.min(200, WHAT_I_SAID_LOCAL_SCAN_LIMIT - scanned,
+        unfiltered ? input.limit + 1 - items.length : 200);
+      const observedAt = Date.now();
+      if (clockAt !== null && observedAt < clockAt) clockReversed = true;
+      clockAt = clockAt === null ? observedAt : Math.max(clockAt, observedAt);
       const page = listRecentWhatISaidEntries({
         ...input.project.location,
         key,
         beforeSeq,
         limit: pageSize,
+        now: new Date(observedAt).toISOString(),
       });
       if (!page.items.length) {
         hasUnscanned = false;
@@ -13192,7 +13586,7 @@ function listWhatISaidProjectMatches(input: {
       if (!hasUnscanned || items.length >= input.limit + 1) break;
       beforeSeq = page.nextBeforeSeq;
     }
-    return { project: input.project, opaqueId, items, scannedBeforeSeq, hasUnscanned };
+    return { project: input.project, opaqueId, items, scannedBeforeSeq, hasUnscanned, clockAt, clockReversed };
   } finally {
     key.fill(0);
   }
@@ -13351,7 +13745,15 @@ function listLocalRegisteredWhatISaid(input: {
       return { items: [], nextBeforeSeq: null, hasMore: false, scan: null, capture, source: 'local' as const };
     }
     const beforeSeq = whatISaidSequence(input.beforeSeq);
-    const scan = listWhatISaidProjectMatches({ project, beforeSeq, limit, filter, preserveExpired: input.preserveExpired });
+    const beforeCollection = whatISaidScanSummary([project]);
+    const scan = listWhatISaidProjectMatches({ project, beforeSeq, limit, filter, preserveExpired: input.preserveExpired, clockAt: beforeCollection?.observedAt });
+    const afterCollection = whatISaidScanSummary([project]);
+    // A row can expire between these independent SQLite reads without an epoch
+    // change; the bracket preserves the earlier bound as well as mutations.
+    const bracket = bracketUserMemoryHistoryScan(beforeCollection, afterCollection);
+    const collection = bracket && { ...bracket, clockGuard: scan.clockReversed
+      || (scan.clockAt !== null && afterCollection !== null && afterCollection.observedAt < scan.clockAt)
+      ? 'reversed' as const : bracket.clockGuard };
     const items = scan.items.slice(0, limit);
     const nextBeforeSeq = scan.items.length > limit
       ? items.at(-1)?.seq ?? null
@@ -13362,7 +13764,7 @@ function listLocalRegisteredWhatISaid(input: {
       items,
       nextBeforeSeq,
       hasMore: nextBeforeSeq !== null,
-      scan: whatISaidScanSummary([project]),
+      scan: collection,
       capture,
       source: 'local' as const,
     };
@@ -13462,6 +13864,8 @@ function scheduleWhatISaidCaptureFollowUp(folderPath: string): void {
 }
 
 const REMOTE_CONTROL_MANAGEMENT_PATHS = new Set([
+  '/api/remote-control/codex-new/review',
+  '/api/remote-control/codex-new/resolve',
   '/api/remote-control/status',
   '/api/remote-control/interfaces',
   '/api/remote-control/enable',
@@ -13883,13 +14287,18 @@ const WHAT_I_SAID_REMOTE_FILE_LOCK = join(APP_DATA_DIR, 'what-i-said-remote.lock
 
 /** Serialize the remote mutation and its local consequence across sidecars
  * sharing this app-data authority. The in-process memory lock is always outer;
- * every push/delete call uses that same order to avoid lock inversion. */
-async function withWhatISaidRemoteFileLock<T>(operation: () => Promise<T>): Promise<T> {
+ * every push/delete call uses that same order to avoid lock inversion.
+ * Without `waitUntil` the lock is waited on for about 30 s. With it, a lock that
+ * stays busy until then throws WhatISaidRemoteWaitExpiredError and the
+ * operation does not run. */
+async function withWhatISaidRemoteFileLock<T>(operation: () => Promise<T>, waitUntil?: number): Promise<T> {
   const release = await acquireOwnedFileLock(WHAT_I_SAID_REMOTE_FILE_LOCK, {
-    attempts: 1_500,
-    retryMs: 20,
+    attempts: whatISaidRemoteFileLockAttempts(waitUntil),
+    retryMs: WHAT_I_SAID_REMOTE_FILE_LOCK_RETRY_MS,
     staleAfterMs: 60_000,
     label: 'what-i-said remote mutation',
+  }).catch(error => {
+    throw whatISaidRemoteFileLockFailure(error, waitUntil);
   });
   try {
     return await operation();
@@ -14009,6 +14418,18 @@ interface WhatISaidSharedPolicyRead {
   error: string | null;
 }
 
+/** Only an entirely unconfigured host is local-only; invalid/partial setup fails closed. */
+function whatISaidLocalOnlyConfiguration(): boolean {
+  try {
+    const portal = readPortalJson(PORTAL_DATA_FILE);
+    const value = portal.supabaseUrl;
+    const hasUrl = typeof value === 'string' ? value.trim().length > 0 : value != null;
+    return !hasUrl && !loadServiceRoleKey(APP_DATA_DIR) && !existsSync(serviceRoleKeyPath(APP_DATA_DIR));
+  } catch {
+    return false;
+  }
+}
+
 const WHAT_I_SAID_SHARED_POLICY_CACHE_MS = 15_000;
 const whatISaidSharedPolicyCache = new Map<string, {
   expiresAt: number;
@@ -14021,6 +14442,7 @@ function invalidateWhatISaidSharedPolicyCache(): void {
 
 async function readWhatISaidSharedCapturePolicies(
   memoryIds: readonly string[],
+  options: { forceFresh?: boolean } = {},
 ): Promise<WhatISaidSharedPolicyRead> {
   const unique = [...new Set(memoryIds.map(value => value.trim()).filter(Boolean))];
   if (!unique.length) return { ready: true, policies: new Map(), error: null };
@@ -14028,10 +14450,10 @@ async function readWhatISaidSharedCapturePolicies(
   const cacheKey = unique.join('\0');
   const now = Date.now();
   const cached = whatISaidSharedPolicyCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
+  if (!options.forceFresh && cached && cached.expiresAt > now) {
     return cached.value;
   }
-  if (cached) whatISaidSharedPolicyCache.delete(cacheKey);
+  if (cached && cached.expiresAt <= now) whatISaidSharedPolicyCache.delete(cacheKey);
   const sb = await whatISaidRemoteClient();
   if (!sb) return { ready: false, policies: new Map(), error: 'Supabase 연결 정보가 없습니다.' };
   const { data, error } = await sb
@@ -14115,8 +14537,9 @@ function applyWhatISaidSharedPolicyToLocalProject(
 
 async function sharedWhatISaidCapturePolicy(
   project: ResolvedWhatISaidProject,
+  options: { forceFresh?: boolean } = {},
 ): Promise<{ ready: boolean; policy: WhatISaidSharedCapturePolicy | null; error: string | null }> {
-  const shared = await readWhatISaidSharedCapturePolicies([project.location.memoryId]);
+  const shared = await readWhatISaidSharedCapturePolicies([project.location.memoryId], options);
   const policy = shared.policies.get(project.location.memoryId) ?? null;
   return { ready: shared.ready, policy, error: shared.error };
 }
@@ -14155,13 +14578,18 @@ interface WhatISaidRemotePushResult {
   localFailure?: boolean;
   /** 밀린 분을 끝까지 올렸다. 페이지 상한에서 멈췄으면 false — 게이트가 다음 틱에 이어 올린다. */
   complete?: boolean;
+  /** 올릴 대상이지만 요청 기한이 지나 원격 커서를 읽기 전에 멈췄다. 아무것도 올리지 않았다. */
+  notStarted?: boolean;
 }
 
 class WhatISaidLocalPushError extends Error {}
 
 async function pushWhatISaidRemote(
   project: ResolvedWhatISaidProject,
-  options: { explicit?: boolean } = {},
+  // `deadlineAt` is checked before the remote cursor is read and between pages
+  // after the first one: an upload in a bounded request stops with
+  // `complete: false` and resumes from the remote cursor.
+  options: { explicit?: boolean; deadlineAt?: number } = {},
 ): Promise<WhatISaidRemotePushResult> {
   const idle: WhatISaidRemotePushResult = { attempted: false, pushed: 0, skipped: null, error: null };
   const local = readWhatISaidRemotePolicy();
@@ -14174,6 +14602,10 @@ async function pushWhatISaidRemote(
     explicit: options.explicit,
   });
   if (!enabled) return { ...idle, skipped: 'disabled' };
+  // A host with no Supabase target at all has nowhere to upload. Reading the
+  // cloud exclusion list there fails, and every manual sync was reported as an
+  // upload failure. A partial setup still fails closed below.
+  if (whatISaidLocalOnlyConfiguration()) return { ...idle, skipped: 'no-credentials' };
   let policy: WhatISaidRemotePolicy;
   try {
     policy = { enabled, excludedMemoryIds: [...await readWhatISaidRemoteExclusions()] };
@@ -14187,6 +14619,9 @@ async function pushWhatISaidRemote(
   if (!identity.deviceId) return { ...idle, skipped: 'no-credentials' };
   const sb = await whatISaidRemoteClient();
   if (!sb) return { ...idle, skipped: 'no-credentials' };
+  // The request deadline passed (for example while this push waited for the
+  // lock): reading the cursor and the first page would run past it.
+  if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) return { ...idle, notStarted: true };
 
   const key = whatISaidProductionKey(project.location);
   try {
@@ -14194,6 +14629,7 @@ async function pushWhatISaidRemote(
     let pushed = 0;
     let complete = false;
     for (let guard = 0; guard < 200; guard += 1) {
+      if (guard > 0 && options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) break;
       let page: ReturnType<typeof listWhatISaidEntries>;
       let rows: ReturnType<typeof whatISaidRemoteRow>[];
       try {
@@ -14224,7 +14660,8 @@ async function pushWhatISaidRemote(
     // 이 RPC 는 호출부가 없어서 서버 쪽 "90일 보관"이 사실이 아니었다. 적재를 한
     // 김에 만료분을 정리한다 — 실패는 적재 결과를 바꾸지 않는다.
     // 매 적재마다 부를 필요는 없다 — 한 시간에 한 번이면 보관 기한을 지키기에 충분하다.
-    if (whatISaidRemoteCleanupGate.tryEnter()) {
+    // 요청 기한이 지났으면 부르지 않는다(시간 문을 쓰지 않으니 다음 적재가 정리한다).
+    if ((options.deadlineAt === undefined || Date.now() < options.deadlineAt) && whatISaidRemoteCleanupGate.tryEnter()) {
       try { await sb.rpc('portmgr_what_i_said_cleanup', { p_limit: 500 }); } catch { /* 정리 실패는 무시 */ }
     }
     return { attempted: true, pushed, skipped: null, error: null, complete };
@@ -14869,23 +15306,50 @@ function remoteControlActionFailure(
 const remoteCodexFirstConversationLauncher = new CodexFirstConversationLaunchCoordinator(
   new FileCodexFirstConversationPendingStore(APP_DATA_DIR),
 );
+const remoteCodexNewChatReceipts = new CodexNewChatReceiptStore(APP_DATA_DIR);
 const remoteCodexSubmissionFence = new FileCodexFirstConversationPendingStore(
   join(APP_DATA_DIR, 'codex-desktop-submissions'),
 );
-async function prepareProjectCodexApp(folderPath: string, projectName = basename(folderPath)) {
+async function prepareProjectCodexApp(folderPath: string, projectName = basename(folderPath), intent: 'prepare-or-reopen' | 'new' = 'prepare-or-reopen', onConfirmed?: (threadId:string)=>Promise<void>, assertActive?:()=>Promise<void>) {
+  return withLockedCodexProject(folderPath,()=>{
+    const identity=projectLaunchDirectoryIdentity(folderPath);
+    return prepareProjectCodexAppLocked(folderPath,projectName,intent,onConfirmed,async()=>{
+      await assertActive?.();
+      if(projectLaunchDirectoryIdentity(folderPath)!==identity) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_PROJECT_CHANGED','프로젝트 폴더가 변경되어 새 대화를 보내지 않았습니다.');
+    });
+  });
+}
+async function withLockedCodexProject<T>(folderPath:string, operation:()=>Promise<T>):Promise<T>{
+  const identity=projectLaunchDirectoryIdentity(folderPath);
+  // Desktop automation shares one foreground app across all projects.
+  return withCodexProjectLaunchLock(APP_DATA_DIR,'codex-desktop-global-v2',async()=>{
+    if(projectLaunchDirectoryIdentity(folderPath)!==identity) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_PROJECT_CHANGED','프로젝트 폴더가 변경되어 새 대화 요청을 중단했습니다.');
+    return operation();
+  });
+}
+async function prepareProjectCodexAppLocked(folderPath: string, projectName: string, intent: 'prepare-or-reopen'|'new', onConfirmed?: (threadId:string)=>Promise<void>, assertActive?:()=>Promise<void>) {
+  if (intent !== 'new') {
+    const identity=projectLaunchDirectoryIdentity(folderPath);
+    const registrations=(await listRemoteControlRegisteredProjects()).filter(target=>{
+      const path=target.worktreePath??target.folderPath;
+      if(!path)return false;
+      try{return projectLaunchDirectoryIdentity(path)===identity;}catch{return false;}
+    }).map(target=>target.internalId);
+    if(await remoteCodexNewChatReceipts.hasBarrier(identity,registrations)) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_REVIEW_REQUIRED','이전 원격 새 대화 요청을 확인하기 전에는 새 대화를 만들 수 없습니다.');
+  }
   await ensureProjectCodexDesktopRegistration(folderPath);
   const result = await openProjectCodexWorkspace(folderPath, {
     coordinator: remoteCodexFirstConversationLauncher,
     latest: () => findLatestProjectCodexThread(folderPath),
     verify: threadId => verifyRecoveredProjectCodexThread(folderPath, threadId),
-    create: retainCreatedThread => createCodexDesktopProjectConversation({folderPath, projectName, retainCreatedThread}),
+    create: retainCreatedThread => createCodexDesktopProjectConversation({folderPath, projectName, retainCreatedThread, retainSubmissionFence:intent==='new',assertActive}),
     finalize: threadId => finalizeCodexDesktopFirstConversation({
       codexPath: resolveAgentBin('codex'), folderPath, projectName, threadId,
     }).then(() => undefined),
     open: threadId => openChatGptDeepLink(`codex://threads/${threadId}`),
-  });
-  const latest = findLatestProjectCodexThread(folderPath);
-  if (latest.state !== 'found' || verifyRecoveredProjectCodexThread(folderPath, latest.sessionId) !== 'verified') throw new ProjectCodexLaunchError();
+  }, {intent,onConfirmed});
+  // openProjectCodexWorkspace verifies the exact created/recovered thread
+  // before and after opening it; a different latest thread is not evidence.
   remoteCodexSubmissionFence.clear(folderPath);
   return { ...result, projectApplied: true, projectRegistered: true };
 }
@@ -15028,6 +15492,7 @@ function shutdownRemoteControlApi(exitCode: number): Promise<void> {
         workroomSharedShell.shutdown(),
         quickLabels.shutdown(),
         helpdeskHost.shutdown(),
+        Promise.resolve().then(()=>{helpdeskAssist?.shutdown();helpdeskAssistBrowserHost.dispose();}),
         onboardingCloudHost.shutdown(),
         agentRuntimeConversationService?.shutdown() ?? Promise.resolve(),
       ]).then(() => undefined),
@@ -15120,15 +15585,85 @@ async function withRemoteControlWorkspaceLease<T>(
   }
 }
 
-async function executeRemoteControlRegisteredProjectAction(input: RemoteControlGatewayAction): Promise<void> {
+async function executeRemoteControlRegisteredProjectAction(input: RemoteControlGatewayAction): Promise<void | {codexNewChatReceipt:{actionId:string;state:'started'|'completed'|'acknowledged'|'cancelled'}|null}> {
   const { action, target } = input;
-  if (!target.actions.includes(action)) {
+  const isCodexV2 = action === 'codex.thread.start.v2' || action === 'codex.thread.ack.v2' || action === 'codex.thread.review.v2' || action === 'codex.thread.cancel.v2';
+  if (!target.actions.includes(isCodexV2 ? 'codex.thread.start' : action as typeof target.actions[number])) {
     throw new RemoteControlError('ACTION_NOT_AVAILABLE', '현재 프로젝트 상태에서는 이 기능을 실행할 수 없습니다.', 409);
   }
   if ((action === 'start' || action === 'restart') && !target.command) {
     throw new RemoteControlError('ACTION_NOT_AVAILABLE', '이 프로젝트의 안전한 실행 명령을 확인할 수 없습니다.', 409);
   }
   const workingPath = target.worktreePath ?? target.folderPath;
+  if (isCodexV2) {
+    if(target.kind!=='main') throw new RemoteControlError('ACTION_NOT_AVAILABLE','새 Codex 대화는 기본 프로젝트에서 사용하세요. 워크트리는 안전한 복구를 준비 중입니다.',409);
+    if (!workingPath || !isAbsolute(workingPath) || !existsSync(workingPath) || !statSync(workingPath).isDirectory()
+      || !input.controllerId || !input.sessionExpiresAt) throw new RemoteControlError('ACTION_NOT_AVAILABLE','새 대화 요청의 프로젝트와 연결을 확인할 수 없습니다.',409);
+    const controllerId=input.controllerId,sessionExpiresAt=input.sessionExpiresAt;
+    try { return await withLockedCodexProject(workingPath,async()=>{
+      const folderIdentity=projectLaunchDirectoryIdentity(workingPath);
+      const projectIdentity=JSON.stringify([folderIdentity,target.internalId]);
+      const binding={controllerId,projectIdentity,folderIdentity,registrationIdentity:target.internalId};
+      if(action==='codex.thread.review.v2') return {codexNewChatReceipt:input.input
+        ? await remoteCodexNewChatReceipts.reviewExact({...binding,actionId:input.input})
+        : await remoteCodexNewChatReceipts.review(binding)};
+      if(action==='codex.thread.cancel.v2') {
+        if(!input.input) throw new RemoteControlError('INVALID_ACTION','취소할 요청 ID가 없습니다.',400);
+        await remoteCodexNewChatReceipts.cancelAbsent({...binding,actionId:input.input,expiresAt:sessionExpiresAt});
+        return;
+      }
+      if(action==='codex.thread.ack.v2') {
+        if(!input.input) throw new RemoteControlError('INVALID_ACTION','확인할 요청 ID가 없습니다.',400);
+        const threadId=await remoteCodexNewChatReceipts.threadForAcknowledgement({...binding,actionId:input.input});
+        if(verifyRecoveredProjectCodexThread(workingPath,threadId)!=='verified') throw new ProjectCodexLaunchError();
+        const hasPending=remoteCodexFirstConversationLauncher.hasConfirmedPending(workingPath,threadId);
+        if(remoteCodexSubmissionFence.load(workingPath)) {
+          if(!hasPending) throw new CodexFirstConversationRecoveryError();
+          remoteCodexSubmissionFence.clear(workingPath);
+        }
+        remoteCodexFirstConversationLauncher.clearConfirmedPending(workingPath,threadId);
+        await remoteCodexNewChatReceipts.acknowledge({...binding,actionId:input.input});
+        return;
+      }
+      const receipt=await remoteCodexNewChatReceipts.reserve({...binding,actionId:input.actionId,expiresAt:sessionExpiresAt});
+      if(!receipt.created) {
+        if(receipt.state==='cancelled') throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_NOT_SENT','이전 요청은 전송되지 않았습니다. 설정을 확인한 뒤 다시 요청하세요.');
+        if(receipt.state==='started'||!receipt.threadId) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_REVIEW_REQUIRED','이전 새 대화 요청 결과가 불확실합니다. Mac에서 확인하세요.');
+        if(verifyRecoveredProjectCodexThread(workingPath,receipt.threadId)!=='verified') throw new ProjectCodexLaunchError();
+        return;
+      }
+      // A legacy operation may already own the project. The new request has
+      // not dispatched anything yet, so remove only its unused reservation.
+      if(remoteCodexFirstConversationLauncher.hasPending(workingPath)) {
+        await remoteCodexNewChatReceipts.cancelUndispatched({...binding,actionId:input.actionId});
+        throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_NOT_SENT','이번 요청은 전송되지 않았습니다. 이전 Codex 요청을 먼저 확인하세요.');
+      }
+      try {
+        await prepareProjectCodexAppLocked(workingPath,target.name,'new',async threadId=>{
+          await remoteCodexNewChatReceipts.complete({...binding,actionId:input.actionId,threadId});
+          remoteCodexSubmissionFence.clear(workingPath);
+        },async()=>{
+          await input.assertActive?.();
+          if(projectLaunchDirectoryIdentity(workingPath)!==folderIdentity) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_PROJECT_CHANGED','프로젝트 폴더가 변경되어 새 대화를 보내지 않았습니다.');
+        });
+      } catch(error) {
+        const code=error && typeof error==='object' && 'code' in error ? String(error.code) : '';
+        const hasPending=remoteCodexFirstConversationLauncher.hasPending(workingPath),hasFence=!!remoteCodexSubmissionFence.load(workingPath);
+        if(canCancelUndispatchedCodexRequest(code,hasPending,hasFence) || (error instanceof CodexDesktopRegistrationError && !hasPending && !hasFence)) {
+          await remoteCodexNewChatReceipts.cancelUndispatched({...binding,actionId:input.actionId});
+          throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_NOT_SENT','새 대화 요청을 전송하지 못했습니다. Codex 설정을 확인한 뒤 다시 요청하세요.');
+        }
+        throw error;
+      }
+      return;
+    }); } catch(error) {
+      if(error instanceof CodexNewChatReceiptError) throw new RemoteControlError(error.code,error.message,409);
+      if(error instanceof CodexDesktopRegistrationError) throw new RemoteControlError(error.code,error.message,409);
+      if(error instanceof ProjectCodexLaunchError || error instanceof CodexFirstConversationRecoveryError) throw new RemoteControlError(error.code,error.message,409);
+      if(error instanceof CodexFirstConversationError) throw new RemoteControlError(error.code,error.publicMessage,409);
+      throw error;
+    }
+  }
   if (action === 'git.merge' || action === 'git.commit' || action === 'git.pull' || action === 'git.push'
     || action === 'worktree.add' || action === 'worktree.add.orca') {
     if (!workingPath || !isAbsolute(workingPath) || !existsSync(workingPath) || !statSync(workingPath).isDirectory()) {
@@ -15202,10 +15737,10 @@ async function executeRemoteControlRegisteredProjectAction(input: RemoteControlG
     }
     const launchStartedAt = Date.now();
     try {
-      await prepareProjectCodexApp(workingPath, target.name);
+      await prepareProjectCodexApp(workingPath, target.name, 'prepare-or-reopen', undefined, input.assertActive);
       console.info(`[RemoteControl] codex.thread.start completed actionId=${input.actionId} elapsedMs=${Date.now() - launchStartedAt}`);
     } catch (error) {
-      if (error instanceof ProjectCodexLaunchError || error instanceof CodexDesktopRegistrationError) throw new RemoteControlError(error.code, error.message, 409);
+      if (error instanceof ProjectCodexLaunchError || error instanceof CodexDesktopRegistrationError || error instanceof CodexNewChatReceiptError) throw new RemoteControlError(error.code, error.message, 409);
       if (error instanceof CodexFirstConversationOpenError) {
         console.error(`[RemoteControl] codex.thread.start failed actionId=${input.actionId} stage=exact-open code=${error.code} elapsedMs=${Date.now() - launchStartedAt}`);
         throw new RemoteControlError(error.code, error.message, 502);
@@ -15401,6 +15936,52 @@ async function handleRemoteControlManagementRequest(req: Request, pathname: stri
       throw new RemoteControlError('METHOD_NOT_ALLOWED', '원격 제어 관리는 POST 요청만 허용합니다.', 405);
     }
     const body = await readRemoteControlManagementBody(req);
+
+    if (pathname === '/api/remote-control/codex-new/review' || pathname === '/api/remote-control/codex-new/resolve') {
+      const resolving=pathname.endsWith('/resolve');
+      requireRemoteControlBodyKeys(body,resolving?['portId','expectedRevision','confirmed']:['portId']);
+      if(typeof body.portId!=='string'||!body.portId||body.portId.length>200) throw new RemoteControlError('INVALID_REQUEST','등록 프로젝트를 확인하세요.',400);
+      if(resolving && (body.confirmed!==true||typeof body.expectedRevision!=='string'||!/^[a-f0-9]{64}$/.test(body.expectedRevision))) throw new RemoteControlError('INVALID_REQUEST','표시된 요청의 확인과 기준이 필요합니다.',400);
+      const matches=(await listRemoteControlRegisteredProjects()).filter(target=>target.internalId===body.portId&&target.kind==='main');
+      const selected=matches[0];
+      if(matches.length!==1||!selected?.folderPath) throw new RemoteControlError('PROJECT_NOT_FOUND','등록된 프로젝트를 확인할 수 없습니다.',404);
+      const folder=selected.folderPath;
+      try {return await withLockedCodexProject(folder,async()=>{
+        const identity=JSON.stringify([projectLaunchDirectoryIdentity(folder),selected.internalId]), current=await remoteCodexNewChatReceipts.reviewLocal(identity);
+        if(!resolving) return json({success:true,receipt:current?{state:current.state,revision:current.revision}:null});
+        if(!current||current.revision!==body.expectedRevision) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_REVIEW_STALE','새 대화 요청이 바뀌었습니다. 다시 확인하세요.');
+        if(current.state==='started') {
+          const retained=remoteCodexFirstConversationLauncher.pendingThreadForRecovery(folder);
+          if(!retained) {
+            if(remoteCodexSubmissionFence.load(folder)) throw new CodexNewChatReceiptError('CODEX_NEW_CHAT_REVIEW_REQUIRED','이전 전송 결과가 불확실해 해제할 수 없습니다. Mac에서 결과를 확인하세요.');
+            await remoteCodexNewChatReceipts.resolveLocal(identity,current.revision,true);
+            return json({success:true});
+          }
+          // A retained ID is written only after the submitted helper returned.
+          // Never submit again: verify exact binding and durable turn completion.
+          if(verifyRecoveredProjectCodexThread(folder,retained)!=='verified') throw new ProjectCodexLaunchError();
+          await finalizeCodexDesktopFirstConversation({codexPath:resolveAgentBin('codex'),folderPath:folder,projectName:selected.name,threadId:retained,readOnly:true});
+          if(verifyRecoveredProjectCodexThread(folder,retained)!=='verified') throw new ProjectCodexLaunchError();
+          const revision=await remoteCodexNewChatReceipts.promoteLocalStarted(identity,current.revision,retained);
+          if(remoteCodexSubmissionFence.load(folder)) remoteCodexSubmissionFence.clear(folder);
+          remoteCodexFirstConversationLauncher.clearConfirmedPending(folder,retained);
+          await remoteCodexNewChatReceipts.resolveLocal(identity,revision,false);
+          return json({success:true});
+        }
+        if(!current.threadId||verifyRecoveredProjectCodexThread(folder,current.threadId)!=='verified') throw new ProjectCodexLaunchError();
+        const hasPending=remoteCodexFirstConversationLauncher.hasConfirmedPending(folder,current.threadId);
+        if(remoteCodexSubmissionFence.load(folder)) {
+          if(!hasPending) throw new CodexFirstConversationRecoveryError();
+          remoteCodexSubmissionFence.clear(folder);
+        }
+        remoteCodexFirstConversationLauncher.clearConfirmedPending(folder,current.threadId);
+        await remoteCodexNewChatReceipts.resolveLocal(identity,current.revision,false);
+        return json({success:true});
+      });} catch(error) {
+        if(error instanceof CodexNewChatReceiptError || error instanceof ProjectCodexLaunchError || error instanceof CodexFirstConversationRecoveryError) throw new RemoteControlError(error.code,error.message,409);
+        throw error;
+      }
+    }
 
     if (pathname === '/api/remote-control/internet/status') {
       requireRemoteControlBodyKeys(body, []);
@@ -16064,10 +16645,10 @@ async function openCodeAppResponse(input: unknown, headers: Record<string, strin
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'CODEX_PROJECT_PREPARE_FAILED';
         const message = error instanceof CodexFirstConversationError ? error.publicMessage
-          : error instanceof ProjectCodexLaunchError || error instanceof CodexFirstConversationOpenError
+          : error instanceof ProjectCodexLaunchError || error instanceof CodexNewChatReceiptError || error instanceof CodexFirstConversationOpenError
             || error instanceof CodexFirstConversationRecoveryError || error instanceof CodexFirstConversationPendingStoreError
             ? error.message : 'Codex 프로젝트 연결 결과를 확인하지 못했습니다. Mac의 Codex 앱 상태를 확인한 뒤 다시 시도하세요.';
-        return Response.json({success: false, projectApplied: false, code, error: message}, {status: error instanceof ProjectCodexLaunchError ? 409 : 502, headers});
+        return Response.json({success: false, projectApplied: false, code, error: message}, {status: error instanceof ProjectCodexLaunchError || error instanceof CodexNewChatReceiptError ? 409 : 502, headers});
       }
     }
 
@@ -16310,7 +16891,7 @@ const server = Bun.serve({
   // 기본 10s — Orca 재시도 체인(repo add → terminal create → send → switch, 각 단계
   // 블로킹 spawnSync + 최대 3회 재시도)이 데몬 부하 시 이를 넘겨 연결이 끊길 수 있어 상향.
   idleTimeout: 90,
-  async fetch(req) {
+  async fetch(req, bunServer) {
     const url = new URL(req.url);
 
     const requestOrigin = req.headers.get('origin');
@@ -16399,6 +16980,9 @@ const server = Bun.serve({
       });
     }
 
+    if(url.pathname===COMPUTER_USE_AGENT_PATH)return handleComputerUse(req,currentComputerUseRuntime,{agent:true,authorized:requestOrigin===null&&controlProfileHost.store.authorize(req.headers.get(CONTROL_PROFILE_HEADER)),
+      origin:computerCallerOrigin(bunServer.requestIP(req))});
+
     if(url.pathname===WORKROOM_BROWSER_AGENT_PATH){
       // A separate high-entropy, session/page/epoch-bound grant. No UI management capability is accepted here.
       return handleWorkroomBrowser(req,workroomBrowserHost,true);
@@ -16469,6 +17053,9 @@ const server = Bun.serve({
       });
     }
 
+    if(url.pathname===DESKTOP_EFFORT_PATH)return handleDesktopEffort(req,desktopEffortHost,isAgentRuntimeManagementRequest(req,url,requestOrigin));
+    if(url.pathname===WORKROOM_SCHEDULE_PATH)return handleWorkroomSchedules(req,workroomScheduleHost,isAgentRuntimeManagementRequest(req,url,requestOrigin));
+    if(url.pathname===COMPUTER_USE_PATH)return handleComputerUse(req,currentComputerUseRuntime,{agent:false,authorized:isAgentRuntimeManagementRequest(req,url,requestOrigin)});
     if(url.pathname===WORKROOM_BROWSER_PATH)return handleWorkroomBrowser(req,workroomBrowserHost);
 
     if(url.pathname===BROWSER_CONTEXT_PATH&&req.method==='POST'){
@@ -16545,6 +17132,14 @@ const server = Bun.serve({
         }
         return Response.json({...result,supported:true},{headers:{...headers,'Cache-Control':'no-store'}});
       }catch(error){return Response.json({error:error instanceof Error?error.message:'대직 요청 실패'},{status:409,headers});}
+    }
+
+    if(url.pathname===HELPDESK_ASSIST_PATH){
+      try{
+        if(!helpdeskAssist)throw Error('도움받기 기록을 열지 못했습니다. 앱을 다시 시작해 주세요.');
+        const view=await helpdeskAssist.handle(await readHelpdeskRequest(req));helpdeskAssistBrowserHost.reap();
+        return Response.json(view,{headers:{...headers,'Cache-Control':'no-store'}});
+      }catch(error){return Response.json({error:error instanceof SyntaxError?'도움받기 요청 형식을 확인하지 못했습니다.':error instanceof Error?error.message:'도움받기 요청을 확인하지 못했습니다.'},{status:409,headers:{...headers,'Cache-Control':'no-store'}});}
     }
 
     if(url.pathname==='/api/agent-runtime/helpdesk'){
@@ -16654,6 +17249,39 @@ const server = Bun.serve({
     }
 
     if(url.pathname===WORKROOM_HISTORY_PATH) return handleWorkroomConversationRequest(req,workroomConversationService,headers);
+    // Quota-only local settings connection. No caller-controlled paths, commands or credentials.
+    if(url.pathname===WEEKLY_USAGE_PATH){
+      const noStore={...headers,'Cache-Control':'no-store'};
+      if(req.method!=='POST'||url.search!=='')return Response.json({error:'지원하지 않는 사용량 요청입니다.'},{status:405,headers:noStore});
+      try{return Response.json(await weeklyUsageHost.perform(await readWeeklyUsageRequest(req)),{headers:noStore});}
+      catch(error){return Response.json({error:error instanceof Error?error.message:'주간 사용량을 확인하지 못했습니다.'},{status:400,headers:noStore});}
+    }
+    // Fixed local context actions for the dock; never opens the voice window's general terminal gateway.
+    if(url.pathname===CONTEXT_SESSION_COMMAND_PATH){
+      const noStore={...headers,'Cache-Control':'no-store'};
+      try{
+        const raw=await req.text();if(Buffer.byteLength(raw)>4096)throw Error('컨텍스트 요청이 너무 큽니다.');
+        const request=normalizeContextCommandRequest(JSON.parse(raw));
+        if(isContextOrcaRequest(request))return Response.json(await performContextOrcaCommand(contextOrcaHost,request),{headers:noStore});
+        if(request.operation==='context.save'||request.operation==='context.save-status'){
+          const binding=aiTerminalService.contextCommandBindings().find(b=>b.sessionId===request.sessionId&&b.providerSessionId===request.providerSessionId&&b.inputRevision===request.inputRevision);
+          if(!binding)throw Error('이 대화의 워크룸 연결이나 입력이 바뀌어 저장하지 않았습니다. 명령은 보내지 않았습니다.');
+          return Response.json(await performMobileWorkspace({operation:'workspace',requestId:request.operation==='context.save'?request.saveRequestId:crypto.randomUUID(),targetId:binding.targetId,
+            workspace:{action:request.operation==='context.save'?'workroom.save':'workroom.status',sessionId:binding.sessionId,...(request.operation==='context.save-status'?{saveRequestId:request.saveRequestId}:{})}},binding.targetId,'local',()=>!remoteControlApiShutdown),{headers:noStore});
+        }
+        return Response.json(await aiTerminalService.performContextCommand(request),{headers:noStore});
+      }catch(error){return Response.json({error:error instanceof Error?error.message:'컨텍스트 요청을 처리하지 못했습니다.'},{status:400,headers:noStore});}
+    }
+    if(url.pathname===MEMORY_SAVE_NOTICE_RECOVERY_PATH){
+      try{
+        const body=JSON.parse(await boundedVoiceResponse(new Response(req.body),MEMORY_SAVE_NOTICE_RECOVERY_BYTES));
+        const result=await performMemorySaveNoticeRecovery(body,request=>aiTerminalService.perform(request));
+        return Response.json(result,{headers:{...headers,'Cache-Control':'no-store'}});
+      }catch(error){
+        const known=error instanceof MemorySaveNoticeRecoveryError?error:new MemorySaveNoticeRecoveryError('MEMORY_RECOVERY_INPUT_INVALID',400);
+        return Response.json({error:known.message,code:known.code},{status:known.status,headers:{...headers,'Cache-Control':'no-store'}});
+      }
+    }
     if (url.pathname === AI_TERMINAL_PREFIX || url.pathname === AI_TERMINAL_PREFIX+'/access' || url.pathname === AI_TERMINAL_PREFIX+'/accounts' || url.pathname === AI_TERMINAL_PREFIX+'/memory') {
       try {
         const body=await req.json();
@@ -17335,13 +17963,25 @@ const server = Bun.serve({
         if (body?.backfill !== undefined && typeof body.backfill !== 'boolean') {
           throw whatISaidRequestError('WHAT_I_SAID_INPUT_INVALID', '가져오기 범위 값이 올바르지 않습니다.');
         }
+        if (body?.localOnly !== undefined && typeof body.localOnly !== 'boolean') {
+          throw whatISaidRequestError('WHAT_I_SAID_INPUT_INVALID', '로컬 수집 값이 올바르지 않습니다.');
+        }
         const project = await resolveRegisteredWhatISaidTarget(body ?? {});
-        const result = await captureRegisteredWhatISaid(project.location.projectRoot, {
-          ...(body?.backfill === true ? { backfill: true } : {}),
-        });
+        const startedAt = Date.now();
+        const result = body?.backfill === true
+          ? await captureExplicitWhatISaidBackfill(project.location.projectRoot, {
+            skipRemotePush: body?.localOnly === true,
+            signal: req.signal,
+            captureDeadlineAt: startedAt + WHAT_I_SAID_SYNC_REQUEST_BUDGET_MS - WHAT_I_SAID_SYNC_PUSH_RESERVE_MS,
+            pushDeadlineAt: startedAt + WHAT_I_SAID_SYNC_REQUEST_BUDGET_MS,
+          })
+          : await captureRegisteredWhatISaid(project.location.projectRoot, { skipRemotePush: body?.localOnly === true });
+        // An unfinished import says why, with the same codes as /sync items.
+        const outcome = body?.backfill === true ? whatISaidBackfillOutcome(result) : { complete: true as const };
         return new Response(JSON.stringify({
-          success: true,
+          success: outcome.complete,
           captured: result?.stored ?? 0,
+          ...(!outcome.complete ? { code: outcome.code, error: outcome.error } : {}),
           result,
         }), { headers: { ...headers, 'Cache-Control': 'private, no-store' } });
       } catch (error: any) {
@@ -17360,6 +18000,7 @@ const server = Bun.serve({
         }
         const result = await syncRegisteredWhatISaid({
           memoryIds: body?.memoryIds,
+          signal: req.signal,
           ...(body?.backfill === true ? { backfill: true } : {}),
         });
         return new Response(JSON.stringify({ success: result.succeeded === result.requested, ...result }), {
@@ -18551,14 +19192,6 @@ const server = Bun.serve({
             autoBackup: true,
             remote: { kind: "ready", status: remote },
           });
-          if (direction === "conflict") {
-            const result = await pullProjectMemory({
-              portalDataFile: PORTAL_DATA_FILE,
-              folderPath: binding.canonicalPath,
-              projectName: binding.projectName,
-            });
-            return new Response(JSON.stringify({ ...result, ok: false, binding, direction, action: "none", conflict: true }), { status: 409, headers });
-          }
           if (direction === "synced") {
             return new Response(JSON.stringify({ ok: true, binding, direction, action: "none", remote }), { headers });
           }
@@ -18568,21 +19201,17 @@ const server = Bun.serve({
               folderPath: binding.canonicalPath,
               projectName: binding.projectName,
             });
-            return new Response(JSON.stringify({ ok: result.success === true, binding, direction, action: "push", result }), {
-              status: (result as any).conflict ? 409 : result.success === true ? 200 : 502,
-              headers,
-            });
+            return projectMemorySyncAnswer({ direction, action: "push", result, extra: { binding }, headers });
           }
-          if (direction === "pull") {
+          // A `conflict` direction also asks Pull: it refuses to replace local memory that is not at the last
+          // agreement and returns the comparison, or adopts Supabase when there is nothing local to protect.
+          if (direction === "pull" || direction === "conflict") {
             const result = await pullProjectMemory({
               portalDataFile: PORTAL_DATA_FILE,
               folderPath: binding.canonicalPath,
               projectName: binding.projectName,
             });
-            return new Response(JSON.stringify({ ok: result.success === true, binding, direction, action: "pull", result }), {
-              status: (result as any).conflict ? 409 : result.success === true ? 200 : 502,
-              headers,
-            });
+            return projectMemorySyncAnswer({ direction, action: "pull", result, extra: { binding }, headers });
           }
           return new Response(JSON.stringify({ ok: false, binding, direction, action: "none", error: "동기화 방향을 안전하게 결정하지 못했습니다." }), { status: 409, headers });
         });
@@ -18679,6 +19308,12 @@ const server = Bun.serve({
     if (url.pathname.startsWith('/api/control-profile/')) {
       const action = url.pathname.slice('/api/control-profile/'.length);
       try {
+        if(action==='memory-conflict'){
+          if(req.method!=='POST'||url.search||!isRemoteControlManagementRequest(req,requestOrigin))
+            return Response.json({success:false,code:'CONTROL_MEMORY_REVIEW_UI_REQUIRED',error:'운영 기억 비교와 적용은 AgentsToZ 앱 화면에서 진행하세요.'},{status:403,headers:{...headers,'Cache-Control':'no-store'}});
+          const raw=await req.text();if(Buffer.byteLength(raw)>6_100_000)throw new ControlProfileError('CONTROL_PROFILE_INPUT_INVALID','운영 기억 요청 크기를 확인하세요.',413);
+          return Response.json({success:true,...await controlProfileHost.conflict(JSON.parse(raw))},{headers:{...headers,'Cache-Control':'no-store'}});
+        }
         if(action==='device-memory'){
           if(req.method!=='POST'||url.search)throw new ControlProfileError('DEVICE_MEMORY_INPUT_INVALID','이 기기의 기억 요청을 확인하세요.',400);
           const raw=await req.text();if(Buffer.byteLength(raw)>32000)throw new ControlProfileError('DEVICE_MEMORY_INPUT_INVALID','기억 요청 크기를 확인하세요.',413);
@@ -18918,7 +19553,7 @@ const server = Bun.serve({
         const request = parseAgentsToZUseActionRequest(body);
         const profileToken = req.headers.get(CONTROL_PROFILE_HEADER);
         const profileAuthorized = controlProfileHost.store.authorize(profileToken);
-        if ((request.action === 'recall-user-memory' || request.action === 'recall-user-profile' || request.action === 'read-reference') && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED', 'AgentsToZ 프로필 연결을 확인하세요.', 403);
+        if ((request.action === 'recall-user-memory' || request.action === 'list-user-memory-history' || request.action === 'recall-user-profile' || request.action === 'read-reference') && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED', 'AgentsToZ 프로필 연결을 확인하세요.', 403);
         if (profileToken && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','이 사용자의 프로필 연결을 다시 확인하세요.',403);
         if (request.target === 'ops' && !profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','OPS 열기는 이 사용자의 프로필 연결이 필요합니다.',403);
         const controller = profileAuthorized
@@ -19036,6 +19671,18 @@ const server = Bun.serve({
           const project = await resolveRegisteredUseProject(request.portId);
           if (!project.memoryId) throw new AgentsToZUseControlError('이 프로젝트의 장기기억을 먼저 연결하세요.', 'USER_MEMORY_PROJECT_REQUIRED');
           const userMemory = await recallUserInstructions({ memoryId: project.memoryId, query: request.controlQuery!, list: input => listRegisteredWhatISaid({ ...input, preserveExpired: true }) });
+          return Response.json({ success: true, performed: true, action: request.action, effect: 'read-only', userMemory }, { headers: { ...headers, 'Cache-Control': 'no-store' } });
+        }
+        if (request.action === 'list-user-memory-history') {
+          const project = await resolveRegisteredUseProject(request.portId);
+          if (!project.memoryId) throw new AgentsToZUseControlError('이 프로젝트의 장기기억을 먼저 연결하세요.', 'USER_MEMORY_PROJECT_REQUIRED');
+          let userMemory;
+          try {
+            userMemory = await listUserInstructionHistory({ memoryId: project.memoryId, ...request.userMemoryRange!, list: input => listRegisteredWhatISaid({ ...input, preserveExpired: true }) });
+          } catch (error) {
+            if (error instanceof UserMemoryHistoryCursorError) throw new AgentsToZUseControlError('이어보기 값이 만료됐거나 다른 조회 조건의 것입니다. 이 기간을 처음부터 다시 조회하세요.', 'USER_MEMORY_CURSOR_EXPIRED', 400);
+            throw new AgentsToZUseControlError('조회 기간 또는 이어보기 값이 올바르지 않습니다.', 'USER_MEMORY_RANGE_INVALID', 400);
+          }
           return Response.json({ success: true, performed: true, action: request.action, effect: 'read-only', userMemory }, { headers: { ...headers, 'Cache-Control': 'no-store' } });
         }
         if (request.action === 'get-control-profile' || request.action === 'recall-control-context' || request.action === 'list-control-memory-candidates' || request.action === 'propose-control-memory') {
@@ -19319,7 +19966,9 @@ const server = Bun.serve({
               projectId: focused.projectId,
               projectName: focused.projectName,
               focusRequested: true,
-              message: `AgentsToZ 앱을 열고 ${focused.projectName} 프로젝트 화면을 요청했습니다. 워크룸이나 AI는 실행하지 않았습니다.`,
+              foregroundConfirmed: false,
+              navigationConfirmed: false,
+              message: `AgentsToZ 앱 열기와 ${focused.projectName} 프로젝트 화면을 요청했습니다. 전면 표시와 화면 전환은 확인되지 않았습니다. 워크룸이나 AI는 실행하지 않았습니다.`,
             }, { headers });
           }
           if (request.target === 'ops') controlProfileHost.store.read();
@@ -19333,8 +19982,10 @@ const server = Bun.serve({
             performed: true,
             action: request.action,
             effect: "opened-local-app",
+            foregroundConfirmed: false,
             ...(request.target === 'ops' ? {target: 'ops', panel: 'ops', focusRequested: true} : {}),
-            message: request.target === 'ops' ? 'AgentsToZ 앱을 열고 OPS 운영 패널 포커스를 요청했습니다.' : "이 기기에서 AgentsToZ 앱을 열었습니다.",
+            ...(request.target === 'ops' ? {navigationConfirmed: false} : {}),
+            message: request.target === 'ops' ? 'AgentsToZ 앱 열기와 OPS 운영 패널 표시를 요청했습니다. 전면 표시와 화면 전환은 확인되지 않았습니다.' : "이 기기에서 AgentsToZ 앱 열기를 요청했습니다. 전면 표시는 확인되지 않았습니다.",
           }), { headers });
         }
 
@@ -19582,32 +20233,77 @@ const server = Bun.serve({
             projectId: project.projectId, projectName: project.projectName, ...body,
           }), { headers: { ...headers, "Cache-Control": "no-store" } });
           if (request.action === "send-workroom-keys") {
-            // A retry is fingerprinted by key names and replays the bytes chosen the first time, even if
-            // the CLI's cursor-key mode changed in between; a different key list under the same ID is refused.
+            // Keep the entire attempt, including a partial refusal, so concurrent calls and retries cannot
+            // resume a stopped key sequence against a different screen.
             const fingerprint = JSON.stringify([selected.id, request.keys]);
             let record = agentsToZUseKeyLedger.get(request.requestId!);
             if (record && record.fingerprint !== fingerprint) throw agentsToZUseRequestIdConflict();
-            if (!record) { record = {fingerprint, sequences: []}; agentsToZUseKeyLedger.set(request.requestId!, record); }
-            let result: Awaited<ReturnType<typeof aiTerminalService.perform>> | undefined;
-            for (const [index, key] of request.keys!.entries()) {
-              const requestId = agentsToZUseDerivedRequestId(`key${index}`, request.requestId!, selected.id);
-              if (index && !aiTerminalService.hasLocalRequest(requestId)) await Bun.sleep(WORKROOM_KEY_INTERVAL_MS);
-              let data = record.sequences[index];
-              if (data === undefined) {
-                // Arrows depend on the CLI's current cursor-key mode; every key is its own exactly-once input.
-                const modes = key === 'up' || key === 'down' || key === 'left' || key === 'right'
-                  ? await aiTerminalService.inputModes(selected.id, selected.targetId) : {};
-                data = record.sequences[index] ??= workroomKeySequence(key, modes);
-              }
-              result = await aiTerminalService.perform({ operation: 'input', requestId, sessionId: selected.id, data });
+            if (!record) {
+              const result = queueAgentsToZUseKeys(selected.id, async () => {
+                let last: Awaited<ReturnType<typeof aiTerminalService.perform>> | undefined;
+                for (const [index, key] of request.keys!.entries()) {
+                  const choosing = key === 'enter' || /^[1-9]$/.test(key);
+                  const navigating = key === 'up' || key === 'down' || key === 'left' || key === 'right' || key === 'tab';
+                  if (index) await Bun.sleep(WORKROOM_KEY_INTERVAL_MS);
+                  let screen = (choosing || navigating) ? await aiTerminalService.screenText(selected.id, selected.targetId).catch(() => null) : null;
+                  const pending = agentsToZUseKeyNavigation.get(selected.id);
+                  if (pending && (choosing || navigating && pending.selection !== null)) {
+                    const deadline = Date.now() + 1600;
+                    while (true) {
+                      // An already visible exit option is safe to refuse even if navigation is unresolved.
+                      if (choosing && screen && workroomKeyChoosesExit(screen.rows, key)) break;
+                      const selection = screen && agentsToZUseSelectedRow(screen.rows);
+                      if (!pending.ambiguous && screen && screen.nextCursor > pending.cursor && selection && selection !== pending.selection) {
+                        agentsToZUseKeyNavigation.delete(selected.id);
+                        break;
+                      }
+                      if (Date.now() >= deadline || pending.ambiguous) {
+                        throw new AgentsToZUseControlError('방향키 이후 선택 화면이 바뀌었는지 확인하지 못해 이 키와 나머지 키를 보내지 않았습니다.',
+                          'AGENTSTOZ_USE_WORKROOM_KEYS_SCREEN_UNCHANGED', 409, {keysSent: index});
+                      }
+                      await Bun.sleep(50);
+                      screen = await aiTerminalService.screenText(selected.id, selected.targetId).catch(() => null);
+                    }
+                  }
+                  if (choosing) {
+                    const readable = screen && screen.rows.some(row => row.trim());
+                    if (!readable || (screen && workroomKeyChoosesExit(screen.rows, key))) {
+                      const code = readable ? 'AGENTSTOZ_USE_WORKROOM_KEYS_WOULD_EXIT' : 'AGENTSTOZ_USE_WORKROOM_KEYS_SCREEN_UNAVAILABLE';
+                      throw new AgentsToZUseControlError(readable
+                        ? '워크룸을 종료하는 선택이어서 이 키와 나머지 키를 보내지 않았습니다.'
+                        : '워크룸 화면을 확인하지 못해 이 키와 나머지 키를 보내지 않았습니다.', code, 409, {keysSent: index});
+                    }
+                  }
+                  if (navigating) {
+                    // Bound unresolved records without forgetting any live session. Closed sessions can be discarded.
+                    if (!pending && agentsToZUseKeyNavigation.size >= 256) {
+                      for (const id of agentsToZUseKeyNavigation.keys()) if (!aiTerminalService.runningSession(id)) agentsToZUseKeyNavigation.delete(id);
+                      if (agentsToZUseKeyNavigation.size >= 256) throw new AgentsToZUseControlError('워크룸 선택 확인 대기열이 가득 찼습니다.', 'AGENTSTOZ_USE_WORKROOM_KEYS_BUSY', 409, {keysSent: index});
+                    }
+                    agentsToZUseKeyNavigation.set(selected.id, {cursor: screen?.nextCursor ?? -1,
+                      selection: screen ? agentsToZUseSelectedRow(screen.rows) : null,
+                      ambiguous: !screen || !!(pending && agentsToZUseKeyNavigation.has(selected.id))});
+                  }
+                  const modes = key === 'up' || key === 'down' || key === 'left' || key === 'right'
+                    ? await aiTerminalService.inputModes(selected.id, selected.targetId) : {};
+                  last = await aiTerminalService.perform({ operation: 'input',
+                    requestId: agentsToZUseDerivedRequestId(`key${index}`, request.requestId!, selected.id),
+                    sessionId: selected.id, data: workroomKeySequence(key, modes) });
+                }
+                return last!;
+              });
+              record = {fingerprint, result};
+              agentsToZUseKeyLedger.set(request.requestId!, record);
             }
-            return reply("sent-workroom-keys", { keys: request.keys, session: result!.session });
+            const result = await record.result;
+            return reply("sent-workroom-keys", { keys: request.keys, session: result.session });
           }
           if (request.action === "close-workroom-session") {
             const closed = await aiTerminalService.perform({
               operation: 'close', requestId: request.requestId!, sessionId: selected.id,
               ...(request.saveMemory ? {} : { memoryPolicy: 'skip' as const }),
             });
+            agentsToZUseKeyNavigation.delete(selected.id);
             return reply("closed-workroom-session", {
               session: closed.session,
               memorySave: request.saveMemory ? (codexAutoRememberCoordinator.settings().enabled ? 'queued' : 'auto-save-disabled') : 'skipped',
@@ -20176,15 +20872,6 @@ const server = Bun.serve({
           autoBackup: true,
           remote: { kind: "ready", status: remote },
         });
-        if (direction === "conflict") {
-          const result = await pullProjectMemory({
-            portalDataFile: PORTAL_DATA_FILE,
-            folderPath: local.projectRoot,
-            projectName: body.projectName,
-            githubUrl: body.githubUrl,
-          });
-          return new Response(JSON.stringify({ ...result, ok: false, direction, action: "none", conflict: true }), { status: 409, headers });
-        }
         if (direction === "synced") {
           return new Response(JSON.stringify({ ok: true, direction, action: "none", remote }), { headers });
         }
@@ -20196,22 +20883,18 @@ const server = Bun.serve({
             githubUrl: body.githubUrl,
           });
           if (result.success === true) queueEnabledProjectMemoryPrivateGitHubArchive(local.projectRoot);
-          return new Response(JSON.stringify({ ok: result.success === true, direction, action: "push", result }), {
-            status: (result as any).conflict ? 409 : result.success === true ? 200 : 502,
-            headers,
-          });
+          return projectMemorySyncAnswer({ direction, action: "push", result, headers });
         }
-        if (direction === "pull") {
+        // A `conflict` direction also asks Pull: it refuses to replace local memory that is not at the last
+        // agreement and returns the comparison, or adopts Supabase when there is nothing local to protect.
+        if (direction === "pull" || direction === "conflict") {
           const result = await pullProjectMemory({
             portalDataFile: PORTAL_DATA_FILE,
             folderPath: local.projectRoot,
             projectName: body.projectName,
             githubUrl: body.githubUrl,
           });
-          return new Response(JSON.stringify({ ok: result.success === true, direction, action: "pull", result }), {
-            status: (result as any).conflict ? 409 : result.success === true ? 200 : 502,
-            headers,
-          });
+          return projectMemorySyncAnswer({ direction, action: "pull", result, headers });
         }
         return new Response(JSON.stringify({ ok: false, direction, action: "none", error: "동기화 방향을 안전하게 결정하지 못했습니다." }), { status: 409, headers });
       } catch (error: any) {
@@ -21680,6 +22363,18 @@ const server = Bun.serve({
         return new Response(JSON.stringify(result), { headers });
       } catch (error: any) {
         return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+      }
+    }
+
+    // Read-only comparison for the dock's 「비교·해결」: no identity claim, schema repair, Pull, ledger sync or write.
+    // The choice that follows goes through resolve-conflict below, guarded by the hashes and revision shown here.
+    if (url.pathname === "/api/project-memory/conflict-preview" && req.method === "POST") {
+      try {
+        const body = await readMemoryParams(req, url);
+        const result = await previewProjectMemoryConflict({ portalDataFile: PORTAL_DATA_FILE, folderPath: body.folderPath });
+        return new Response(JSON.stringify(result), { headers });
+      } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message, code: error.code }), { status: 500, headers });
       }
     }
 
@@ -24871,9 +25566,11 @@ end try`);
 
     if (url.pathname === "/api/clone-repository" && req.method === "POST") {
       try {
-        const { repositoryUrl, folderPath } = await req.json() as {
+        const { repositoryUrl, folderPath, githubAccountId } = await req.json() as {
           repositoryUrl?: unknown;
           folderPath?: unknown;
+          /** The GitHub account the new project chose; a private repository is read with it, never another. */
+          githubAccountId?: unknown;
         };
         const cloneUrl = typeof repositoryUrl === "string" ? repositoryUrl.trim() : "";
         const target = typeof folderPath === "string" ? folderPath.trim() : "";
@@ -24902,10 +25599,25 @@ end try`);
             `.agentstoz-staging-${basename(target) || 'repository'}-${crypto.randomUUID()}`,
           );
           let published = false;
+          // An https github.com clone for a project that chose its GitHub account reads with that account only:
+          // git asks this one helper (the list is reset first), and the token lives only in git's environment.
+          let accountToken: string | null = null;
+          if (typeof githubAccountId === 'string' && githubAccountId && githubAccountId !== PLATFORM_CLI_DEFAULT_ACCOUNT && /^https:\/\/github\.com\//i.test(cloneUrl)) {
+            try {
+              const account = await platformCliHost.account(githubAccountId, 'github');
+              accountToken = await platformCliHost.using(account, {id:'clone', cwd:parentPath, label:'clone'}, [], async execution => execution.env.GH_TOKEN ?? null);
+            } catch (error) {
+              return new Response(JSON.stringify({ success: false, error: `선택한 GitHub 계정을 확인하지 못했습니다. 다른 계정으로 복제하지 않았습니다. ${platformCliPublicError(error)}` }), { status: 400, headers });
+            }
+            if (!accountToken) return new Response(JSON.stringify({ success: false, error: '선택한 GitHub 계정을 확인하지 못했습니다. 다른 계정으로 복제하지 않았습니다.' }), { status: 400, headers });
+          }
+          const accountHelper = accountToken
+            ? ["-c", "credential.https://github.com.helper=", "-c", 'credential.https://github.com.helper=!f() { cat >/dev/null; test "$1" = get || exit 0; echo username=x-access-token; echo "password=$AGENTSTOZ_CLONE_GITHUB_TOKEN"; }; f']
+            : [];
           try {
             // 자격증명 프롬프트가 GUI에는 뜨지 않는다. 물어보게 두면 요청이 그냥 매달려 있다가
             // 타임아웃으로 죽고, 사용자는 이유를 알 수 없다. 물어보지 말고 즉시 실패시킨다.
-            const proc = Bun.spawn([GIT_PATH, "clone", "--", cloneUrl, stagingPath], {
+            const proc = Bun.spawn([GIT_PATH, ...accountHelper, "clone", "--", cloneUrl, stagingPath], {
               stdout: "pipe",
               stderr: "pipe",
               env: {
@@ -24914,6 +25626,7 @@ end try`);
                 GIT_ASKPASS: "",
                 SSH_ASKPASS: "",
                 GIT_SSH_COMMAND: "ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new",
+                ...(accountToken ? { AGENTSTOZ_CLONE_GITHUB_TOKEN: accountToken } : {}),
               },
             });
             const stdoutDone = new Response(proc.stdout).text();
@@ -27618,7 +28331,7 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
       try {
         const dir = join(APP_DATA_DIR, 'context');
         const now = Date.now();
-        const claudeSnapshotRows = existsSync(dir) ? readdirSync(dir)
+        const claudeSnapshots = existsSync(dir) ? readdirSync(dir)
           .filter((f: string) => f.endsWith('.json'))
           .map((f: string) => {
             const full = join(dir, f);
@@ -27665,10 +28378,17 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
               };
             } catch { return null; }
           })
-          .filter((row): row is NonNullable<typeof row> => (
-            row !== null && !!row.session.sessionId && row.session.usedPercent !== null
-          ))
+          .filter((row): row is NonNullable<typeof row> => row !== null && !!row.session.sessionId)
           : [];
+        // After /clear the same terminal's capture appears under a new session ID — often before its first reply, so
+        // before it has a reading of its own. Match successors over every capture, then list only rows with a reading.
+        const nextClaudeConversation = nextClaudeConversations(claudeSnapshots
+          .filter(({ session }) => isSafeContextSessionId(session.sessionId))
+          .map(({ session, launchContext }) => ({
+            sessionId: session.sessionId, capturedAt: session.capturedAt, usedPercent: session.usedPercent,
+            usedTokens: session.usedTokens, launchContext,
+          })));
+        const claudeSnapshotRows = claudeSnapshots.filter(({ session }) => session.usedPercent !== null);
 
         // Codex stores session metadata at the start of each rollout and the current
         // context count near its tail. Read bounded head/tail slices so the five-second
@@ -27716,7 +28436,7 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
               const tokenEvent = summary?.tokenEvent ?? null;
               // Subagent rollouts are implementation detail and would swamp the human
               // session list. Their parent Codex app session remains visible.
-              if (!meta || meta.thread_source === 'subagent') continue;
+              if (!meta || isInternalContextSessionSource(meta.thread_source)) continue;
               const sessionId = typeof meta.id === 'string'
                 ? meta.id
                 : typeof meta.session_id === 'string' ? meta.session_id : null;
@@ -27865,8 +28585,12 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
             session.sessionId,
           );
           const metadata = readClaudeSessionMetadata(session.sessionId);
+          const nextConversation = nextClaudeConversation.get(session.sessionId);
           return {
             ...session,
+            // What the dock reads to tell a /compact or /clear outcome (src/contextCommandOutcome.ts). Local API only.
+            ...(metadata?.lastCompaction ? { lastCompaction: metadata.lastCompaction } : {}),
+            ...(nextConversation ? { nextConversation } : {}),
             // `projectDir` is the repository root, while `cwd` may legitimately
             // be a subdirectory. Preserve the actual initial cwd so the UI does
             // not report a project move just because Claude started in /src.
@@ -27877,6 +28601,10 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
             ...classifyClaudeSessionOrigin(launchContext, runtimeFacts),
             navigation: resolveClaudeSessionNavigation(launchContext, runtimeFacts),
             surfacePresence: claudeSurfaceInspection.presence.get(session.sessionId) ?? 'not-applicable',
+            // The Workroom its environment named: copy only (src/contextSessionCommandAvailability.ts), never a binding.
+            ...(isSafeContextSessionId(launchContext?.agentstozWorkroomSessionId)
+              ? { workroomSessionId: launchContext.agentstozWorkroomSessionId }
+              : {}),
           };
         });
         // A Codex CLI session lives in a process; when none exists the row is a
@@ -28362,7 +29090,7 @@ const agentDialogueMaintenanceTimer=setInterval(()=>{
   if(!remoteControlApiShutdown)void agentDialogueHost.maintenance().catch(error=>{
     devLog(`[AgentDialogue] retention tick failed: ${error instanceof Error?error.message:String(error)}`);
   });
-},10*60_000);
+},AGENT_DIALOGUE_HEARTBEAT_MS);
 (agentDialogueMaintenanceTimer as any).unref?.();
 setInterval(()=>{if(!remoteControlApiShutdown)void tickSdkManagement().catch(()=>undefined);},60_000).unref();
 // Auto-join runs far more often than retention: a paired peer's room has to be answered within
@@ -28446,7 +29174,7 @@ const whatISaidRetentionTimer = setInterval(() => {
 let threadCheckpointTickRunning=false;
 async function tickWorkroomMemory(){
   if(threadCheckpointTickRunning)return;threadCheckpointTickRunning=true;threadCheckpointObservations=null;
-  try{await workroomThreadService.checkpointTick();await codexAutoRememberCoordinator.tick();}
+  try{await workroomScheduleHost.tick();await workroomThreadService.checkpointTick();await codexAutoRememberCoordinator.tick();}
   finally{threadCheckpointObservations=null;threadCheckpointTickRunning=false;}
 }
 const codexAutoRememberTimer = setInterval(() => {void tickWorkroomMemory().catch(()=>{});}, 15_000);

@@ -199,6 +199,20 @@ test('restart plan: the replaced launch\'s tier is kept and the CLI-side checks 
 /** 팀 작전 (src/workroomTeam.ts): the brief's shared rules mention security, merging and conflicts for every member. */
 const BRIEF = '[AgentsToZ 팀 작전 · 팀원 m1]\n규칙: 보안 키를 유출하지 말고, 충돌은 리더가 해결합니다.';
 
+test('explicit model-specific efforts reach each CLI and remain pinned on restart', async () => {
+  const f = fixture({auto:false, codex:{ok:true,model:'gpt-6.1-sol',allowed:['low','medium','high','xhigh','max']}});
+  const claude = await f.member('claude', BRIEF, {launchModel:{model:'claude-opus-5-5'},launchEffort:{pinned:'max'}});
+  expect(flag(f.spawns[0], '--model')).toBe('claude-opus-5-5');
+  expect(flag(f.spawns[0], '--effort')).toBe('max');
+  await f.member('codex', BRIEF, {launchModel:{model:'gpt-6.1-sol'},launchEffort:{pinned:'xhigh'}});
+  expect(f.spawns[1]).toContain('model_reasoning_effort="xhigh"');
+  await f.member('agy', BRIEF, {launchModel:{model:'gemini-4-argon-high'},launchEffort:{pinned:'high'}});
+  expect(flag(f.spawns[2], '--model')).toBe('gemini-4-argon-high');
+  expect(flag(f.spawns[2], '--effort')).toBe('high');
+  await f.start('claude', undefined, {resumeFrom:claude.id});
+  expect(flag(f.spawns[3], '--effort')).toBe('max');
+});
+
 test('a team member\'s pinned effort is passed whatever the Mac setting, kept by a restart and reported as a level without a tier', async () => {
   const f = fixture({auto: false});
   const pinned = await f.member('claude', BRIEF, {launchEffort: {pinned: 'low'}});
@@ -210,9 +224,9 @@ test('a team member\'s pinned effort is passed whatever the Mac setting, kept by
   const restarted = await f.start('claude', undefined, {resumeFrom: pinned.id});
   expect(flag(f.spawns[1], '--effort')).toBe('low');
   expect(await f.record(restarted.id)).toMatchObject({level: 'low', origin: 'restart'});
-  // Antigravity takes effort in its model name; nothing else may carry it, and a pin is refused off the team path.
+  // A pinned Antigravity level is passed only by the host's team launch path.
   await f.member('agy', BRIEF, {launchEffort: {pinned: 'high'}});
-  expect(f.spawns[2]!.includes('--effort')).toBe(false);
+  expect(flag(f.spawns[2], '--effort')).toBe('high');
   await expect(f.service.perform({operation: 'start', requestId: crypto.randomUUID(), targetId: TARGET, agent: 'claude', cols: 80, rows: 24, resumeFrom: restarted.id},
     undefined, {launchEffort: {pinned: 'high'}})).rejects.toThrow('에포트 지정은 이 Mac의 새 워크룸 시작에만');
 });
@@ -236,11 +250,38 @@ test('Codex: a model the app chose is the one proven for effort; an unproven one
   expect(f.spawns[0]!).toContain('model_reasoning_effort="high"');
   expect(flag(f.spawns[0], '-m')).toBe('gpt-6.1-sol');
   const unproven = fixture({codex: {ok: false, why: 'model'}});
-  const session = await unproven.member('codex', BRIEF, {launchModel: {model: 'gpt-next-preview'}, launchEffort: {pinned: 'high'}});
-  expect(unproven.spawns[0]!.some(arg => arg.includes('model_reasoning_effort'))).toBe(false);
-  expect(await unproven.record(session.id)).toMatchObject({skipped: 'model-unknown'});
+  await expect(unproven.member('codex', BRIEF, {launchModel: {model: 'gpt-next-preview'}, launchEffort: {pinned: 'high'}})).rejects.toThrow('고정 에포트');
+  expect(unproven.spawns).toHaveLength(0);
   const env = fixture({env: {CLAUDE_CODE_EFFORT_LEVEL: 'max'}});
-  const claude = await env.member('claude', BRIEF, {launchEffort: {pinned: 'medium'}});
-  expect(env.spawns[0]!.includes('--effort')).toBe(false);
-  expect(await env.record(claude.id)).toMatchObject({skipped: 'env-override'});
+  await expect(env.member('claude', BRIEF, {launchEffort: {pinned: 'medium'}})).rejects.toThrow('고정 에포트');
+  expect(env.spawns).toHaveLength(0);
+  const noThinking = fixture({env: {CLAUDE_CODE_DISABLE_THINKING: '1'}});
+  await expect(noThinking.member('claude', BRIEF, {launchModel:{model:'claude-opus-5-5'}, launchEffort:{pinned:'max'}})).rejects.toThrow('thinking');
+  expect(noThinking.spawns).toHaveLength(0);
+});
+
+test('Hermes with a known model and provider passes only a level its adapter carries (v0.20.5): Haiku on anthropic gets none', async () => {
+  const haiku = {model: 'claude-haiku-5-5', provider: 'anthropic'};
+  // 자동: anthropic_adapter.py sends no reasoning for a «haiku» model, so the badge must not claim a level was applied.
+  const f = fixture();
+  const auto = await f.member('hermes', BRIEF, {launchModel: haiku, launchEffort: {requestText: 'fix the deadlock in the queue'}});
+  expect(f.spawns[0]!).not.toContain('--reasoning');
+  expect(flag(f.spawns[0], '-m')).toBe('claude-haiku-5-5');
+  const record = await f.record(auto.id);
+  expect(record).toMatchObject({tier: 'high', skipped: 'model-unknown'});
+  expect(record.level).toBeUndefined();
+  // A restart keeps the same model, so it still passes nothing.
+  await f.start('hermes', undefined, {resumeFrom: auto.id});
+  expect(f.spawns[1]!).not.toContain('--reasoning');
+  // A pin the adapter would drop is refused at start, like Codex's unproven model.
+  await expect(f.member('hermes', BRIEF, {launchModel: haiku, launchEffort: {pinned: 'high'}})).rejects.toThrow('고정 에포트');
+  expect(f.spawns).toHaveLength(2);
+  // The same provider's Opus carries low…max verbatim, and a model on another provider keeps low/medium/high.
+  await f.member('hermes', BRIEF, {launchModel: {model: 'claude-opus-5-5', provider: 'anthropic'}, launchEffort: {pinned: 'max'}});
+  expect(flag(f.spawns[2], '--reasoning')).toBe('max');
+  await f.member('hermes', BRIEF, {launchModel: {model: 'claude-haiku-5-5', provider: 'openrouter'}, launchEffort: {requestText: 'rename the variable'}});
+  expect(flag(f.spawns[3], '--reasoning')).toBe('low');
+  // Hermes on its configured model (unknown here) is unchanged: 자동 still passes its level.
+  await f.start('hermes', 'rename the variable');
+  expect(flag(f.spawns[4], '--reasoning')).toBe('low');
 });

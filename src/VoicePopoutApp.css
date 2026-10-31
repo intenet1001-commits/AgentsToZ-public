@@ -6,7 +6,7 @@
 .voice-popout .az-voice-dock__call small {max-width:170px;}
 .voice-popout .az-voice-dock__controls {flex-wrap:wrap;margin-left:auto;}
 .voice-popout .az-voice-dock__picker,.voice-popout .az-voice-dock__type,.voice-popout .az-voice-dock__draft {width:100%;box-sizing:border-box;}
-.voice-popout .voice-panel {position:relative;inset:auto;width:100%;max-height:none;padding:16px;margin:0;box-shadow:none;}
+.voice-popout .voice-panel {position:relative;inset:auto;width:100%;max-height:none;--voice-panel-pad:16px;padding:var(--voice-panel-pad);margin:0;box-shadow:none;}
 .voice-popout .az-voice-dock--fullscreen {height:680px;width:100%;}
 .voice-popout .az-voice-dock__fullscreen-panel {height:680px;}
 .voice-popout .az-voice-dock--compact {max-width:none;align-items:center;}

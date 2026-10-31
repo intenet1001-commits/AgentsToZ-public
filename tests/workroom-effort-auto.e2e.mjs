@@ -123,9 +123,9 @@ try{
   await run('mac-option-default-on-badge-advice-and-one-change','mac',{width:1000,height:900},async p=>{
     const badge=p.getByTestId('workroom-effort-badge');
     await badge.waitFor();
-    assert.equal(await badge.innerText(),'에포트 자동 · 보통');
+    assert.equal(await badge.innerText(),'에포트 자동 · 이번 요청은 변경 안 함');
     assert.equal(await badge.getAttribute('data-help-key'),'workroom-effort-badge');
-    assert.equal(await p.getByTestId('workroom-effort-advice').innerText(),'이번 요청은 높음이 맞아 보입니다 (설계·리뷰) · 지금 보통 · 바꾸려면 「에포트 변경」');
+    assert.equal(await p.getByTestId('workroom-effort-advice').innerText(),'에포트는 지금 보통 그대로입니다 · 이번 요청의 권장 높음 (설계·리뷰)으로 바꾸지 않았습니다 · 바꾸려면 「에포트 변경」');
     // A read names the project, and — once the session is listed and selected — that session.
     assert.ok((await effortCalls(p)).some(c=>c.targetId==='project-effort-aaaa'&&c.sessionId==='session-effort-0001'&&c.set===undefined));
     assert.ok((await reads(p))<=3,'A handful of reads on load, not a stream');
@@ -139,9 +139,10 @@ try{
     await shot(p,'mac-settings-and-footer');
     for(const value of ['off','recommend','auto']){
       await box.selectOption(value);await until(async()=>(await box.inputValue())===value&&await box.isEnabled(),'The shared mode is saved');
+      if(value==='recommend'){assert.equal(await badge.innerText(),'에포트 추천제공');assert.equal(await p.getByTestId('workroom-effort-advice').innerText(),'이번 요청은 높음이 맞아 보입니다 (설계·리뷰) · 지금 보통 · 바꾸려면 「에포트 변경」');}
     }
     const sets=(await effortCalls(p)).filter(c=>c.mode!==undefined);
-    assert.deepEqual(sets,['off','recommend','auto'].map(mode=>({effortModes:true,targetId:'project-effort-aaaa',action:'workroom.effort',sessionId:'session-effort-0001',mode})),'Exactly one request per mode');
+    assert.deepEqual(sets,['off','recommend','auto'].map(mode=>({effortModes:true,effortExtended:true,targetId:'project-effort-aaaa',action:'workroom.effort',sessionId:'session-effort-0001',mode})),'Exactly one request per mode, using the negotiated extended Mac contract');
     await p.keyboard.press('Escape');assert.equal(await p.getByTestId('workroom-settings').getAttribute('open'),null);
     // No timer: an idle panel asks nothing more; a window coming back asks once.
     const before=await reads(p);
@@ -165,7 +166,10 @@ try{
     const after=await reads(p);
     for(let i=0;i<4;i++){await p.evaluate(()=>window.dispatchEvent(new Event('focus')));await sleep(100);}
     assert.equal(await reads(p),after,'An older Mac is not asked again');
-    assert.equal(await reads(p),1);
+    const oldReads=(await effortCalls(p)).filter(c=>c.set===undefined&&c.mode===undefined);
+    assert.equal(oldReads.length,2,'One extended read and one legacy read establish that this Mac supports neither');
+    assert.equal(oldReads[0].effortExtended,true);
+    assert.equal(oldReads[1].effortExtended,undefined);
   });
 
   for(const width of [320,390]){
@@ -175,8 +179,8 @@ try{
       await view.waitFor();
       const badge=view.getByTestId('workroom-effort-badge');
       await badge.waitFor({state:'attached'});
-      assert.equal(await badge.innerText(),'에포트 자동 · 보통');
-      assert.match(await view.getByTestId('workroom-effort-advice').innerText(),/이번 요청은 높음이 맞아 보입니다/);
+      assert.equal(await badge.innerText(),'에포트 자동 · 이번 요청은 변경 안 함');
+      assert.match(await view.getByTestId('workroom-effort-advice').innerText(),/이번 요청의 권장 높음.*바꾸지 않았습니다/);
       assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
       await badge.scrollIntoViewIfNeeded();await shot(p,`phone-${width}-session-view`);
       await p.getByTestId('workroom-session-view-back').click();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { LockOpen, RefreshCw, X } from 'lucide-react';
 import { isTauri } from '../lib/env';
+import { isDialogDismissKey } from '../dialogEscape';
 import type {
   OrphanedWorkspaceLease,
   WorkspaceLeaseRecoveryOutcome,
@@ -176,7 +177,7 @@ export function WorkspaceLeaseRecoveryDialog({ onClose, onToast }: {
   }, [load, onToast]);
 
   return <div role="dialog" aria-modal="true" aria-labelledby="workspace-lease-recovery-title" data-testid="workspace-lease-recovery-dialog"
-    onKeyDown={event => { if (event.key === 'Escape') onClose(); }}
+    onKeyDown={event => { if (isDialogDismissKey(event.nativeEvent)) { event.preventDefault(); onClose(); } }}
     style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div style={{ width: 'min(560px, 100%)', maxHeight: '85vh', overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--line)',

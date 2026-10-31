@@ -14,7 +14,7 @@ type FrameRef={session:string;frameId:string;context:number;stale:boolean};
 type Tab={page:BrowserPage;session:string;frame?:string;context?:number;children:Map<string,string>;armed:Set<string>;navigations:number;discovery:boolean;arming?:boolean};
 /** `tabs` is the Workroom's own tab set and `tab` its active tab (`state.page` is that tab's page). `allowed` limits a
  * built-in browser to the native pages this Workroom itself opened. */
-type Binding={state:BrowserWorkspace;recoveryId?:string;cdp:BrowserCdp;endpoint:string;allowed?:Set<string>;tab?:Tab;tabs:Map<string,Tab>;frames:Map<string,FrameRef>;grant?:string;tail:Promise<unknown>;queued:number;receipts:Map<string,{fingerprint:string;state:BrowserActionState}>;off?:()=>void};
+type Binding={state:BrowserWorkspace;recoveryId?:string;cdp:BrowserCdp;endpoint:string;allowed?:Set<string>;tab?:Tab;tabs:Map<string,Tab>;frames:Map<string,FrameRef>;grant?:string;tail:Promise<unknown>;queued:number;receipts:Map<string,{fingerprint:string;state:BrowserActionState}>;off?:()=>void;inputs:number};
 type Deps={runningSession:(id:string)=>{targetId:string}|null;profiles?:typeof discoverChromeProfiles;endpoint?:()=>Promise<string>;connect?:(endpoint:string)=>Promise<BrowserCdp>;recovery?:WorkroomBrowserRecovery;sleep?:(ms:number)=>Promise<void>;now?:()=>number};
 /** Observation budgets. The main document keeps its original 80 elements and 12,000 characters; each child frame adds
  * at most 16 elements and 1,500 characters, for at most 6 frames. */
@@ -122,7 +122,8 @@ export class WorkroomBrowserHost {
    tab.children.set(child,sid);void this.adoptChild(b,tab,child);return;
   }
   // Trusted human input in any tab of the set revokes, not only in the active one.
-  if(method==='Runtime.bindingCalled'&&p.name==='__atzHumanTakeover'&&tab.armed.has(`${sid}|${p.executionContextId}`)&&['agent','observing'].includes(b.state.owner)){this.invalidate(b);return;}
+  // Every trusted input is counted, whoever holds control: an in-process caller compares counts across its own step.
+  if(method==='Runtime.bindingCalled'&&p.name==='__atzHumanTakeover'&&tab.armed.has(`${sid}|${p.executionContextId}`)){b.inputs++;if(['agent','observing'].includes(b.state.owner))this.invalidate(b);return;}
   if(method==='Runtime.executionContextDestroyed'){tab.armed.delete(`${sid}|${p.executionContextId}`);this.stale(b,tab,sid,ref=>ref.context===p.executionContextId);}
   const own=sid===tab.session,active=tab===b.tab;
   if(!own){
@@ -267,7 +268,7 @@ export class WorkroomBrowserHost {
     }else endpoint=await (this.deps.endpoint??chromeDebugEndpoint)();
     cdp=await (this.deps.connect??WorkroomCdpTransport.connect)(endpoint);
     if(this.deps.runningSession(r.sessionId)?.targetId!==r.targetId)fail('session-ended','Workroom changed during Chrome approval.');
-    const id=randomUUID(),b:Binding={state:{id,sessionId:r.sessionId,targetId:r.targetId,profileId:profile.id,profileName:profile.profileName,source:r.operation==='connect-owned'?'owned':'chrome',page:null,owner:'human',epoch:1,observation:null,connection:'connected',profileVerification:'unverified'},cdp,endpoint,tabs:new Map(),frames:new Map(),tail:Promise.resolve(),queued:0,receipts:new Map()};
+    const id=randomUUID(),b:Binding={state:{id,sessionId:r.sessionId,targetId:r.targetId,profileId:profile.id,profileName:profile.profileName,source:r.operation==='connect-owned'?'owned':'chrome',page:null,owner:'human',epoch:1,observation:null,connection:'connected',profileVerification:'unverified'},cdp,endpoint,tabs:new Map(),frames:new Map(),tail:Promise.resolve(),queued:0,receipts:new Map(),inputs:0};
     cdp.onClose(()=>{if(b.state.connection!=='disconnected')this.lose(b);});
     b.recoveryId=saved?.id??(this.deps.recovery?id:undefined);
     if(b.recoveryId){if(saved)this.deps.recovery!.save(b.state,b.recoveryId);b.receipts=new Map(this.deps.recovery!.receipts(b.recoveryId).map(({id,...receipt})=>[id,receipt]));}
@@ -498,6 +499,34 @@ export class WorkroomBrowserHost {
    if(data.length<=SHOT_CHARS)return {mimeType:'image/jpeg',data,width:Math.max(1,Math.round(clip.width*scale)),height:Math.max(1,Math.round(clip.height*scale))};
   }
   return fail('observe-failed','Screenshot too large. Capture one observed element instead.');
+ }
+ /** In-process only, for the helpdesk's own instance; no HTTP route reaches these. The connected workspace of one
+  * session, and its control facts without any page content: who holds it, the active tab's address as the browser
+  * reported it (before anything on that page is read), the count of the person's trusted inputs and each receipt's state. */
+ trustedWorkspace(sessionId:string){return [...this.spaces.values()].find(b=>b.state.sessionId===sessionId&&b.state.connection==='connected')?.state.id??null;}
+ trustedState(workspaceId:string){
+  const b=this.spaces.get(workspaceId);if(!b)return null;
+  return {owner:b.state.owner,epoch:b.state.epoch,connection:b.state.connection,targetId:b.state.targetId,url:b.state.page?.url??null,inputs:b.inputs,verified:b.state.profileVerification==='user-confirmed',observationId:b.state.observation?.id??null,receipts:Object.fromEntries([...b.receipts].map(([id,r])=>[id,r.state]))};
+ }
+ /** Opens a reviewed address in the active tab. Like any navigation of that tab it ends an agent's lease; the caller
+  * decides from the arrived address whether to return. Waits for the new document to finish loading (bounded). */
+ async navigateTrusted(workspaceId:string,raw:string,expect:{epoch:number;inputs:number;targetId:string},timeoutMs=20000){
+  const b=this.bound(workspaceId);this.connected(b);const url=workroomBrowserUrl(raw).href;
+  const same=()=>b.state.connection==='connected'&&b.state.epoch===expect.epoch&&b.inputs===expect.inputs&&b.state.targetId===expect.targetId&&b.state.owner!=='taking';
+  if(!same())fail('workspace-changed','Control changed before the page was opened.');
+  return this.queue(b,async()=>{
+   // Rechecked right before the navigation: a takeover or input while this waited in the queue refuses it.
+   if(!same())fail('workspace-changed','Control changed before the page was opened.');
+   const tab=b.tab;if(!tab)fail('profile-mismatch','Select a page first.');const before=tab.navigations,start=this.now();
+   const r=await b.cdp.send('Page.navigate',{url},tab.session);if(r?.errorText)fail('target-lost','The page could not be opened.');
+   while(tab.navigations===before&&this.now()-start<timeoutMs)await this.sleep(WAIT_POLL_MS);
+   if(tab.navigations===before)fail('target-lost','The page did not open in time.');
+   for(;this.now()-start<timeoutMs;await this.sleep(WAIT_POLL_MS)){
+    if(b.tab!==tab||b.state.connection!=='connected')fail('target-lost','The page changed while opening.');
+    try{if(!tab.context)await this.prepareContext(b,tab);const ready=await b.cdp.send('Runtime.evaluate',{expression:'document.readyState',contextId:tab.context,returnByValue:true},tab.session,{read:{timeoutMs:READ_MS}});if(ready.result?.value==='complete')return {url:tab.page.url};}catch{tab.context=undefined;}
+   }
+   return {url:tab.page.url};
+  });
  }
  reap(){for(const b of this.spaces.values())if(this.deps.runningSession(b.state.sessionId)?.targetId!==b.state.targetId){this.disconnect(b);this.spaces.delete(b.state.id);}}
  dispose(){for(const b of this.spaces.values())this.disconnect(b);this.spaces.clear();}

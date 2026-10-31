@@ -28,7 +28,12 @@ public enum InputEvent: Equatable, Sendable {
     case key(code: UInt16, isDown: Bool, modifiers: KeyModifiers)
     /// Composed text (Korean included), typed as Unicode characters rather than pasted.
     case text(String)
+    /// Version 4: one admission for the composed text and a subsequent Return attempt.
+    case textAndReturn(id: UInt32, text: String)
 }
+
+/// `posted` reports HID posting, not successful receipt by the target application.
+public enum ScreenTextReturnResult: UInt8, Sendable { case posted = 0, blocked, unknown }
 
 public enum InputError: Error, Equatable, Sendable {
     case malformed, outOfRange
@@ -39,7 +44,7 @@ public enum InputCodec {
     public static let maxTextBytes = 256
     public static let maxKeyCode: UInt16 = 0x7F
 
-    private enum Tag: UInt8 { case pointerMove = 1, button = 2, scroll = 3, key = 4, text = 5 }
+    private enum Tag: UInt8 { case pointerMove = 1, button = 2, scroll = 3, key = 4, text = 5, textAndReturn = 6 }
 
     public static func encode(_ event: InputEvent) -> Data {
         switch event {
@@ -49,12 +54,13 @@ public enum InputCodec {
         case let .key(code, isDown, modifiers):
             Data([Tag.key.rawValue]) + code.bigEndianData + Data([isDown ? 1 : 0, modifiers.rawValue])
         case let .text(text): Data([Tag.text.rawValue]) + Data(text.utf8)
+        case let .textAndReturn(id, text): Data([Tag.textAndReturn.rawValue]) + id.bigEndianData + Data(text.utf8)
         }
     }
 
     /// Strict decoding: exact lengths, booleans exactly 0 or 1, no unknown modifier bits, finite and
     /// bounded numbers, and text without control characters.
-    public static func decode(_ data: Data) throws -> InputEvent {
+    public static func decode(_ data: Data, version: UInt16 = ScreenControlProtocol.version) throws -> InputEvent {
         let bytes = [UInt8](data)
         guard let first = bytes.first, let tag = Tag(rawValue: first) else { throw InputError.malformed }
         let body = Array(bytes.dropFirst())
@@ -93,6 +99,12 @@ public enum InputCodec {
                 throw InputError.malformed
             }
             return .text(text)
+        case .textAndReturn:
+            guard version >= 4, body.count > 4 else { throw InputError.malformed }
+            let id = body[0..<4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            guard id != 0, let text = String(bytes: body.dropFirst(4), encoding: .utf8),
+                  isPlainText(text, maxBytes: maxTextBytes) else { throw InputError.malformed }
+            return .textAndReturn(id: id, text: text)
         }
     }
 }
@@ -116,6 +128,7 @@ public struct InputGate: Sendable {
 
     /// Release events for everything still held, to inject when the session ends.
     public mutating func releaseAll() -> [InputEvent] { held.releaseAll() }
+    mutating func admitAction(at now: ContinuousClock.Instant) -> Bool { limiter.admit(at: now) }
 }
 
 /// The Mac's input path for one session: strict decoding, then the gate, then `inject`. A malformed record ends the
@@ -129,6 +142,9 @@ public final class InputReceiver: Sendable {
         var gate = InputGate()
         var priority: LocalPriority
         var finished = false
+        var pendingPriorityChange: LocalPriority.Change?
+        var controlLimiter = TokenBucket(perSecond: 4, burst: 8)
+        var lastTextReturnID: UInt32 = 0
 
         /// Lets go of everything held, as injected events.
         mutating func release(_ inject: (InputEvent) -> Void, at now: ContinuousClock.Instant) {
@@ -142,40 +158,100 @@ public final class InputReceiver: Sendable {
     public let localPriority: LocalPriority.Policy
     private let state: OSAllocatedUnfairLock<State>
     private let inject: @Sendable (InputEvent) -> Void
+    private let releaseInput: @Sendable (InputEvent) -> Void
+    private let physicalInput: PhysicalInputProbe?
+    private let compound: (@Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult)?
+    public var observesPhysicalInput: Bool { physicalInput != nil }
 
-    public init(localPriority: LocalPriority.Policy = .init(), inject: @escaping @Sendable (InputEvent) -> Void) {
+    public init(localPriority: LocalPriority.Policy = .init(), physicalInput: PhysicalInputProbe? = nil,
+                release: (@Sendable (InputEvent) -> Void)? = nil,
+                compound: (@Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult)? = nil, inject: @escaping @Sendable (InputEvent) -> Void) {
         self.localPriority = localPriority
         state = OSAllocatedUnfairLock(initialState: State(priority: LocalPriority(policy: localPriority)))
         self.inject = inject
+        self.physicalInput = physicalInput
+        self.compound = compound
+        self.releaseInput = release ?? inject
     }
 
     /// Whether remote input is paused because someone at the Mac is using it.
     public var isPaused: Bool { state.withLock { $0.priority.isPaused } }
 
-    public func receive(_ payload: Data, at now: ContinuousClock.Instant = .now) throws {
-        let event = try InputCodec.decode(payload)
-        state.withLock { [inject] state in
-            guard !state.finished, !state.priority.isPaused, state.gate.admit(event, at: now) else { return }
+    /// A bounded keyboard/Spaces operation uses the same authorization lifetime, limiter and local-input priority
+    /// as ordinary input. Holding the lock through the operation prevents a revoked session injecting afterwards.
+    /// Release modifiers/drags first, so they cannot leak into the next input source or Space.
+    @discardableResult
+    public func performControlInput(at now: ContinuousClock.Instant = .now, _ operation: () -> Void) -> Bool {
+        // The operation is synchronous on the caller's executor (TIS requires the main actor), never transferred.
+        state.withLockUnchecked { [releaseInput, physicalInput] state in
+            if let physicalInput, let change = state.priority.updatePhysical(physicalInput(), at: now) {
+                state.pendingPriorityChange = change
+                if change == .paused { state.release(releaseInput, at: now) }
+            }
+            guard !state.finished, !state.priority.isPaused, state.controlLimiter.admit(at: now),
+                  state.gate.admitAction(at: now) else { return false }
+            state.release(releaseInput, at: now)
+            operation()
+            state.priority.noteInjected(.key, at: now)
+            return true
+        }
+    }
+
+    /// Compound results report posting only. A nil result is a legacy input event.
+    @discardableResult
+    public func receive(_ payload: Data, version: UInt16 = ScreenControlProtocol.version,
+                        at now: ContinuousClock.Instant = .now) throws -> (UInt32, ScreenTextReturnResult)? {
+        let event = try InputCodec.decode(payload, version: version)
+        return state.withLock { [inject, releaseInput, physicalInput, compound] state in
+            if let physicalInput, let change = state.priority.updatePhysical(physicalInput(), at: now) {
+                state.pendingPriorityChange = change
+                if change == .paused { state.release(releaseInput, at: now) }
+            }
+            if case let .textAndReturn(id, text) = event {
+                // IDs are per-session and monotonic, including denied attempts; never replay an uncertain request.
+                guard id > state.lastTextReturnID else { return (id, .unknown) }
+                state.lastTextReturnID = id
+                guard !state.finished, !state.priority.isPaused, let physicalInput, let compound,
+                      state.gate.admit(event, at: now) else { return (id, .blocked) }
+                state.release(releaseInput, at: now)
+                let result = compound(text, physicalInput)
+                state.priority.noteInjected(.key, at: now)
+                return (id, result)
+            }
+            guard !state.finished, !state.priority.isPaused, state.gate.admit(event, at: now) else { return nil }
             inject(event)
             state.priority.noteInjected(event.localKind, at: now)
+            return nil
         }
     }
 
     /// Reads the Mac's own input through `probe`. Pausing lets go of everything the phone holds, so the person at the
     /// Mac never fights a held Command key or a drag. Returns the change to tell the phone, if any.
-    public func checkLocalInput(_ probe: LocalInputProbe, at now: ContinuousClock.Instant) -> LocalPriority.Change? {
-        state.withLock { [inject] state in
+    public func checkLocalInput(_ probe: LocalInputProbe? = nil, at now: ContinuousClock.Instant) -> LocalPriority.Change? {
+        state.withLock { [releaseInput, physicalInput] state in
             guard !state.finished else { return nil }
-            let change = state.priority.update(probe, at: now)
-            if change == .paused { state.release(inject, at: now) }
+            let fresh: LocalPriority.Change?
+            if let physicalInput { fresh = state.priority.updatePhysical(physicalInput(), at: now) }
+            else { fresh = probe.flatMap { state.priority.update($0, at: now) } }
+            let change = fresh ?? state.pendingPriorityChange
+            state.pendingPriorityChange = nil
+            if change == .paused { state.release(releaseInput, at: now) }
             return change
         }
     }
 
+    /// A capture target change releases the old display's held input before mapping to the new one.
+    public func releaseHeld(at now: ContinuousClock.Instant = .now) {
+        state.withLock { $0.release(releaseInput, at: now) }
+    }
+
+    /// Call after checkLocalInput: one coherent reason for the latest native observation.
+    public var availability: ScreenInputAvailability { state.withLock { $0.priority.availability } }
+
     public func finish(at now: ContinuousClock.Instant = .now) {
-        state.withLock { [inject] state in
+        state.withLock { [releaseInput] state in
             state.finished = true
-            state.release(inject, at: now)
+            state.release(releaseInput, at: now)
         }
     }
 }
@@ -223,7 +299,7 @@ struct HeldInputTracker: Sendable {
         switch event {
         case let .key(code, isDown, _): !isDown && keys.contains(code)
         case let .button(button, isDown): !isDown && buttons.contains(button)
-        case .pointerMove, .scroll, .text: false
+        case .pointerMove, .scroll, .text, .textAndReturn: false
         }
     }
 
@@ -231,7 +307,7 @@ struct HeldInputTracker: Sendable {
         switch event {
         case let .key(code, isDown, _): if isDown { keys.insert(code) } else { keys.remove(code) }
         case let .button(button, isDown): if isDown { buttons.insert(button) } else { buttons.remove(button) }
-        case .pointerMove, .scroll, .text: break
+        case .pointerMove, .scroll, .text, .textAndReturn: break
         }
     }
 

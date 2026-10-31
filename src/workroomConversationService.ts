@@ -11,6 +11,13 @@ import { savedWorkroomConversation } from './workroomConversationIdentity';
 import { processGroupOpenFiles, resolveAiTerminalResume } from './aiTerminalResume';
 import type { WorkroomHistoryLaunch, WorkroomHistoryObserver, WorkroomSessionContext } from './workroomConversationHost';
 import type { AiTerminalResponse } from './aiTerminalProtocol';
+import type { AiTerminalLaunchModel } from './aiTerminalLaunchArgs';
+
+type ScheduledHistoryLaunch = {
+  launchModel: AiTerminalLaunchModel;
+  startGuard: (context: WorkroomSessionContext) => void | (() => void) | Promise<void | (() => void)>;
+  startEffectGate: import('./aiTerminalService').AiTerminalEffectGate;
+};
 
 export interface WorkroomConversationDependencies {
   appDataDir: string;
@@ -218,7 +225,7 @@ export class WorkroomConversationService implements WorkroomHistoryObserver {
   resumeReceipt(requestId: string) { return this.#store().receipt(requestId); }
   /** A bound Community follow-up uses the same exact-conversation review, provider lease and durable receipt as history.
    * Never falls back to a new conversation or guesses the latest rollout of a folder. */
-  async resumeThreadSession(sessionId:string,targetId:string,requestId:string,allowed:()=>boolean) {
+  async resumeThreadSession(sessionId:string,targetId:string,requestId:string,allowed:()=>boolean,scheduled?:ScheduledHistoryLaunch) {
     const journal=this.#store();
     await this.#reconcile(journal);
     const record=journal.forSession(sessionId);
@@ -228,7 +235,7 @@ export class WorkroomConversationService implements WorkroomHistoryObserver {
     const base={protocolVersion:WORKROOM_HISTORY_VERSION,storeInstanceId:journal.storeInstanceId,conversationId:record.id,expectedRevision:record.revision};
     const reviewed=await this.perform({operation:'resume.review',...base},{allowed});
     if(!reviewed.review?.available)throw Error(reviewed.review?.reason||'원래 워크룸의 저장된 대화를 확인하지 못했습니다.');
-    const result=await this.perform({operation:'resume.execute',...base,expectedRevision:reviewed.review.revision,reviewId:reviewed.review.id,requestId,cols:100,rows:28},{allowed});
+    const result=await this.perform({operation:'resume.execute',...base,expectedRevision:reviewed.review.revision,reviewId:reviewed.review.id,requestId,cols:100,rows:28},{allowed,scheduled});
     return result.resume?.state==='completed'?result.resume.session:undefined;
   }
   /**
@@ -269,7 +276,7 @@ export class WorkroomConversationService implements WorkroomHistoryObserver {
   }
   /** `allowed` (host-only, never on the wire) is re-checked right before a resume launches: a remote grant revoked
    *  between review and launch refuses the launch, and the receipt says 'rejected'. */
-  async perform(value: unknown, options: { allowed?: () => boolean } = {}): Promise<WorkroomHistoryResult> {
+  async perform(value: unknown, options: { allowed?: () => boolean; scheduled?: ScheduledHistoryLaunch } = {}): Promise<WorkroomHistoryResult> {
     const r = normalizeWorkroomHistoryRequest(value), journal = this.#store();
     if (r.operation !== 'list' && r.operation !== 'restart.list' && r.storeInstanceId !== journal.storeInstanceId) throw new Error('대화 기록의 저장소가 달라졌습니다. 원래 기기의 기록을 다시 확인하세요.');
     const base = {protocolVersion:WORKROOM_HISTORY_VERSION,storeInstanceId:journal.storeInstanceId};
@@ -343,6 +350,7 @@ export class WorkroomConversationService implements WorkroomHistoryObserver {
         await this.deps.launch(review.record,r.requestId,r.cols,r.rows,{
           logicalConversationId:review.record.id, resume:{agent:review.record.agent as 'codex'|'claude',conversationId:review.record.providerConversationId!},
           accountId:review.record.accountId,cwd:(await this.deps.prepare(review.record)).cwd,
+          ...(options.scheduled ? {launchModel:options.scheduled.launchModel,startGuard:options.scheduled.startGuard,startEffectGate:options.scheduled.startEffectGate} : {}),
           validate:async context=>{
             if(options.allowed&&!options.allowed()) throw new Error('원격 대화 기록 권한이 변경되었습니다.');
             await this.#validate(review.record,context);

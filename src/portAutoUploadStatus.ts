@@ -66,3 +66,31 @@ export function portAutoUploadFailureMessage(error: unknown): string {
   }
   return '자동 업로드 중단 · 원인을 확인하지 못했습니다. 동기화 상태를 확인해 주세요.';
 }
+
+/**
+ * The header chip's words for a stopped upload: the cause, not only 「확인」. A person saw
+ * 「자동 업로드 중단 · 확인」 for days without knowing why (2026-11-01); the full sentence stayed in a tooltip.
+ */
+export function portAutoUploadChipLabel(status: string, conflictCount = 0): string {
+  if (status.includes('원격 상태가 변경')) return '동기화 충돌 · 확인';
+  if (status.startsWith('자동 업로드 결과 확인 필요')) return '업로드 결과 확인 필요';
+  if (status.includes('프로젝트 정보를 비교')) {
+    return conflictCount > 0 ? `프로젝트 정보 차이 ${conflictCount}개 · 확인` : '프로젝트 정보 차이 · 확인';
+  }
+  if (status.includes('인증과 접근 권한')) return '자동 업로드 중단 · 로그인 확인';
+  if (status.includes('DB 업데이트')) return '자동 업로드 중단 · DB 업데이트 필요';
+  if (status.includes('잠금')) return '자동 업로드 중단 · 잠금 확인';
+  if (status.includes('로컬 API') || status.includes('연결 설정이 바뀌')) return '자동 업로드 중단 · 앱 다시 열기';
+  if (status.includes('네트워크')) return '자동 업로드 중단 · 연결 확인';
+  return '자동 업로드 중단 · 확인';
+}
+
+/**
+ * A stop that a fresh startup Pull may clear by itself: the network, or a local API that was not ready yet. Never a
+ * conflict, sign-in, DB, lock or an upload whose result is unknown — a network failure of the upload RPC itself is
+ * classified as 「결과 확인 필요」 (portDurableFence rpcFailure), so it is not here.
+ */
+export function isPortAutoUploadTransientStop(status: string): boolean {
+  return status.startsWith('자동 업로드 중단 · ')
+    && (status.includes('네트워크와 Supabase 연결') || status.includes('로컬 API가 아직 준비'));
+}

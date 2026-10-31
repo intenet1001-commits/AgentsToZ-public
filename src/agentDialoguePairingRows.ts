@@ -43,6 +43,20 @@ export function agentDialoguePairingState(record:AgentDialoguePairingRecord|unde
   return 'none';
 }
 
+/**
+ * The server row says `waiting-peer` for every pending pairing; which side still has to accept is only in
+ * acceptedByMe/acceptedByPeer. An MCP reader gets the state this screen shows, so an AI is never told to wait for a
+ * peer that already accepted. Every other row and field is returned unchanged.
+ */
+export function withAgentDialoguePairingStates(rows:unknown):unknown{
+  if(!Array.isArray(rows))return rows;
+  return rows.map(row=>{
+    if(!row||typeof row!=='object'||Array.isArray(row))return row;
+    const record=row as AgentDialoguePairingRecord;
+    return record.state==='waiting-peer'&&agentDialoguePairingState(record)==='waiting-me'?{...record,state:'waiting-me'}:row;
+  });
+}
+
 export function agentDialoguePairingRows({peers,pairings,search}:{
   peers:readonly AgentDialoguePairingPeer[]|null;
   pairings:readonly AgentDialoguePairingRecord[]|null;

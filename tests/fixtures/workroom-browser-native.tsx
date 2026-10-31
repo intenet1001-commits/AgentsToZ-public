@@ -6,6 +6,26 @@ import{AiTerminalPanel}from'../../src/AiTerminalPanel';import'../../src/index.cs
 import'../../src/WorkroomSessionDirectory.css';
 import{readAppLanguage}from'../../src/i18n';import{workroomBrowserUiCopy}from'../../src/workroomBrowserUiCopy';import{workroomBrowserPageErrorCopy}from'../../src/workroomBrowserErrorCopy';
 const ctx=await invoke<{session:{id:string;targetId:string};sibling:{id:string;targetId:string};fixtureUrl:string;refusedUrl:string;restoreOnly?:boolean;mode?:'main'|'cold'|'slow'|'lost';restoreDelayMs?:number;restoreProfileKey?:string}>('qa_context');
+// One animation frame, or false when WKWebView withholds them: an occluded or hidden window suspends them.
+const nextFrame=(ms:number)=>new Promise<boolean>(resolve=>{const timer=setTimeout(()=>resolve(false),ms);requestAnimationFrame(()=>{clearTimeout(timer);resolve(true);});});
+// Waits for animation frames, asking the host to raise its window (qa_raise) whenever they stall, within one budget.
+// A raise floats the window above every other one; once frames return it is lowered to a normal window (qa_lower).
+const lower=()=>invoke('qa_lower').catch(()=>{});
+const frames=async(count:number,stage:string,budgetMs=5000)=>{
+ const deadline=Date.now()+budgetMs;let seen=0,raised:unknown=null;
+ while(seen<count){const left=deadline-Date.now();
+  if(left<=0)throw Error(`Native QA viewport animation frames were suspended: ${JSON.stringify({stage,visibilityState:document.visibilityState,hasFocus:document.hasFocus(),raised})}`);
+  if(await nextFrame(Math.min(1000,left)))seen++;else raised=await invoke('qa_raise').catch(String);}
+ if(raised!==null)await lower();
+};
+// Layout has settled when the same geometry repeats over three consecutive animation frames; no fixed sleep stands in.
+const settle=async(label:string,signature:()=>string,budgetMs=5000)=>{
+ const deadline=Date.now()+budgetMs;let previous=signature(),repeats=0;
+ while(repeats<2){
+  if(Date.now()>=deadline)throw Error(`${label}: layout did not settle within ${budgetMs}ms: ${JSON.stringify({last:previous,visibilityState:document.visibilityState,hasFocus:document.hasFocus()})}`);
+  await frames(1,label,Math.max(1,deadline-Date.now()));const now=signature();repeats=now===previous?repeats+1:0;previous=now;
+ }
+};
 // A small physical display exercises the same CSS baseline as the original large-screen native QA.
 // Measure each bounded correction instead of assuming a titlebar size or fractional native size rounding.
 try{
@@ -14,10 +34,12 @@ try{
   const physical=await baselineWindow.innerSize(),logical=physical.toLogical(scale),measured={width:innerWidth,height:innerHeight},logicalPerCssPixel=logical.width/measured.width;
   if(!Number.isFinite(logicalPerCssPixel)||logicalPerCssPixel<=0)throw Error('Invalid measured native QA viewport scale');
   await baselineWindow.setSize(new LogicalSize(logical.width+(800-measured.width)*logicalPerCssPixel,logical.height+(814-measured.height)*logicalPerCssPixel));
-  await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Native QA viewport animation frames were suspended')),5000);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(timer);resolve();}));});
+  await frames(2,'qa-viewport-calibration');
   await new Promise(resolve=>setTimeout(resolve,100));
  }
  if(innerWidth!==800||innerHeight!==814)throw Error(`Native QA could not establish its 800x814 CSS baseline: ${JSON.stringify({after:{width:innerWidth,height:innerHeight},physical:await baselineWindow.innerSize(),scale})}`);
+ // The host floats the window from launch for this calibration; with frames flowing it stays in front as a normal window.
+ await frames(1,'qa-viewport-calibration');await lower();
 }catch(error){await invoke('qa_finish',{report:{passed:false,checks:[],error:String(error),stage:'qa-viewport-calibration'}});throw error;}
 localStorage.setItem('portmanager-workroom-font-size','16');
 function InstalledWorkroom(){const dialog=useRef<HTMLDialogElement>(null);useEffect(()=>{dialog.current?.showModal();},[]);return <dialog ref={dialog} className="workroom-session-dialog" aria-label="설치 앱 대화 창"><header className="workroom-session-dialog-header">실제 설치 창의 브라우저 검증</header><div className="workroom-session-dialog-content"><fieldset className="session-directory-view-controls"><AiTerminalPanel popout projects={[{targetId:ctx.session.targetId,label:'임시 실제 PTY 워크룸'}]} entry={{nonce:1,targetId:ctx.session.targetId,sessionId:ctx.session.id}} sessionScope="native-browser-qa"/></fieldset></div></dialog>;}
@@ -75,7 +97,26 @@ const closedToStart=async()=>{
 const checks:string[]=[];
 // Snapshot while the app is still alive. Runner totals can also include normal renderer teardown after qa_finish.
 let topLevelNavigation:{idleMs:number;inspectorDetached:number;rendererGone:number;targetClosed:number;otherInspectorDetached:number;cdpClosed:number}|undefined;
-// Geometry only: no text, form values, workspace access or storage belongs in a layout failure report.
+// Geometry only: no text, form values, workspace access or storage belongs in a layout failure report or probe.
+const nodeName=(e:Element)=>`${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}`;
+// The native page cannot scroll with the Workroom: each part must lie inside the viewport and the padding box of every
+// ancestor that clips or scrolls it (the panel's overflow:auto, the dialog's overflow:hidden, ...).
+const clipBoxes=(node:Element)=>{const boxes=[{name:'viewport',top:0,left:0,bottom:innerHeight,right:innerWidth}];
+ for(let e=node.parentElement;e;e=e.parentElement){const s=getComputedStyle(e);if(s.display==='contents'||(s.overflowX==='visible'&&s.overflowY==='visible'))continue;const b=e.getBoundingClientRect(),top=b.top+e.clientTop,left=b.left+e.clientLeft;boxes.push({name:nodeName(e),top,left,bottom:top+e.clientHeight,right:left+e.clientWidth});}
+ return boxes;};
+const trustedParts={frame:'[data-testid=workroom-browser-frame]',panel:'[data-testid=workroom-browser-panel]',slot:'[data-testid=owned-browser-slot]',heightHandle:'[data-testid=workroom-browser-height-divider]'};
+const clippedParts=()=>{const out:string[]=[];
+ for(const [part,selector] of Object.entries(trustedParts)){const node=document.querySelector(selector);if(!node){out.push(`${part} missing`);continue;}const r=node.getBoundingClientRect();
+  for(const c of clipBoxes(node))if(r.top<c.top-.5||r.left<c.left-.5||r.bottom>c.bottom+.5||r.right>c.right+.5)out.push(`${part} ${JSON.stringify([r.left,r.top,r.right,r.bottom])} outside ${c.name} ${JSON.stringify([c.left,c.top,c.right,c.bottom])}`);}
+ return out;};
+const ancestorChain=()=>{const out:Array<Record<string,unknown>>=[];for(let e=document.querySelector(trustedParts.frame);e&&e!==document.body;e=e.parentElement){const r=e.getBoundingClientRect();out.push({node:nodeName(e),top:r.top,bottom:r.bottom,scrollTop:e.scrollTop,scrollHeight:e.scrollHeight,clientHeight:e.clientHeight,overflow:getComputedStyle(e).overflow});}return out;};
+const childBoxes=(selector:string)=>[...(document.querySelector(selector)?.children??[])].map(e=>{const r=e.getBoundingClientRect();return {node:nodeName(e),top:r.top,height:r.height};});
+const layoutSignature=()=>JSON.stringify([innerWidth,innerHeight,...Object.values(trustedParts).map(selector=>{const r=document.querySelector(selector)?.getBoundingClientRect();return r?[r.x,r.y,r.width,r.height].map(n=>Math.round(n*2)/2):null;}),...ancestorChain().map(a=>a.scrollTop)]);
+// One bounded geometry line per stage through qa_log; the runner copies them into report.json on success and failure.
+const probe=(stage:string)=>invoke('qa_log',{line:JSON.stringify({stage,viewport:[innerWidth,innerHeight],
+ parts:Object.fromEntries(Object.entries(trustedParts).map(([part,selector])=>{const r=document.querySelector(selector)?.getBoundingClientRect();return [part,r?[r.x,r.y,r.width,r.height]:null];})),
+ ranges:['workroom-browser-divider','workroom-browser-height-divider'].map(id=>{const e=document.querySelector(`[data-testid=${id}]`);return e?['aria-valuemin','aria-valuenow','aria-valuemax','aria-disabled'].map(a=>e.getAttribute(a)):null;}),
+ outside:clippedParts(),ancestors:ancestorChain(),body:childBoxes('.ai-terminal-body'),visibilityState:document.visibilityState,hasFocus:document.hasFocus()})}).catch(()=>{});
 const layoutDiagnostics=()=>{
  const number=(value:string)=>parseFloat(value)||0;
  const inspect=(e:Element|null)=>{if(!e)return null;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {rect:{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,right:r.right},clientHeight:e.clientHeight,scrollHeight:e.scrollHeight,style:Object.fromEntries(['display','height','minHeight','maxHeight','width','padding','paddingTop','paddingBottom','margin','marginTop','marginBottom','gap','rowGap','columnGap','borderTopWidth','borderBottomWidth','boxSizing','flex','flexBasis','flexGrow','flexShrink','gridTemplateRows','overflow'].map(key=>[key,s[key as keyof CSSStyleDeclaration]]))};};
@@ -84,7 +125,8 @@ const layoutDiagnostics=()=>{
  if(parent){const style=getComputedStyle(parent),visible=[...parent.children].filter(e=>getComputedStyle(e).display!=='none'),siblings=visible.filter(e=>e!==frame),padding=number(style.paddingTop)+number(style.paddingBottom),occupied=siblings.reduce((sum,e)=>{const s=getComputedStyle(e);return sum+e.getBoundingClientRect().height+number(s.marginTop)+number(s.marginBottom);},0),gaps=number(style.rowGap)*Math.max(0,visible.length-1);parentAvailable={clientHeight:parent.clientHeight,padding,occupiedBySiblings:occupied,gaps,availableForFrame:parent.clientHeight-padding-occupied-gaps,parent:inspect(parent),siblings:siblings.map(e=>({tag:e.tagName,className:String(e.className),...inspect(e)}))};}
  const column=document.querySelector(selectors.column),panel=document.querySelector(selectors.panel),handle=document.querySelector(selectors.heightHandle),columnStyle=column&&getComputedStyle(column),handleStyle=handle&&getComputedStyle(handle),panelRect=panel?.getBoundingClientRect(),slotRect=document.querySelector(selectors.slot)?.getBoundingClientRect();
  const columnAvailable=column&&columnStyle&&handle&&handleStyle?{contentHeight:column.clientHeight-number(columnStyle.paddingTop)-number(columnStyle.paddingBottom),handleOuterHeight:handle.getBoundingClientRect().height+number(handleStyle.marginTop)+number(handleStyle.marginBottom),gap:number(columnStyle.rowGap),availablePanelHeight:column.clientHeight-number(columnStyle.paddingTop)-number(columnStyle.paddingBottom)-handle.getBoundingClientRect().height-number(handleStyle.marginTop)-number(handleStyle.marginBottom)-number(columnStyle.rowGap),panelHeightFor200pxPage:panelRect&&slotRect?panelRect.height+200-slotRect.height:null}:null;
- return {nodes:Object.fromEntries(Object.entries(selectors).map(([name,selector])=>[name,inspect(document.querySelector(selector))])),frameParent:parentAvailable,columnAvailable,frameChildren:frame?[...frame.children].map(e=>({tag:e.tagName,className:String(e.className),...inspect(e)})):[]};
+ return {nodes:Object.fromEntries(Object.entries(selectors).map(([name,selector])=>[name,inspect(document.querySelector(selector))])),frameParent:parentAvailable,columnAvailable,frameChildren:frame?[...frame.children].map(e=>({tag:e.tagName,className:String(e.className),...inspect(e)})):[],
+  outside:clippedParts(),ancestors:ancestorChain(),bodyChildren:childBoxes('.ai-terminal-body'),panelChildren:childBoxes('.ai-terminal-panel')};
 };
 try{
  // Exercise both K0's direct Close and K1's planned menu-only Close in the real
@@ -228,9 +270,9 @@ try{
  const slotBox=()=>document.querySelector<HTMLElement>('[data-testid=owned-browser-slot]')!.getBoundingClientRect();
  const widthHandle=await wait(()=>document.querySelector<HTMLElement>('[data-testid=workroom-browser-divider]')),heightHandle=await wait(()=>document.querySelector<HTMLElement>('[data-testid=workroom-browser-height-divider]'));
  const resizeState=()=>{const r=slotBox(),p=document.querySelector<HTMLElement>('[data-testid=workroom-browser-panel]')!.getBoundingClientRect(),range=(el:HTMLElement)=>({low:Number(el.getAttribute('aria-valuemin')),high:Number(el.getAttribute('aria-valuemax')),current:Number(el.getAttribute('aria-valuenow')),disabled:el.getAttribute('aria-disabled')==='true'});return {slot:{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom},panel:{width:p.width,height:p.height},width:range(widthHandle),height:range(heightHandle),viewport:[innerWidth,innerHeight],layout:layoutDiagnostics()};};
- const originalSize=resizeState();
- const assertFloorInView=(label:string)=>{const state=resizeState();if(state.slot.height<200||[state.layout.nodes.frame,state.layout.nodes.panel,state.layout.nodes.slot,state.layout.nodes.heightHandle].some(n=>!n||n.rect.y<0||n.rect.x<0||n.rect.bottom>innerHeight||n.rect.right>innerWidth))throw Error(`${label}: the native page is not above its 200px floor with its trusted frame fully in view: ${JSON.stringify({baseline:originalSize,changed:state})}`);};
- assertFloorInView('Native default size');
+ await settle('Native default size',layoutSignature);const originalSize=resizeState();
+ const assertFloorInView=(label:string)=>{const state=resizeState(),outside=clippedParts();if(state.slot.height<200||outside.length)throw Error(`${label}: the native page is not above its 200px floor with its trusted frame fully in view inside every clipping box: ${JSON.stringify({outside,baseline:originalSize,changed:state})}`);};
+ await probe('default');assertFloorInView('Native default size');
  const resizeWait=async(label:string,before:ReturnType<typeof resizeState>,fn:()=>boolean)=>{for(let i=0;i<100;i++){if(fn())return;await delay(50);}throw Error(`${label}: ${JSON.stringify({baseline:before,changed:resizeState()})}`);};
  const key=(el:HTMLElement,key:string)=>{el.focus();el.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));};
  const realFrame=async()=>{let native:unknown;for(let i=0;i<100;i++){const s=await invoke<{visible:boolean;rect:number[]}>('workroom_browser_native',{sessionId:ctx.session.id,operation:'status'}),r=slotBox();native=s;if(s.visible&&s.rect.length===4&&[r.x,r.y,r.width,r.height].every((n,j)=>Math.abs(n-s.rect[j]!)<1))return;await delay(50);}throw Error(`Real CEF did not follow keyboard resize: ${JSON.stringify({baseline:originalSize,changed:resizeState(),native})}`);};
@@ -247,19 +289,19 @@ try{
  const qaWindow=getCurrentWindow(),originalWindowSize=await qaWindow.innerSize(),scale=await qaWindow.scaleFactor(),logical=originalWindowSize.toLogical(scale);
  try{
   await qaWindow.setSize(new LogicalSize(logical.width,logical.height+400));
-  await resizeWait('The QA window did not expose additional CSS height',originalSize,()=>innerHeight>=originalSize.viewport[1]!+200);await realFrame();assertFloorInView('Expanded native default size');
+  await resizeWait('The QA window did not expose additional CSS height',originalSize,()=>innerHeight>=originalSize.viewport[1]!+200);await settle('Expanded native default size',layoutSignature);await realFrame();await probe('expanded');assertFloorInView('Expanded native default size');
   const expandedSize=resizeState();key(widthHandle,'Home');await resizeWait('Horizontal keyboard resize did not move 40px',expandedSize,()=>slotBox().width-expandedSize.slot.width>=40);await realFrame();
   // Width changes can shorten the trusted controls; wait for their actual reflow before measuring height.
-  await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+  await settle('Horizontal keyboard resize',layoutSignature);
   const heightBefore=resizeState(),available=heightBefore.height.high-heightBefore.height.low;
   if(!Number.isFinite(available)||available<40||heightBefore.height.disabled)throw Error(`The expanded native window has no 40px height range: ${JSON.stringify({baseline:expandedSize,changed:heightBefore,available,required:40})}`);
-  key(heightHandle,'Home');await resizeWait('Height Home did not reach its minimum panel height',heightBefore,()=>Math.abs(resizeState().panel.height-resizeState().height.low)<=2);assertFloorInView('Minimum manual native height');await realFrame();
+  key(heightHandle,'Home');await resizeWait('Height Home did not reach its minimum panel height',heightBefore,()=>Math.abs(resizeState().panel.height-resizeState().height.low)<=2);await settle('Minimum manual native height',layoutSignature);await probe('minimum-manual');assertFloorInView('Minimum manual native height');await realFrame();
   const minimumHeight=resizeState();key(heightHandle,'End');await resizeWait('Height End did not reach its maximum panel height',minimumHeight,()=>Math.abs(resizeState().panel.height-resizeState().height.high)<=2);await realFrame();
-  const maximumHeight=resizeState();if(maximumHeight.slot.height-minimumHeight.slot.height<40)throw Error(`Native vertical change did not move 40px: ${JSON.stringify({baseline:heightBefore,minimum:minimumHeight,changed:maximumHeight,available,required:40})}`);assertFloorInView('Maximum manual native height');
+  await settle('Maximum manual native height',layoutSignature);await probe('maximum-manual');const maximumHeight=resizeState();if(maximumHeight.slot.height-minimumHeight.slot.height<40)throw Error(`Native vertical change did not move 40px: ${JSON.stringify({baseline:heightBefore,minimum:minimumHeight,changed:maximumHeight,available,required:40})}`);assertFloorInView('Maximum manual native height');
  }finally{
   widthHandle.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));heightHandle.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
   await qaWindow.setSize(originalWindowSize);
-  await resizeWait('Original QA viewport and default size were not restored',originalSize,()=>innerWidth===originalSize.viewport[0]&&innerHeight===originalSize.viewport[1]&&Math.abs(slotBox().width-originalSize.slot.width)<=2&&Math.abs(slotBox().height-originalSize.slot.height)<=2);await realFrame();assertFloorInView('Restored native default size');
+  await resizeWait('Original QA viewport and default size were not restored',originalSize,()=>innerWidth===originalSize.viewport[0]&&innerHeight===originalSize.viewport[1]&&Math.abs(slotBox().width-originalSize.slot.width)<=2&&Math.abs(slotBox().height-originalSize.slot.height)<=2);await settle('Restored native default size',layoutSignature);await realFrame();await probe('restored');assertFloorInView('Restored native default size');
  }
  checks.push('native view stays visible in the actual Workroom modal, hides behind another dialog, locks human input during agent ownership and follows both keyboard resize axes before restoring its default size');
  await button('workroom-browser-view-terminal');await wait(()=>!document.querySelector('[data-testid=owned-browser-slot]'));r=await ask('/qa-agent',{...base,operation:'observe'});if(!r.workspace.observation.text.includes('native agent 한글'))throw Error('Hidden page lost state');checks.push('hiding the browser preserves the document and agent work');
@@ -428,4 +470,4 @@ try{
  await invoke('workroom_browser_native',{sessionId:recovered,operation:'navigate',url:new URL('/restore',ctx.fixtureUrl).href});await delay(300);const restored=await invoke<any>('workroom_browser_native',{sessionId:recovered,operation:'status'});const contents=JSON.parse((await human('state',restored)).value);if(!contents.cookie.includes('atz-role=one')||contents.storage!=='one')throw Error('Recovered Chromium profile lost cookies or storage');checks.push('a new Workroom view can reopen the saved browser profile without copying cookies');
  await invoke('qa_finish',{report:{passed:true,checks,realAccounts:0,personalProfileAccess:false,topLevelNavigation}});
  }
-}catch(e){const native=await invoke('workroom_browser_native',{sessionId:ctx.session.id,operation:'status'}).catch(String);const r=document.querySelector('[data-testid=owned-browser-slot]')?.getBoundingClientRect();await invoke('qa_finish',{report:{passed:false,checks,error:redact(e),native,slot:r?{x:r.x,y:r.y,width:r.width,height:r.height,viewport:innerHeight}:null,scroll:Object.fromEntries(['.ai-terminal-panel','.workroom-session-dialog-content','.ai-terminal-workspace','.ai-terminal-body','.workroom-browser-panel'].map(s=>{const e=document.querySelector(s);return [s,e?{scrollTop:e.scrollTop,scrollHeight:e.scrollHeight,clientHeight:e.clientHeight}:null];})),screen:redact(document.body.innerText).slice(-8000)}});}
+}catch(e){const native=await invoke('workroom_browser_native',{sessionId:ctx.session.id,operation:'status'}).catch(String);const r=document.querySelector('[data-testid=owned-browser-slot]')?.getBoundingClientRect();await invoke('qa_finish',{report:{passed:false,checks,error:redact(e),native,slot:r?{x:r.x,y:r.y,width:r.width,height:r.height,viewport:innerHeight}:null,scroll:Object.fromEntries(['.ai-terminal-panel','.workroom-session-dialog-content','.ai-terminal-workspace','.ai-terminal-body','.workroom-browser-panel'].map(s=>{const e=document.querySelector(s);return [s,e?{scrollTop:e.scrollTop,scrollHeight:e.scrollHeight,clientHeight:e.clientHeight}:null];})),layout:(()=>{try{return layoutDiagnostics();}catch{return null;}})(),screen:redact(document.body.innerText).slice(-8000)}});}

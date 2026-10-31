@@ -23,6 +23,7 @@ enum PushLabel {
     static let fetch = base + " push fetch"
     static let command = base + " remote command"
     static let result = base + " remote command result"
+    static let weeklyUsage = base + " push weekly usage"
 }
 
 public enum PushMessageError: Error, Equatable, Sendable {
@@ -159,6 +160,9 @@ public struct PushRegistration: Sendable, Equatable {
 
 public enum ScreenEventKind: UInt8, Sendable, CaseIterable {
     case connected = 1, registered = 2
+    /// New values distinguish another Mac from a registered phone. The host must not send them until the relay
+    /// and the receiving iOS app understand them; older phones may show the banner but cannot open its action menu.
+    case controllerConnected = 3, controllerRegistered = 4
 }
 
 /// What the Mac tells its other registered devices when a device connects or a new one is registered (DESIGN
@@ -236,6 +240,183 @@ public struct ScreenEvent: Sendable, Equatable {
     }
 
     public var date: Date { PushWire.date(eventAt) }
+}
+
+// MARK: Mac → server: a weekly AI allowance alert
+
+/// Whose weekly allowance an alert is about: the AI CLIs the main AgentsToZ app reads (src/weeklyUsage.ts).
+public enum WeeklyUsageProvider: UInt8, Sendable, CaseIterable {
+    case claude = 1, codex = 2, agy = 3
+
+    public init?(name: String) {
+        switch name {
+        case "claude": self = .claude
+        case "codex": self = .codex
+        case "agy": self = .agy
+        default: return nil
+        }
+    }
+
+    public var name: String {
+        switch self { case .claude: "claude"; case .codex: "codex"; case .agy: "agy" }
+    }
+}
+
+/// One weekly allowance alert the main AgentsToZ app handed over: it decides (src/weeklyUsageAlerts.ts) and writes one
+/// small file per alert (src/weeklyUsagePushHost.ts). Another process of this user can write that folder too, so a hand-off
+/// carries no authority: every field is bounded here, AgentsToZ Screen adds its own Mac name and recipients, and a flood is
+/// stopped by `WeeklyUsageBudget` before the relay. The worst a forged file can do is ring this Mac's own devices a few times.
+public struct WeeklyUsageHandoff: Sendable, Equatable {
+    public static let maxBytes = 512
+    /// Older than this when AgentsToZ Screen reads it (screen control was off meanwhile): dropped unsent. The relay agrees.
+    public static let maxAge: TimeInterval = 2 * 60 * 60
+
+    public let provider: WeeklyUsageProvider
+    /// 90…10: remaining went under that boundary; 0: 소진.
+    public let mark: UInt8
+    public let windowKey: String
+    /// Milliseconds since 1970, when the main app read the figure.
+    public let observedAt: UInt64
+
+    public init?(provider: WeeklyUsageProvider, mark: UInt8, windowKey: String, observedAt: UInt64) {
+        guard WeeklyUsageEvent.marks.contains(mark), WeeklyUsageEvent.isWindowKey(windowKey), observedAt > 0 else { return nil }
+        self.provider = provider
+        self.mark = mark
+        self.windowKey = windowKey
+        self.observedAt = observedAt
+    }
+
+    /// Exactly `{"version":1,"provider":"codex","mark":30,"windowKey":"r498056","observedAt":1793000000000}`: no other key,
+    /// no other type, nothing larger than `maxBytes`.
+    public static func decode(_ data: Data) -> WeeklyUsageHandoff? {
+        guard data.count <= maxBytes, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              Set(object.keys) == ["version", "provider", "mark", "windowKey", "observedAt"], integer(object["version"]) == 1,
+              let name = object["provider"] as? String, let provider = WeeklyUsageProvider(name: name),
+              let mark = integer(object["mark"]), (0...255).contains(mark), let windowKey = object["windowKey"] as? String,
+              let observedAt = integer(object["observedAt"]), observedAt > 0 else { return nil }
+        return WeeklyUsageHandoff(provider: provider, mark: UInt8(mark), windowKey: windowKey, observedAt: UInt64(observedAt))
+    }
+
+    /// A JSON whole number; never a boolean, a fraction or a string.
+    private static func integer(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let double = number.doubleValue
+        guard double.rounded() == double, abs(double) < 9e15 else { return nil }
+        return Int(double)
+    }
+
+    /// Seen by the main app at most `maxAge` ago, and not (beyond the push clock skew) in the future.
+    public func isFresh(at now: Date) -> Bool {
+        let age = now.timeIntervalSince(PushWire.date(observedAt))
+        return age <= Self.maxAge && age >= -RemoteStopClock.skew
+    }
+}
+
+/// AgentsToZ Screen's own cap on weekly alerts, the relay's `usage` budget (12 an hour per Mac): hand-offs beyond it are
+/// dropped here, before anything is signed. Screen notifications have their own budget at the relay regardless.
+public struct WeeklyUsageBudget: Sendable {
+    public static let limit = 12
+    public static let window: TimeInterval = 60 * 60
+    private var sent: [Date] = []
+
+    public init() {}
+
+    public mutating func take(at now: Date) -> Bool {
+        sent.removeAll { now.timeIntervalSince($0) >= Self.window || $0 > now }
+        guard sent.count < Self.limit else { return false }
+        sent.append(now)
+        return true
+    }
+}
+
+/// What this Mac tells its registered devices when the main AgentsToZ app saw a weekly allowance drop past another 10%
+/// boundary. Signed with the Mac identity key like a screen event, so the relay pushes it only to devices registered here and
+/// the banner is built from these fields alone: the Mac's name, the provider, the boundary and the weekly window. Never an
+/// account, an email, a token or an exact figure. Its own label: it never passes as a screen event, nor one as it.
+public struct WeeklyUsageEvent: Sendable, Equatable {
+    /// 90…10: remaining went under that boundary; 0: 소진 (src/weeklyUsageAlerts.ts `WeeklyUsageAlertMark` without 100).
+    public static let marks: Set<UInt8> = [90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
+
+    public let macKey: Data
+    public let macName: String
+    public let provider: WeeklyUsageProvider
+    public let mark: UInt8
+    public let windowKey: String
+    public let observedAt: UInt64
+    public let recipients: [Data]
+    public let issuedAt: UInt64
+    public let nonce: Data
+
+    public init(macKey: P256.Signing.PublicKey, macName: String, handoff: WeeklyUsageHandoff, recipients: [Data],
+                issuedAt: Date = Date(), nonce: Data? = nil) throws {
+        try self.init(macKey: macKey.x963Representation, macName: macName, provider: handoff.provider, mark: handoff.mark,
+                      windowKey: handoff.windowKey, observedAt: handoff.observedAt, recipients: recipients,
+                      issuedAt: PushWire.milliseconds(issuedAt), nonce: try PushWire.freshNonce(nonce))
+    }
+
+    init(macKey: Data, macName: String, provider: WeeklyUsageProvider, mark: UInt8, windowKey: String, observedAt: UInt64,
+         recipients: [Data], issuedAt: UInt64, nonce: Data) throws {
+        guard PushWire.key(macKey) != nil, isDisplaySafeName(macName, maxBytes: RegistrationRecord.maxTextBytes),
+              Self.marks.contains(mark), Self.isWindowKey(windowKey), !recipients.isEmpty,
+              PushWire.ids(from: PushWire.ids(recipients)) != nil, nonce.count == PushWire.nonce else { throw PushMessageError.malformed }
+        self.macKey = macKey
+        self.macName = macName
+        self.provider = provider
+        self.mark = mark
+        self.windowKey = windowKey
+        self.observedAt = observedAt
+        self.recipients = recipients
+        self.issuedAt = issuedAt
+        self.nonce = nonce
+    }
+
+    /// `r` and 1–9 digits (the reset time, in hours since 1970), or `w` and an ISO week such as `w2026-W44`.
+    public static func isWindowKey(_ key: String) -> Bool {
+        let b = Array(key.utf8)
+        let digits = { (part: ArraySlice<UInt8>) in part.allSatisfy { (0x30...0x39).contains($0) } }
+        if b.first == UInt8(ascii: "r") { return (2...10).contains(b.count) && digits(b[1...]) }
+        return b.count == 9 && b[0] == UInt8(ascii: "w") && digits(b[1..<5]) && b[5] == UInt8(ascii: "-")
+            && b[6] == UInt8(ascii: "W") && digits(b[7..<9])
+    }
+
+    /// The main app's alert key, `<provider>:<windowKey>:<mark>`: the relay's collapse ID, one banner per boundary per window.
+    public var key: String { "\(provider.name):\(windowKey):\(mark)" }
+
+    public func encoded() -> Data {
+        PushWire.encode(label: PushLabel.weeklyUsage, [macKey, Data(macName.utf8), Data([provider.rawValue]), Data([mark]),
+                                                       Data(windowKey.utf8), observedAt.bigEndianData, PushWire.ids(recipients),
+                                                       issuedAt.bigEndianData, nonce])
+    }
+
+    public static func decode(_ data: Data) throws -> WeeklyUsageEvent {
+        let f = try PushWire.fields(data, label: PushLabel.weeklyUsage, count: 9)
+        guard f[2].count == 1, let provider = WeeklyUsageProvider(rawValue: f[2][f[2].startIndex]), f[3].count == 1,
+              let macName = String(data: f[1], encoding: .utf8), let windowKey = String(data: f[4], encoding: .utf8),
+              let observedAt = PushWire.uint64(f[5]), let recipients = PushWire.ids(from: f[6]),
+              let issuedAt = PushWire.uint64(f[7]) else { throw PushMessageError.malformed }
+        return try WeeklyUsageEvent(macKey: f[0], macName: macName, provider: provider, mark: f[3][f[3].startIndex],
+                                    windowKey: windowKey, observedAt: observedAt, recipients: recipients, issuedAt: issuedAt, nonce: f[8])
+    }
+
+    public func signed(by signer: TranscriptSigner) async throws -> SignedPushMessage {
+        try await SignedPushMessage.sign(encoded(), as: macKey, with: signer)
+    }
+
+    /// The alerts to send now: fresh hand-offs, while the budget lasts, each addressed to this Mac's registered devices in
+    /// use (most recently used first, at most 16). Nothing when there is nobody to tell.
+    public static func plan(_ handoffs: [WeeklyUsageHandoff], macKey: P256.Signing.PublicKey, macName: String, recipients: [Data],
+                            budget: inout WeeklyUsageBudget, at now: Date) -> [WeeklyUsageEvent] {
+        let recipients = Array(recipients.prefix(PushWire.maxDevices))
+        guard !recipients.isEmpty else { return [] }
+        var events: [WeeklyUsageEvent] = []
+        for handoff in handoffs where handoff.isFresh(at: now) {
+            guard budget.take(at: now) else { break }
+            if let event = try? WeeklyUsageEvent(macKey: macKey, macName: macName, handoff: handoff, recipients: recipients, issuedAt: now) {
+                events.append(event)
+            }
+        }
+        return events
+    }
 }
 
 // MARK: Phone → server → Mac: remote stop

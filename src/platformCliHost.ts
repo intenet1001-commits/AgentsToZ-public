@@ -10,7 +10,8 @@ import {platformCliJson,type PlatformCliJson} from './platformCliIdentity';
 import {PLATFORM_CLI_DEFAULT_ACCOUNT,PLATFORM_CLI_PROVIDERS,PLATFORM_CLI_LABELS,platformCliBinding,platformCliManagedId,platformCliNativeGithubId,platformCliNativeGithubLogin,platformCliRequestId,platformCliProvider,type PlatformCliAccount,type PlatformCliProvider} from './platformCliProtocol';
 
 export interface PlatformCliProcess {code:number;stdout:string;stderr:string}
-export interface PlatformCliExecution {executable:string;args:string[];env:NodeJS.ProcessEnv;cwd:string;account:PlatformCliAccount;timeoutMs?:number}
+/** `input` goes to stdin and is closed; it is how a credential reaches a CLI without argv. */
+export interface PlatformCliExecution {executable:string;args:string[];env:NodeJS.ProcessEnv;cwd:string;account:PlatformCliAccount;timeoutMs?:number;input?:string}
 export interface PlatformCliProject {id:string;cwd:string;label:string}
 export interface PlatformCliHostDependencies {
   store:PlatformCliStore;
@@ -20,6 +21,8 @@ export interface PlatformCliHostDependencies {
   env?:NodeJS.ProcessEnv;
   json?:PlatformCliJson;
   nativeCredential?(provider:PlatformCliProvider):Promise<string>;
+  /** The Mac-wide Vercel login directory while it holds this managed account (platformCliNativeSwitch.ts). */
+  nativeVercelConfig?(account:PlatformCliAccount):Promise<string|null>;
 }
 /** No global login switching, no inherited provider token, no shell evaluation. */
 export function platformCliEnvironment(base:NodeJS.ProcessEnv):NodeJS.ProcessEnv {
@@ -30,7 +33,8 @@ export function platformCliEnvironment(base:NodeJS.ProcessEnv):NodeJS.ProcessEnv
 }
 export function runPlatformCliProcess(e:PlatformCliExecution):Promise<PlatformCliProcess> {
   return new Promise(resolve=>{
-    const child=spawn(e.executable,e.args,{cwd:e.cwd,env:e.env,detached:process.platform!=='win32',windowsHide:true,stdio:['ignore','pipe','pipe']});
+    const child=spawn(e.executable,e.args,{cwd:e.cwd,env:e.env,detached:process.platform!=='win32',windowsHide:true,stdio:[e.input===undefined?'ignore':'pipe','pipe','pipe']});
+    if(e.input!==undefined){child.stdin!.on('error',()=>{});child.stdin!.end(e.input);}
     const output:Buffer[]=[],errors:Buffer[]=[];let bytes=0,done=false,stopped=false;
     let hardStop:ReturnType<typeof setTimeout>|undefined;
     const kill=(hard:boolean)=>{if(!child.pid)return;if(process.platform==='win32'){execFile('taskkill',['/PID',String(child.pid),'/T',...(hard?['/F']:[])],{timeout:3000,windowsHide:true},()=>{});}else try{process.kill(-child.pid,hard?'SIGKILL':'SIGTERM');}catch{/* owned group exited */}};
@@ -38,7 +42,7 @@ export function runPlatformCliProcess(e:PlatformCliExecution):Promise<PlatformCl
     const stop=()=>{if(done||stopped)return;stopped=true;kill(false);hardStop=setTimeout(()=>{kill(true);finish(1);},1000);};
     const timeout=Math.min(600_000,Math.max(100,e.timeoutMs??90_000));const timer=setTimeout(stop,timeout);
     const collect=(target:Buffer[],chunk:Buffer)=>{bytes+=chunk.length;if(bytes>256*1024){stop();return;}target.push(chunk);};
-    child.stdout.on('data',chunk=>collect(output,chunk));child.stderr.on('data',chunk=>collect(errors,chunk));child.on('error',()=>finish(1));
+    child.stdout!.on('data',chunk=>collect(output,chunk));child.stderr!.on('data',chunk=>collect(errors,chunk));child.on('error',()=>finish(1));
     child.on('exit',()=>kill(true));child.on('close',code=>finish(code??1));
   });
 }
@@ -50,13 +54,15 @@ export class PlatformCliHost {
     const base=this.deps.env??process.env,env=platformCliEnvironment(base);if(base.GH_CONFIG_DIR)env.GH_CONFIG_DIR=base.GH_CONFIG_DIR;
     return (this.deps.run??runPlatformCliProcess)({executable,args,cwd:this.store.appDirectory,env,timeoutMs:15_000,account:{id:'native-github',provider:'github',label:'GitHub',identity:null,state:'unchecked',revision:''}});
   }
-  private async nativeGithubLogins():Promise<{login:string;active:boolean}[]> {
+  async nativeGithubLogins():Promise<{login:string;active:boolean}[]> {
     // No token output is exposed, including masked tokens returned by gh auth status.
     // cwd must exist even before the first managed account is created.
     const executable=this.deps.executable('github');if(!executable||!isAbsolute(executable))throw new PlatformCliError('GitHub CLI를 설치한 뒤 다시 확인하세요.');
     const base=this.deps.env??process.env,env=platformCliEnvironment(base);if(base.GH_CONFIG_DIR)env.GH_CONFIG_DIR=base.GH_CONFIG_DIR;
     const r=await(this.deps.run??runPlatformCliProcess)({executable,args:['auth','status','--hostname','github.com','--json','hosts'],cwd:this.store.appDirectory,env,timeoutMs:15_000,account:{id:'native-github',provider:'github',label:'GitHub',identity:null,state:'unchecked',revision:''}});
-    let rows:any;try{rows=JSON.parse(r.stdout).hosts?.['github.com'];}catch{}
+    let hosts:any;try{hosts=JSON.parse(r.stdout).hosts;}catch{}
+    // No github.com entry is a CLI with no login yet, not an unreadable list.
+    const rows=hosts&&typeof hosts==='object'&&!Array.isArray(hosts)?hosts['github.com']??[]:null;
     if(!Array.isArray(rows))throw new PlatformCliError('기존 GitHub 로그인 목록을 확인하지 못했습니다.');
     const result=new Map<string,{login:string;active:boolean}>();
     for(const row of rows)if(row.state==='success'&&typeof row.login==='string'&&/^[A-Za-z0-9-]{1,39}$/.test(row.login))result.set(row.login.toLowerCase(),{login:row.login,active:row.active===true});
@@ -146,14 +152,18 @@ export class PlatformCliHost {
     const secret=nativeDefault?null:await this.credential(account);
     let temporary:string|undefined;
     const prefix:string[]=[];
+    // While the Mac-wide Vercel login is this account, run against that one session: a copy would refresh the
+    // same OAuth grant twice and leave one of the two holding a superseded refresh token.
+    const nativeVercel=!nativeDefault&&account.provider==='vercel'&&platformCliManagedId(account.id)?await this.deps.nativeVercelConfig?.(account)??null:null;
     try {
+      if(nativeVercel)prefix.push('--global-config',nativeVercel);
       if(nativeDefault){
         // With no explicit account, retain this provider's native login and the project's own link.
         for(const key of Object.keys(base))if(account.provider==='vercel'&&key==='VERCEL_TOKEN'||account.provider==='supabase'&&key==='SUPABASE_ACCESS_TOKEN'||account.provider==='google-workspace'&&(/^GOOGLE_WORKSPACE_/.test(key)||key==='GOOGLE_APPLICATION_CREDENTIALS'))env[key]=base[key];
       }
       if(account.provider==='github'){env.GH_TOKEN=secret!;env.GH_HOST='github.com';}
       if(account.provider==='supabase'&&!nativeDefault)env.SUPABASE_ACCESS_TOKEN=secret!;
-      if(!nativeDefault&&(account.provider==='supabase'||account.provider==='vercel'||account.provider==='google-workspace')) {
+      if(!nativeDefault&&!nativeVercel&&(account.provider==='supabase'||account.provider==='vercel'||account.provider==='google-workspace')) {
         // Each invocation owns its temporary files, including concurrent invocations of one account.
         temporary=mkdtempSync(join(this.store.root,'run-'));mkdirSync(join(temporary,'config'),{mode:0o700});
         if(account.provider==='supabase'){

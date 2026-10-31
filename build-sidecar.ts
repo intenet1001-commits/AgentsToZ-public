@@ -115,6 +115,7 @@ export function planSidecarBuild(
     ]),
   }));
   const nativeOutput = join(paths.resourceDir, 'agentstoz-codex-accessibility-helper');
+  const controlLinkOutput = join(paths.resourceDir, 'agentstoz-api-sidecar-control-link.node');
   const nativeCommands = platform === 'darwin' ? [Object.freeze({
     entrypoint: join(projectRoot, 'src-tauri/native/codex-accessibility-helper/main.c'),
     outfile: nativeOutput,
@@ -124,7 +125,15 @@ export function planSidecarBuild(
       join(projectRoot, 'src-tauri/native/codex-accessibility-helper/main.c'),
       '-o', nativeOutput,
     ]),
-  })] : [];
+  }), Object.freeze({
+    entrypoint: join(projectRoot, 'src-tauri/native/computer-use/PrivateLink/addon.c'),
+    outfile: controlLinkOutput,
+    args: Object.freeze([
+      '/usr/bin/clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+      '-bundle', '-undefined', 'dynamic_lookup', '-I', join(projectRoot, 'node_modules/node-api-headers/include'),
+      join(projectRoot, 'src-tauri/native/computer-use/PrivateLink/addon.c'), '-o', controlLinkOutput,
+    ]),
+  })].filter(command => mode.kind !== "macos-runtime-production" || command.outfile !== controlLinkOutput) : [];
   return Object.freeze({
     projectRoot,
     resourceDir: paths.resourceDir,
@@ -133,7 +142,7 @@ export function planSidecarBuild(
     commands: Object.freeze(commands),
     nativeCommands: Object.freeze(nativeCommands),
     nativeOutputs: Object.freeze(nativeCommands.map(command => command.outfile)),
-    staleNativeOutputs: Object.freeze(platform === 'darwin' ? [] : [nativeOutput]),
+    staleNativeOutputs: Object.freeze(platform === 'darwin' ? (mode.kind === 'macos-runtime-production' ? [controlLinkOutput,controlLinkOutput.replace(/\.node$/u,'.LICENSE')] : []) : [nativeOutput, controlLinkOutput,controlLinkOutput.replace(/\.node$/u,'.LICENSE')]),
     productionTeamIdentifierEmbedded: mode.kind === "macos-runtime-production",
   });
 }
@@ -335,6 +344,7 @@ export async function buildSidecars(mode: SidecarBuildMode, options: { env?: Rec
     const exitCode = await child.exited;
     if (exitCode !== 0) throw new Error(`[build-sidecar] ${command.entrypoint} compile failed (${exitCode})`);
   }
+  if(process.platform==='darwin'&&mode.kind!=='macos-runtime-production')cpSync(join(projectRoot,'node_modules/node-api-headers/LICENSE'),join(plan.resourceDir,'agentstoz-api-sidecar-control-link.LICENSE'));
   if (process.platform !== "win32") {
     for (const output of plan.outputs) chmodSync(output, 0o755);
     for (const output of plan.nativeOutputs) chmodSync(output, 0o755);

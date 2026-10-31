@@ -32,6 +32,7 @@ describe('hosted remote-control project card', () => {
         ],
       },
       busy: false,
+      codexNewSupported: true,
       onAction() {},
     }));
 
@@ -40,8 +41,9 @@ describe('hosted remote-control project card', () => {
     expect(html).not.toContain('data-action="claude.thread.start"');
     expect(html).not.toContain('Claude Code 처음 연결');
     expect(html).toContain('data-action="codex.thread.start"');
-    expect(html).toContain('Mac의 Codex 앱에서 열기');
-    expect(html).toContain('이 프로젝트·워크트리의 연결용 대화를 준비하고');
+    expect(html).toContain('Mac의 Codex에서 새 대화 요청');
+    expect(html).toContain('이 프로젝트의 새 Codex 대화를 요청합니다');
+    expect(html).toContain('실제 대화는 Mac의 프로젝트에서 확인');
     expect(html).toContain('최근 대화 다시 열기');
     expect(html).toContain('data-action="agent.claude"');
     expect(html).toContain('Orca · Claude');
@@ -61,6 +63,16 @@ describe('hosted remote-control project card', () => {
     expect(html.indexOf('새 대화')).toBeLessThan(html.indexOf('최근 대화 다시 열기'));
     expect(html.indexOf('최근 대화 다시 열기')).toBeLessThan(html.indexOf('Orca에서 열기'));
     expect(html).not.toContain('worktree.remove');
+  });
+
+  test('disables new Codex creation until the host advertises durable receipt support', () => {
+    const html = renderToStaticMarkup(createElement(RemoteControlProjectCard, {
+      project: { controlId: 'opaque_control', name: 'project', alias: null, workspaceRoot: null, branch: null,
+        port: null, kind: 'main' as const, status: 'unknown' as const, actions: ['codex.thread.start' as const] },
+      busy: false, codexNewSupported: false, onAction() {},
+    }));
+    expect(html).toMatch(/data-action="codex\.thread\.start"[^>]*disabled/);
+    expect(html).toContain('Mac의 AgentsToZ를 업데이트하세요');
   });
 
   test('renders an auto-discovered worktree card without offering nested creation', () => {
@@ -87,13 +99,16 @@ describe('hosted remote-control project card', () => {
         ],
       },
       busy: false,
+      codexNewSupported: true,
       onAction() {},
     }));
     expect(html).toContain('>워크트리</span>');
     expect(html).not.toContain('WORKTREE');
     expect(html).not.toContain('Claude Code 처음 연결');
     expect(html).not.toContain('data-action="claude.thread.start"');
-    expect(html).toContain('Mac의 Codex 앱에서 열기');
+    expect(html).toContain('Mac의 Codex에서 새 대화 요청');
+    expect(html).toMatch(/data-action="codex\.thread\.start"[^>]*disabled/);
+    expect(html).toContain('워크트리는 현재 지원하지 않습니다');
     expect(html).toContain('기본 브랜치에 Merge');
     expect(html).not.toContain('+ 표준 Git 워크트리');
     expect(html).not.toContain('+ Orca 등록 워크트리');

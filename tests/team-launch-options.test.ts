@@ -6,11 +6,99 @@ import {
 import {teamLeaderInstruction, teamMemberLabel} from '../src/workroomTeamInstruction';
 import {blankTeamRow, teamRowMember, type TeamBuilderRow} from '../src/WorkroomTeamBuilder';
 import {hermesVariantItems} from '../src/hermesVariants';
+import {teamEffortIsRequest, teamEffortLevels} from '../src/teamEffortCatalog';
+import {AGENTSTOZ_USE_MCP_TOOLS} from '../agentstoz-use-mcp-server';
+import type {WorkroomEffortLevel} from '../src/workroomEffortPolicy';
 
 // 팀 실행 계약 v1 (src/teamLaunchOptions.ts): the team builder and create_team share these choices, so each rule is pinned here.
 const SESSION = 'session-abcdef12';
 const parse = (raw: unknown) => parseTeamMemberSelection(raw, 0);
 const refuse = (raw: unknown, message: RegExp) => expect(() => parse(raw)).toThrow(message);
+
+test('effort choices follow model and surface; unknown model variants and invalid choices are refused', () => {
+  expect(teamEffortLevels('claude', 'claude-opus-5-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(teamEffortLevels('claude', 'claude-haiku-5-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(teamEffortLevels('claude', 'claude-fable-5-1')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(teamEffortLevels('codex', 'gpt-6.1-sol')).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  expect(teamEffortLevels('codex', 'gpt-6-luna')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(teamEffortLevels('agy', 'gemini-4-argon-low')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('agy', 'gpt-oss-120b-medium')).toEqual(['medium']);
+  expect(teamEffortLevels('agy', 'unknown-high')).toEqual([]);
+  for (const member of [
+    {agent:'claude', model:'claude-opus-5-5', effort:'max'},
+    {agent:'codex', model:'gpt-6.1-sol', effort:'xhigh'},
+    {agent:'agy', model:'gemini-4-argon-high', effort:'high'},
+  ] as const) expect(parse(member)).toEqual(member);
+  refuse({agent:'agy', model:'gpt-oss-120b-medium', effort:'high'}, /확인된 에포트/);
+  refuse({agent:'agy', model:'gemini-4-argon-low', effort:'high'}, /일치/);
+  refuse({agent:'agy', model:'unknown-high', effort:'high'}, /확인된 에포트/);
+  refuse({agent:'codex', model:'unknown', effort:'max'}, /확인된 에포트/);
+  refuse({agent:'claude', model:'claude-opus-5-5', effort:'max', surface:'app'}, /에포트|모델/);
+  expect(parse({agent:'claude', model:'claude-opus-5-5', effort:'max', surface:'orca-worktree'}))
+    .toEqual({agent:'claude', model:'claude-opus-5-5', effort:'max', surface:'orca-worktree'});
+  expect(parse({agent:'claude', effort:'max', surface:'orca-worktree'}))
+    .toEqual({agent:'claude', effort:'max', surface:'orca-worktree'});
+});
+
+test('effort lists name only levels the member\'s launch can carry: Codex catalog, Hermes per provider, Claude default per surface', () => {
+  const LMH: WorkroomEffortLevel[] = ['low', 'medium', 'high'], ALL: WorkroomEffortLevel[] = [...LMH, 'xhigh', 'max'];
+  // Codex: the CLI default keeps what every catalog model offers; an uncatalogued model has nothing provable to pin.
+  expect(teamEffortLevels('codex')).toEqual(LMH);
+  expect(teamEffortLevels('codex', 'gpt-6.1-terra')).toEqual([...ALL, 'ultra']);
+  expect(teamEffortLevels('codex', 'gpt-reserve')).toEqual(ALL);
+  expect(teamEffortLevels('codex', 'gpt-5.5')).toEqual(LMH);
+  expect(teamEffortLevels('codex', 'gpt-7-nova')).toEqual([]);
+  refuse({agent:'codex', model:'gpt-7-nova', effort:'low'}, /확인된 에포트/);
+  expect(parse({agent:'codex', model:'gpt-7-nova'})).toEqual({agent:'codex', model:'gpt-7-nova'});
+  expect(parse({agent:'codex', model:'gpt-6.1-terra', effort:'ultra'})).toEqual({agent:'codex', model:'gpt-6.1-terra', effort:'ultra'});
+  // Hermes moves a level its provider lacks without saying so (v0.20.5 anthropic_adapter / reasoning_effort): offer none of those.
+  expect(teamEffortLevels('hermes')).toEqual(LMH);
+  expect(teamEffortLevels('hermes', 'claude-opus-5-5', undefined, 'anthropic')).toEqual(ALL);
+  expect(teamEffortLevels('hermes', 'claude-haiku-5-5', undefined, 'anthropic')).toEqual([]);
+  expect(teamEffortLevels('hermes', 'gpt-5.6-sol', undefined, 'openai-codex')).toEqual(ALL);
+  expect(teamEffortLevels('hermes', 'gpt-6.1-sol', undefined, 'openai-codex')).toEqual([...LMH, 'xhigh']);
+  expect(teamEffortLevels('hermes', 'gpt-6-luna', undefined, 'openai-codex')).toEqual([...LMH, 'xhigh']);
+  expect(teamEffortLevels('hermes', 'gpt-7-nova', undefined, 'openai-codex')).toEqual(LMH);
+  expect(teamEffortLevels('hermes', 'some-model', undefined, 'openrouter')).toEqual(LMH);
+  expect(parse({agent:'hermes', model:'claude-opus-5-5', provider:'anthropic', effort:'max'})).toEqual({agent:'hermes', model:'claude-opus-5-5', provider:'anthropic', effort:'max'});
+  refuse({agent:'hermes', model:'claude-haiku-5-5', provider:'anthropic', effort:'low'}, /확인된 에포트/);
+  refuse({agent:'hermes', model:'claude-opus-5-5', provider:'anthropic', effort:'ultra'}, /확인된 에포트/);
+  refuse({agent:'hermes', model:'gpt-6.1-sol', provider:'openai-codex', effort:'max'}, /확인된 에포트/);
+  // Claude's CLI default: the Workroom enforces a pin (low/medium/high); Orca only requests one, so it offers low…max.
+  expect(teamEffortLevels('claude')).toEqual(LMH);
+  expect(teamEffortLevels('claude', undefined, 'internal')).toEqual(LMH);
+  expect(teamEffortLevels('claude', undefined, 'orca-floating')).toEqual(ALL);
+  refuse({agent:'claude', effort:'xhigh'}, /확인된 에포트/);
+});
+
+test('a pinned level is a request wherever the start cannot hold it: outside the Workroom, and Hermes on every surface', () => {
+  // Hermes hands --reasoning to its provider adapter, which moves or drops a level silently, and the Workroom start has no
+  // Hermes-side refusal for its configured model — so even a Workroom Hermes pin stays 「요청됨 · 실제 적용 확인 필요」.
+  for (const surface of [undefined, 'internal', 'orca-floating'] as const) expect(teamEffortIsRequest('hermes', surface)).toBe(true);
+  for (const agent of ['claude', 'codex', 'agy'] as const) {
+    expect(teamEffortIsRequest(agent, undefined)).toBe(false);
+    expect(teamEffortIsRequest(agent, 'internal')).toBe(false);
+  }
+  expect(teamEffortIsRequest('claude', 'orca-worktree')).toBe(true);
+  expect(teamEffortIsRequest('claude', 'orca-floating')).toBe(true);
+});
+
+test('create_team tells an MCP leader the Hermes levels the shared parser accepts, per provider', () => {
+  const description = AGENTSTOZ_USE_MCP_TOOLS.find(tool => tool.name === 'agentstoz_use_create_team')!.description;
+  expect(description).not.toContain('Hermes supports low/medium/high');
+  // Each claim matches teamEffortLevels / parseTeamMemberSelection above.
+  expect(description).toContain('Hermes levels depend on its provider');
+  expect(description).toContain('anthropic Haiku takes none');
+  expect(description).toContain('claude-opus-5-5/claude-sonnet-5-5/claude-fable-5-1 low…max, other anthropic models low/medium/high');
+  expect(description).toContain('openai-codex gpt-5.6 models low…max, other catalog models low…xhigh, both capped by the Codex catalog, an uncatalogued model low/medium/high');
+  expect(description).toContain('any other provider, or no model, low/medium/high');
+  expect(teamEffortLevels('hermes', 'claude-opus-5', undefined, 'anthropic')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('hermes', 'claude-opus-5-5', undefined, 'openrouter')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('hermes', undefined, undefined, 'anthropic')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('hermes', 'gpt-5.5', undefined, 'openai-codex')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('hermes', 'claude-sonnet-5-5', undefined, 'anthropic')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(teamEffortLevels('hermes', 'claude-fable-5-1', undefined, 'anthropic')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+});
 
 describe('surfaces and what each takes', () => {
   test('the header terminals of each platform plus the Workroom and the desktop app, in contract order', () => {
@@ -22,7 +110,7 @@ describe('surfaces and what each takes', () => {
   test('model, effort and account ride a Workroom start only', () => {
     expect(teamLaunchSupport('internal', 'hermes')).toMatchObject({model: true, provider: true, effort: true, account: false, bypass: true});
     expect(teamLaunchSupport('internal', 'codex')).toMatchObject({model: true, provider: false, account: true});
-    expect(teamLaunchSupport('internal', 'agy')).toMatchObject({model: true, effort: false, account: false});
+    expect(teamLaunchSupport('internal', 'agy')).toMatchObject({model: true, effort: true, account: false});
     for (const surface of TEAM_LAUNCH_SURFACES.filter(surface => surface !== 'internal'))
       expect(teamLaunchSupport(surface, 'codex')).toMatchObject({model: false, provider: false, effort: false, account: false});
   });
@@ -124,7 +212,7 @@ describe('the strict member parser', () => {
     refuse({agent: 'claude', surface: 'app', effort: 'high'}, /Claude 앱에서는 에포트/);
     refuse({agent: 'codex', provider: 'openai'}, /provider는 model과 함께/);
     refuse({agent: 'codex', model: 'gpt-6-sol', provider: 'openai'}, /provider는 Hermes에서만/);
-    refuse({agent: 'agy', effort: 'high'}, /Antigravity는 에포트/);
+    refuse({agent: 'agy', effort: 'high'}, /확인된 에포트/);
     refuse({agent: 'hermes', accountId: 'host-default'}, /Codex·Claude만/);
     refuse({agent: 'codex', surface: 'cmux', accountId: 'host-default'}, /cmux에서는 계정/);
     refuse({agent: 'codex', accountId: 'acct_nope'}, /accountId/);
@@ -226,10 +314,11 @@ describe('the versioned selection block', () => {
 
 describe('the leader instruction', () => {
   test('a plain Workroom member reads exactly as before, and the block follows', () => {
-    const text = teamLeaderInstruction({goal: '결제 오류를 고친다', members: [{agent: 'codex', model: 'gpt-7-nova', effort: 'high', task: 'API와 테스트'}, {agent: 'hermes', model: 'claude-opus-5-5', provider: 'anthropic'}]});
-    expect(text).toContain('- 팀원 1: Codex (gpt-7-nova) · 에포트 고정 high — API와 테스트\n- 팀원 2: Hermes (anthropic/claude-opus-5-5) · 에포트 자동 — 작업은 리더가 배분\n\n진행:');
+    // A typed Codex model the catalog knows (not a builder preset): its pinned level can be proven at the Workroom start.
+    const text = teamLeaderInstruction({goal: '결제 오류를 고친다', members: [{agent: 'codex', model: 'gpt-reserve', effort: 'high', task: 'API와 테스트'}, {agent: 'hermes', model: 'claude-opus-5-5', provider: 'anthropic'}]});
+    expect(text).toContain('- 팀원 1: Codex (gpt-reserve) · 에포트 고정 high — API와 테스트\n- 팀원 2: Hermes (anthropic/claude-opus-5-5) · 에포트 자동 — 작업은 리더가 배분\n\n진행:');
     expect(text).not.toContain('실행 위치·옵션:');
-    expect(parseTeamSelectionBlock(text).members).toEqual([{agent: 'codex', task: 'API와 테스트', model: 'gpt-7-nova', effort: 'high'}, {agent: 'hermes', model: 'claude-opus-5-5', provider: 'anthropic'}]);
+    expect(parseTeamSelectionBlock(text).members).toEqual([{agent: 'codex', task: 'API와 테스트', model: 'gpt-reserve', effort: 'high'}, {agent: 'hermes', model: 'claude-opus-5-5', provider: 'anthropic'}]);
   });
 
   test('every launch choice is named on the member’s line, with how the team carries it', () => {
@@ -342,4 +431,15 @@ describe('the builder row', () => {
     expect(member(row({sessionId: SESSION, accountId: OTHER, bypass: true, surface: 'iterm', task: ' API '}), {open}).member)
       .toEqual({agent: 'codex', sessionId: SESSION, sessionLabel: 'Demo · codex', task: 'API'});
   });
+});
+
+test('computerUseApprovals is a desktop app member opt-in, kept only as true and refused anywhere else', () => {
+  expect(parseTeamMemberSelection({agent: 'codex', surface: 'app', computerUseApprovals: true})).toEqual({agent: 'codex', surface: 'app', computerUseApprovals: true});
+  expect(parseTeamMemberSelection({agent: 'codex', surface: 'app', computerUseApprovals: false})).toEqual({agent: 'codex', surface: 'app'});
+  for (const surface of ['internal', 'orca-worktree', 'orca-floating', 'cmux', 'iterm', 'terminal'] as const)
+    expect(() => parseTeamMemberSelection({agent: 'claude', surface, computerUseApprovals: true})).toThrow('데스크톱 앱');
+  expect(() => parseTeamMemberSelection({agent: 'codex', surface: 'app', computerUseApprovals: 'yes'})).toThrow('true 또는 false');
+  expect(() => parseTeamMemberSelection({agent: 'codex', sessionId: 'session_abcdefgh', computerUseApprovals: true})).toThrow('computerUseApprovals');
+  expect(teamLaunchText({agent: 'codex', surface: 'app', computerUseApprovals: true})).toContain('리더가 1회성 승인만 컴퓨터 유즈로 응답 가능');
+  expect(teamLaunchText({agent: 'codex', surface: 'app'})).not.toContain('컴퓨터 유즈');
 });

@@ -1,5 +1,68 @@
 # 워크룸 — 팝아웃 · 활동 상태 · 에포트 · Hermes 변형 · 터미널 질의 · 다시 시작
 
+## Antigravity CLI 미완료 업무 스킬 (2026-10-29)
+
+Antigravity CLI의 전역 스킬 경로는 IDE의 `~/.gemini/config/skills/`와 별도인 `~/.gemini/antigravity-cli/skills/`다 ([Google 설치 코드](https://github.com/google/agents-cli/blob/main/src/google/agents/cli/setup/_antigravity.py)). 부팅 시에는 기존 CLI 홈에 `agentstoz-unfinished-work`를 설치하며, 사용자 파일·심볼릭 링크·새 버전은 보존한다. 워크룸 팔레트는 agy에 `/agentstoz-unfinished-work`를 제공한다. 팔레트 및 설치 테스트는 실제 CLI에서 스킬 실행과 MCP 연결까지 성공했다는 증거는 아니다.
+
+워크룸의 agy 시작 직전에 해당 스킬만 다시 맞춘다. 실행 파일을 확인하고 안전한 기존 `.gemini`가 있을 때는 첫 실행에도 CLI 홈과 스킬을 만든다. 부모가 없거나 심볼릭 링크인 경우 생성하지 않으며, 기존 자동 맞춤 비활성 설정도 그대로 따른다.
+
+## 모바일 Codex 새 대화 영수증 (2026-10-29)
+
+구형 `codex.thread.start`는 프로젝트 연결 준비·최근 대화 재사용을 유지한다. 신형 휴대폰은 `codex-new-receipt-v1` capability를 확인한 뒤 기본 프로젝트에서만 `codex.thread.start.v2`를 보낸다. 서버는 controller와 actionId, 등록 프로젝트 및 실제 폴더 identity에 결속된 `started` 영수증을 첫 전송 전에 내구 저장한다. Codex Desktop의 공통 화면을 사용하는 legacy·v2 생성과 Mac 검토는 전역 교차 프로세스 잠금으로 직렬화한다. 정확한 Desktop projectId·host·cwd와 turn 완료를 확인한 후 `completed` 영수증을 저장하며, 휴대폰이 응답을 받은 뒤 원래 actionId로 `codex.thread.ack.v2`를 보낼 때만 다음 새 요청이 가능하다. 확인된 기록은 세션 수명 동안 tombstone으로 남아 같은 ID의 재전송이 새 대화를 만들지 못한다.
+
+연결 포트·저장소 변경 뒤에는 같은 controller의 `codex.thread.review.v2`로 미확인 상태와 opaque actionId만 확인한다. 다른 기기는 기록의 내용을 받지 못한다. Mac의 remote-control 관리 capability로 보호된 검토·복구는 등록 프로젝트 ID와 revision CAS, 사람의 명시 확인을 요구한다. `started`는 프로젝트 잠금 아래 두 fence가 모두 없어 전송 전임을 증명하거나, 보존된 정확 threadId의 Desktop 결속과 완료된 turn을 읽기 전용으로 확인한 경우만 복구한다. 결과 불명은 자동으로 지우거나 재전송하지 않는다. 워크트리는 해당 Mac 복구 경로가 준비될 때까지 v2를 거절하고, 인터넷 capability가 기존 16개 한도에 가득 차면 이 기능을 광고하지 않는다.
+
+## 팀원 고정 에포트 모델별 선택 (2026-10-27)
+
+`teamEffortCatalog.ts`는 자동 판정 범위(low·medium·high)와 사람이 고정하는 모델별 범위를 분리한다. 이 Mac의 Codex 모델 캐시에서 확인한 모델은 xhigh·max, 일부는 ultra까지 지원한다. Claude Code 2.1.311은 low·medium·high·xhigh·max 플래그를 제공하며 Opus·Sonnet·Haiku 5.5와 Fable 5.1은 제공자 문서로 xhigh·max를 확인했다. 다른 모델·기본 모델은 미확인 상위 단계를 노출하지 않는다. CLI 버전, 계정과 사용자 지정 모델은 달라질 수 있으므로 카탈로그는 이 날짜의 증거이지 모든 설치에서의 실행 보장이 아니다.
+
+agy 모델 목록은 각 단계가 별도 슬러그다. 같은 계열의 확인된 단계만 표시하며 선택 시 모델도 해당 슬러그로 바꾼다. `--model gemini-4-argon-low --effort high`는 실기에서 충돌로 거절됐고, high 모델과 high effort는 `/effort`에서 high로 확인했다. 기본·미확인 직접 입력 모델의 단계는 추측하지 않는다. 고정값은 워크룸의 각 CLI 실행 인자에 전달하며, Orca의 Claude에도 선택한 `--model`과 `--effort`를 전달한다. Orca 기본 Claude 모델이 미확인인 경우에도 CLI가 받는 xhigh·max를 요청할 수 있으나 모델의 실제 지원을 단정하지 않는다. Orca의 별도 셸 환경은 확인되지 않으므로 팀 현황은 요청한 값과 실제 적용 미확인을 구분한다. 그 외 외부 앱·터미널과 열린 세션에는 적용하지 않는다. 워크룸에서 Codex 설정을 증명할 수 없거나 Claude 환경 변수가 덮어쓰는 경우 고정을 조용히 버리지 않고 시작을 거절한다. thinking이 꺼진 Claude의 xhigh/max도 거절한다.
+
+기존 모바일 리더는 에포트 표시 수준 enum을 엄격히 검증하므로, 확장된 고정값은 요청이 `effortExtended:true`를 보낼 때만 workspace 응답에 넣는다. 새 로컬 화면은 이 표식을 보내고 구형 호스트의 거절 시 읽기 요청에 한해 기존 형식으로 재시도한다. 자동 판정과 Antigravity 자동 적용 정책은 바뀌지 않는다.
+`effortExtended`는 **요청 쪽 키**이고 Mac의 자기 패널만 보낸다(`AiTerminalPanel`의 `extended:!remote`). 휴대폰은 보내지 않으므로 응답 DTO·`AiTerminalSummary`·
+`REMOTE_CONTROL_PROTOCOL_VERSION`은 그대로다. 정규화기는 `true`만, `workroom.effort`에서만 받는다(다른 값·다른 동작은 구형 호스트와 같은 거절 문구 → 읽기만 한 번 대체).
+쓰기(설정·모드 변경)는 다시 보내지 않는다. 검증: `tests/workroom-effort-controls.test.tsx`(정규화기·휴대폰은 키 없음·패널 조건).
+
+### 증거 재동기화와 표면별 차이 (2026-10-28)
+
+- **Codex 카탈로그**는 Codex 자신의 모델 메타데이터(`~/.codex/models_cache.json`, codex-cli 0.163.0, 2026-10-28 재확인)에서 온다. 이 Mac의 설정 기본 모델
+  `gpt-6.1-terra`(low…ultra)가 빠져 있어 **기본 모델로 고정한 Codex 팀원은 워크룸 시작에서 전부 거절됐다**('model-unknown'). 숨김 모델 `gpt-reserve`·
+  `codex-auto-review`는 low…max, 메타데이터에 없는 옛 항목(`gpt-5.5`·`gpt-daybreak-*`)은 low·medium·high만 둔다. 구성기 목록과 시작 증명은 같은
+  표(`teamCodexEffortLevels`)를 쓴다 — `tests/codex-effort-model.test.ts`가 모델마다 둘이 같은지 본다.
+- **카탈로그에 없는 Codex 모델**(직접 입력)은 고정할 단계가 없다 — 「자동」만 보이고 parser도 거절한다(시작이 어차피 거절하므로 미리 막는다). Codex CLI 기본
+  모델은 모든 카탈로그 모델이 가진 low·medium·high를 보이고, 시작은 여전히 이 Mac 설정의 모델을 증명하며 모르는 모델이면 거절한다(fail-closed 유지).
+- **Hermes**(v0.20.5)는 공급자 어댑터가 없는 단계를 말없이 바꾼다: anthropic은 이름에 haiku가 든 모델에 reasoning을 아예 보내지 않고(고정 없음),
+  Opus·Sonnet·Fable 5.x는 low…max를 그대로 보낸다(ultra→max라 ultra 없음). openai-codex는 gpt-5.6 계열 none…max, 그 밖은 none…xhigh로 자르므로
+  카탈로그와 교집합만 보인다. 그 밖의 공급자·공급자 없음은 예전 그대로 low·medium·high.
+- **Claude 기본 모델의 표면별 차이는 의도다**(B11 결정): 워크룸의 Claude 고정은 강제된다(`CLAUDE_CODE_EFFORT_LEVEL`이 덮으면 시작 거절, thinking off의 xhigh/max 거절)
+  — 모델을 모르면 low·medium·high만. Orca의 `--effort`는 요청일 뿐이고(셸 환경을 볼 수 없음) 현황이 「요청됨 · 실제 적용 확인 필요」로 말하므로 CLI가 받는
+  low…max를 연다. 코드 옆 주석: `teamEffortLevels`.
+- **구성기**: 실행 위치를 바꾸거나 Hermes provider를 고치면 새 조합이 제공하지 않는 고정값을 지운다(Orca 기본 Claude max → 워크룸이면 「자동」,
+  Hermes anthropic Opus max → provider openrouter면 「자동」; 새 조합에도 있는 단계는 유지). xhigh·max·ultra도 「고정 · <단계>」로 읽는다(`effortPinned`).
+  **팀 현황**·구성기 제목은 `teamEffortIsRequest` 하나로 정한다: 워크룸의 Claude·Codex 고정(시작이 적용 못 하면 거절)과 agy(고정이 곧 모델 변형)는
+  「에포트 고정 · …」으로만, 워크룸 밖(Orca Claude)과 **Hermes는 워크룸에서도** 「요청됨 · 실제 적용 확인 필요」를 붙인다 — Hermes는 공급자 어댑터가
+  `--reasoning`을 말없이 바꾸거나 빼고, 기본 모델 Hermes는 시작이 모델을 모른다(2026-10-28 B-01: 한때 워크룸 Hermes에서 이 꼬리표를 뺐던 것을 되돌렸다).
+  검증: `tests/team-launch-options.test.ts`, `tests/workroom-team-builder-ui.mjs`, `tests/workroom-team-status-ui.mjs`.
+
+## 예약 재개와 외부 앱 effort (2026-10-27)
+
+`workroomScheduleHost/Store/Protocol.ts`, `WorkroomScheduleCard.tsx`는 기존 15초 유지보수 tick과 전체 요청 영수증을 사용한다.
+입력 대기·빈 작성칸·계정/모델/대화 identity 및 input/output revision을 입력 직전에 확인하고, 새 CLI 시작의 최종 guard는
+비동기 대상 재검증 뒤에도 실행한다. 원래 요청 생성/실행 ID를 읽는 것은 재실행이 아니다. 결과 불명은 영속 대화 lease를 유지하고
+사람의 결과 검토와 별도 재활성화를 요구한다. 같은 세션/별도 새 대화는 별도 선택이며 새 대화는 증명된 launch model과 일반 승인을 사용한다.
+현재 Codex/Claude 대상이다. 같은 호스트 프로세스에서 명시 동의한 종료 대화는 `workroomScheduleIntegration.ts`가
+정확한 provider·계정·모델·완료 transcript 증명과 history 영수증을 다시 확인할 때만 복원한다. 같은 호스트에서 복원된 세션이
+다시 종료된 경우에도 마지막 완료와 예약 전용 입력 revision을 증명하면 복원할 수 있다. 완료 증거는
+bounded 정규 파일 전체 해시와 마지막 완료 행에 결속되므로 정상 메타데이터 추가도 거절할 수 있다. 호스트 재시작 후 증거가
+없거나 사람이 입력한 경우에는 확인을 요구한다. Hermes/agy와 불명확한 대화는 추측해 열지 않는다.
+
+예약 재개 패널은 세션의 도구 버튼으로 열 때만 표시·조회한다. 빈 카드도 항상 끼워 넣으면 1120×780·글자 16에서 원래 입력칸이 화면 밖으로 밀린다. `tests/workroom-popout.e2e.mjs`의 초기 입력칸·전송 버튼 가시성 및 예약 열기/닫기 회귀를 유지한다. 닫힌 UI와 별도로 호스트의 기존 유지보수 tick은 예약을 처리한다.
+
+`desktopEffortHost/Native/Protocol.ts`, `DesktopEffortPanel.tsx`는 공통 desktop recommend/off 설정과 다른 세션별 최대 10분 동의다.
+HTTP/MCP body로 native adapter를 등록할 수 없다. gateway의 CAS만으로 미제출 입력/선택창을 증명할 수 없어
+현재 설치 앱용 Auto connector는 등록되어 있지 않다. 테스트 포트를 실제 연결로 승격하지 않는다.
+상세 범위와 검증: `docs/design/workroom-scheduler-2026-10-27/EXECUTION.md`.
+
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
@@ -58,6 +121,14 @@
   이전 Mac이 `snapshot` 키를 거부하면 오류를 표시하지 않고 기존 `after:0` 재생으로 폴백한다.
   ⚠️ 그 크기 주장(입력 직전 resize)이 Codex에게는 커서 위치 질의(`CSI 6 n`)를 부른다 — 호스트가 그것에 답해야 입력이 제출된다
   (아래 「워크룸 터미널 질의는 호스트가 한 번만 답한다」).
+- **휴대폰의 세션 보기 도구는 줄바꿈으로 터미널을 밀어내지 않는다**(2026-10-29): 320×568에서 「미처리 업무 조회」가
+  한 글자씩 줄바꿈되며 터미널이 221px로 작아졌고, 926×428에서는 도구가 두 줄을 차지해 202px만 남았다. 세션 보기의 도구는
+  44px 터치 대상을 유지한 한 줄 가로 스크롤이며, 넓고 짧은 화면에서는 제목·세션 선택기 폭을 제한해 첫 줄에 둔다.
+  스크롤된 「미처리 업무 조회」는 초안만 준비하고 자동 전송하지 않으며, 「워크룸 설정」 팝업은 도구 영역 밖에서도 눌러야 한다.
+  `scripts/check-maintainer-web.ts mobile-terminal-full`이 WebKit·Chromium의 해당 크기와 입력·설정 접근성을 격리 검사한다.
+  설정을 연 직후 하드웨어 Escape를 누르면 React의 문서 리스너가 아직 붙지 않았을 수 있으므로, `<details>`가 키를 동기 처리한다
+  (`WorkroomEffortControls.tsx`). iOS 터치는 입력칸에 초점이 남을 수 있어 세션 보기의 캡처 단계에서도 열린 설정을 먼저 닫고,
+  Escape가 CLI나 바깥 세션 보기에 전달되지 않게 한다(`AiTerminalPanel.tsx`).
 - ⚠️ **휴대폰 워크룸 터미널이 비어 보이던 원인은 `list` 폭주였다(2026-10-02, 실기 Web Inspector로 확인).** 포털은 상태 폴링(~1초)마다
   `projects`를 새 배열로 넘기고, 패널의 `refresh`(→`list`)가 그 배열 정체성에 묶여 매번 다시 돌았다. 휴대폰 릴레이는 요청을 하나씩
   처리하므로 1분에 `list` ~32회·`read` 1회 — 버퍼가 비어 있었다(그리기 문제가 아니었다; v564의 「다시 그리기」는 틀린 진단이라 뺐다).
@@ -191,10 +262,11 @@
   설정 쓰기 실패는 사용자용 오류만 반환하고 로컬 파일 경로·원시 파일시스템 오류를 내보내지 않는다.
 - **내부 워크룸 팀원 에포트**(2026-10-25): 자동인 팀원은 지시문 전체가 아니라 **자기 작업**으로 판정한다(`requestText`). 사람이 고정한 팀원은
   설정이 꺼짐·권고만이어도 그 강도로 시작하고, 이후 자동 조정·advice·다시 시작이 바꾸지 않는다(`WorkroomEffortState.pinned`, 호스트 전용 —
-  기록·화면에는 tier 없는 level로만 보이고 배지는 「에포트 고정 · <강도>」). 자세한 것은 `mcp-ops.md` 「팀 작전」.
+  기록·화면에는 tier 없는 level로만 보이고, 세션 배지는 CLI가 보여 줄 때까지 「에포트 요청 · <강도> · 적용 확인 전」, 보인 뒤 「… · CLI 표시 <강도>」).
+  자세한 것은 `mcp-ops.md` 「팀 작전」.
 - **팀 실행 위치와 현황**(2026-10-25): 구성기와 MCP는 같은 `teamLaunchOptions.ts` 카탈로그·parser를 사용한다. 지원 위치별 옵션을 지시문의 version 1 선택 블록에 보존한다.
   팀 현황(`WorkroomTeamStatus`, Mac)은 내부 세션 상태와 외부 실행 위치·전달 상태·수동 확인 출처를 구분한다. 리더는 지시문 복사·시작/전달 확인·옮긴 보고를 기록할 수 있다.
-  외부 창 열림·prefill·복사만으로 작업 중이나 완료로 판정하지 않고, 연결 대기·수동 합류·응답 대기·미확정으로 남긴다. 외부 위치의 모델/에포트/계정 선택은 현재 제공하지 않는다.
+  외부 창 열림·prefill·복사만으로 작업 중이나 완료로 판정하지 않고, 연결 대기·수동 합류·응답 대기·미확정으로 남긴다. 외부 위치의 계정 선택은 제공하지 않고, 모델·에포트는 Orca의 Claude에만 요청으로 전달한다(적용 확인 전 — 위 「증거 재동기화와 표면별 차이」).
   실제 read/send/reveal, 초기 지시 한 번 전달, 재시작 후 자동 재실행 금지는 [mcp-ops.md](mcp-ops.md) 「팀 실행 위치·영수증」을 따른다.
 - **자연어 MCP의 AI 선택**(2026-10-25): `agentstoz_use_prepare_agent_launch`에서 AI → 실행 위치 → Hermes 기본/Claude/Codex 중 미정만 질문한다.
   agent 이름만으로 앱·터미널·워크룸을 정하지 않으며, 연결 클라이언트는 답 전까지 실행하지 않는다. 값이 모두 알려진 prepare도 비실행이다.
@@ -204,7 +276,11 @@
   새 팀원도 surface와 Hermes variant 또는 model+provider가 필요하다. 새 raw 선택 블록은 기본값을 명시하며, 과거 유효한 v1 블록에서 생략된 internal/plain-Hermes 기본값은 클라이언트가 MCP에 명시해 재질문하지 않는다. 열린 sessionId 합류는 기존 설정을 유지한다.
   prepare의 `executionRoutes`가 팀 생성만 제공하면 단일 요청을 임의로 팀으로 바꾸지 않는다.
 - 열린 결정: 보통 요청의 `medium`이 사람의 더 높은 개인 기본값(예: Claude `effortLevel`, Codex config의 effort)을 이번 세션에 한해 낮춘다(D1 — 요청대로
-  「그 밖은 medium」). Haiku처럼 effort를 받지 않는 모델에서 `--effort`가 무시되는지는 확인하지 않았다.
+  「그 밖은 medium」). Claude Code의 Haiku 5.5는 effort low…max를 받는다(제공자 문서). Hermes의 anthropic 어댑터는 haiku 모델에 reasoning을 보내지 않으므로 Hermes·Haiku 팀원에는
+  고정을 제공하지 않는다. 시작이 Hermes 모델·provider를 **골랐을 때**(팀원·「Hermes · Claude/Codex」, `launchModel`) `planWorkroomEffort`는 같은 표
+  (`teamHermesEffortLevels`)로 거른다(`hermesModel`): Hermes·anthropic Haiku의 **자동**은 `--reasoning`을 넘기지 않고 「모델을 확인하지 못해 CLI 기본값」
+  (`model-unknown`)으로 말하며, 그 표에 없는 고정은 시작을 거절한다(2026-10-28). ⚠️ Hermes **자기 설정**(`~/.hermes/config.yaml`)의 기본 모델은 여전히
+  모른다 — 그 모델이 Haiku면 자동 `--reasoning`은 무시되는데 배지는 「에포트 자동 · <단계>」라고 말한다(미해결: 호스트가 그 설정을 읽어야 한다).
 - 검증: `tests/workroom-effort-policy.test.ts`(골든·high 상한·4,000자·300자·단어 경계·첨부 제외), `tests/codex-effort-model.test.ts`(카탈로그·모델/공급자/
   프로필/카탈로그/base URL/실행 인자·맨 위 키 스캐너·실제 파일의 없음/64 KiB/권한/디렉터리), `tests/workroom-launch-options.test.ts`(CLI별 플래그 위치·생략 시
   바이트 동일·agy/제한 실행 무시), `tests/workroom-effort-launch.test.ts`(실제 서비스 + 가짜 PTY: 켜짐/꺼짐·요청 없음·CLI 명령·agy·Codex 증명·Hermes·
@@ -212,6 +288,120 @@
   낮춤 표시·변경 줄/입력으로 수동·기준선·advice가 아무것도 입력하지 않음·MCP/꺼짐/수동 뒤 advice 없음·high 위에서 낮추라 하지 않음),
   `tests/workroom-effort-setting.test.ts`(없으면 켜짐·0600 원자적 저장·깨진 파일/심볼릭 링크·요청 형식·원격/커뮤니티 거절·`normalizeAiTerminalRequest` 거절).
   ⚠️ 실제 CLI(Claude·Codex·Hermes)로 플래그를 넣어 띄워 보지는 않았다(돈·네트워크) — 인자는 각 CLI `--help`와 바이너리 문자열로만 확인했다.
+
+### 에포트 자동은 전송을 붙잡지 않는다 — 쓰기 전 대기는 4초, 거절은 `rejected` (2026-10-30)
+
+설치본 1577에서 「현재 세션에 전송」이 Claude는 두 번째 요청부터, Codex는 첫 요청부터, 팀 작전 리더에게는 일하는 중에 멈췄다(「앞서 보낸 요청의
+전송 결과를 확인해야 합니다」). 설치본 기록의 해당 영수증은 모두 `prepared`로 남아 있었다. 원인: 전체 요청 제출의 **쓰기 울타리 앞**에서 실행 중 에포트 조절(`#adjustEffort` →
+`changeWorkroomEffort`)이 「빈 작성칸 + idle」을 **최대 60초** 기다렸다. 그 대기는 모든 클라이언트 대기(브라우저 15초·앱 프록시와 MCP 20초)와
+조립 수명 30초보다 길다. Claude 2.1.314는 턴이 끝날 때마다 다음 프롬프트 제안을 작성칸에 흐리게(`ESC[2m`) 그려
+`effortComposerEmpty`가 거짓이 된다. 일하는 리더(「Orchestrating…」)는 idle이 아니다. Codex의 hooks 검토 화면은 질문 화면이라 즉시 거절했다.
+거절된 입력 영수증은 `prepared`로 영원히 남았고, 패널은 그 위에 울타리를 쳤다. 실측: 시험 세션 `fa7c78b8`에서 C1·C2는 written, 제안이 뜬 뒤 C4는 20초
+타임아웃·`prepared`·입력 0바이트였다. 팀 리더 `cfdc3925`의 두 번째 요청도 같은 `prepared`, 같은 시각 리더→팀원 후속 지시(MCP)는 written.
+- **준비 대기는 `WORKROOM_EFFORT_READY_WAIT_MS`(4초)**. 넘기면 `WorkroomEffortNotReadyError`가 난다. 화면이 강도를 보여 주지 않으면 기다리지 않고
+  곧바로 `unsupported`다. 질문 화면 거절이 이 둘보다 먼저다 — 승인·선택 화면에 요청을 치지 않는다. 키를 하나도 치지 않았으면 강도는 그대로 두고
+  (`runtimeStatus`는 비우고 advice를 남긴다 — `deferred`는 바꾸는 동안에만이다) 요청은 쓰기 경로로 간다. Claude·Codex는 일하는 중 입력을 자기
+  대기열에 넣는다.
+- **그때 작성칸이 비었음을 새로 증명해야 한다(ROOT 리뷰)**: 바꿀 수 있는 Claude·Codex TUI(`claudeSessionPicker`·`codexDefaultKeys`)에서는 쓰기
+  울타리 직전에 화면을 **다시** 읽고 `effortComposerEmpty`가 참일 때만 요청을 쓴다(흐린 자리표시자는 빈 칸이다). 진짜 초안·대기 중에 생긴 초안·
+  읽을 수 없는 작성칸이면 쓰기 울타리 전에 거절한다 — 요청 0바이트, 사람의 초안은 그대로, 영수증은 `rejected`. `NotReadyError`는 「바쁨」과
+  「초안 있음」을 가르지 못하기 때문이다(그대로 쓰면 초안에 요청이 이어 붙는다). 일하는 리더라도 작성칸이 비어 있으면 받는다.
+  런타임에 바꿀 수 없는 CLI(피커·기본 키 없음)와 Hermes는 예전 쓰기 경로 그대로다.
+- **「바꾸지 않았다」를 화면이 말한다(ROOT 리뷰)**: 자동 모드(`mode==='auto'`)에서 바꾸는 중(`deferred`)도 확인 필요(`unconfirmed`)도 아닌데 advice가
+  있으면, 에포트 자동이 강도를 바꾸지 않은 것이다. 배지는 「에포트 자동 · 이번 요청은 변경 안 함」, 안내는 「에포트는 지금 xhigh 그대로입니다 · 이번
+  요청의 권장 보통으로 바꾸지 않았습니다 · 바꾸려면 「에포트 변경」」(`workroomEffortView.ts`의 `notAdjusted`). **전달 여부는 말하지 않는다** —
+  advice는 쓰기 울타리 전에 남고 그 뒤 권한·교정·작성칸 확인이 요청을 거절할 수 있다. 전달은 제출 영수증만 증명한다. 기존 DTO 필드만 쓴다 — 새 `runtimeStatus` 값을
+  더하면 휴대폰의 엄격한 정규화기가 응답 전체를 거절한다. 추천 모드와 mode가 없는 옛 응답의 문구는 그대로다.
+- **키를 하나도 치지 않았으면 `seen`을 지킨다**: 강도 줄은 턴이 지나면 화면에서 사라진다. 그래서 다음 요청은 지켜 둔 강도로 다시 판단해 바꾼다.
+  키를 쳤으면 기준선을 새로 잡는다(예전 그대로).
+- **강도는 낱말로만 읽는다**: Claude 2.1.314는 시작 화면에 `◉ xhigh · /effort`를 그린다(실측). `cliInfoFromScreen`이 `◉`를 받아들인다.
+  그러나 강도는 늘 `/effort` 앞의 낱말에서 읽는다 — 글리프만으로 짐작하지 않는다(`◉ · /effort`·`◉ turbo · /effort`는 읽지 않는다).
+- **흐린 자리표시자는 빈 작성칸이다 — 기하가 정확할 때만**(`effortComposerEmpty`): 커서 뒤 글자가 **모두** 흐려야 한다(`dimmedCursorTail`).
+  또 커서가 표시(`❯`/`›`) 바로 다음 칸에 있어야 한다.
+  ⚠️ Codex 0.166은 `ultra`에서만 작성칸 표시를 `»`로 그린다(none…max는 `›` — 2026-10-31 3호 격리 tmux 실측, 같은 바이너리).
+  `»`를 몰랐던 1634까지는 ultra 세션의 모든 요청이 「확인할 수 없는 내용」으로 거절됐다(1호 OPS). 작성칸 표시 정규식에는 `»`를 함께 둔다.
+  Claude는 여기에 더해 작성칸 줄 **바로 위·아래가 규칙선**이어야 하고 200자 이하여야 한다(낱말은 무엇이든 — CLI의 추측이다).
+  Codex는 「Ask a follow-up question」 문자열일 때만이다(0.166 바이너리 문자열 — 실기 미확인). 흐리지 않은 같은 글자, 커서가 뒤에 있음,
+  `git ` 뒤의 흐린 자동완성, 다른 열, 아래가 규칙선이 아님 — 이런 경우는 모두 진짜 초안으로 보고 손대지 않는다.
+  ⚠️ 기존 「preserve my draft」 검사의 초안은 `dim:false`로 바꿨다. 그 검사는 Home에서 규칙선 사이에 놓인 **완전히 흐린** 꼬리를 초안이라고 불렀다.
+  그런데 그 모양이 바로 2.1.314의 자리표시자다. 흐리지 않은 초안은 지금도 그대로 지켜진다.
+- **키를 친 뒤 확인 못 한 변경은 여전히 요청을 거절한다**(`unconfirmed`). 요청 글자는 하나도 쓰지 않는다. 같은 id는 `rejected`로 남고,
+  다시 보내도 거절만 다시 답한다(검사: Claude는 `/effort⏎`만, Codex는 `ESC ,`만 친 뒤).
+- **쓰기 울타리 전 거절 = `rejected`**: 입력 제출도 시작 제출처럼, 작성기가 `start` 전에 던지면 영수증을 `rejected`로 남긴다(`refuseUnwritten`).
+  여기에는 질문 화면, 오래된 교정, 이미지 경로, 준비 기간 만료가 들어간다. 같은 id 재시도는 그 거절을 다시 답하고 나중에 쓰이지 않는다(`#submitWhole`).
+  MCP에서는 NOT_SENT로 남는다. 아무 요청 없이 **만료만 된** 입력 조립은 예전처럼 `prepared`다.
+- **클라이언트**: `pendingAfterStatus`는 written과 함께 `rejected`·`held`(=`launchNeverStarted`)도 정리한다. 다만 **written처럼 다루지 않는다** —
+  패널 `settleSubmission`과 LAN 페이지는 초안·칩·첨부·브라우저 접근을 그대로 두고 「앞선 요청은 터미널에 입력되지 않았습니다(…)」라고 말한다.
+  ⚠️ `pendingAfterStatus`는 LAN 페이지가 소스째 싣는다 — 다른 모듈 심볼을 부르지 말 것.
+- **실패 뒤 상태 조회는 한 번, 울타리를 놓은 뒤에**(`statusAfterFailure`): 전송의 `finally`가 `submissionInFlight`를 푼 다음에 같은 id의 읽기 전용
+  status를 묻는다. 예전처럼 `catch` 안에서 물으면, 빨리 오는 답이 아직 걸린 울타리 때문에 버려질 수 있었다. 기록은 선택된 세션의 상태가 아니라
+  **그 세션의 sessionStorage 키**에서 다시 읽는다. 그래서 응답이 오기 전에 다른 세션으로 옮겨도 원래 세션만 정리된다(수정 전에는 원래 세션에
+  울타리가 남았다). `outcomeCheck`를 뮤텍스로 쓰고, 다른 확인이 돌거나 새 전송이 진행 중이면 배너의 수동 확인에 맡긴다 —
+  자동 조회는 같은 id에 한 번 이하다. `unknown`·`prepared`·무응답은 울타리를 유지하며 다시 보내지 않는다.
+- 팀 작전: 리더의 후속 지시(`workroomTeamHost.instruct` → `submitHostInstruction`)도 같은 쓰기 경로다. 같은 세션 대기열에서 60초씩 밀리던 것이 사라졌다.
+- **증거의 종류를 나눠 둔다**:
+  - 실기(설치본 기록·시험 세션): `prepared`로 막힌 것은 Codex `b4709981`의 첫 요청, Claude `a862a581`의 두 번째 요청, 리더 `cfdc3925`의 두 번째
+    요청(Orchestrating 중)이다. 팀원 `636a4129`의 후속 지시는 written이었다. 시험 세션 `fa7c78b8`에서 C1·C2는 written이었고, C4는 20초 타임아웃·
+    `prepared`·0바이트였다. 그 화면에서 `◉ xhigh · /effort`(시작)와 흐린 제안(턴 뒤 4행 2열, 규칙선 사이)을 확인했다.
+  - 가짜 PTY만(실제 CLI·모델 없음): 수정 뒤의 모든 흐름 — 4초 뒤 현재 강도로 쓰기와 그 문구, idle Claude 2.1.314에서 자동 변경 적용,
+    부분 변경 거절, 진짜 초안 거절, 일하는 리더 3연속과 팀 후속 지시 2개의 순서. **수정본으로 실제 리더·팀원 세션을 돌려 본 적은 없다.**
+- 검증: `tests/workroom-submission-effort-gate.test.ts`(실제 서비스·저장소·에포트 런타임, 가짜 PTY 12개 — 수정 전 첫 4개 모두 실패. Claude·Codex의
+  진짜 초안·강도 못 읽는 화면의 초안·대기 중 생긴 초안 4개는 작성칸 증명을 끄면 모두 실패, 바꿀 수 없는 CLI의 예전 쓰기 경로 가드 1개),
+  `tests/claude-effort-placeholder.test.ts`(2.1.314·Codex 자리표시자 양성/음성, `◉` 피커 왕복), `tests/workroom-cli-commands.test.ts`(`◉` 낱말),
+  `tests/workroom-effort-view.test.ts`(바꾸지 않았다 문구·추천 그대로), `tests/remote-control-mobile-submission-never-ran.test.ts`(LAN 상태 버튼),
+  `tests/workroom-submission-refusal.e2e.mjs`(실제 React 패널: 거절·유실·새로고침·늦은 거절 중 세션 전환 × 기본 창·팝아웃, 버튼·Enter, 같은 id
+  조회 한 번 — 처음 6개는 수정 전 0/6, 세션 전환 검사는 `catch` 안 조회로 되돌리면 2개 모두 실패).
+  계약 갱신: `workroom-submission.test.ts`(준비 기간이 지난 쓰기 시작 → rejected), `workroom-submission-attachments.test.ts`(이미지 거절 → rejected),
+  `community-submission.test.ts`(rejected·held → 정리).
+- 남은 것: Codex 흐린 자리표시자는 실기 미확인이다. 자동 변경 뒤에도 시작 화면의 `◉ xhigh` 줄이 화면에 남아 있으면, 그 줄 때문에 세션이 수동
+  설정으로 잡힐 수 있다(실기 미확인). 이번 수정은 설치본에 이미 남은 `prepared` 기록을 고치지 않는다. 새 앱으로 다시 시작하면 이전 부팅의
+  `prepared`는 `held`로 읽히고, `held`도 정리 대상이라 상태 확인 한 번으로 풀린다(초안 유지). 그 전에는 「제출 결과 확인」·「터미널 결과 확인했음」을
+  사람이 누른다.
+### 낮은 워크룸에서 Claude 슬라이더가 열린 채 남았다 · Codex 단축키 거절 (2026-10-31)
+
+설치본 1594의 Codex 클릭 QA에서 Testforcsagents1 새 워크룸 첫 요청이 Claude·Codex 모두 「에포트 자동 변경 결과를 확인하지 못했습니다」로
+거절됐다. Claude 터미널은 `Effort · xhigh` 슬라이더에 멈춰 있었다. 세션 크기는 **105×11**이었다(`list_workroom_sessions`).
+- **실측(Claude 2.1.314, 별도 tmux 소켓, 요청 없음)**: `/effort`⏎는 「Faster … Smarter」 슬라이더와 한 줄짜리 강도 행
+  (`low medium high xhigh max`)을 그린다. 안내 줄 「←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel」은
+  **13줄부터** 보이고 12줄 이하에서는 화면 밖으로 잘린다. 60칸에서는 `…s for this session` / `only…`로 접힌다. 키는 그대로다
+  (바이너리 기본 바인딩 `s: effortSlider:thisSessionOnly`). `s` 뒤 「Set effort level to medium (this session only)」·`◐ medium · /effort`,
+  사람의 `~/.claude/settings.json`은 md5 그대로였다. **Esc 한 번**은 「⎿  Cancelled」를 남기고 강도·빈 작성칸을 되돌린다.
+- **안내 줄만이 `s`의 증거다** — 안 보이면 `s`도 Enter도 치지 않는다. 행을 공백으로 이어 붙여 접힌 안내도 읽는다(`claudeSessionOnlyHint`).
+  슬라이더가 열렸는데 안내가 25번 읽는 동안 안 보이면 잘린 것으로 본다(한 프레임에 그려진다).
+- **열린 슬라이더는 Esc로 닫고, 증명되면 요청을 보낸다**(`cancelClaudePicker`): 슬라이더가 열려 있을 때만 Esc를 치고, 슬라이더가 닫히고
+  작성칸이 비고 강도가 `before`일 때만 `unchanged`다. 증명되지 않으면 원래 거절(`unconfirmed`)이다. `s`가 확인되지 않은 경우와 강도
+  항목을 못 읽은 경우도 같다. `unchanged`는 내부 결과일 뿐이다 — `runtimeStatus`는 비우고 advice를 남긴다(새 DTO 값 없음, 화면은
+  「에포트 자동 · 이번 요청은 변경 안 함」).
+- **슬라이더는 구조로만 알아본다**(`claudeSlider`, 같은 날 독립 리뷰): 정확히 「Effort」뿐인 줄 → 4줄 안의 트랙(`───▲───`), 그 아래에 작성칸(`❯`)
+  행이 없을 것 — 이것이 「열려 있다」(Esc로 닫을 근거)다. 강도를 **바꾸는** 것은 트랙 바로 아래 강도 행에 low·medium·high가 온전할 때만이다.
+  실측(2.1.314, 50·40·34칸): 50칸은 슬라이더가 온전하고 안내만 접힌다. **42칸쯤보다 좁으면 행이 양옆에서 잘린다**(40칸 「aster … Smarte」,
+  「ow  medium  high  xhigh  ma」) — 그때는 Esc로 닫고 `unchanged`, **너비만** 기억한다(그 너비 이하에서는 높이와 상관없이 키를 치지 않는다).
+  처음 고친 판은 「Faster … Smarter」를 요구해 좁은 화면에서 슬라이더를 못 알아보고 열린 채 두었다. 처음 판정(화면 어디든 `effort` 낱말 + 세 강도가 든 행)은 상태줄 `◉ xhigh · /effort`와
+  `const LEVELS = ['low', 'medium', 'high'];` 같은 대화 행을 슬라이더로 읽었다 — 정상 변경을 거절했고, 화살표 수를 그 행으로 셌고,
+  슬라이더가 열리지 않았는데 일반 작성칸에 Esc를 쳤다(재현 후 수정). 사용 가능한 강도·「이 세션만」 안내는 **제목 줄 아래에서만** 읽는다.
+  ⚠️ 「Adjust effort level」 화면은 실제 Claude에 없다(2.1.309·2.1.314 바이너리에 그 문자열 없음) — 검사 fixture는 실제 슬라이더 모양을 쓴다.
+  더 오래된 Claude가 다르게 그리면 슬라이더를 못 찾아 Esc 없이 예전처럼 거절된다(안전한 쪽).
+- **Codex**: 0.166은 gpt-6.1-sol에서 `ESC ,`에 「Reasoning shortcuts are unavailable for gpt-6.1-sol.」로 답하고 강도를 그대로 둔다. 바이너리에서 이
+  문장은 「Voice set to」 등과 같은 **정보 행**(대화 기록 쪽)이다. 그래서 **문장 하나뿐인 행**(앞에 `•`·`■` 등 글리프 하나 허용)만 거절로 세고,
+  흘러나오는 출력이 그 문장을 인용한 행은 세지 않는다. 그 행이 **새로** 보이고, 첫 단계이며, 강도가 `before`이고, 작성칸이 그대로이고,
+  **200 ms 뒤 다시 읽어도** 강도가 `before`일 때만 `unchanged`다(적용된 단축키는 하단줄을 조금 늦게 다시 그린다). 「…disabled until startup
+  completes」도 `unchanged`이지만 기억하지 않는다.
+- **같은 곳에서 되풀이하지 않는다**(호스트 전용 `effortRefusal`, 기록 `workroomEffortRecord`에서 뺀다): 잘린 슬라이더는 그때의 **높이·너비**를
+  남기고 그 크기 이하(더 좁으면 안내가 더 접힌다)에서는 키를 치지 않는다. 더 넓거나 높으면 다시 시도한다. 「unavailable for <모델>」은 **모델**을
+  남기고 화면 하단줄의 모델이 같을 때만(대소문자 무시 — 0.166 하단줄은 「GPT-6.1-Sol high」, 거절 문장은 「gpt-6.1-sol」) 건너뛴다 — `/model`로 바꾸면 다시 시도한다.
+  ⚠️ `~/.codex`의 기본 계정에서는 같은 gpt-6.1-sol에 `ESC ,`가 **먹었다**(실측 2026-10-31, high→medium, 거절 줄 없음). 거절은 워크룸이 고른
+  계정 쪽 모델 정보에서 난 것으로 보인다 — 실제 거절 줄의 모양은 아직 캡처하지 못했다(정규식은 QA 인용 문장 기준). 높이만 기억하던 첫 판은 모델이 바뀌어도 막았다.
+- **시간 한도**: 준비 대기 4초 뒤 키와 그 증명은 **마감 하나**(6초)를 함께 쓰고, Esc 취소는 따로 1.5초다(`WORKROOM_EFFORT_CHANGE_WAIT_MS`·
+  `…CANCEL_WAIT_MS`). 80회 대기 셋을 따로 두면 `s` 실패 뒤 잠만 13.6초로 브라우저 15초 한도에 닿았다. `s` 뒤 확인은 마감이 거의 지났어도
+  최소 1초를 받는다(늦게 열린 슬라이더에서 `s` 처리 중에 Esc를 치지 않게).
+- 증거의 종류: 슬라이더·안내·Esc는 **실제 CLI**(tmux 프로브)이고, Codex 거절 줄은 **Codex 클릭 QA 화면 인용 + 0.166 바이너리 문자열**이다
+  (그 줄의 정확한 위치·글리프는 미확인). 수정본으로 실제 워크룸을 다시 돌린 것은 다음 설치본의 클릭 QA다.
+- 검증: `tests/workroom-submission-effort-gate.test.ts`(잘린 슬라이더 → Esc → 요청 한 번, 다음 요청은 키 없음; Codex 거절 → 요청, 다음은 키 없음 —
+  수정 전 둘 다 실패), `tests/claude-effort-placeholder.test.ts`(60칸 접힌 안내 → 적용, 105×11 → 취소·높이 기억, `s` 미확인 → Esc 되돌림·증명 없는
+  취소는 거절, Codex 시작 전 거절은 기억 안 함 — 수정 전 4개 모두 실패). 리뷰 수정분(같은 파일): 대화 행 「low / medium / high」·`const LEVELS …` 위의
+  실제 슬라이더 → 적용, 강도가 모자란 대화 행 → 슬라이더 행으로 화살표 수, 열리지 않은 슬라이더 → Esc 없음, Codex 인용 행 → 거절 아님,
+  거절 뒤 하단줄이 바뀜 → 거절(부분 변경), 모델별 기억, 크기별 기억(더 넓으면 다시) — 수정 전 8개 모두 실패.
+
 ## 「Hermes · Claude」·「Hermes · Codex」 — Hermes가 어느 모델로 뜨는지 고르기만 하면 된다 (2026-10-25)
 
 **사용자 요청(2026-10-25)**: 「헤르메스는 헤르메스에 코덱스, 클로드 둘다 적용할수있으니 별도버튼으로 만들어져야」 — 초보자가 Hermes를
@@ -384,3 +574,10 @@ headless 화면(`AiTerminalScreen`)이 PTY 자신의 크기로 답한다** — �
 - **최종 native 38/38:** ARIA min/max/now의 반올림을 일치시킨 Home/End 범위 검사와 새 QA 배율을 포함한 재빌드가 통과했고 `sourceVerified`·`cleanExit`는 true다(`output/workroom-browser-native-qa/report.json`). OS 화면 제한을 피하는 QA 전용 500×550 logical·zoom 0.625와 렌더 전 실측 content-size 보정(최대 3회)으로 CSS 800×814를 맞추며 titlebar 높이를 가정하지 않는다. 페이지 200px·양축 40px·원래 PhysicalSize 복구 단언은 유지하고 일반 앱 배율·호스트 해상도·권한 범위를 바꾸지 않는다.
 - **최종 craft·A2:** `/tmp/agentstoz-browser-craft-release-review.log`의 matrix120+locale12+extended72, 합계 **204사례**가 통과했고 `/tmp/agentstoz-browser-craft-release-review-1519`에 **206 PNG**를 저장했다. en/de/ja 확장 각 24장(72장)과 root 대표 4장을 실제로 열람했다. 전체 206장 직접 검토나 정적 이미지의 탭 스크롤·tooltip·키보드·드래그 동작 검증으로 확대하지 않는다.
 - 사용자 제보의 설치 앱은 **1263.0.0**이며 위 resize/search·native 단축키 변경은 아직 미반영이다. native 변경은 UI 새로고침으로 적용되지 않아 QA/helper 재빌드가 필요하다. OS IME·외부 Google 접속은 미검증이다. 전체 verify는 소스 35파일 지문 `33707dc9bdddf3ba88da7097a4629185832e42191c642383b92b730ca4f12a5e`로 동결해 exit 0으로 완료했다(Python 131개, TypeScript exit 0, Bun 8601 pass / 0 fail / 10 skip, Rust 120 pass / 0 fail). 검증 후 결과 문서만 갱신했으며 normal profile·configured personas는 후속 영수증에서 확인한다. 이전 중단·실패를 pass로 읽지 않는다. [실행 기록](../design/browser-workroom-craft-2026-10-25/EXECUTION.md)과 최종 `output/browser-workroom-verification-final.json`에서 실제 영수증을 확인한다.
+- **800×814 나란히 보기의 chrome 예산(2026-10-28):** native QA가 창을 키웠다가 원래 크기로 되돌리는 단계에서 페이지를 trusted UI 위로 28.8px 밀어 실패했다(frame 아래 815.2 > 814, `.ai-terminal-panel` scrollHeight 729 > clientHeight 685). chrome을 두 번 센 것이 아니다 — 하한은 200 + panel chrome 158.8, 여기에 handle 8 + 전환 줄 51.2를 더한 418.2px로 맞다. 본문(456px)이 그만큼을 줄 수 없었다: 줄바꿈된 세션 머리줄 114px와 gap 8px를 빼면 314px였다. 두 가지로 고쳤다. ① 나란히 보기의 「터미널/나란히/브라우저」 전환은 페이지 열 위가 아니라 터미널 열 머리에 겹친다(`WorkroomBrowserFrame.tsx`·`.css`). panes의 첫 자식이라 Tab 순서(전환 → 페이지 열)가 그대로이고, grid 1열 1행에 놓이며, 터미널 열은 측정한 높이 + 8px(`--workroom-browser-switch-block`)의 투명 border-top 아래에서 내용을 시작한다. 그래서 터미널 열 상자는 페이지 상단과 같은 높이에서 시작한다(기존 `stack.top≈browser.top` 단언 유지). 브라우저 보기에서는 전환이 페이지 위에 남고, 터미널 보기는 display:contents라 배치가 예전과 같다. ② 브라우저를 연 전용 표면(dialog·popout)에서 세션 머리줄은 한 줄이다(`AiTerminalPanel.css`) — view controls는 줄바꿈 대신 가로로 스크롤하고 세션 이름이 먼저 줄어든다. 재빌드한 native 실측: 머리줄 114→52px, 페이지 217.2px, 높이 범위 359–376(이제 조절된다), 모든 조상 scrollTop 0. 확대(800×1454)·수동 최소/최대·복구에서도 frame·panel·slot·handle가 모든 clip 상자 안에 있었다.
+- **값싼 재현:** `tests/workroom-browser-layout.mjs`의 native mirror 시나리오가 native fixture의 chrome을 Chromium/WebKit에서 그대로 만든다. mount 전 16px 글꼴, 실행 중 워크룸 2개, `임시 실제 PTY 워크룸`, 빈 팀 장부, account manager 없는 QA 호스트의 계정 거절(머리 알림), 사람 초안과 grant chip이 그 내용이다. 각 부분이 자기 clip 조상(overflow≠visible)의 padding box와 viewport 안에 있는지, dialog content·panel·workspace·body의 초과 스크롤이 2px 이하인지, 페이지 200px 이상·native rect = slot·머리줄 한 줄인지를 본다. native와 같은 확대 → 양축 키보드 → 더블클릭 복원 → 원래 크기 왕복도 돈다. 수정 전 같은 stub의 probe에서는 body가 31px 넘쳤다 — 이 검사가 있었다면 native 전에 잡혔다.
+- **native fixture 계측:** `assertFloorInView`는 viewport뿐 아니라 모든 clip 조상(panel의 overflow:auto, dialog의 overflow:hidden)의 padding box를 본다. 기본·확대·수동 높이·복구 단언 전에는 `settle`이 같은 기하(네 부분 rect 0.5px 반올림 + 조상 scrollTop + viewport)가 연속 세 프레임 반복될 때까지 기다린다. 고정 sleep이 아니며, 가로 단계의 rAF 두 번 대기도 이것으로 바꿨다. 단계별 geometry probe는 `qa_log`(호스트가 `ATZ_NATIVE_QA_PROBE:` 한 줄로 출력, 16000자 한도)로 나가고, runner가 마지막 24줄을 `report.json`의 `processReports[].probes`에 성공·실패 모두 담는다 — WKWebView console은 전달되지 않는다. probe와 실패 보고의 `layout`(조상 체인·body/panel 자식 포함)에는 기하만 넣고 글·입력값·접근 정보는 넣지 않는다.
+- **QA 창 노출:** 호스트는 시작할 때 창을 가운데 두고, 모든 Space에서 일반 창 위에 띄운 뒤(always-on-top·visible-on-all-workspaces) show·앱 show·focus한다. 가려지거나 숨은 WKWebView는 requestAnimationFrame을 멈추기 때문이다. focus는 macOS 협력 활성화가 거절할 수 있어 best effort다. 프레임이 멈추면 fixture가 `qa_raise`(같은 raise 뒤 visible/focused/minimized를 돌려준다)를 부르고 같은 5초 예산 안에서 다시 기다린다. 끝내 멈추면 `Native QA viewport animation frames were suspended` 문구에 `visibilityState`·`hasFocus()`·raise 결과가 함께 남는다.
+  띄움은 **되찾는 동안만** 유지한다(2026-10-28 검토): 800×814 보정이 끝나 프레임이 오면, 그리고 멈춘 프레임이 raise 뒤 돌아오면 fixture가 `qa_lower`로 두 설정을 끈다. 창은 앞에 남은 일반 창이 되고, 약 65초 동안 사람의 다른 창을 모든 Space에서 덮지 않는다. 보정 뒤 단계는 E3 이전처럼 띄움 없이 돌며, `frames()`를 쓰는 대기(보정·settle)는 멈추면 다시 띄운다. 이 변경 뒤의 실제 native 재실행 결과는 아래 결과 줄이 아니라 그 실행의 `report.json`으로 판정한다.
+- **결과(2026-10-28):** `bun tests/workroom-browser-native.mjs --build` 한 번에 main 32·cold 2·slow 4·lost 2, 합계 **40/40**이 통과했고 `sourceVerified`·`cleanExit`는 true다(`output/workroom-browser-native-qa/report.json`, 단계별 probe 포함). layout은 Chromium/WebKit **22/22**(native mirror 포함), craft·screen·owned-requests 통과, browser 단위 229 pass / 0 fail, tsc 0이다. 설치 앱 반영과 사람의 화면 확인은 하지 않았다. 확대 창의 자동 높이에서 `aria-valuenow` 965가 `aria-valuemax` 964를 넘는 반올림 불일치가 probe에 보였다 — 고치지 않았다.
+- **키보드 포커스·ARIA 검토 수정(2026-10-28):** ① 전환은 브라우저 보기에서 section 자식, 터미널·나란히 보기에서 panes 자식이라 그 사이를 오가면 remount되어 포커스가 문서(body)로 떨어졌다. 내 Chrome 소스에는 포커스를 받을 주소창이 없어 키보드 사용자가 dialog 맨 앞부터 다시 Tab해야 했다. `chooseView`는 rAF에서 주소창(내장 브라우저)이 있으면 그것을, 없으면 누른 보기 버튼을 포커스한다. 포커스가 이미 다른 요소로 옮겨 갔으면 건드리지 않는다. ② 한 줄 세션 머리줄은 가로 scroller라 맨 오른쪽 control(「새 창으로 분리」)의 2px ring + 2px offset 오른쪽이 모든 폭에서 잘렸다. 머리줄에 사방 4px padding을 주고 같은 음수 margin으로 body padding에서 되돌린다. 브라우저는 32px 넘게 보이는 control에 포커스가 와도 스크롤하지 않기 때문에(800px에서 66%만 보임) frame이 키보드 포커스(`:focus-visible`)일 때만 머리줄을 ring까지 보이게 민다. 포인터 포커스는 click이 다른 버튼에 떨어질 수 있어 밀지 않는다. ③ 자동 높이의 `aria-valuenow`는 패널의 반올림 전 높이이고 max는 floor라 .5 이상의 소수에서 now가 max보다 1 컸다(native 965 > 964, 800×814 mirror 388 > 387). now를 [min, max(min,max)]로 자른다. 회귀: `tests/workroom-browser-layout.mjs` 마지막 시나리오(Chrome 소스의 여섯 보기 전환 포커스, 내장 브라우저 주소창, 1280·800px 머리줄 ring)와 native mirror의 모든 단계·817–843px 자동 높이 범위 검사. 수정 전 소스로 돌린 변형에서 셋 다 실패했다.

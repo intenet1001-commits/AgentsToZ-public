@@ -862,6 +862,9 @@ async function verifyIndeterminateConversationUi(browser) {
         await page.getByTestId('open-qr-remote-control').click();
         const qrDialog = page.getByTestId('qr-remote-control-dialog');
         await qrDialog.waitFor({ state: 'visible', timeout: 5000 });
+        // 꺼진 같은 Wi‑Fi 웹 원격은 접혀 있다 — 펼쳐야 켜기 버튼이 나온다(켜져 있으면 바로 QR 회전 버튼이 보인다).
+        await page.locator('[data-testid="qr-remote-control-lan-expand"], [data-testid="qr-remote-control-rotate"]').first().waitFor({ state: 'visible', timeout: 5000 });
+        if (await page.getByTestId('qr-remote-control-lan-expand').isVisible()) await page.getByTestId('qr-remote-control-lan-expand').click();
         const availableQrAction = page.locator([
           '[data-testid="qr-remote-control-enable"]',
           '[data-testid="qr-remote-control-rotate"]',

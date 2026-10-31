@@ -67,7 +67,7 @@ const results = [];
 async function fixture(path, extraSessions = [], options = {}) {
   const context = await browser.newContext({ viewport: options.viewport ?? { width: 1200, height: 1000 }, serviceWorkers: 'block' });
   if (options.fontSize) await context.addInitScript(size => {if(location.protocol==='http:')localStorage.setItem('portmanager-workroom-font-size', String(size));}, options.fontSize);
-  const state = { sessions: options.sessions ?? [session(A, projects[0].targetId, 'codex'), session(B, projects[1].targetId, 'claude'), ...extraSessions], requests: [], vocPosts: [], unexpected: [], errors: [] };
+  const state = { sessions: options.sessions ?? [session(A, projects[0].targetId, 'codex'), session(B, projects[1].targetId, 'claude'), ...extraSessions], requests: [], scheduleReads: [], vocPosts: [], unexpected: [], errors: [] };
   await context.route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -78,6 +78,7 @@ async function fixture(path, extraSessions = [], options = {}) {
     // The VOC journey needs its explicit synthetic DEV project; other Workroom
     // fixtures use the shared empty suggestions list instead.
     if (url.pathname === '/api/ports' && request.method() === 'GET') return respond(ports);
+    if (url.pathname === '/api/agent-runtime/workroom-schedules') state.scheduleReads.push(request.postDataJSON());
     const background = workroomBackgroundResponse(url.pathname, request.method(), request.postDataJSON());
     if (background) return respond(background);
     if (url.pathname === '/api/agent-runtime/targets') return respond({ protocolVersion: 'agentstoz-tasks-v2', complete: true, targets: projects.map(p => ({ ...p, projectTargetId: p.targetId, scope: 'main', branch: 'main', locked: false, worktreeCapable: true })) });
@@ -135,6 +136,36 @@ async function run(name, path, execute, extraSessions, options) {
 }
 
 try {
+  await run('agentstoz-unfinished-work-prepares-a-request-without-sending-or-replacing-a-draft', popoutPath, async ({page,state}) => {
+    const composer=page.getByRole('textbox',{name:'워크룸 입력'});
+    const button=page.getByTestId('workroom-unfinished-work');
+    await button.waitFor();
+    const sentBefore=state.requests.filter(request=>['input','submit'].includes(request.operation)).length;
+    await composer.fill('작성 중인 요청');
+    await button.click();
+    assert.equal(await composer.inputValue(),'작성 중인 요청','A pending draft is never overwritten');
+    await composer.fill('');
+    await button.click();
+    assert.equal(await composer.inputValue(),'agentstoz-unfinished-work 스킬을 사용해 이 프로젝트의 미처리 업무를 확인해 주세요.');
+    assert.equal(state.requests.filter(request=>['input','submit'].includes(request.operation)).length,sentBefore,'The user must explicitly send the prepared request');
+  });
+  await run('schedule-controls-open-only-on-request-and-leave-the-initial-composer-visible', popoutPath, async ({page,state}) => {
+    const composer=page.getByTestId('workroom-command-composer');
+    await composer.waitFor();
+    assert.equal(await page.getByTestId('workroom-schedule-card').count(),0);
+    assert.deepEqual(state.scheduleReads,[], 'A closed schedule panel does not query its host');
+    const opener=page.getByTestId('workroom-schedule-open');
+    await opener.click();
+    await page.getByTestId('workroom-schedule-card').waitFor();
+    await until(()=>state.scheduleReads.length>0,'Opening schedule controls reads this exact session');
+    // The real app uses StrictMode, which can replay a mount read in development. Every read stays scoped.
+    for(const request of state.scheduleReads)assert.deepEqual(request,{operation:'list',sessionId:A});
+    await opener.click();
+    await page.getByTestId('workroom-schedule-card').waitFor({state:'detached'});
+    const closedReads=state.scheduleReads.length;await wait(50);assert.equal(state.scheduleReads.length,closedReads,'Closing schedule controls stops its reads');
+    const rect=await composer.boundingBox();
+    assert.ok(rect&&rect.y>=0&&rect.y+rect.height<=780,'Closing schedule controls restores the laptop composer: '+JSON.stringify(rect));
+  },[],{viewport:{width:1120,height:780},fontSize:16});
   await run('laptop-popup-keeps-composer-visible-with-ended-session-and-font16', popoutPath, async ({page,state}) => {
     await page.getByTestId('workroom-popout-window').waitFor();
     await until(async () => (await selectedTab(page))?.includes('입력 검증 A'), 'The actual popup selects its active session');
@@ -310,8 +341,12 @@ try {
     return { windows: 2 };
   });
 
-  await run('remote-transport-shows-readable-view-instead-of-popout', '/__popout-harness?remote=1', async ({ page, context }) => {
+  await run('remote-transport-shows-readable-view-instead-of-popout', '/__popout-harness?remote=1', async ({ page, context, state }) => {
     assert.equal(await page.getByTestId('workroom-popout').count(), 0, 'A phone must not offer an action that always raises a red error');
+    const pendingWork=page.getByTestId('workroom-unfinished-work');
+    await pendingWork.click();
+    assert.equal(await page.getByRole('textbox',{name:'워크룸 입력'}).inputValue(),'agentstoz-unfinished-work 스킬을 사용해 이 프로젝트의 미처리 업무를 확인해 주세요.');
+    assert.equal(state.requests.filter(request=>['input','submit'].includes(request.operation)).length,0,'The phone also prepares without sending');
     const button = page.getByTestId('workroom-readable-toggle');
     await button.waitFor();
     assert.equal(await button.getAttribute('aria-pressed'), 'true');

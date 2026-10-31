@@ -13,8 +13,9 @@
  */
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import {checkMacOSNotary,notaryAuthArgs,type NotaryOptions} from './macOSNotaryPreflight';
 import { isAbsolute, join, resolve } from 'node:path';
-import { MACOS_BASE_CODEX_ACCESSIBILITY_HELPER_IDENTIFIER, MACOS_BASE_KMSG_IDENTIFIER } from './macOSBaseAppSigning';
+import { MACOS_BASE_CODEX_ACCESSIBILITY_HELPER_IDENTIFIER, MACOS_BASE_KMSG_IDENTIFIER, MACOS_BASE_CONTROL_LINK_IDENTIFIER } from './macOSBaseAppSigning';
 import {
   MACOS_RUNTIME_PRODUCTION_API_SIDECAR_IDENTIFIER,
   MACOS_RUNTIME_PRODUCTION_GUARD_IDENTIFIER,
@@ -130,6 +131,7 @@ const CEF_LIBRARY = new RegExp(`^${CEF_FRAMEWORK.replace(/[.*+?^${}()|[\]\\]/gu,
 
 /** Maps one Mach-O found in the bundle to what codesign signs for it. */
 export function classifyDeveloperIdMachO(relativePath: string): DeveloperIdSigningTarget {
+  if (relativePath === `${RESOURCES}agentstoz-api-sidecar-control-link.node`) return {path:relativePath,kind:'library',identifier:MACOS_BASE_CONTROL_LINK_IDENTIFIER,entitlements:'none'};
   if (relativePath === 'Contents/MacOS/app') return { path: '', kind: 'app', entitlements: 'gui' };
   if (relativePath === `${SCREEN_HELPER_BUNDLE_PATH}/Contents/MacOS/AgentsToZScreen`) {
     return { path: SCREEN_HELPER_BUNDLE_PATH, kind: 'screen-app', entitlements: 'none' };
@@ -237,7 +239,38 @@ export function readNotaryApiKey(home = homedir(), fs: { existsSync(path: string
   return Object.freeze({ keyPath, keyId, issuerId });
 }
 
-export function notaryAuthArguments(key: NotaryApiKey): readonly string[] {
+export type NotaryAuthentication = NotaryApiKey | Readonly<NotaryOptions>;
+
+/** Explicit profile selection only; no discovery, credential creation or fallback to another account. */
+export function parseDeveloperIdNotaryOptions(args: readonly string[]): {buildArguments: string[]; notaryOptions: NotaryOptions | undefined} {
+  const buildArguments: string[] = [], selected = new Map<string,string>();
+  for (let i=0;i<args.length;i++) {
+    const arg=args[i]!;
+    if (arg !== '--notary-profile' && arg !== '--notary-keychain') { buildArguments.push(arg); continue; }
+    const value=args[++i];
+    if (!value || value.startsWith('--') || selected.has(arg)) throw Error('Supply each --notary-profile/--notary-keychain option once with its value.');
+    selected.set(arg,value);
+  }
+  if (!selected.size) return {buildArguments,notaryOptions:undefined};
+  if (!buildArguments.includes('--developer-id')) throw Error('--notary-profile and --notary-keychain require --developer-id.');
+  const profile=selected.get('--notary-profile');
+  if (profile===undefined) throw Error('--notary-keychain requires --notary-profile.');
+  const notaryOptions={profile,...(selected.has('--notary-keychain')?{keychain:selected.get('--notary-keychain')!}:{})};
+  notaryAuthArgs(notaryOptions);
+  return {buildArguments,notaryOptions};
+}
+
+export function readDeveloperIdNotaryAuthentication(options?: NotaryOptions, dependencies={readKey:readNotaryApiKey,checkProfile:checkMacOSNotary}): NotaryAuthentication {
+  if (!options) return dependencies.readKey();
+  const selected=Object.freeze({...options});
+  notaryAuthArgs(selected);
+  const result=dependencies.checkProfile(selected);
+  if (!result.ready) throw Error(`Existing notary Keychain profile is not ready (${result.status}); no submission was made.`);
+  return selected;
+}
+
+export function notaryAuthArguments(key: NotaryAuthentication): readonly string[] {
+  if ('profile' in key) return Object.freeze(notaryAuthArgs(key));
   return Object.freeze(['--key', key.keyPath, '--key-id', key.keyId, '--issuer', key.issuerId]);
 }
 
@@ -287,10 +320,10 @@ export function resolveMacOSCargoTargetDir(env: Readonly<Record<string, string |
 
 export interface DeveloperIdSigningIdentity { readonly certificateFingerprint: string; readonly commonName: string; readonly teamIdentifier: string }
 
-export interface DeveloperIdPreflight { readonly identity: DeveloperIdSigningIdentity; readonly notaryKey: NotaryApiKey }
+export interface DeveloperIdPreflight { readonly identity: DeveloperIdSigningIdentity; readonly notaryKey: NotaryAuthentication }
 
 /** Fails before the long build when the identity, the notary key or the Xcode tools are missing. */
-export async function preflightDeveloperId(): Promise<DeveloperIdPreflight> {
+export async function preflightDeveloperId(notaryOptions?: NotaryOptions): Promise<DeveloperIdPreflight> {
   if (process.platform !== 'darwin') throw new Error('--developer-id requires macOS');
   const resolution = await resolveMacOSRuntimeProductionIdentity();
   const identity = resolution.identity;
@@ -298,8 +331,8 @@ export async function preflightDeveloperId(): Promise<DeveloperIdPreflight> {
   if (identity.teamIdentifier !== DEVELOPER_ID_TEAM_IDENTIFIER) {
     throw new Error(`The keychain's Developer ID identity belongs to team ${identity.teamIdentifier}, not ${DEVELOPER_ID_TEAM_IDENTIFIER}`);
   }
-  const notaryKey = readNotaryApiKey();
   for (const tool of ['notarytool', 'stapler']) run(['xcrun', '--find', tool], `xcrun --find ${tool}`);
+  const notaryKey = readDeveloperIdNotaryAuthentication(notaryOptions);
   return Object.freeze({ identity, notaryKey });
 }
 
@@ -330,6 +363,8 @@ export interface DeveloperIdReceipt {
 }
 
 function notarize(artifact: string, label: string, options: DeveloperIdReleaseOptions): string {
+  // A long build may outlive the unlocked login session. Recheck the same profile, never select a fallback.
+  if ('profile' in options.preflight.notaryKey) readDeveloperIdNotaryAuthentication(options.preflight.notaryKey);
   const auth = notaryAuthArguments(options.preflight.notaryKey);
   const log = options.log ?? console.log;
   log(`[developer-id] notarizing ${label} (notarytool submit --wait)…`);
@@ -337,7 +372,7 @@ function notarize(artifact: string, label: string, options: DeveloperIdReleaseOp
   const stdout = result.stdout.toString();
   let submission: NotarySubmission;
   try { submission = parseNotarySubmission(stdout); } catch (error) {
-    throw new Error(`notarytool submit for ${label} failed (exit ${result.exitCode}): ${error instanceof Error ? error.message : error}\n${result.stderr.toString().trim()}`);
+    throw new Error(`notarytool submit for ${label} failed (exit ${result.exitCode}): ${error instanceof Error ? error.message : error}. Outcome unknown; inspect notarytool history with the same authentication before any new submission.`);
   }
   let notaryLog = '';
   if (submission.id) {

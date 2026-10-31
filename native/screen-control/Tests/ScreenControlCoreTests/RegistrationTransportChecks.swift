@@ -106,6 +106,65 @@ extension ScreenControlChecks {
         try await expectError(RegistrationError.malformed) { _ = try RegistrationInvite(text: text(fields + [Data()])) }
     }
 
+    /// The registration QR scanned with the iPhone Camera said 「사용 가능한 데이터가 없음」: its text is a URL in a scheme
+    /// no app had registered (2026-11-01). The app now registers `RegistrationInvite.scheme`; this pins that every QR the
+    /// Mac shows parses as a URL in exactly that scheme, that the URL the system opens the app with gives back the very
+    /// text that was scanned, and that the opened text meets the same parser, purpose check included.
+    func testRegistrationQRIsAURLTheAppOpens() async throws {
+        let mac = SoftwareSigner()
+        let fingerprint = ScreenControlIdentity.fingerprint(of: mac.publicKey)
+        let code = RegistrationCode.generate()
+        let endpoint = URL(string: "wss://relay.example/screen-relay")!
+        let legacy = try RegistrationInvite(macFingerprint: fingerprint, code: code, macName: "Mac", hostName: "mac.local",
+                                            address: "192.168.0.12", registrationPort: 50123, screenPort: 52741)
+        let nearby = try RegistrationInvite(macFingerprint: fingerprint, code: code, macName: "최천성's MacBook Pro",
+                                            hostName: "MacBook-Pro.local",
+                                            nearbyRegistrationService: ScreenNearby.registrationService(codeID: code.id),
+                                            nearbyScreenService: ScreenNearby.screenService(fingerprint: fingerprint))
+        let internet = try RegistrationInvite(macFingerprint: fingerprint, code: code, macName: "Mac", hostName: "mac.local",
+                                              nearbyRegistrationService: ScreenNearby.registrationService(codeID: code.id),
+                                              nearbyScreenService: ScreenNearby.screenService(fingerprint: fingerprint),
+                                              registrationRelay: try ScreenRelayRoute(endpoint: endpoint, room: ScreenRelayRoute.newRoom(fingerprint: fingerprint)),
+                                              screenRelay: try ScreenRelayRoute(endpoint: endpoint, room: ScreenRelayRoute.newRoom(fingerprint: fingerprint)))
+        try check(RegistrationInvite.prefix == RegistrationInvite.scheme + ":", "the QR prefix is the URL scheme")
+        for invite in [legacy, nearby, internet] {
+            guard let url = URL(string: invite.text) else { throw CheckFailure(description: "the QR text is not a URL: \(invite.text)") }
+            try check(url.scheme == RegistrationInvite.scheme && url.host == nil && url.query == nil && url.fragment == nil,
+                      "an opaque URL in the app's scheme: nothing a browser or server would take apart")
+            guard let opened = RegistrationInvite.text(openedURL: url) else { throw CheckFailure(description: "the app ignores its own QR") }
+            try check(opened == invite.text, "the opened URL gives back the exact scanned text")
+            let read = try RegistrationInvite(deviceRegistrationText: opened)
+            try check(read.macFingerprint == fingerprint && read.code.id == code.id && read.code.qrSecret == code.qrSecret
+                      && read.registrationRelay == invite.registrationRelay && read.nearbyScreenService == invite.nearbyScreenService,
+                      "opening the QR as a URL reads the same invitation as scanning it")
+        }
+        // Only this scheme is a registration; other app links and look-alikes are left to their own handlers.
+        for other in ["agentstoz://connect#e30", "agentstoz-mobile://auth/callback?state=x", "agentstoz-screen-controller:AAAA",
+                      "https://example.com/agentstoz-screen:AAAA", "agentstoz-screenx:AAAA"] {
+            guard let url = URL(string: other) else { throw CheckFailure(description: "fixture is not a URL: \(other)") }
+            try check(RegistrationInvite.text(openedURL: url) == nil, "\(other) is not a registration URL")
+        }
+        // A URL in the scheme is still only text to the strict parser: another spelling or a cut QR is refused.
+        for bad in ["agentstoz-screen://register#" + internet.text.dropFirst(RegistrationInvite.prefix.count),
+                    "AGENTSTOZ-SCREEN:" + internet.text.dropFirst(RegistrationInvite.prefix.count),
+                    String(internet.text.dropLast(4))] {
+            guard let url = URL(string: bad), let opened = RegistrationInvite.text(openedURL: url) else {
+                throw CheckFailure(description: "fixture should be in the scheme: \(bad)")
+            }
+            try await expectError(RegistrationError.malformed) { _ = try RegistrationInvite(deviceRegistrationText: opened) }
+        }
+        // A Mac-controller invitation opened from the Camera is refused for this device, as when it is scanned.
+        let controller = try RegistrationInvite(macFingerprint: fingerprint, code: RegistrationCode.generate(), macName: "Mac",
+                                                hostName: "mac.local",
+                                                nearbyRegistrationService: ScreenNearby.registrationService(codeID: code.id),
+                                                nearbyScreenService: ScreenNearby.screenService(fingerprint: fingerprint),
+                                                capabilities: .macController)
+        guard let controllerURL = URL(string: controller.text), let controllerText = RegistrationInvite.text(openedURL: controllerURL) else {
+            throw CheckFailure(description: "the controller QR is not a URL in the scheme")
+        }
+        try await expectError(RegistrationError.wrongPurpose) { _ = try RegistrationInvite(deviceRegistrationText: controllerText) }
+    }
+
     func testRegistrationOverTCPNeedsTheMacsApproval() async throws {
         // Approved: the phone shows the Mac's SAS, then keeps the Mac it pinned from the QR.
         let desk = try await RegistrationDesk()

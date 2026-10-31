@@ -35,8 +35,9 @@ describe('remote Codex first-conversation launch coordination', () => {
     expect(createConversation).toContain('store: remoteCodexSubmissionFence');
     expect(createConversation).toContain('retainCreatedThread: input.retainCreatedThread');
     expect(createConversation).toContain('findCreatedThread: () => waitForFreshChatGptProjectConversation(');
-    expect(source).toContain('create: retainCreatedThread => createCodexDesktopProjectConversation({folderPath, projectName, retainCreatedThread})');
-    expect(source).toContain('await prepareProjectCodexApp(workingPath, target.name)');
+    expect(source.includes('create: retainCreatedThread => createCodexDesktopProjectConversation({folderPath, projectName, retainCreatedThread, retainSubmissionFence:intent===\'new\',assertActive})')).toBe(true);
+    expect(source.includes("await prepareProjectCodexApp(workingPath, target.name, 'prepare-or-reopen', undefined, input.assertActive)")).toBe(true);
+    expect(source.includes("await prepareProjectCodexAppLocked(workingPath,target.name,'new'")).toBe(true);
   });
 
   test('creates once and opens the exact resulting thread', async () => {

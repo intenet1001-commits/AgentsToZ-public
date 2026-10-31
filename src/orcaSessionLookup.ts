@@ -75,22 +75,33 @@ export function findOrcaSessionBinding(
   return inspected.kind === 'one' ? inspected.value : null;
 }
 
+/** Orca's pane key is `<tabId>:<leafId>`; the leaf names one pane of a split tab. */
+export function orcaPaneLeafId(binding: Pick<OrcaSessionBinding, 'paneKey' | 'tabId'>): string | null {
+  const prefix = `${binding.tabId}:`;
+  return binding.paneKey.startsWith(prefix) && binding.paneKey.length > prefix.length ? binding.paneKey.slice(prefix.length) : null;
+}
+
 /**
  * `orca terminal list --json` is the source of runtime-issued terminal
  * handles. Require the exact persisted tab and worktree relation before any
  * focus action; stale/ambiguous live records intentionally yield null.
+ * A record that reports its pane (`leafId`) must also be the persisted pane:
+ * the other pane of a split tab is not this session's terminal.
  */
 export function inspectLiveOrcaTerminal(
   runtime: unknown,
   binding: OrcaSessionBinding,
 ): OrcaLookup<OrcaLiveTerminal> {
   const matches = new Map<string, OrcaLiveTerminal>();
+  const leafId = orcaPaneLeafId(binding);
   walkObjects(runtime, (record) => {
     const handle = asNonEmptyString(record.handle);
     const tabId = asNonEmptyString(record.tabId);
     const worktreeId = asNonEmptyString(record.worktreeId);
     if (!handle || tabId !== binding.tabId || worktreeId !== binding.worktreeId) return;
     if (record.orphaned === true || record.connected === false) return;
+    const recordLeaf = asNonEmptyString(record.leafId);
+    if (leafId && recordLeaf && recordLeaf !== leafId) return;
     matches.set(handle, { handle, tabId, worktreeId });
   });
   if (matches.size === 0) return { kind: 'none' };

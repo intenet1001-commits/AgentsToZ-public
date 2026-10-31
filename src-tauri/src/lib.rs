@@ -14,6 +14,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[cfg(target_os = "macos")]
 mod macos_runtime_client_bridge;
+mod computer_use_bridge;
 mod workroom_popout;
 mod workroom_browser;
 #[cfg(all(target_os="macos",feature="embedded-browser"))]
@@ -522,6 +523,16 @@ async fn agent_dialogue_management_request(
     .map_err(|error| format!("에이전트 대화 요청 작업을 완료하지 못했습니다: {}", error))?
 }
 
+/// OPS memory comparison stays in the local app, with its own bounded document budget.
+#[tauri::command]
+async fn control_memory_conflict_request(body: serde_json::Value, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let capability = state.remote_control_capability.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        .ok_or_else(|| "운영 기억 보안 연결을 준비하지 못했습니다.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || authenticated_remote_control_management_request_with_limits(
+        &capability, CONTROL_MEMORY_CONFLICT_PATH, "POST", body, 6_100_000, Duration::from_secs(30),
+    )).await.map_err(|e| format!("운영 기억 비교 요청을 완료하지 못했습니다: {}", e))?
+}
+
 /// Drives another community Mac's Workroom. A terminal request carries up to 4KB of input (24KB for a
 /// first prompt) and its answer is a round trip through the other Mac, so it gets its own size and
 /// read limits instead of widening the management route's.
@@ -586,6 +597,12 @@ async fn agent_runtime_request(
     })
     .await
     .map_err(|error| format!("에이전트 런타임 요청 작업을 완료하지 못했습니다: {}", error))?
+}
+
+#[tauri::command]
+async fn computer_use_native(operation:String,window:tauri::Window)->Result<serde_json::Value,String>{
+    if window.label()!="main" {return Err("컴퓨터 유즈 설정은 이 Mac의 기본 앱 창에서만 사용할 수 있습니다.".into());}
+    tauri::async_runtime::spawn_blocking(move||computer_use_bridge::manage(&operation)).await.map_err(|_|"컴퓨터 유즈 도우미 결과를 확인하지 못했습니다.".to_owned())
 }
 
 mod desktop_effort;
@@ -1058,6 +1075,7 @@ const WHAT_I_SAID_MANAGEMENT_REQUEST_MAX_BYTES: usize = 1024 * 1024;
 const REMOTE_CONTROL_MANAGEMENT_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
 const REMOTE_CONTROL_MANAGEMENT_REQUEST_MAX_BYTES: usize = 4 * 1024;
 const AGENT_DIALOGUE_CONTROL_PATH: &str = "/api/agent-dialogue/control";
+const CONTROL_MEMORY_CONFLICT_PATH: &str = "/api/control-profile/memory-conflict";
 /// Matches the sidecar's 64KB body limit for the control route.
 const AGENT_DIALOGUE_CONTROL_REQUEST_MAX_BYTES: usize = 64 * 1024;
 /// The sidecar gives up after 20s (AGENT_DIALOGUE_CONTROL_TIMEOUT_MS) and answers; this leaves room for that answer.
@@ -1079,19 +1097,26 @@ const AGENT_RUNTIME_CORRECTION_OUTCOMES_PATH: &str = "/api/agent-runtime/correct
 const AGENT_RUNTIME_CORRECTION_OUTCOMES_REQUEST_MAX_BYTES: usize = 8 * 1024;
 
 const AGENT_RUNTIME_BROWSER_CONTEXT_PATH: &str = "/api/agent-runtime/browser-context";
+const COMPUTER_USE_PATH: &str = "/api/agent-runtime/computer-use";
 const WORKROOM_BROWSER_PATH: &str = "/api/agent-runtime/workroom-browser";
 const AGENT_RUNTIME_PROJECT_STATE_PATH: &str = "/api/agent-runtime/project-state";
 const AGENT_RUNTIME_PROJECT_STATE_REQUEST_MAX_BYTES: usize = 4 * 1024;
 const AGENT_RUNTIME_PROJECT_STATE_RESPONSE_MAX_BYTES: usize = 32 * 1024;
 
 fn agent_runtime_response_max_bytes(path: &str) -> usize {
-    if path == WORKROOM_BROWSER_PATH { return 512 * 1024; }
+    if path == "/api/agent-runtime/workroom-schedules" { return 512 * 1024; }
+    if path == "/api/agent-runtime/desktop-effort" { return 64 * 1024; }
+    if path == COMPUTER_USE_PATH || path == WORKROOM_BROWSER_PATH { return 512 * 1024; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { 1024 * 1024 }
     else if path == AGENT_RUNTIME_PROJECT_STATE_PATH { AGENT_RUNTIME_PROJECT_STATE_RESPONSE_MAX_BYTES }
     else { AGENT_RUNTIME_RESPONSE_MAX_BYTES }
 }
 
 fn agent_runtime_request_max_bytes(path: &str) -> usize {
+    if path == "/api/agent-runtime/memory-save-recovery" { return 2048; }
+    if path == "/api/agent-runtime/workroom-schedules" { return 16000; }
+    if path == "/api/agent-runtime/desktop-effort" { return 8000; }
+    if path == COMPUTER_USE_PATH { return 16000; }
     if path == WORKROOM_BROWSER_PATH { return 4096; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { 4096 }
     else if path == AGENT_RUNTIME_PROJECT_STATE_PATH { AGENT_RUNTIME_PROJECT_STATE_REQUEST_MAX_BYTES }
@@ -1263,9 +1288,12 @@ fn authenticated_what_i_said_management_request(
 fn is_allowed_remote_control_management_route(method: &str, path: &str) -> bool {
     matches!((method, path),
         ("POST", "/api/agent-dialogue/manage")
+        | ("POST", CONTROL_MEMORY_CONFLICT_PATH)
         | ("POST", "/api/agent-dialogue/control")
         |
         ("POST", "/api/remote-control/status")
+        | ("POST", "/api/remote-control/codex-new/review")
+        | ("POST", "/api/remote-control/codex-new/resolve")
         | ("POST", "/api/remote-control/interfaces")
         | ("POST", "/api/remote-control/enable")
         | ("POST", "/api/remote-control/pairing/rotate")
@@ -1304,7 +1332,7 @@ fn authenticated_remote_control_management_request(
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     // Only the control route has its own limits; every other management path keeps 4KB / 10s.
-    if path == AGENT_DIALOGUE_CONTROL_PATH {
+    if path == AGENT_DIALOGUE_CONTROL_PATH || path == CONTROL_MEMORY_CONFLICT_PATH {
         return Err("허용되지 않은 원격 제어 관리 요청입니다.".to_string());
     }
     authenticated_remote_control_management_request_with_limits(
@@ -1364,7 +1392,7 @@ fn authenticated_remote_control_management_request_with_limits(
     stream.write_all(&body).map_err(|error| error.to_string())?;
     let response = read_local_api_json_response(
         &mut stream,
-        REMOTE_CONTROL_MANAGEMENT_RESPONSE_MAX_BYTES,
+        if path == CONTROL_MEMORY_CONFLICT_PATH { 12_100_000 } else { REMOTE_CONTROL_MANAGEMENT_RESPONSE_MAX_BYTES },
     )?;
     Ok(serde_json::json!({
         "status": response.status,
@@ -1439,14 +1467,19 @@ fn is_agent_runtime_task_id(value: &str) -> bool {
 }
 
 fn is_allowed_agent_runtime_route(method: &str, path: &str) -> bool {
-    if path == WORKROOM_BROWSER_PATH { return method == "POST"; }
+    if path == "/api/agent-runtime/memory-save-recovery" { return method == "POST"; }
+    if path == "/api/agent-runtime/desktop-effort" { return method == "POST"; }
+    if path == "/api/agent-runtime/workroom-schedules" { return method == "POST"; }
+    if path == "/api/agent-runtime/weekly-usage" { return method == "POST"; }
+    if path == "/api/agent-runtime/context-sessions" { return method == "POST"; }
+    if path == COMPUTER_USE_PATH || path == WORKROOM_BROWSER_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_PROJECT_STATE_PATH { return method == "POST"; }
     if path == "/api/agent-runtime/voice-settings" { return method == "POST"; }
     if path == "/api/agent-runtime/tester" { return method == "POST"; }
     if path == AGENT_RUNTIME_APP_DISPATCH_PATH { return method == "POST"; }
     if path == AGENT_RUNTIME_CORRECTION_OUTCOMES_PATH { return method == "POST"; }
-    if matches!(path, "/api/agent-runtime/platform-cli" | "/api/agent-runtime/voice" | "/api/agent-runtime/terminals" | "/api/agent-runtime/terminals/access" | "/api/agent-runtime/terminals/accounts" | "/api/agent-runtime/terminals/history" | "/api/agent-runtime/terminals/memory" | "/api/agent-runtime/terminals/images" | "/api/agent-runtime/quick-labels" | "/api/agent-runtime/workroom-teams" | "/api/agent-runtime/helpdesk" | "/api/agent-runtime/cs-duty") { return method == "POST"; }
+    if matches!(path, "/api/agent-runtime/platform-cli" | "/api/agent-runtime/voice" | "/api/agent-runtime/terminals" | "/api/agent-runtime/terminals/access" | "/api/agent-runtime/terminals/accounts" | "/api/agent-runtime/terminals/history" | "/api/agent-runtime/terminals/memory" | "/api/agent-runtime/terminals/images" | "/api/agent-runtime/quick-labels" | "/api/agent-runtime/workroom-teams" | "/api/agent-runtime/helpdesk" | "/api/agent-runtime/helpdesk-assist" | "/api/agent-runtime/cs-duty") { return method == "POST"; }
     if matches!(path,
         "/api/agent-runtime/capabilities" | "/api/agent-runtime/readiness" |
         "/api/agent-runtime/targets" | "/api/agent-runtime/targets?productUses=1" | "/api/agent-runtime/tasks"
@@ -1555,6 +1588,8 @@ fn agent_runtime_response_timeout(method: &str, path: &str, body: Option<&serde_
     if method == "POST" && path == AGENT_RUNTIME_BROWSER_CONTEXT_PATH { return Duration::from_secs(20); }
     if method == "POST" && path == AGENT_RUNTIME_PROJECT_STATE_PATH { return Duration::from_secs(15); }
     if method == "POST" && path == "/api/agent-runtime/voice" { return Duration::from_secs(40); }
+    // One assisted step may run several Ego Lite calls (45 s cap each), a tool-free Claude choice or a real CLI check.
+    if method == "POST" && path == "/api/agent-runtime/helpdesk-assist" { return Duration::from_secs(150); }
     // Both walk the same KakaoTalk probes, so the default 20s window is not enough for either.
     // Diagnose deliberately keeps going after a failed check, which makes it the slower of the two.
     if method == "POST" && path == "/api/agent-runtime/voice-settings" { return Duration::from_secs(30); }
@@ -1769,6 +1804,11 @@ fn spawn_bundled_api_sidecar(app_handle: &tauri::AppHandle) -> Result<Child, Str
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
+    #[cfg(target_os = "macos")]
+    let computer_use_link = computer_use_bridge::ChildLink::new().ok();
+    #[cfg(target_os = "macos")]
+    if let Some(link) = &computer_use_link { link.configure(&mut command); }
+
     let mut child = command.spawn().map_err(|e| {
         format!(
             "번들된 로컬 API 실행 실패 ({}): {}",
@@ -1794,6 +1834,8 @@ fn spawn_bundled_api_sidecar(app_handle: &tauri::AppHandle) -> Result<Child, Str
         }
     }
 
+    #[cfg(target_os = "macos")]
+    if let Some(link) = computer_use_link { link.start(); }
     Ok(child)
 }
 
@@ -9646,10 +9688,12 @@ pub fn run() {
         get_platform,
         what_i_said_management_request,
         remote_control_management_request,
+        control_memory_conflict_request,
         agent_dialogue_management_request,
         agent_dialogue_control_request,
         agent_runtime_request,
         desktop_effort_mode,
+        computer_use_native,
         workroom_popout::open_workroom_window,
         voice_popout::open_voice_window,
         voice_popout::set_voice_dock_context,
@@ -9923,6 +9967,17 @@ mod tests {
         }
         assert_eq!(agent_runtime_request_max_bytes(path), 64 * 1024);
         assert_eq!(agent_runtime_response_timeout("POST", path, None), Duration::from_secs(75));
+        assert_eq!(agent_runtime_response_timeout("POST", "/api/agent-runtime/helpdesk-assist", None), Duration::from_secs(150));
+    }
+
+    #[test]
+    fn memory_save_diagnosis_has_one_small_exact_post_route() {
+        let path = "/api/agent-runtime/memory-save-recovery";
+        assert!(is_allowed_agent_runtime_route("POST", path));
+        for (method, route) in [("GET", path), ("POST", "/api/agent-runtime/memory-save-recovery?operation=start"), ("POST", "/api/agent-runtime/memory-save-recovery/start")] {
+            assert!(!is_allowed_agent_runtime_route(method, route));
+        }
+        assert_eq!(agent_runtime_request_max_bytes(path), 2048);
     }
 
     #[test]
@@ -10237,6 +10292,8 @@ mod tests {
     fn remote_control_management_proxy_is_path_free_and_has_an_exact_route_allowlist() {
         for path in [
             "/api/remote-control/status",
+            "/api/remote-control/codex-new/review",
+            "/api/remote-control/codex-new/resolve",
             "/api/remote-control/interfaces",
             "/api/remote-control/enable",
             "/api/remote-control/pairing/rotate",
@@ -10287,6 +10344,12 @@ mod tests {
         assert!(super::authenticated_remote_control_management_request(
             &capability, "/api/agent-dialogue/control", "POST", serde_json::json!({}),
         ).is_err());
+        assert!(is_allowed_remote_control_management_route("POST", super::CONTROL_MEMORY_CONFLICT_PATH));
+        assert!(!is_allowed_remote_control_management_route("GET", super::CONTROL_MEMORY_CONFLICT_PATH));
+        assert!(!is_allowed_remote_control_management_route("POST", "/api/control-profile/memory-conflict?path=/other"));
+        assert!(super::authenticated_remote_control_management_request(
+            &capability, super::CONTROL_MEMORY_CONFLICT_PATH, "POST", serde_json::json!({}),
+        ).is_err(), "Document budgets require the dedicated local OPS command");
     }
 
     #[test]
@@ -10317,6 +10380,22 @@ mod tests {
             ("POST", "/api/agent-runtime/browser-context?url=http://localhost"),
             ("POST", "/api/agent-runtime/browser-context/"), ("POST", "/api/agent-runtime/browser-context/read")] {
             assert!(!is_allowed_agent_runtime_route(method, route), "{method} {route}");
+        }
+    }
+
+    #[test]
+    fn scheduled_work_and_desktop_effort_have_exact_local_management_routes() {
+        for (path, request_limit, response_limit) in [
+            ("/api/agent-runtime/workroom-schedules", 16000, 512 * 1024),
+            ("/api/agent-runtime/desktop-effort", 8000, 64 * 1024),
+        ] {
+            assert!(is_allowed_agent_runtime_route("POST", path));
+            assert!(!is_allowed_agent_runtime_route("GET", path));
+            for suffix in ["?", "?targetId=other", "/", "/run"] {
+                assert!(!is_allowed_agent_runtime_route("POST", &format!("{path}{suffix}")));
+            }
+            assert_eq!(agent_runtime_request_max_bytes(path), request_limit);
+            assert_eq!(super::agent_runtime_response_max_bytes(path), response_limit);
         }
     }
 
@@ -10371,6 +10450,7 @@ mod tests {
             ("POST", "/api/agent-runtime/quick-labels"),
             ("POST", "/api/agent-runtime/workroom-teams"),
             ("POST", "/api/agent-runtime/helpdesk"),
+            ("POST", "/api/agent-runtime/helpdesk-assist"),
             ("POST", "/api/agent-runtime/tester"),
         ] {
             assert!(is_allowed_agent_runtime_route(method, path), "{method} {path}");

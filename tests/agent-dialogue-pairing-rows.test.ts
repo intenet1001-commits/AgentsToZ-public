@@ -1,5 +1,5 @@
 import {expect,test} from 'bun:test';
-import {agentDialoguePairingRows,agentDialoguePairingState,agentDialoguePairingSummary} from '../src/agentDialoguePairingRows';
+import {agentDialoguePairingRows,agentDialoguePairingState,agentDialoguePairingSummary,withAgentDialoguePairingStates} from '../src/agentDialoguePairingRows';
 
 const peers=[
   {endpointId:'e-ops-3',displayName:'아젠투지3호 / 아젠투지(OPS)',kind:'ops' as const,deviceId:'d3'},
@@ -29,4 +29,19 @@ test('peers that have not loaded show nothing, and search keeps the real counts'
   const all=agentDialoguePairingRows({peers,pairings:[{peerEndpointId:'e-ops-2',state:'active',acceptedByMe:true,acceptedByPeer:true}]});
   expect(agentDialoguePairingRows({peers,pairings:null,search:'2호'}).map(row=>row.endpointId)).toEqual(['e-ops-2']);
   expect(agentDialoguePairingSummary(all).active).toBe(1);
+});
+
+test('the MCP list says waiting-me when only the peer accepted, and leaves every other row as the server sent it',()=>{
+  const rows=[
+    {peerEndpointId:'a',state:'waiting-peer',acceptedByMe:false,acceptedByPeer:true,expiresAt:null},
+    {peerEndpointId:'b',state:'waiting-peer',acceptedByMe:true,acceptedByPeer:false,expiresAt:null},
+    {peerEndpointId:'c',state:'active',acceptedByMe:true,acceptedByPeer:true,expiresAt:'2026-11-30T00:00:00.000Z'},
+    {peerEndpointId:'d',state:'expired',acceptedByMe:false,acceptedByPeer:true,expiresAt:'2026-10-01T00:00:00.000Z'},
+  ];
+  const listed=withAgentDialoguePairingStates(rows) as typeof rows;
+  expect(listed.map(row=>row.state)).toEqual(['waiting-me','waiting-peer','active','expired']);
+  expect(listed[0]).toEqual({...rows[0]!,state:'waiting-me'});
+  expect(listed.slice(1)).toEqual(rows.slice(1));
+  expect(rows[0]!.state).toBe('waiting-peer');
+  expect(withAgentDialoguePairingStates(null)).toBeNull();
 });

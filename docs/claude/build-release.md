@@ -1,5 +1,24 @@
 # Tauri 빌드·배포 · 버전 번호 · 빌드 시스템
 
+Control 독립 helper의 서명 빌드(`scripts/build-computer-use-control-app.ts`)는 Swift 컴파일 전에 전용 App ID·팀·Developer ID 배포 형태·
+만료·승인 Keychain group을 검사한다(`computerUseSigningProfile.ts`). Screen 프로필·개발 기기 프로필을 대체 사용하지 않는다.
+프로필 metadata 통과와 실제 OS profile 검증·설치·TCC·Secure Enclave 사람 승인은 별도 증거이며, 없는 프로필을 생성/갱신하지 않는다.
+프로필은 허용 범위이므로 Apple이 발급한 같은 팀의 `TEAM.*` Keychain 허용값도 전용 group을 허용한다. 바이너리의 `controlEntitlements()`는 항상 정확한 Control group 하나를 요청하며 wildcard를 복사하지 않는다. 2026-10-27 다른 Mac의 기존 공증 Control v1527 프로필에서 이 차이를 확인했다.
+실기 재현(2026-10-28): Control 프로필이 다른 Developer ID 인증서에 결속된 상태에서 서명·Apple 공증·Gatekeeper는 통과했지만,
+실제 실행은 AMFI의 `No matching profile found`로 거부됐다. 프로필의 `DeveloperCertificates` 공개 SHA-1 지문과 `--sign`이 선택한
+유효 identity를 컴파일 전에 대조하고, 일치하지 않거나 이름이 모호하면 빌드·공증 전에 거절한다. 유일하게 해석된 지문을
+`codesign`에 넘기고 검증한 프로필 바이트를 그대로 내장한다. 이 검사는 인증서 소속만 확인하며 Apple의 프로필 신뢰·실행을 보장하지 않는다.
+프로필 XML을 Python에 stdin으로 넘길 때는 `plistlib.loads(sys.stdin.buffer.read())`를 쓴다. 이 Mac의 Python 3.9에서 `plistlib.load(sys.stdin.buffer)`는 nonseekable pipe를 rewind하려다 실패했다. 합성 프로필을 실제 파이프로 읽는 회귀를 `computer-use-signing-profile.test.ts`에 둔다.
+
+**보안 타임스탬프가 기본이다 (2026-10-28).** 예전에는 `--timestamp`를 빼면 조용히 `--timestamp=none`으로 서명했다. 핸드오프가 만든 helper가 그 상태였다 — `codesign -dvv`에 Developer ID·hardened runtime은 있지만 `Timestamp=` 없이 `Signed Time=`만 있어 Apple 공증이 거절한다. 이제 서명 빌드는 항상 `codesign --timestamp`로 서명하고, `codesign --display --verbose=4`에 `Timestamp=`가 없으면 빌드를 실패시킨다(`--timestamp`는 기본값이 되어 그대로 받는다). `--timestamp=none`은 서명 빌드에서만 쓰는 명시적 로컬 전용 옵션이다. stderr 경고와 결과 JSON의 `notarizable:false`로 공증할 수 없다고 알리고, `--notarize`와 함께 쓸 수 없다.
+
+**공증은 옵트인 `--notarize --notary-profile <기존 notarytool keychain profile> [--notary-keychain <절대 경로>]`.** 플래그가 없으면 이전처럼 서명까지만 한다.
+- 전제: 위 서명 조건(전용 Developer ID 프로필 + `--sign`) + **이미 저장된** notarytool keychain profile. Control은 direct-distribution·`check-macos-notary.ts`와 같은 keychain profile 경로를 쓴다. 메인 앱도 이제 `--developer-id --notary-profile <이름>`으로 같은 기존 프로필을 명시할 수 있고, 미지정하면 기존 App Store Connect API 키 경로를 유지한다. 스크립트는 자격 증명을 만들거나 바꾸지 않고(store-credentials를 실행하지 않는다) 출력하지도 않는다.
+- 순서: Swift 컴파일 전에 `checkMacOSNotary`(= `bun check-macos-notary.ts`)로 한 번, 업로드 직전에 한 번 더 확인한다 — 빌드하는 동안 화면이 잠길 수 있다(장기기억 「Notary profile lookup can fail while the screen is locked」). 잠긴 세션의 조회 실패·프로필 없음·Apple 401을 따로 보고하며, 조회 실패만으로 프로필이 지워졌다고 보지 않는다. 그다음 확인된 **같은 auth 인자**로 `ditto -c -k --sequesterRsrc --keepParent` zip → `notarytool submit --wait --timeout 60m --output-format json` → `notarytool log` → Accepted가 아니면 로그와 함께 실패 → `stapler staple`·`stapler validate` → helper 요구사항 재검사 → `spctl --assess --type execute`가 `source=Notarized Developer ID`인지 확인한다.
+- 영수증: 앱 옆의 `AgentsToZ Control.notary-receipt.json`(0600, 모든 검사를 통과한 뒤에만 쓴다)과 `AgentsToZ Control.notary-log.json`. 둘 중 하나라도 이미 있으면 빌드 전에 거절한다 — 옛 영수증을 새 빌드 것으로 덮지 않는다.
+- 결과를 모르는 제출(JSON 없음·시간 초과)은 **다시 보내지 않는다.** 읽기 전용 재확인으로 잠금·401을 구분하고 `notarytool history`로 먼저 찾아보라고 안내한다. 이때 재확인 결과의 안내는 업로드 전 안내(「빌드를 다시 돌려라」·「이 빌드는 아무것도 바꾸지 않았다」)를 쓰지 않는다 — 이 스크립트는 항상 빌드하고 업로드하므로 다시 돌리면 다시 업로드된다. 서명된 앱의 위치와 함께 「history에서 Apple이 받지 않았음을 확인한 뒤에만 다시 돌린다」고 말한다(`controlNotaryPreflightError`의 `after-unconfirmed-upload`, 2026-10-28 리뷰에서 발견). notarytool의 원문 stderr는 출력하지 않는다. Accepted 뒤 staple·Gatekeeper에서 실패하면 그 submission id를 알려 주고 다시 제출하지 말라고 한다.
+- 검증: `tests/computer-use-control-bundle.test.ts`가 주입한 러너로 순서·인자·실패 분기를 검사한다(Apple에 접속하지 않는다). 실제 공증도 2026-10-28 통과했다: `/private/tmp/agentstoz-control-notarized-20261028/AgentsToZ Control.app`, submission `caf3c23f-c75b-46fb-ae74-fc3bf3af1f10`. Developer ID 서명·secure timestamp·Accepted·staple·Gatekeeper 검증 완료, `installed:false`. 설치·LaunchAgent 등록·TCC·Touch ID 승인은 여전히 별도의 수동 단계다.
+
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
@@ -91,6 +110,10 @@ fast-forward Pull을 이어가도록 현재 공개 `main`을 부모로 쓰는 �
 중첩된 위치에서 실행하지 않는다. 메인 앱의 시작/Screen 열기 경로가 서명된 사본을 독립
 Applications 앱으로 설치한다. 사용자 권한 승인·제어 켜기·기기 등록은 기존 Screen 흐름이다.
 
+동봉 Screen은 알림 중계 주소를 **명시 옵션으로만** 받는다(2026-11-01, `pushEndpoint`). 환경 변수는 물려받지 않으며
+(`screenBundleBuildEnvironment`), 이 Mac의 `build-macos.ts`만 `AGENTSTOZ_SCREEN_PUSH_URL`이 있을 때 넘긴다. 공개 Developer ID base
+파이프라인은 넘기지 않는다. 만든 뒤 동봉 사본의 `AgentsToZScreenPushURL`이 요청과 같지 않으면(없어야 할 때 있는 것 포함) 빌드가 실패한다.
+
 Screen에 GUI 서명이나 `--deep --force`를 적용하지 않는다. 원래 Developer ID 서명과
 키체인 권한을 검사한 뒤 보존한다. base 빌드의 전체 파일 digest에도 Screen이 포함된다.
 일반 Tauri DMG는 이 staging보다 먼저 생기므로 최종 앱 서명 뒤 이번 실행에서 만든 DMG만
@@ -117,6 +140,7 @@ GUI의 고정 designated requirement를 `--deep`으로 새 helper에도 적용�
 - **실행**: `bun run tauri:build:browser:developer-id`(내장 Chromium 앱 — 지금 설치된 형태) 또는 `bun run tauri:build:developer-id`(기본 형태, `--dmg`와 함께 쓸 수 있다). 내장 브라우저는 `CEF_PATH=/tmp/agentstoz-cef-runtime-156 PATH="/tmp/agentstoz-cef-build-tools/bin:$PATH"`가 그대로 필요하다. 미공개 소스로 검증만 할 때는 `bun build-macos.ts --embedded-browser --developer-id --allow-unpublished-source`처럼 직접 부른다(공식 배포본 아님).
 - **산출물 위치**: `AGENTSTOZ_CARGO_TARGET_DIR`(절대 경로)가 있으면 그곳, 없으면 `~/cargo-targets/portmanager-devid`. 기본 빌드의 `~/cargo-targets/portmanager`(설치·「DMG 출시하기」가 집는 곳)를 덮지 않는다. 이 환경변수는 기본 빌드에도 통한다. 영수증·공증 로그는 `<target>/release/developer-id/`.
 - **하는 일** (`src/macOSDeveloperIdBuild.ts`): 시작 전에 키체인의 `Developer ID Application: … (DA8QKAQ2C9)` 하나와 공증 키를 확인한다(없으면 빌드 전에 실패). Tauri가 만든 앱의 Mach-O를 모두 찾아 **안쪽부터** 서명한다 — `Resources/resources`·`Library/LaunchServices`의 실행 파일 → CEF dylib → framework → helper 앱 → 앱. 모두 hardened runtime + 보안 타임스탬프, `--deep`은 쓰지 않는다. 그다음 deep/strict 검증, 조각마다 Team ID 앵커와 정확한 엔타이틀먼트 확인, 앱의 지정 요구사항 확인 → `xcrun notarytool submit --wait` → **Accepted가 아니면 공증 로그를 출력하고 실패** → staple·validate → `spctl`이 `source=Notarized Developer ID`인지 확인. 이 빌드가 만든 DMG가 있으면 공증된 앱으로 다시 만들어(hdiutil, Tauri DMG의 창 배치 없음) 서명·공증·스테이플한다.
+- **기존 키체인 프로필 선택 (2026-10-28)**: `bun build-macos.ts --developer-id --notary-profile <기존 이름> [--notary-keychain /absolute/path]`. `--embedded-browser`와 조합할 수 있다. 프로필을 명시하면 raw API 키 설정/파일을 읽지 않고 `checkMacOSNotary`의 읽기 전용 history 검사로 검증한다. 빌드 전과 각 제출 직전에 같은 프로필을 확인하며 실패하면 raw 키로 대체하거나 자격 증명을 생성·추출하지 않는다. 프로필 미지정은 기존 `~/.appstoreconnect/agentstoz-asc.json` 경로 그대로다. `--notary-keychain` 단독·중복·상대 경로·`--developer-id` 없는 선택은 거부한다. 미확정 제출은 자동 재시도하지 않고 같은 인증의 history로 확인한다. 공개 clean-source 가드·Developer ID 팀·entitlement·서명·설치 제한은 바뀌지 않았다. 관련 유닛 검증은 합성 러너만 사용하며 실제 메인 앱 공증의 증거가 아니다.
 - **지정 요구사항**: `identifier "com.intenet.agentstozbycs" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = DA8QKAQ2C9` — 같은 팀의 Developer ID 서명 없이는 흉내 낼 수 없다.
 - **엔타이틀먼트는 조각마다 따로**(GUI 것을 helper에 주지 않는다):
   - GUI: 마이크(`device.audio-input`, 음성 도크 — `Voice.entitlements`) + **Apple Events**(`automation.apple-events`). 앱과 사이드카가 osascript로 Terminal·iTerm·System Events·Orca·ChatGPT를 부르고 TCC는 그것을 앱의 요청으로 본다. hardened 앱에 이 엔타이틀먼트가 없으면 묻지도 않고 거절된다. 화면 기록(screencapture)·손쉬운 사용(kmsg, System Events 키 입력)은 엔타이틀먼트가 아니라 TCC 허용이라 더하지 않는다. 카메라는 Mac 앱이 쓰지 않는다(QR 카메라는 휴대폰 포털). Info.plist에는 마이크·Apple Events 설명 문구가 이미 있다 — 단 Apple Events 문구는 ChatGPT만 말한다.

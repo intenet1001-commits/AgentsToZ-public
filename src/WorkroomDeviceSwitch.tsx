@@ -9,6 +9,7 @@ import {createTerminalRequester} from './aiTerminalScheduling';
 import {communityTerminalTransport,communityWorkroomTransport,listCommunityControlDevices,loadCommunityRemoteProjects,
   type CommunityControlDevice,type CommunityRemoteProjects} from './agentDialogueControlClient';
 import {COMMUNITY_BYPASS_UNAVAILABLE,communityDeviceLabel} from './workroomDeviceLabel';
+import {communityStaleDevices} from './communityDeviceLiveness';
 import {WORKROOM_EFFORT_ELSEWHERE} from './workroomEffortView';
 import {CommunityChatPanel} from './CommunityChatPanel';
 import {WORKROOM_DEVICE_EVENT,WORKROOM_DEVICE_STORAGE_KEY,takePendingWorkroomDeviceRequest,workroomDeviceRequest} from './workroomDeviceSelection';
@@ -78,6 +79,9 @@ export function WorkroomDeviceSwitch({sessionDirectory=false,initialDevice,onEnt
 
 function WorkroomDeviceWorkspace(props:PanelProps&{initialDevice?:string}){
   const [devices,setDevices]=useState<CommunityControlDevice[]>([]);
+  // Devices that stopped beating (src/communityDeviceLiveness.ts), worked out at each list so the 「마지막 …」 moves on
+  // with it — an unchanged result keeps its identity and nothing re-renders.
+  const [stale,setStale]=useState<Record<string,string>>({});
   const [unread,setUnread]=useState(0);
   // A local opaque pop-out route must not inherit a peer selected in its opener's sessionStorage.
   const [selected,setSelected]=useState(()=>props.initialDevice??readSelected());
@@ -95,6 +99,8 @@ function WorkroomDeviceWorkspace(props:PanelProps&{initialDevice?:string}){
       if(!alive)return;
       awaitingList.current=false;
       setDevices(prior=>JSON.stringify(prior)===JSON.stringify(result.devices)?prior:result.devices);
+      const lastSeen=communityStaleDevices(result.devices,Date.now());
+      setStale(prior=>JSON.stringify(prior)===JSON.stringify(lastSeen)?prior:lastSeen);
       // 읽지 않음은 이 조회의 덤이다 — 대화창이 접혀 있는 동안 따로 두드리지 않기 위한 것이다.
       setUnread(result.unread);
     }).catch(()=>{/* keep the last known list */});
@@ -184,6 +190,8 @@ function WorkroomDeviceWorkspace(props:PanelProps&{initialDevice?:string}){
     requester:mentionRequester,workspaceRequester:(deviceId:string)=>deviceId==='local'?props.workspaceTransport??localWorkroomTransport:communityWorkroomTransport(deviceId)}:undefined,[mentionDevices,requestMentionProjects,mentionRequester,props.workspaceTransport]);
 
   const choose=(value:string)=>{setSelected(value);writeSelected(value);};
+  const staleCount=devices.filter(item=>stale[item.endpointId]).length;
+  const selectedStale=device?stale[device.endpointId]:undefined;
   const localLabel=props.deviceName?.trim()?`${props.deviceName.trim()} (이 기기)`:'이 기기';
   // 기기는 **탭**이다 — 두 번 누르는 드롭다운보다 한 번에 바뀌고, 어느 호가 있는지 한눈에 보인다
   // (VOC 2026-10-05). 기기가 하나도 없으면 줄 자체가 없어 예전 화면과 같다.
@@ -191,17 +199,21 @@ function WorkroomDeviceWorkspace(props:PanelProps&{initialDevice?:string}){
     <span className="ai-terminal-label">기기</span>
     <div className="ai-terminal-devices" role="group" aria-label="워크룸 기기" data-testid="workroom-device-tabs">
       <button type="button" className="ai-terminal-device-tab" aria-pressed={!device} data-testid="workroom-device-tab-local" onClick={()=>choose('')}>{localLabel}</button>
+      {/* A device that stopped answering stays a tab you can pick — it only says so, and when it was last seen. */}
       {devices.map(item=><button key={item.endpointId} type="button" className="ai-terminal-device-tab"
-        aria-pressed={device?.endpointId===item.endpointId} data-testid={'workroom-device-tab-'+item.deviceId}
-        title={`${communityDeviceLabel(item.displayName)}의 워크룸에서 실행합니다.`} onClick={()=>choose(item.endpointId)}>{communityDeviceLabel(item.displayName)}</button>)}
+        aria-pressed={device?.endpointId===item.endpointId} data-testid={'workroom-device-tab-'+item.deviceId} data-stale={stale[item.endpointId]?'true':undefined}
+        title={stale[item.endpointId]?`${communityDeviceLabel(item.displayName)} · 응답 없음 · ${stale[item.endpointId]}. 고를 수는 있지만 요청이 응답 없이 끝날 수 있습니다.`:`${communityDeviceLabel(item.displayName)}의 워크룸에서 실행합니다.`}
+        onClick={()=>choose(item.endpointId)}>{communityDeviceLabel(item.displayName)}{stale[item.endpointId]&&<span className="ai-terminal-hint" data-testid={'workroom-device-stale-'+item.deviceId}> · 응답 없음 · {stale[item.endpointId]}</span>}</button>)}
     </div>
+    {device&&selectedStale&&<span className="ai-terminal-hint ai-terminal-hint--error" role="status" data-testid="workroom-device-stale-note">
+      {communityDeviceLabel(device.displayName)}이(가) 응답하지 않습니다({selectedStale}). 그 Mac이 잠들었거나 꺼졌을 수 있습니다 — 보낸 요청은 실행됐는지 모른 채 끝날 수 있습니다.</span>}
     {device&&remote?.loading&&<span className="ai-terminal-hint" data-testid="workroom-device-loading">{communityDeviceLabel(device.displayName)}의 프로젝트를 불러오는 중…</span>}
     {device&&remote?.error&&<span className="ai-terminal-hint ai-terminal-hint--error" role="alert" data-testid="workroom-device-error">
       {remote.error} <button type="button" className="ai-terminal-btn" onClick={()=>loadRemote(device.endpointId)}>다시 시도</button></span>}
     {device&&!remote?.loading&&!remote?.error&&<span className="ai-terminal-hint" data-testid="workroom-device-remote-note">이 화면의 터미널은 {communityDeviceLabel(device.displayName)}에서 실행됩니다.</span>}
     {/* 대화창은 「기기」 줄 바로 아래다 — 다른 호를 생각하는 자리가 여기이기 때문이다. 접혀 있으면 한 줄만
         차지하고, 읽을 것이 있으면 그 줄이 개수를 말한다(VOC 2026-10-05). */}
-    <CommunityChatPanel visible={visible} unread={unread} label={`함께 있는 대상 ${devices.length}개`}/>
+    <CommunityChatPanel visible={visible} unread={unread} label={`함께 있는 대상 ${devices.length}개${staleCount?` · 응답 없음 ${staleCount}개`:''}`}/>
   </div>:null;
 
   if(!device||!transports)return <AiTerminalPanel {...props} deviceSwitch={switcher} communityMention={communityMention}/>;

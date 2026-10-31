@@ -4,6 +4,7 @@ import CryptoKit
 import AuthenticationServices
 import AVFoundation
 import AgentsToZCore
+import ScreenControlCore
 
 /// The page owns transport, credentials and CSP. The only native bridge starts a
 /// validated system PKCE authentication session; it never accepts terminal commands.
@@ -783,6 +784,15 @@ struct LANWorkroomView: View {
     let onDone: () -> Void
     /// Opens another saved workspace (a failed same-network page offers the internet one).
     var onOpenSaved: ((SavedWorkspace) -> Void)? = nil
+    /// A Mac-screen registration QR the iPhone Camera opened the app with while this workspace was open. It is shown in
+    /// this page's own 「Mac 화면」 sheet, which turns into the registration in place, so the workspace page and its
+    /// draft stay as they are (closing the workroom would end the page).
+    var screenInvite: Binding<String?> = .constant(nil)
+    @State private var screenRegistration: RegistrationInvite?
+    @State private var screenRegistrationBusy = false
+    @State private var screenRejection: String?
+    /// The registration QR arrived over 「연결 설정」: 「Mac 화면」 opens once that sheet has gone.
+    @State private var screensAfterSheet = false
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -816,14 +826,30 @@ struct LANWorkroomView: View {
                 Button("연결 설정", systemImage: "slider.horizontal.3") { showingConnection = true }
                     .accessibilityIdentifier("workroomConnectionSettings")
             }
-            .sheet(isPresented: $showingScreens) {
-                NavigationStack {
-                    List { ScreenMacsSection(scannedInvite: .constant(nil)) }
-                        .navigationTitle("Mac 화면").navigationBarTitleDisplayMode(.inline)
-                        .toolbar { Button("닫기") { showingScreens = false }.accessibilityIdentifier("screenMacsClose") }
+            .sheet(isPresented: $showingScreens, onDismiss: {
+                screenRegistration = nil; screenRegistrationBusy = false; screenRejection = nil
+            }) {
+                if let invite = screenRegistration {
+                    ScreenRegistrationSheet(invite: invite, busy: $screenRegistrationBusy) { saved in
+                        _ = try ScreenMacStore.register(saved)
+                    }
+                    .id(invite.code.id)
+                } else {
+                    NavigationStack {
+                        List {
+                            if let screenRejection {
+                                Section { Text(screenRejection).font(.subheadline).foregroundStyle(.secondary) }
+                            }
+                            ScreenMacsSection(scannedInvite: .constant(nil))
+                        }
+                            .navigationTitle("Mac 화면").navigationBarTitleDisplayMode(.inline)
+                            .toolbar { Button("닫기") { showingScreens = false }.accessibilityIdentifier("screenMacsClose") }
+                    }
                 }
             }
+            .onChange(of: screenInvite.wrappedValue, initial: true) { _, text in receiveScreenInvite(text) }
             .sheet(isPresented: $showingConnection, onDismiss: {
+                if screensAfterSheet { screensAfterSheet = false; showingScreens = true }
                 if scanAfterSheet { scanAfterSheet = false; onReconnect() }
                 if let other = openAfterSheet { openAfterSheet = nil; onOpenSaved?(other) }
             }) {
@@ -907,5 +933,23 @@ struct LANWorkroomView: View {
             }
 
         }.interactiveDismissDisabled()
+    }
+
+    /// Takes the QR off the binding at once (it is read exactly once) and opens 「Mac 화면」 on it: the registration when
+    /// the QR is one, the list with the reason when it is not. A registration already under way keeps the sheet; its
+    /// outcome is not known yet, so another QR never replaces it. Nothing reaches the Mac before 「이 기기 등록」.
+    private func receiveScreenInvite(_ text: String?) {
+        guard let text else { return }
+        screenInvite.wrappedValue = nil
+        do {
+            let invite = try RegistrationInvite(deviceRegistrationText: text)
+            if showingScreens, let current = screenRegistration, current.code.id == invite.code.id || screenRegistrationBusy { return }
+            screenRegistration = invite; screenRejection = nil
+        } catch {
+            // A bad QR does not close a registration on screen; the list shows why when no registration is up.
+            if showingScreens, screenRegistration != nil { return }
+            screenRejection = ScreenMacsSection.rejection(for: error)
+        }
+        if showingConnection { screensAfterSheet = true; showingConnection = false } else { showingScreens = true }
     }
 }

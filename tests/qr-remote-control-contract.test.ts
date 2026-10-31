@@ -49,6 +49,8 @@ describe('QR remote-control management contract', () => {
       '/api/remote-control/pairing/rotate',
       '/api/remote-control/sessions/revoke',
       '/api/remote-control/disable',
+      '/api/remote-control/codex-new/review',
+      '/api/remote-control/codex-new/resolve',
     ]);
     expect(Object.values(QR_REMOTE_CONTROL_PATHS).every(path => path.startsWith('/api/remote-control/'))).toBe(true);
   });

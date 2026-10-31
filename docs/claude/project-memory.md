@@ -1,5 +1,53 @@
 # 프로젝트 장기기억 · 공통기억 · Hermes 명령
 
+## 저장 실패 알림의 진단 동선 (2026-10-29)
+
+- Codex stderr는 CLI 헤더·작업 경로·입력 프롬프트까지 담을 수 있다. `runProjectMemoryAgent`는 실패 출력을
+  Error로 넘기지 않고 `projectMemoryAgentOutput`의 고정 문구와 `PROJECT_MEMORY_AGENT_FAILED` 코드만 반환한다.
+  성공 출력은 기존 문서/원문 복사 방지 검사를 그대로 통과해야 한다. 프런트도 임의 `error`/`backupError`를 알림에 붙이지 않는다.
+- `unsavedSessionMemory`는 충돌·AI 실패·미확정·백업·기타 상태를 분류한다. 로컬 저장 후 백업만 실패한 결과는
+  로컬 저장 성공을 유지하면서 확인 대상으로 표시한다. 미확정 저장을 자동 재전송하거나 다음 저장을 시작하지 않는다.
+- 알림은 `확인·해결`에서 프로젝트를 현재 등록 경로로 다시 해석하고, 사람이 AI를 골라 진단 워크룸을 연다.
+  원문 오류는 진단 프롬프트에도 넣지 않는다. 양쪽 기억과 기존 영수증을 먼저 확인하고, 충돌 원본 보존·백업만 복구·
+  미확정 저장 중복 실행 금지를 고정 진단 작업에 포함한다. 워크룸 시작 자체를 기억 저장 성공으로 표시하지 않는다.
+- 시작 응답 유실은 재시작하지 않고 같은 프로젝트·AI의 최신 워크룸 최대 16개에서 사람이 선택한다. 창 열기만 실패하면
+  확인된 같은 세션을 다시 연다. 생성/실행 결과를 추측해서 다른 프로젝트나 다른 세션을 고르지 않는다.
+- 알림용 모듈은 `memorySaveNoticeRecovery*`다. 기존 V2 `memorySaveRecovery.ts`의 복구 계약과 섞지 않는다.
+  회귀는 `memory-save-notice-recovery.test.ts`, `unsaved-session-memory.test.ts`, capability HTTP 검사와
+  Chromium/WebKit `check-memory-save-notice-recovery.ts`에 있다. 실제 제공자 호출은 화면 fixture의 검증 범위가 아니다.
+
+## 「모두 바뀌어 저장하지 않았습니다」 — 가짜 충돌과 도크 「비교·해결」 (2026-11-01)
+
+- `pullProjectMemory`는 로컬만 바뀌어도(Supabase head = 마지막 동기화) `conflict:true`를 돌려준다(Pull이 로컬을
+  덮지 않으려는 것). 세션 저장 preflight가 이것을 「양쪽 다 바뀜」으로 읽어 백업 안 된 로컬 변경이 있는 프로젝트의
+  저장을 매번 막았다. 이제 충돌 응답에 `remoteChangedSinceSync`·`localChangedSinceSync`를 싣고, preflight는
+  `sessionPreflightBlocksSave`로 **head가 실제로 움직였을 때만**(또는 필드가 없을 때) 멈춘다. head 이동 판정은
+  `projectMemoryRemoteMovedSinceSync` 하나 — push의 CAS 검사도 같은 함수를 쓴다.
+- 도크 행의 「비교·해결」(`DockMemoryConflictReview.tsx`): `POST /api/project-memory/conflict-preview`(읽기 전용 —
+  claim·Pull·쓰기 없음)가 로컬·Supabase와 **검증된 기준 리비전**(`lastPulledRevisionId`·`lastSyncedHash`가 가리키고
+  sha256이 맞는 행만)을 준다. `src/projectMemoryConflictEntries.ts`가 항목(`###`, memory-entry-id) 단위로 비교한다.
+  선택은 로컬 유지 / Supabase 받기 / 항목 합치기이고, 확인 뒤 기존 `resolve-conflict`로 **한 번만** 보낸다(비교한
+  해시·리비전을 함께 보내 그 사이 바뀌면 stale). 응답 유실은 다시 보내지 않고 「다시 비교」만 연다.
+- 「항목 합치기」는 기준이 있고, 양쪽이 **서로 없는 항목을 더하기만** 했고, 항목 밖 머리말·섹션 설명이 같고, ID가
+  모호하지 않을 때만 연다. 로컬 문서를 그대로 두고 Supabase 추가분만 같은 섹션 끝에 넣는다 — 「Contested Entries」
+  절을 만들지 않는다. 고침·지움이 하나라도 있으면 이유를 보여 주고 프로젝트 화면의 충돌 검토로 보낸다.
+- 회귀: `project-memory-conflict-detection.test.ts`(가짜 Supabase로 preflight·preview·병합 resolve·재전송 stale),
+  `project-memory-conflict-entries.test.ts`, `scripts/check-voice-dock-sessions.ts`(Chromium·WebKit).
+
+## 합의 기록이 없을 때 Pull은 로컬을 덮지 않는다 (2026-11-01)
+
+- `lastSyncedHash`가 없는 기기(이 기기의 첫 동기화, `state.json`이 없거나 사라짐 — gitignore라 clone에는 없다, 계보를 바꾼
+  identity claim이 커서를 지움)에서 `pullProjectMemory`는 로컬을 **바뀌지 않은 것으로** 읽고 백업 뒤 Supabase head로
+  교체했다. `/sync`의 `conflict` 방향(합의 없음 + 시각 동률/불명)은 그 Pull을 부른 뒤 `conflict: true`(409)로 답해,
+  화면·스킬은 「덮어쓰지 않았다」고 멈추는데 로컬은 이미 교체되고 원격이 새 합의로 기록됐다(다음 싱크는 「동기화됨」).
+- 이제 합의가 없으면 **아무도 쓰지 않은 문서**만 받는다 — 없음·빈 문서·초기 템플릿 그대로(`projectMemoryHoldsNoLocalWork`,
+  프로젝트 이름·날짜 줄만 다를 수 있음, 한 줄이라도 고쳤으면 아님). 그 밖의 차이는 충돌 응답(비교 본문 포함)이고 선택은
+  기존 resolve / 도크 「비교·해결」(기준 없음 → 두 쪽 비교)로 사람이 한다. 같은 바이트면 합의를 기록한다. `force` Pull은 그대로.
+- `/sync`·`/thread/sync`는 `projectMemorySyncAnswer` 하나로 답한다: Push·Pull이 충돌로 멈추면 **최상위** `conflict: true`
+  (패널·도크·스킬이 거기를 본다 — `result` 안에 있으면 「요청 실패 (409)」만 보였다), `conflict` 방향의 Pull이 받기를 했으면
+  `action: 'pull'`로 답한다. 공통기억 복원은 Pull 충돌을 `COMMON_MEMORY_PROJECT_CONFLICT`로 실패시킨다(완료로 보고하지 않음).
+- 회귀: `project-memory-unagreed-sync.test.ts`(가짜 Supabase + 실제 API의 `/sync`).
+
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
@@ -35,6 +83,9 @@
 - **`common-memory-rpc-v2`는 레거시 capability 답(8개)에 넣지 않는다** — `conversations-v1`이 밀려난다. 확장 답에만 있다.
 - **이전 방식(목표·원본 검토·게시)은 울타리일 뿐 삭제가 아니다.** op·testid·`ProjectCommonMemoryChoice` export·`common-memory.bind`가 남아 있다.
 - **이번 릴리스에는 마이그레이션이 없다.** 표·행·파일도 지우지 않았다.
+- **주제 발견은 같은 교훈 묶음이 먼저다**(`src/commonMemoryLessonClusters.ts`, 2026-11-01). 다른 장기기억에 비슷하게 적힌 항목을 n-gram Jaccard로 묶고,
+  예전 키워드 주제 7개는 그 조회에 같은 교훈이 없을 때만 나온다. 라틴 문자 5-gram을 3-gram으로 되돌리지 말 것 — 실측에서 무관한 영어 항목이 실제
+  공유 교훈과 같은 유사도로 섞였다. 후보에 키를 더하지 않는다. 문턱의 근거와 한계(한 쪽 안에서만 비교)는 `docs/meta-common-memory.md` 「주제 발견」.
 - `hostCapabilities`는 `list` **결과 안쪽**에 실린다(옛 휴대폰의 엄격한 정규화기가 바깥 키를 거절한다). JSON 포함 조건은 `.filter(…,'cs',JSON)`으로만 —
   supabase-js `.contains()`는 객체 배열을 `cs.{[object Object]}`로 보낸다. 카테고리를 `.or()`로 섞지 말 것.
 

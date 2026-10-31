@@ -31,6 +31,53 @@ describe('project Codex first/continue entry',()=>{
     fail=false;f.deps.latest=()=>({state:'found',sessionId:'thread-1'});
     await openProjectCodexWorkspace('project-1',f.deps);expect(f.calls.filter(c=>c==='create')).toHaveLength(1);expect(f.calls.filter(c=>c==='finalize:thread-1')).toHaveLength(2);
   });
+  test('explicit new intent creates beside an existing thread and coalesces simultaneous presses',async()=>{
+    const f=codexFixture();f.deps.latest=()=>({state:'found',sessionId:'old-thread'});
+    let sequence=0;
+    f.deps.create=async retain=>{const id=`new-${++sequence}`;f.calls.push('create:'+id);await Bun.sleep(5);retain(id);return {threadId:id};};
+    const [a,b]=await Promise.all([openProjectCodexWorkspace('project-1',f.deps,{intent:'new'}),openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})]);
+    expect(a).toEqual(b);expect(f.calls).toEqual(['create:new-1','finalize:new-1','open:new-1']);
+    await openProjectCodexWorkspace('project-1',f.deps,{intent:'new'});
+    expect(f.calls).toEqual(['create:new-1','finalize:new-1','open:new-1','create:new-2','finalize:new-2','open:new-2']);
+  });
+  test('explicit new intent fails closed when inventory unavailable',async()=>{
+    const f=codexFixture();f.deps.latest=()=>({state:'unavailable'});
+    await expect(openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).rejects.toMatchObject({code:'CODEX_PROJECT_CONNECTION_UNAVAILABLE'});
+    expect(f.calls).toEqual([]);
+  });
+  test('failed exact new-thread binding keeps the same thread for safe recovery',async()=>{
+    const f=codexFixture();f.deps.latest=()=>({state:'found',sessionId:'old-thread'});
+    let binding=false;f.deps.verify=async id=>id==='thread-1' && binding ? 'verified' : 'unavailable';
+    await expect(openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).rejects.toMatchObject({code:'CODEX_PROJECT_CONNECTION_UNAVAILABLE'});
+    expect(f.calls).toEqual(['create','finalize:thread-1']);
+    binding=true;
+    const recovered=await openProjectCodexWorkspace('project-1',f.deps,{intent:'new'});
+    expect(recovered.mode).toBe('reopened');
+    expect(f.calls).toEqual(['create','finalize:thread-1','finalize:thread-1','open:thread-1']);
+  });
+  test('binding lost after opening retains the exact thread for recovery',async()=>{
+    const f=codexFixture();f.deps.latest=()=>({state:'found',sessionId:'old-thread'});
+    let checks=0;f.deps.verify=async id=>{expect(id).toBe('thread-1');return ++checks===2?'unavailable':'verified';};
+    await expect(openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).rejects.toMatchObject({code:'CODEX_PROJECT_CONNECTION_UNAVAILABLE'});
+    expect(f.deps.coordinator.hasPending('project-1')).toBe(true);
+    expect((await openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).mode).toBe('reopened');
+    expect(f.calls.filter(c=>c==='create')).toHaveLength(1);
+  });
+  test('after restart pending recovery checks exact binding before any new creation',async()=>{
+    const f=codexFixture();f.deps.latest=()=>({state:'found',sessionId:'old-thread'});
+    const entries=new Map<string,string>();
+    const store={load:(key:string)=>entries.get(key)??null,save:(key:string,id:string)=>{entries.set(key,id);},clear:(key:string)=>{entries.delete(key);}};
+    f.deps.coordinator=new CodexFirstConversationLaunchCoordinator(store);
+    f.deps.open=async()=>{throw new Error('URL handler unavailable');};
+    await expect(openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).rejects.toMatchObject({code:'CODEX_FIRST_TURN_CREATED_OPEN_FAILED'});
+    f.deps.coordinator=new CodexFirstConversationLaunchCoordinator(store);
+    f.deps.verify=async()=> 'unavailable' as const;
+    await expect(openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).rejects.toMatchObject({code:'CODEX_FIRST_TURN_RECOVERY_UNVERIFIED'});
+    expect(f.calls.filter(c=>c==='create')).toHaveLength(1);
+    f.deps.verify=async()=> 'verified' as const;f.deps.open=async id=>{f.calls.push('open:'+id);};
+    expect((await openProjectCodexWorkspace('project-1',f.deps,{intent:'new'})).mode).toBe('reopened');
+    expect(f.calls.filter(c=>c==='create')).toHaveLength(1);expect(entries.size).toBe(0);
+  });
 });
 
 describe('project Workroom entry',()=>{

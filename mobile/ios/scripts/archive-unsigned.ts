@@ -10,6 +10,8 @@ const output=mkdtempSync(join(base,'rehearsal-'));chmodSync(output,0o700);
 const archive=join(output,'AgentsToZMobile-UNSIGNED.xcarchive'),derived=join(output,'DerivedData');
 const args=unsignedArchiveArguments(join(root,'mobile/ios/AgentsToZMobile.xcodeproj'),archive,derived);
 const provenance=sourceProvenance(root);
+const portalBuild=Bun.spawnSync(['bun',join(root,'mobile/ios/scripts/build-portal-web.ts')],{cwd:root,stdout:'inherit',stderr:'inherit'});
+if(portalBuild.exitCode!==0)throw Error('BUNDLED_PORTAL_BUILD_FAILED');
 const logFD=openSync(join(output,'archive.log'),'wx',0o600);
 console.log('무서명 iPhone용 Release archive를 생성합니다. 설치·TestFlight·업로드를 수행하지 않습니다.');
 const child=Bun.spawn(args,{cwd:root,stdin:'ignore',stdout:logFD,stderr:logFD});

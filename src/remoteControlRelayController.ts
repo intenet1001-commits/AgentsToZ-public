@@ -1,6 +1,7 @@
 import type {MobileWorkspaceRequest,MobileWorkspaceResult} from './mobileWorkspaceProtocol';
 import {normalizeRemoteTerminalResult,type RemoteTerminalResult} from './remoteControlTerminalProtocol';
 import {AI_TERMINAL_REQUEST_INVALID_CODE,type AiTerminalRequest,type AiTerminalResponse} from './aiTerminalProtocol';
+import {WEEKLY_USAGE_REMOTE_ACTION} from './weeklyUsageRemote';
 import type {
   RemoteControlAction,
   RemoteControlActionResult,
@@ -116,7 +117,9 @@ export function isBackgroundTerminalRequest(request: AiTerminalRequest|MobileWor
       // `history.restart` (w14) is the restart banner's own look when the Workroom shows; nobody is waiting on it.
       && (['workroom.status', 'memory.status', 'tester.status', 'tester.read', 'community.status', 'history.restart'].includes(request.workspace.action)
         // A 「에포트 자동」 read (w16) is the screen's own look; a change is something the person pressed.
-        || request.workspace.action === 'workroom.effort' && request.workspace.set === undefined && request.workspace.mode === undefined));
+        || request.workspace.action === 'workroom.effort' && request.workspace.set === undefined && request.workspace.mode === undefined
+        // The Home card's 「주간 잔여」 read changes nothing; even its 「새로고침」 must not crowd out a tap.
+        || request.workspace.action === WEEKLY_USAGE_REMOTE_ACTION));
 }
 
 /**
@@ -125,8 +128,9 @@ export function isBackgroundTerminalRequest(request: AiTerminalRequest|MobileWor
  */
 export function readOnlyTerminalProbe(request: AiTerminalRequest|MobileWorkspaceRequest): boolean {
   if (request.operation === 'read') return !!request.snapshot;
-  // An older Mac refuses `workroom.effort` (w16) outright; the screen hides the option itself.
-  if (request.operation === 'workspace') return request.workspace.action === 'workroom.effort' && request.workspace.set === undefined && request.workspace.mode === undefined;
+  // An older Mac refuses `workroom.effort` (w16) and `usage.weekly` outright; the screen hides the option / the card itself.
+  if (request.operation === 'workspace') return request.workspace.action === 'workroom.effort' && request.workspace.set === undefined && request.workspace.mode === undefined
+    || request.workspace.action === WEEKLY_USAGE_REMOTE_ACTION;
   if (request.operation === 'list') return !!request.capabilities;
   if (request.operation !== 'submission') return false;
   const phase = (request.submission as {phase?: unknown} | undefined)?.phase;
@@ -259,6 +263,8 @@ export interface RemoteControlRelayControllerStatus {
   nextPage: number | null;
   /** Null until probed; empty means an authenticated legacy/base host. */
   supportedFeatures: RemoteControlSupportedFeature[] | null;
+  /** False until this connection has received the extended manifest or a verified legacy refusal. */
+  extendedCapabilitiesChecked?: boolean;
   /** True only while a user-triggered request is queued or in flight. */
   requesting: boolean;
   busy: boolean;
@@ -401,7 +407,7 @@ function boundedSupportedFeatures(value: unknown): RemoteControlSupportedFeature
   }
 }
 
-function parseServerMessage(value: unknown): ServerMessage {
+export function parseServerMessage(value: unknown): ServerMessage {
   const raw = exactObject(value);
   if (raw.type === 'terminal.result') return normalizeRemoteTerminalResult(raw);
   if (raw.type === 'tasks.result') return normalizeRemoteControlTaskResult(raw);
@@ -445,8 +451,9 @@ function parseServerMessage(value: unknown): ServerMessage {
       const hasSupportedFeatures = Object.prototype.hasOwnProperty.call(raw, 'supportedFeatures');
       const hasOps = Object.prototype.hasOwnProperty.call(raw, 'ops');
       const hasOpsCandidates = Object.prototype.hasOwnProperty.call(raw, 'opsCandidates');
-      if ([hasProjects, hasProject, hasWorkspaceRoots, hasSupportedFeatures, hasOps, hasOpsCandidates].filter(Boolean).length !== 1
-        || Object.keys(raw).some(key => !['type', 'actionId', 'ok', 'projects', 'project', 'workspaceRoots', 'supportedFeatures', 'ops', 'opsCandidates', 'page', 'projectCount', 'nextPage'].includes(key))) {
+      const hasCodexReceipt = Object.prototype.hasOwnProperty.call(raw, 'codexNewChatReceipt');
+      if ([hasProjects, hasProject, hasWorkspaceRoots, hasSupportedFeatures, hasOps, hasOpsCandidates, hasCodexReceipt].filter(Boolean).length !== 1
+        || Object.keys(raw).some(key => !['type', 'actionId', 'ok', 'projects', 'project', 'workspaceRoots', 'supportedFeatures', 'ops', 'opsCandidates', 'codexNewChatReceipt', 'page', 'projectCount', 'nextPage'].includes(key))) {
         throw new Error('REMOTE_CONTROL_RESPONSE_INVALID');
       }
       if (hasProjects) {
@@ -486,6 +493,15 @@ function parseServerMessage(value: unknown): ServerMessage {
       if (hasOpsCandidates) {
         if (Object.keys(raw).length !== 4) throw new Error('REMOTE_CONTROL_RESPONSE_INVALID');
         return {type:'action.result',actionId,ok:true,opsCandidates:normalizeQrRemoteControlOpsCandidates({opsCandidates:raw.opsCandidates})};
+      }
+      if (hasCodexReceipt) {
+        if (Object.keys(raw).length !== 4) throw new Error('REMOTE_CONTROL_RESPONSE_INVALID');
+        if (raw.codexNewChatReceipt === null) return {type: 'action.result', actionId, ok: true, codexNewChatReceipt: null};
+        const receipt = exactObject(raw.codexNewChatReceipt);
+        if (Object.keys(receipt).sort().join() !== 'actionId,state'
+          || typeof receipt.actionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(receipt.actionId)
+          || !['started', 'completed', 'acknowledged', 'cancelled'].includes(String(receipt.state))) throw new Error('REMOTE_CONTROL_RESPONSE_INVALID');
+        return {type: 'action.result', actionId, ok: true, codexNewChatReceipt: {actionId: receipt.actionId, state: receipt.state as 'started' | 'completed' | 'acknowledged' | 'cancelled'}};
       }
       if (Object.keys(raw).length !== 4) throw new Error('REMOTE_CONTROL_RESPONSE_INVALID');
       if (raw.project === null) return { type: 'action.result', actionId, ok: true, project: null };
@@ -790,6 +806,13 @@ export class RemoteControlRelayController {
   #pendingActionIsForeground = false;
   #pendingCapabilityProbeActionId: string | null = null;
   #extendedCapabilityProbed=false;
+  /**
+   * When the unconfirmed extended manifest is owed again: right away for a session restored from the vault (only the
+   * feature list is stored, so the manifest may be the legacy eight a closed page never got past), after
+   * EXTENDED_CAPABILITY_RETRY_MS for an attempt that failed without a refusal. Null: not owed. Without this, one
+   * dropped answer left 공통기억·기기 기억 saying 「Mac 앱을 업데이트」 for the life of the session (2026-11-01).
+   */
+  #extendedProbeRetryAt: number | null = null;
   #pendingActionSentAt = 0;
   #terminalResult: RemoteTerminalResult | null = null;
   #terminalRequestId: string | null = null;
@@ -878,6 +901,7 @@ export class RemoteControlRelayController {
       this.#supportedFeatures = restored.supportedFeatures === undefined
         ? null
         : [...restored.supportedFeatures];
+      this.#extendedProbeRetryAt = this.#supportedFeatures === null ? null : 0;
       this.#sasCode = restored.sasCode;
       this.#controllerKeyFingerprint = restored.controllerKeyFingerprint;
       this.#state = restored.sessionToken
@@ -996,6 +1020,7 @@ export class RemoteControlRelayController {
       projectCount: this.#projectCount,
       nextPage: this.#nextPage,
       supportedFeatures: this.#supportedFeatures === null ? null : [...this.#supportedFeatures],
+      extendedCapabilitiesChecked: this.#extendedCapabilityProbed,
       requesting: this.#foregroundTerminalRequests > 0
         || this.#pendingActionIsForeground
         || this.#pendingTaskIsForeground
@@ -1387,6 +1412,10 @@ export class RemoteControlRelayController {
     return this.#exclusive(async () => {
     const admittedToken=this.#sessionToken;
     if (this.#state !== 'online' || !this.#sessionToken) throw new Error('REMOTE_CONTROL_SESSION_NOT_READY');
+    const codexV2 = action === 'codex.thread.start.v2' || action === 'codex.thread.ack.v2' || action === 'codex.thread.review.v2' || action === 'codex.thread.cancel.v2';
+    if (codexV2 && (!this.#extendedCapabilityProbed || !this.#supportedFeatures?.includes('codex-new-receipt-v1'))) {
+      throw new RemoteControlRelayRequestError(REMOTE_CONTROL_HOST_UPDATE_REQUIRED, '새 대화를 안전하게 만들려면 연결된 Mac의 AgentsToZ를 업데이트하세요.');
+    }
     if (this.#unsentRequest()) throw this.#inProgressError();
     this.#refuseWhilePhoneOffline();
     if (this.#pendingOutbound || this.#pendingActionId
@@ -1396,12 +1425,15 @@ export class RemoteControlRelayController {
     await this.#waitForPollToRelease(REMOTE_CONTROL_BUSY_WAIT_ATTEMPTS, REMOTE_CONTROL_BUSY_WAIT_POLL_MS, true);
     if (this.#state !== 'online' || !this.#sessionToken) throw new Error('REMOTE_CONTROL_SESSION_NOT_READY');
     this.#assertSession(admittedToken);
+    if (codexV2 && (!this.#extendedCapabilityProbed || !this.#supportedFeatures?.includes('codex-new-receipt-v1'))) {
+      throw new RemoteControlRelayRequestError(REMOTE_CONTROL_HOST_UPDATE_REQUIRED, '새 대화를 안전하게 만들려면 연결된 Mac의 AgentsToZ를 업데이트하세요.');
+    }
     this.#refuseWhilePhoneOffline();
     if (this.#busy || this.#pendingOutbound || this.#pendingActionId
       || this.#pendingTaskOperationId || this.#pendingConversationOperationId) {
       throw this.#inProgressError();
     }
-    if (creationActionId !== undefined && (action !== 'project.create' || !/^[A-Za-z0-9_-]{8,100}$/.test(creationActionId))) {
+    if (creationActionId !== undefined && (!['project.create', 'codex.thread.start.v2'].includes(action) || !/^[A-Za-z0-9_-]{8,100}$/.test(creationActionId))) {
       throw new Error('REMOTE_CONTROL_CREATE_INTENT_INVALID');
     }
     const actionId = creationActionId ?? this.#randomUuid();
@@ -1426,7 +1458,7 @@ export class RemoteControlRelayController {
       // Authenticated read; no project-scoped control ID is needed.
     } else if (action !== 'projects.list'
       && action !== 'workspace-roots.list'
-      && action !== 'protocol.capabilities'&& action !== 'protocol.capabilities.extended') {
+      && action !== 'protocol.capabilities'&& action !== 'protocol.capabilities.extended' && action !== 'protocol.codex-new-v2') {
       if (!controlId) throw new Error('REMOTE_CONTROL_CONTROL_ID_REQUIRED');
       request.controlId = controlId;
       if (action !== 'project.status') request.remoteConfirmed = true;
@@ -1504,15 +1536,25 @@ export class RemoteControlRelayController {
     if (!force && this.#supportedFeatures !== null&&(!extended||this.#extendedCapabilityProbed)) return this.status();
     if(force||this.#supportedFeatures===null)await this.sendAction('protocol.capabilities');
     if(extended){
-      try{await this.sendAction('protocol.capabilities.extended');this.#extendedCapabilityProbed=true;this.#extendedProbeDropped=false;}
-      catch(error){if(isLocalSaveFailure(error))this.#extendedProbeDropped=true;throw error;}
+      this.#extendedCapabilityProbed=false;
+      try{await this.sendAction('protocol.capabilities.extended');this.#extendedCapabilityProbed=true;this.#extendedProbeDropped=false;this.#extendedProbeRetryAt=null;}
+      catch(error){
+        if(isLocalSaveFailure(error))this.#extendedProbeDropped=true;
+        // A read is safe to ask again; the wait keeps a Mac that keeps failing it from being asked every poll.
+        else this.#extendedProbeRetryAt=this.#now()+EXTENDED_CAPABILITY_RETRY_MS;
+        throw error;
+      }
     }
     return this.status();
   }
 
-  /** The automatic capability probe still has to run: never answered, or dropped by a failed save (nothing was sent). */
+  /**
+   * The automatic capability probe still has to run: never answered, dropped by a failed save (nothing was sent), or
+   * the extended manifest is still unconfirmed and due again (restored session; earlier attempt failed).
+   */
   capabilityProbeOwed(): boolean {
-    return this.#supportedFeatures === null || this.#extendedProbeDropped;
+    return this.#supportedFeatures === null || this.#extendedProbeDropped
+      || (!this.#extendedCapabilityProbed && this.#extendedProbeRetryAt !== null && this.#now() >= this.#extendedProbeRetryAt);
   }
 
   async sendTask<TOperation extends RemoteControlTaskOperation>(
@@ -1924,6 +1966,8 @@ export class RemoteControlRelayController {
     this.#projectCount = 0;
     this.#nextPage = null;
     this.#supportedFeatures = null;
+    this.#extendedCapabilityProbed = false;
+    this.#extendedProbeRetryAt = null;
     this.#sasCode = null;
   }
 
@@ -2152,6 +2196,8 @@ export class RemoteControlRelayController {
         // A new authenticated token belongs to the newly running host process;
         // never inherit an earlier manifest across a restart or restore.
         this.#supportedFeatures = null;
+        this.#extendedCapabilityProbed = false;
+        this.#extendedProbeRetryAt = null;
         this.#projects = message.projects;
         this.#projectCount = message.projectCount;
         this.#nextPage = message.nextPage;
@@ -2223,7 +2269,7 @@ export class RemoteControlRelayController {
         else if ('opsCandidates' in message) {
           // Returned to the explicit caller; candidate text is never persisted in the controller vault.
         }
-        else if (message.project) {
+        else if ('project' in message && message.project) {
           const index = this.#projects.findIndex(project => project.controlId === message.project!.controlId);
           if (index >= 0) this.#projects = this.#projects.map((project, offset) => offset === index ? message.project! : project);
           else { this.#projects = [...this.#projects, message.project]; this.#projectCount = Math.max(this.#projectCount, this.#projects.length); }
@@ -2325,12 +2371,14 @@ export const REMOTE_CONTROL_HOST_SILENT_MS = 60_000;
 export const REMOTE_CONTROL_BUSY_WAIT_POLL_MS = 100;
 /** How old the relay status may get between back-to-back requests before one is read again. */
 export const REMOTE_CONTROL_STATUS_REFRESH_MS = 5_000;
+/** How long an extended capability probe that failed without a refusal waits before the poll asks again. */
+export const EXTENDED_CAPABILITY_RETRY_MS = 30_000;
 export const REMOTE_CONTROL_BUSY_WAIT_ATTEMPTS = 30;
 export const REMOTE_CONTROL_ACTION_RESULT_POLL_MS = 1_000;
 export const REMOTE_CONTROL_ACTION_RESULT_ATTEMPTS = 60;
 /** Actions that only read; an unanswered one never holds the in-flight lock. */
 const READ_ONLY_RELAY_ACTIONS: ReadonlySet<string> = new Set([
-  'projects.list', 'workspace-roots.list', 'protocol.capabilities', 'protocol.capabilities.extended', 'project.status', 'ops.status', 'ops.memory.pending',
+  'projects.list', 'workspace-roots.list', 'protocol.capabilities', 'protocol.capabilities.extended', 'protocol.codex-new-v2', 'codex.thread.review.v2', 'project.status', 'ops.status', 'ops.memory.pending',
 ]);
 export const REMOTE_CONTROL_INTERACTIVE_TERMINAL_POLL_MS = 250;
 const REMOTE_CONTROL_INTERACTIVE_TERMINAL_FAST_POLLS = 4;

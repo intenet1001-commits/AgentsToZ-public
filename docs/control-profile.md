@@ -110,21 +110,103 @@ Claude command와 Hermes skill은 네이티브 슬래시를 사용할 수 있지
 |---|---|
 | `agentstoz_use_get_control_profile` | 연결된 아젠투지 OPS 운영 프로필, 기억 기준 revision, 갱신 시각과 동기화 상태 |
 | `agentstoz_use_recall_user_memory` | 등록 프로젝트 ID와 query로 그 프로젝트의 로컬 과거 지시 최대 5건·16 KiB 미만을 회상. 프로필 인증 필요, 과거 근거이며 현재 명령과 구분 |
+| `agentstoz_use_list_user_memory_history` | 등록 프로젝트 ID와 기간 `[start,end)`로 이 기기의 과거 지시를 한 페이지씩 읽음(저장 순서, `nextCursor`로 이어 읽기). 프로필 인증 필요, 읽기 전용. 아래 「미처리 업무 조회」 |
 | `agentstoz_use_recall_user_profile` | 이 기기에 직접 확인해 저장한 활성 개인 선호를 정확한 프로젝트와 질의 범위에서 최대 5개·8,000 bytes로 조회. 원문·OPS 기억과 별도이며 쓰기나 AI 추론은 하지 않음 |
 | `agentstoz_use_recall_control_context` | 질의와 관련된 운영 기억 최대 8개·16 KiB |
 | `agentstoz_use_propose_control_memory` | 운영 기억 저장 후보. 실제 저장 완료가 아님 |
 
 후보는 「아젠투지 설정」에서 내용·근거를 검토하고 저장합니다. 로컬 저장과 원격 백업 결과는 따로 표시합니다.
-후보 목록은 상태 줄 바로 아래에 있습니다. 이미 저장된 운영 기억은 같은 패널의 **저장된 운영 기억 · N**에서 읽기 전용으로 봅니다
+후보 목록은 상태·지금 할 일 카드 아래에 있습니다. 긴 후보는 **전체 보기**로 확인한 뒤 저장합니다.
+이미 저장된 운영 기억은 같은 패널의 **저장된 운영 기억 · N**을 펼쳐 읽기 전용으로 봅니다
 (`GET /api/control-profile/entries` — 최근 순 제목 최대 200개, 펼친 항목 하나의 본문만 `?entryId=`로 최대 12,000자).
 이 경로는 Mac 패널 전용이며 원격 `ops.status` DTO나 휴대폰 응답에는 들어가지 않습니다. 저장은 항목을 덧붙이기만 하므로
 이 화면에 기존 항목을 고치는 경로는 없습니다.
 OPS 운영 기억과 구현 프로젝트의 장기기억은 분리됩니다. 작업이 필요하면 워크룸에서 프로젝트와 AI를 명시적으로 선택합니다.
 이 기능은 지원 AI가 전달하는 음성/텍스트 요청을 받습니다. 항상 켜진 마이크나 모든 AI 서비스의 자동 도구 지원을 뜻하지 않습니다.
 
+### 운영 기억 동기화 확인 (지금 할 일)
+
+동기화 상태가 `needs-attention`(로컬·원격 운영 기억이 다름, 또는 원격을 읽지 못함)이면 상태 카드의 동기화 줄이 경고색으로
+보이고 **지금 할 일**에 「운영 기억 동기화 확인」이 들어갑니다. 이때 「기다리는 후보나 연결 확인이 없습니다.」는 나오지 않습니다.
+「장기기억 현황 보기」는 장기기억 탭(기기별 기억 상태 현황판)으로 **이동만** 합니다. 패널은 Pull·Push·준비·검토 요청을
+보내지 않고 어느 쪽도 덮어쓰지 않습니다. 다시 확인은 「아젠투지 준비·연결 다시 확인」입니다.
+2026-10-28부터 **운영 기억 비교**가 별도로 열립니다(`ControlMemoryConflictPanel`). OPS는 여전히 DEV 기억 편집기를 열지 않습니다.
+비교 버튼은 두 문서를 읽기만 하며 claim·별칭 추적·스키마 복구·Pull·Push·설정 쓰기를 실행하지 않습니다. 사람이 로컬·원격·직접 병합을
+선택하고 확인한 뒤에만 기존 CAS 충돌 해결기가 두 버전을 검사해 적용합니다. 원격은 리비전으로 보존하고 로컬 교체 전에는 백업합니다.
+화면에서 검토한 profileId·memoryId와 연결된 폴더를 서버가 다시 확인하며 요청에서 경로를 받지 않습니다. OPS 전용 해결은 identity claim과
+schema repair를 생략하고 정확한 계보만 읽기 확인합니다. 별칭·연결·내용이 달라지면 다시 비교해야 합니다.
+이 경로는 MCP·모바일에 노출되지 않습니다. 설치 앱은 전용 Tauri command `control_memory_conflict_request`와 기존 로컬 management capability를
+사용하며 POST `/api/control-profile/memory-conflict`만 허용합니다. 각 원문 1MB 상한을 유지하고 JSON escape를 포함한 전송은 요청 6.1MB·응답 12.1MB로
+제한합니다. 다른 management 경로의 4KB 한도는 바꾸지 않습니다. 적용 요청의 응답이 불명확하면 자동 재전송하지 않고 다시 비교합니다.
+적용 뒤 「아젠투지 준비·연결 다시 확인」으로 동기화 상태를 갱신합니다. 실제 운영 기억을 AI가 임의로 선택해 해결하지 않습니다.
+
+## 미처리 업무 조회 — 스킬 · 워크룸 버튼 · 기간 기록 도구
+
+등록 프로젝트의 장기기억과 근거로 요청했지만 끝나지 않은 일을 **읽기 전용으로** 찾고, 그다음 사람이 고를 **개선 지시 초안**을
+내는 흐름입니다(커밋 `9f3ffcc3b`, 2026-10-29 워크룸 밖 호출·이름 지정 프로젝트·개선 지시 단계 추가).
+
+- **스킬 `agentstoz-unfinished-work`** (`src/unfinishedWorkSkill.ts`, 스킬 버전 2): 프로젝트 장기기억 색인·노트·회상, 「내가 한 말」 회상,
+  기간 기록 도구를 차례로 쓰고 결과를 **미처리 / 상태 불확실 / 완료**로 나눕니다. 계획·검색 무응답·커밋·테스트·빌드·설치만으로
+  완료로 보지 않고, 빈·잘린·실패한 조회를 「남은 일이 없다」의 근거로 쓰지 않습니다. 조회 단계에서는 작업 실행, 원문 가져오기,
+  기억 쓰기, 수집 설정 변경, 메시지 전송을 하지 않습니다.
+  - **설명(트리거 문구)**: AgentsToZ 등록 프로젝트(현재 또는 아젠투지데브처럼 이름으로 지정)의 미처리·미완료 업무/과제, 후속 작업,
+    백로그, 장기기억 기반 진행 현황, 개선 지시와 unfinished/pending/outstanding work를 담습니다. 「남은 일」 같은 일상어는
+    「장기기억에서 남은 일」처럼 묶어서만 넣었습니다 — 전역 스킬이라 AgentsToZ와 무관한 할 일 요청에서 무거운 기억 조회가
+    시작되면 안 됩니다. 1,024자 이하이고 따옴표로 감싼 YAML입니다(Codex 검증 한도).
+  - **0단계 — 대상 고르기**: 프로젝트 이름·별명을 말했거나 OPS·등록되지 않은 폴더에서 부르면 `agentstoz_use_get_control_profile` →
+    `agentstoz_use_resolve_target`으로 정하고 **돌려받은 ID만** 씁니다. 모호하거나 후보가 여럿이거나 실패하면 묻고 기다립니다.
+    현재 프로젝트가 아니면 폴더를 찾지 않고 `agentstoz_use_read_reference`(role `dev`, 그 ID를 `portId`로)를 짧은 질의 여러 개로 부르고
+    같은 ID로 「내가 한 말」 회상·기간 기록 도구를 씁니다. 이 경로는 **제한된 조회**라고 밝힙니다 — 참조 질의당 발췌 5건, 날짜별
+    작업 기록(journal) 제외, 「내가 한 말」은 이 기기에서 수집한 것만. 다른 기기에만 있는 프로젝트는 이렇게 읽을 수 없다고 말하고,
+    사람이 명시적으로 요청할 때만 OPS 요청(`agentstoz_use_list_ops_devices` → `agentstoz_use_submit_ops_request`)으로 보냅니다.
+  - **5단계 — 개선 지시**: 보고 뒤 미처리·상태 불확실 항목에 번호를 붙이고 항목마다 짧은 지시 초안(목표, 먼저 볼 근거, 완료 확인 방법)을
+    냅니다. 사람이 고르기 전에는 아무것도 시작하지 않습니다. 고른 뒤 **같은 프로젝트**면 그 세션에서 이어 하고, **다른 프로젝트**면
+    공통 실행 규칙대로 `agentstoz_use_prepare_agent_launch` → 질문하고 기다림 → 고른 AI·명시한 실행 위치로 워크룸 시작/목록 →
+    첫 화면 읽기 → 고른 지시를 한 번 보냅니다. 돌려받은 requestId를 지키고, 결과가 불확실하면 같은 requestId로 확인할 뿐 자동으로
+    다시 보내거나 새 ID로 보내지 않습니다. `self:true`인 세션(자기 자신)에는 지시·키 입력·닫기를 하지 않습니다.
+- **설치**: 사이드카가 시작할 때 `src/agentstozInvocationInstaller.ts`가 Codex(`~/.codex/skills`), Claude(`~/.claude/skills`),
+  Antigravity(`~/.gemini/skills`, agy가 만든 `~/.gemini/config/skills`가 있을 때만 그곳도), Hermes(설정된 각 home의 `skills`)에
+  같은 본문을 둡니다. 관리 표식(`<!-- AgentsToZ agentstoz-unfinished-work skill -->`)이 있는 우리 파일만 갱신하고,
+  남의 `SKILL.md`, 심볼릭 링크인 `SKILL.md`나 **폴더**, 폴더가 아닌 같은 이름, `SKILL.md` 없이 다른 파일이 든 폴더는 건드리지 않습니다.
+  비어 있거나 우리 임시 파일만 남은 폴더(첫 쓰기가 중단된 경우)만 이어서 채웁니다.
+- **워크룸 밖에서 부르는 길**(remember-session처럼 여러 경로):
+  - **항상 켜진 한 줄 — invocation 10**: 전역 지침(`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, agy의
+    `~/.gemini/config/GEMINI.md`, Hermes `SOUL.md`)과 `/agentstoz` 스킬·명령의 AgentsToZ 블록에 「등록 프로젝트(현재 또는 이름 지정)의
+    미처리·미완료 업무 → 이 스킬, Claude `/agentstoz-unfinished-work`, Codex `$agentstoz-unfinished-work`」 줄이 들어갑니다.
+    ⚠️ **Claude Code는 사용자 스킬이 많으면(이 Mac 약 1,000개) 설명 없이 이름만 나열**하므로 스킬 설명이 닿지 않습니다 —
+    Claude에서는 이 줄과 명시 명령이 실제 트리거입니다. Codex·agy·Hermes는 스킬 설명도 봅니다.
+  - **명시 호출**: Claude `/agentstoz-unfinished-work`, Codex `$agentstoz-unfinished-work`, Hermes CLI `/agentstoz-unfinished-work`
+    (Hermes는 `<HERMES_HOME>/skills`의 스킬을 frontmatter 이름으로 슬래시 명령에 등록합니다 — 설치된 hermes-agent 소스로 확인,
+    실기 미확인). 워크룸 명령 모음(`src/workroomCliCommands.ts`)에도 같은 항목이 있습니다. Claude 목록에서는 `/agents` 뒤에 둡니다 —
+    입력한 접두어에서 Enter는 첫 후보를 실행하므로 `/agent`는 계속 `/agents`입니다.
+    agy에는 그런 명령이 없습니다. Hermes Telegram 메뉴에는 등록하지 않았습니다(메뉴 플러그인 변경은 장기기억 버전 상승이 필요해 보류).
+  - **절대 되돌리지 않음**: 관리 블록과 `/agentstoz` 스킬·명령은 `invocation-version`, 이 스킬은 `skill-version` 표식을 갖고, 설치기는 **자기보다
+    높은 버전이 적힌 사본을 그대로 둡니다**(같거나 낮거나 표식 없는 사본만 교체). 다만 invocation 10 이전 빌드(v1549 이하 설치본·백업 번들·
+    옛 체크아웃의 dev api-server)에는 이 검사가 없어 시작할 때 한 번 옛 내용으로 되돌립니다 — 확인은 새 설치본으로, 옛 dev 서버 없이 합니다.
+  - **다시 시작**: `CLAUDE.md`·`AGENTS.md`와 MCP 도구 목록은 세션 시작 때 읽으므로 설치 뒤 새 세션(ChatGPT Codex 앱은 새 스레드)에서 확인합니다.
+- **워크룸 버튼 「미처리 업무 조회」** (`data-testid="workroom-unfinished-work"`, 문구 `src/workroomUnfinishedWorkCopy.ts`):
+  실행 중인 프로젝트 세션에만 보이고 OPS 세션에는 숨깁니다(OPS에서는 명령 모음이나 「아젠투지데브 미완료 업무」처럼 이름을 말해 0단계로 갑니다).
+  누르면 그 세션의 입력칸에 스킬 사용 요청을 **채우기만** 하고 보내지 않습니다. 작성 중인 글·첨부·참조가 있으면 바꾸지 않고 그대로 둔다고 알립니다. 휴대폰 원격 워크룸에도 같은 버튼이 있고
+  역시 보내지 않습니다(`tests/workroom-popout.e2e.mjs`).
+- **기간 기록 도구 `agentstoz_use_list_user_memory_history`** (`src/userMemoryHistoryServer.ts`):
+  - **이 기기에서 수집한** 그 프로젝트의 과거 지시만 읽습니다. 다른 기기의 기록이나 수집 완전성을 증명하지 않습니다
+    (`coverage.deviceScope: local-device`, `historical: unknown`).
+  - 저장 순서(최신 저장 먼저)로 읽습니다. 타임스탬프 순서가 아니므로 기간 밖 행이 섞이고, 빈 페이지 뒤에도 `nextCursor`로 이어 읽습니다.
+    `complete: true`는 저장소 끝까지 읽었고 마지막 수집 검사가 완전했으며 잘린 본문이 없을 때만입니다.
+  - 한 페이지는 저장된 행 50개를 읽고, 기간 안 결과는 직렬화 기준 14,000 bytes까지 싣습니다(결과 하나는 2,800 bytes·본문 2,048 bytes 이내).
+    예산이 차면 마지막으로 실은 행에서 페이지를 끝내고 커서가 바로 다음 행부터 이어 읽으므로 건너뛰는 행이 없습니다.
+    행 위치(seq)를 주지 않는 목록에서 예산이 차면 그 자리에서 이어 읽을 수 없으므로, 남은 행을 조용히 넘기지 않고
+    `state: unavailable`로 답합니다(그 기간은 검색하지 못한 것으로 보고). 현재 로컬 목록은 항상 seq를 줍니다.
+    예전에는 페이지가 5행이라 스킬의 첫 순회(10페이지·15초)가 최신 50행만 봤습니다.
+  - 커서는 프로젝트 기억 ID·기간·위치를 HMAC으로 묶은 값이고 **호스트가 다시 시작하면 무효**입니다. 다른 프로젝트·기간에는 쓰지 못합니다.
+  - `agentstoz_use_recall_user_memory`의 최대 5건은 의도된 경계입니다(문자열 포함 검색 한 번의 크기 상한 · `complete`로 더 있음을 알림).
+    기간 전체를 훑을 때는 이 기록 도구를 씁니다.
+- **설치 앱 반영**: 스킬은 이 커밋을 포함한 앱의 사이드카가 시작할 때 깔리고, MCP 도구 목록은 CLI 세션 시작 때 고정되므로
+  새 도구를 쓰려면 그 뒤 세션을 다시 시작해야 합니다.
+
 ## OPS 열기 — 앱 · Workroom · Orca
 
-「아젠투지 설정」의 **아젠투지 열기**에서 실행 표면과 AI를 선택합니다. 기존 프로젝트
+「아젠투지 설정」의 상태 카드에서 현재 선택으로 바로 열 수 있습니다. **열기 방식 바꾸기**를 누르면 실행 표면과 AI 선택이 펼쳐집니다. 기존 프로젝트
 실행기를 사용하며 DEV로 대체하거나 새 운영 기억/프로젝트를 만들지 않습니다.
 
 | 표면 | 기존 MCP 도구와 추가 선택 | 범위 |

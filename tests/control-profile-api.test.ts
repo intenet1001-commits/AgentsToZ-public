@@ -1,8 +1,9 @@
 import {afterEach,describe,expect,test} from 'bun:test';
 import {Database} from 'bun:sqlite';
+import {createHash} from 'node:crypto';
 import {existsSync,mkdtempSync,mkdirSync,rmSync,readFileSync,writeFileSync} from 'node:fs';
 import {initializeProjectMemory} from '../project-memory-server';
-import {configureWhatISaidCapture,captureWhatISaidPrompt,whatISaidDatabasePath} from '../src/whatISaidStore';
+import {configureWhatISaidCapture,captureWhatISaidPrompt,softDeleteWhatISaidEntries,whatISaidDatabasePath} from '../src/whatISaidStore';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {startTestApiServer} from './startTestApiServer';
@@ -26,6 +27,78 @@ test('get_control_profile describes the titles it returns and where the panel is
  expect(d).toContain('entryTitles');expect(d).toContain('도구 및 설정 → 아젠투지 설정');expect(d).toContain('list_ops_devices');expect(d).not.toContain('운영 프로필');
 });
 describe('Control profile through real API and MCP',()=>{
+ test('a deletion between history pages invalidates the same snapshot without changing capture policy',async()=>{
+  const f=await fixture();await f.post('/api/control-profile/prepare',{});
+  const project=join(f.home,'deleted-history');mkdirSync(project);
+  const memory=initializeProjectMemory({folderPath:project,projectName:'Deletion fixture',autoBackup:false});
+  writeFileSync(join(f.data,'ports.json'),JSON.stringify([{id:'deleted-history',name:'Deletion fixture',folderPath:project}]));
+  const location={appDataDir:f.data,projectRoot:project,memoryId:memory.config!.memoryId},now=new Date().toISOString();
+  configureWhatISaidCapture({...location,enabled:true,retention:'forever',analysisAllowed:false,now});
+  for(let i=0;i<22;i++)expect(captureWhatISaidPrompt({...location,key:Buffer.alloc(32,0x31),agent:'codex',sourceIdentity:'source.jsonl',sourceEventIdentity:String(i),recordedAt:now,text:`fixture ${i}`,promptOrigin:'human',now}).stored).toBe(true);
+  const capture=await fetch(f.baseUrl+'/api/what-i-said/capture',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:9000'},body:JSON.stringify({memoryId:location.memoryId,localOnly:true})});
+  expect(capture.status).toBe(200);const receipt=(await capture.json() as any).result;
+  expect(Date.parse(receipt.scannedThrough)).toBeGreaterThan(Date.parse(now));
+  const env={...f.env,AGENTSTOZ_USE_ENDPOINT:f.baseUrl+'/api/agentstoz-use/action'};
+  const args={portId:'deleted-history',start:new Date(Date.now()-7*86400_000).toISOString(),end:receipt.scannedThrough,origin:'human'};
+  const call=async(cursor?:string)=>{
+   const response=await handleAgentsToZUseMcpRequest({id:1,method:'tools/call',params:{name:'agentstoz_use_list_user_memory_history',arguments:{...args,...(cursor?{cursor}:{})}}},env) as any;
+   expect(response.result.isError).toBe(false);return response.result.structuredContent.userMemory;
+  };
+  const first=await call();expect(first.hits).toHaveLength(20);expect(first.nextCursor).toBeString();
+  const inserted=captureWhatISaidPrompt({...location,key:Buffer.alloc(32,0x31),agent:'codex',sourceIdentity:'source.jsonl',sourceEventIdentity:'later',recordedAt:now,text:'new fixture',promptOrigin:'human',now});
+  expect(inserted.stored).toBe(true);
+  const seen=first.hits.map((hit:any)=>hit.id);let cursor=first.nextCursor,last:any;
+  for(let page=0;page<8&&cursor;page++) { last=await call(cursor);seen.push(...last.hits.map((hit:any)=>hit.id));cursor=last.nextCursor; }
+  expect(cursor).toBeNull();expect(last.complete).toBe(true);expect(seen).toHaveLength(23);
+  expect(seen.filter((id:string)=>id===inserted.id)).toHaveLength(1);
+  const beforeDelete=await call();expect(beforeDelete.nextCursor).toBeString();
+  expect(softDeleteWhatISaidEntries({...location,ids:[beforeDelete.hits[0].id]}).softDeleted).toBe(1);
+  const next=await call(beforeDelete.nextCursor);
+  expect(next).toMatchObject({complete:false,nextCursor:null,incomplete:['changed-or-out-of-order'],traversal:{inconsistent:true}});
+ },30_000);
+ test('lossless recent history stays complete after a sidecar restart with a finalized local-only scan receipt',async()=>{
+  const f=await fixture();await f.post('/api/control-profile/prepare',{});
+  const project=join(f.home,'complete-history');mkdirSync(project);
+  const memory=initializeProjectMemory({folderPath:project,projectName:'Complete history fixture',autoBackup:false});
+  writeFileSync(join(f.data,'ports.json'),JSON.stringify([{id:'complete-history',name:'Complete history fixture',folderPath:project}]));
+  const location={appDataDir:f.data,projectRoot:project,memoryId:memory.config!.memoryId},now=new Date().toISOString();
+  configureWhatISaidCapture({...location,enabled:true,retention:'forever',analysisAllowed:false,now});
+  const text='검증😀\n\\"'.repeat(4096);
+  expect(captureWhatISaidPrompt({...location,key:Buffer.alloc(32,0x31),agent:'codex',sourceIdentity:'long.jsonl',sourceEventIdentity:'one',recordedAt:now,text,promptOrigin:'human',now}).stored).toBe(true);
+  const args={portId:'complete-history',start:new Date(Date.now()-7*86400_000).toISOString(),end:now,origin:'human'};
+  const capture=await fetch(f.baseUrl+'/api/what-i-said/capture',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:9000'},body:JSON.stringify({memoryId:location.memoryId,localOnly:true})});
+  expect(capture.status).toBe(200);const captured=(await capture.json() as any).result;
+  expect(captured).toMatchObject({scanAdvanced:true,hasMore:false});
+  expect(Date.parse(captured.scannedThrough)).toBeGreaterThan(Date.parse(now));
+  args.end=captured.scannedThrough;
+  const old=children.pop()!;old.kill();await old.exited;
+  const restarted=await startTestApiServer({cwd:join(import.meta.dir,'..'),env:f.env});children.push(restarted.child);
+  const status=await fetch(restarted.baseUrl+'/api/what-i-said/status',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:9000'},body:JSON.stringify({memoryId:location.memoryId})});
+  expect(status.status).toBe(200);expect((await status.json() as any).status.scan).toMatchObject({complete:true,unreadable:0,withheld:0});
+  const env={...f.env,AGENTSTOZ_USE_ENDPOINT:restarted.baseUrl+'/api/agentstoz-use/action'};
+  let cursor:string|undefined,last:any,body='';
+  for(let page=0;page<40;page++){
+   const response=await handleAgentsToZUseMcpRequest({id:page+1,method:'tools/call',params:{name:'agentstoz_use_list_user_memory_history',arguments:{...args,...(cursor?{cursor}:{})}}},env) as any;
+   expect(response.result.isError).toBe(false);last=response.result.structuredContent.userMemory;
+   for(const hit of last.hits){expect(hit.textPart.offset).toBe(body.length);body+=hit.excerpt;expect(hit.textPart.nextOffset).toBe(body.length);expect(hit.textPart.sha256).toBe(createHash('sha256').update(text).digest('hex'));}
+   if(!last.nextCursor)break;cursor=last.nextCursor;
+  }
+  expect(body).toBe(text);
+  expect(last).toMatchObject({complete:true,incomplete:[],nextCursor:null,traversal:{rows:1,inRange:1,returned:1,truncated:0,skipped:0},coverage:{collection:'reported-complete',endBoundary:'confirmed'}});
+  // An authentic successful receipt is not evidence for a later requested end.
+  cursor=undefined;body='';
+  const futureEnd=new Date(Date.parse(captured.scannedThrough)+1000).toISOString();
+  for(let page=0;page<40;page++){
+   const response=await handleAgentsToZUseMcpRequest({id:100+page,method:'tools/call',params:{name:'agentstoz_use_list_user_memory_history',arguments:{...args,end:futureEnd,...(cursor?{cursor}:{})}}},env) as any;
+   expect(response.result.isError).toBe(false);last=response.result.structuredContent.userMemory;
+   for(const hit of last.hits){expect(hit.textPart.offset).toBe(body.length);body+=hit.excerpt;}
+   if(!last.nextCursor)break;cursor=last.nextCursor;
+  }
+  expect(body).toBe(text);
+  expect(last).toMatchObject({complete:false,incomplete:['collection-outdated'],nextCursor:null,
+   traversal:{rows:1,inRange:1,returned:1,truncated:0,skipped:0},
+   coverage:{collection:'reported-complete',endBoundary:'unconfirmed',scannedThrough:captured.scannedThrough}});
+ },30_000);
  test('external # references read only the exact OPS, DEV or activated USE memory with no DEV fallback',async()=>{
   const f=await fixture();const prepared=await f.post('/api/control-profile/prepare',{});const token=readControlProfileAccess(f.data)!.token;
   const project=join(f.home,'reference-project');mkdirSync(project);
@@ -77,9 +150,57 @@ describe('Control profile through real API and MCP',()=>{
   expect(captureWhatISaidPrompt({...location,key:Buffer.alloc(32,0x31),agent:'codex',sourceIdentity:'history.jsonl',sourceEventIdentity:'expired',recordedAt:old,text:'검증 만료 원문',allowBeforeEnabled:true,now:old}).stored).toBe(true);
   const read=await f.post('/api/agentstoz-use/action',request,token);
   expect(read.status).toBe(200);expect(read.body.userMemory.hits[0]).toMatchObject({memoryId:memory.config!.memoryId,excerpt:'검증 후 사용자에게 결과를 알려줘',authority:'historical-evidence'});
+  const historyArgs={portId:'history-project',start:new Date(Date.now()-60_000).toISOString(),end:new Date(Date.now()+60_000).toISOString()};
+  const historyBody={action:'list-user-memory-history',controllerPortId:CONTROL_PROFILE_CONTROLLER,...historyArgs};
+  expect((await f.post('/api/agentstoz-use/action',historyBody)).status).toBe(403);
+  const history=await handleAgentsToZUseMcpRequest({id:2,method:'tools/call',params:{name:'agentstoz_use_list_user_memory_history',arguments:historyArgs}},{...f.env,AGENTSTOZ_USE_ENDPOINT:f.baseUrl+'/api/agentstoz-use/action'}) as any;
+  expect(history.result.isError).toBe(false);
+  expect(history.result.structuredContent.userMemory.hits[0]).toMatchObject({memoryId:memory.config!.memoryId,excerpt:'검증 후 사용자에게 결과를 알려줘'});
+  expect(history.result.structuredContent.userMemory.traversal).toMatchObject({returned:1,filtered:0,stoppedBy:'end'});
+  // The fixture's prompt carries no human-delivery evidence, so a human-only page withholds it and says so.
+  const human=await f.post('/api/agentstoz-use/action',{...historyBody,origin:'human'},token);
+  expect(human.status).toBe(200);expect(human.body.userMemory).toMatchObject({hits:[],origin:'human',traversal:{inRange:1,filtered:1}});
+  const expired=await f.post('/api/agentstoz-use/action',{...historyBody,cursor:'umh1_eyJ4IjoxfQ.'+'A'.repeat(43)},token);
+  expect(expired.status).toBe(400);expect(expired.body.code).toBe('USER_MEMORY_CURSOR_EXPIRED');
+  const malformed=await f.post('/api/agentstoz-use/action',{...historyBody,cursor:'not-a-cursor'},token);
+  expect(malformed.status).toBe(400);expect(malformed.body.code).toBe('USER_MEMORY_CURSOR_EXPIRED');
+  // The whole range was read; any remaining reason (such as an unknown capture summary) is named, never implied.
+  const whole=history.result.structuredContent.userMemory;
+  expect(whole.nextCursor).toBeNull();expect(whole.complete).toBe(whole.incomplete.length===0);
+  const reversed=await f.post('/api/agentstoz-use/action',{...historyBody,start:historyArgs.end,end:historyArgs.start},token);
+  expect(reversed.status).toBe(400);expect(reversed.body.code).toBe('USER_MEMORY_RANGE_INVALID');
+  expect(JSON.stringify(history)).not.toContain(f.home);
   expect(JSON.stringify(read.body)).not.toContain('검증 만료 원문');
   const db=new Database(whatISaidDatabasePath(location),{readonly:true});
   try{expect((db.query('SELECT COUNT(*) AS count FROM what_i_said_events WHERE recorded_at = ? AND purged_at IS NULL').get(old) as {count:number}).count).toBe(1);}finally{db.close();}
+ },20_000);
+ test('dated human history traverses real encrypted sequence boundaries without losing requests',async()=>{
+  const f=await fixture();await f.post('/api/control-profile/prepare',{});
+  const project=join(f.home,'boundary-project');mkdirSync(project);
+  const memory=initializeProjectMemory({folderPath:project,projectName:'Boundary fixture',autoBackup:false});
+  writeFileSync(join(f.data,'ports.json'),JSON.stringify([{id:'boundary-project',name:'Boundary fixture',folderPath:project}]));
+  const location={appDataDir:f.data,projectRoot:project,memoryId:memory.config!.memoryId},now=new Date().toISOString();
+  configureWhatISaidCapture({...location,enabled:true,retention:'forever',analysisAllowed:false,now});
+  const ids:string[]=[];
+  for(let seq=1;seq<=105;seq++){
+   const saved=captureWhatISaidPrompt({...location,key:Buffer.alloc(32,0x31),agent:'codex',sourceIdentity:'boundaries.jsonl',sourceEventIdentity:String(seq),recordedAt:now,text:`boundary request ${seq}`,promptOrigin:'human',now});
+   expect(saved.stored).toBe(true);if(saved.stored)ids.push(saved.id);
+  }
+  const args={portId:'boundary-project',start:new Date(Date.now()-60_000).toISOString(),end:new Date(Date.now()+60_000).toISOString(),origin:'human'};
+  const env={...f.env,AGENTSTOZ_USE_ENDPOINT:f.baseUrl+'/api/agentstoz-use/action'};
+  const seen:string[]=[],cursors=new Set<string>();let cursor:string|undefined,last:any;
+  for(let page=0;page<12;page++){
+   const result=await handleAgentsToZUseMcpRequest({id:page+1,method:'tools/call',params:{name:'agentstoz_use_list_user_memory_history',arguments:{...args,...(cursor?{cursor}:{})}}},env) as any;
+   expect(result.result.isError).toBe(false);last=result.result.structuredContent.userMemory;
+   expect(last.incomplete).not.toContain('changed-or-out-of-order');
+   seen.push(...last.hits.map((hit:any)=>hit.id));
+   if(!last.nextCursor)break;
+   expect(cursors.has(last.nextCursor)).toBe(false);cursors.add(last.nextCursor);cursor=last.nextCursor;
+  }
+  expect(last.nextCursor).toBeNull();expect(last.traversal).toMatchObject({rows:105,inRange:105,returned:105,filtered:0,inconsistent:false,stoppedBy:'end'});
+  expect(seen).toEqual(ids.reverse());expect(new Set(seen).size).toBe(105);
+  // An absent capture summary still stays visible; exhausting the rows must not invent collection evidence.
+  expect(last.complete).toBe(last.incomplete.length===0);
  },20_000);
  test('the real OPS request endpoint enforces profile auth and never launches an unbound receiver',async()=>{
   const f=await fixture();await f.post('/api/control-profile/prepare',{});const token=readControlProfileAccess(f.data)!.token;

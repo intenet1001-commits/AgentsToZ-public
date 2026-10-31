@@ -1,8 +1,9 @@
+import {HELPDESK_SCREEN_GUIDES} from './helpdeskScreenGuides';
 export const HELPDESK_PATH = '/api/agent-runtime/helpdesk';
 export const OPEN_HELPDESK_EVENT = 'agentstoz:open-helpdesk';
 export const isMacHelpdeskSurface=(native:boolean,platform:string)=>native&&/^Mac/.test(platform);
 export type HelpdeskProvider = 'codex' | 'claude';
-export type HelpdeskAction = 'setup' | 'projects' | 'workroom' | 'memory' | 'report' | 'phone';
+export type HelpdeskAction = 'setup' | 'projects' | 'workroom' | 'memory' | 'report' | 'phone' | 'computer';
 export const HELPDESK_MOBILE_GUIDES = {
   email: {
     title:'이메일 코드로 로그인',
@@ -38,8 +39,10 @@ export const HELPDESK_GUIDES = [
   {id:'community',question:'커뮤니티와 기기 간 대화는 무엇인가요?',title:'기기와 담당자를 잇는 업무 공간',text:'승인한 기기·프로젝트 참여자가 업무와 결과를 주고받는 공간입니다. 대화방 참여가 다른 기기의 프로젝트 실행 권한을 자동으로 주지는 않습니다. 실제 업무는 각 프로젝트 워크룸과 권한을 사용합니다.',action:'projects',label:'작업 공간으로 돌아가기',source:'docs/user-guide/METHODOLOGY.md'},
   {id:'error',question:'설치나 로그인이 안 돼요',title:'중단된 준비 이어가기',text:'어디에서 막히셨나요? 아래에서 골라 주세요. 설치가 멈췄다면 기존 준비 결과부터, 로그인이 안 된다면 공식 계정 연결 상태부터 확인합니다. 이미 보낸 질문이 있다면 같은 요청 결과를 먼저 확인하세요. 해결되지 않으면 신고할 내용을 직접 검토해 전달할 수 있습니다. 로컬 저장과 개발자 접수는 다른 결과예요.',action:'report',label:'오류 신고·개선 요청',source:'docs/design/helpdesk-onboarding.md'},
   {id:'save',question:'기억 저장이나 백업이 안 돼요',title:'저장 결과부터 확인하기',text:'워크룸의 세션 저장에서 해당 프로젝트의 저장 상태·복구 확인 또는 장기기억에서 백업 확인을 여세요. 로컬 저장 완료·백업 확인 필요라면 같은 대화를 다시 저장하지 말고 Supabase 상태부터 확인합니다. 충돌은 양쪽 기억을 비교해 검토해야 하며 백업 재시도만으로 풀리지 않습니다. 중단된 저장은 같은 작업의 복구 화면을 사용하세요. AI 원인 조사 요청은 필요할 때 따로 선택합니다.',action:'memory',label:'장기기억 열기',source:'docs/user-guide/METHODOLOGY.md'},
-  {id:'gws',question:'Google 설정과 JSON 받기가 어려워요',title:'Google 콘솔부터 연결 확인까지',text:'서비스 계정에서 Google Workspace를 선택하세요. JSON이 없다면 “Codex 컴퓨터 사용 안내 복사”로 Google 콘솔의 프로젝트·Drive API·동의 화면·Desktop app 클라이언트 준비를 도움받을 수 있습니다. 파일은 Mac에 내려받아 이 앱에 직접 첨부하고 Google 로그인·연결을 확인합니다. 컴퓨터 사용도 화면을 처리하므로 비밀값이 보이는 단계는 직접 마무리하세요. 안내 복사는 AI 실행이나 설정 완료가 아닙니다.',action:'setup',label:'Google Workspace 준비하기',source:'docs/user-guide/HELPDESK.md'},
+  {id:'gws',question:'Google 설정과 JSON 받기가 어려워요',title:'Google 콘솔부터 연결 확인까지',text:'서비스 계정에서 Google Workspace를 선택하세요. JSON이 없다면 「헬프데스크 도움받기」로 에고라이트 또는 아젠투지브라우저에서 Google 콘솔의 프로젝트·API·동의 화면·Desktop app 클라이언트 준비를 함께 진행할 수 있습니다(대안: “Codex 컴퓨터 사용 안내 복사”). 파일은 Mac에 내려받아 이 앱에 직접 첨부하고 Google 로그인·연결을 확인합니다. 컴퓨터 사용도 화면을 처리하므로 비밀값이 보이는 단계는 직접 마무리하세요. 안내 복사는 AI 실행이나 설정 완료가 아닙니다.',action:'setup',label:'Google Workspace 준비하기',source:'docs/user-guide/HELPDESK.md'},
   {id:'profile',question:'사용자 프로필은 어디에 있나요?',title:'내 프로필과 아젠투지 설정',text:'장기기억 → 내 프로필에서 직접 확인한 선호와 적용 범위를 관리합니다. 이 기기의 현재 OS 사용자에게만 저장되며 다른 기기와 동기화하지 않습니다. 「내가 한 말」은 지시 원문과 결과 기록이고 프로필을 자동 생성하지 않습니다. 아젠투지(OPS)의 운영 기억과 준비·연결 상태는 도구 및 설정 → 아젠투지 설정에서 확인합니다. GitHub·Supabase 같은 서비스 로그인은 서비스 계정에서 따로 확인합니다.',action:'memory',label:'장기기억 열기',source:'docs/user-guide/HELPDESK.md'},
+  {id:'screen',question:'iPad·iPhone에서 Mac 화면을 연결하고 싶어요',title:'Mac 화면 연결을 한 단계씩',text:'Mac 화면 등록 QR, 앱 버전, 본인 인증, 실제 조작 순서로 안내합니다. 올바른 QR인데 등록 QR이 아니라는 오류, Cloudflare 사설망 준비, 목록 삭제와 등록 해지도 확인할 수 있어요. 프로젝트·워크룸 연결과 Mac 화면 등록은 서로 다른 QR을 사용합니다.',action:'phone',label:'Mac 화면 연결 안내',source:'docs/user-guide/HELPDESK.md'},
+  {id:'computer-use',question:'AI가 Mac 앱을 대신 조작하게 하려면?',title:'AI에 창 하나 맡기기',text:'먼저 연결된 AI에 “컴퓨터 유즈를 연결해 줘”라고 요청하세요. 도구 및 설정 → 컴퓨터 유즈에서 AI가 알려 준 연결 이름과 맡길 창·작업을 선택합니다. 이 창 허용 요청 뒤 Control 앱에서 같은 대상과 작업을 확인하고 본인이 승인합니다. 도우미 연결 준비는 이 Mac에서 한 번 하며, 창 제어 허용은 최대 10분입니다. AI 앱에 따라 여러 대화가 한 연결을 공유할 수 있습니다. 사람의 입력·보안 입력·대상 변경 때는 동작을 보류하거나 중지합니다. 지원하지 않는 접근성 요소와 결과 불명 작업은 사람이 확인합니다. 앱의 모델·에포트 자동 변경이나 iPad의 원격 화면 등록과는 별도입니다.',action:'computer',label:'컴퓨터 유즈 열기',source:'docs/user-guide/HELPDESK.md'},
 ] as const satisfies readonly {id:string;question:string;title:string;text:string;action:HelpdeskAction;label:string;source:string}[];
 
 /** Actions come only from this reviewed catalog, never from model-produced shell/URLs. */
@@ -52,5 +55,7 @@ export function helpdeskPrompt(question:string, history:readonly {question:strin
 참고 설명서:\n${HELPDESK_GUIDES.map(g=>`[${g.id}] ${g.title}: ${g.text}`).join('\n')}
 모바일 연결 안내:\n${Object.values(HELPDESK_MOBILE_GUIDES).map(g=>`${g.title}: ${g.description}\n${g.steps.join('\n')}`).join('\n')}
 모바일 준비는 헬프데스크의 “모바일 연결”로 안내합니다. CLI 가입·인증, 저장소 연결, Auth 사용자와 DB 허용 회원, Google Provider 설정, iPhone 실제 로그인·Mac 연결을 구분하세요. 직접 확인하지 않은 단계는 확인 필요이며, 발송 한도를 우회하거나 인증을 반복 요청하지 않습니다.
+Mac 화면 연결 안내:\n${Object.values(HELPDESK_SCREEN_GUIDES).map(g=>`${g.title}:\n${g.steps.join('\n')}`).join('\n')}
+Mac 화면 질문은 “Mac 화면 연결 안내”로 이어갑니다. 프로젝트·워크룸 QR, 화면 등록 QR, Cloudflare 조직 등록을 구분하세요. QR 원문·등록 비밀·생체 인증 정보를 요구하지 마세요. 근거리 실기, 터널 Healthy, 실제 LTE 화면 조작을 서로 다른 확인 결과로 설명하세요.
 <support_data>\n${JSON.stringify({status:context,history:history.slice(-6),question})}\n</support_data>`;
 }

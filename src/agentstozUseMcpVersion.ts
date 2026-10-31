@@ -77,7 +77,36 @@ import buildInfo from '../build-number.json';
 //         Team views return settledCursor for per-reader wait(afterCursor), independent of the legacy settled count.
 //         Internal team-member output cursors bind to a session and reset only through verified resumeFrom lineage.
 //         Team leader targets are retained when supplied, so verified leader resumeFrom continuations keep their role.
-export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.61.0';
+// 1.62.0: native human-approved Mac window control, scoped to an MCP connection with no global pointer input.
+// 1.63.0: bounded, project-scoped local user instruction history with dated paging.
+// 1.64.0: model-specific explicit team effort choices, including agy model variants.
+//         Restart read-only recovery output (EXTERNAL_HOST_RESTART_READ_ONLY) never authorizes send, reveal or close.
+// 1.65.0: approved-window image capture and capture-bound AXPress click on agentstoz_use_computer. Control advertises
+//         its operations; an older Control refuses capture/click with control-update-required. New refusal reasons
+//         name screen consent, Screen Recording, image size and unobserved coordinates. History pages read 50 rows.
+// 1.66.0: separate native v2 desktop/application consent and connection-scoped computer session tool.
+//         Scope capability comes from the installed Control; old window grants remain v1 only.
+// 1.67.0: team_member operation keys (leader only, managed orca-worktree members) and the per-app-member
+//         computerUseApprovals opt-in on create_team. A computer session never acts on the caller's own host app.
+// 1.68.0: dated history pages are dense, origin-filtered, traversal-aware and report incomplete reasons.
+// 1.70.0: dated history separately verifies the requested end against the scan receipt.
+// 1.71.0: computer-session action receipts may carry optional, bounded guardSamples (HID idle age, time since the action's
+//         own event, counter changes; no input, screen or token content). Diagnostic only: parameters, permissions,
+//         input meaning, states, halt and replay are unchanged, and no value proves who caused an input.
+// 1.72.0: computer-session request-access (no fields) asks Control for the scope the person switched on in the app.
+//         It is refused while the switch is off; the person still approves each request with Touch ID or password.
+// 1.73.0: a refused computer-session receipt may carry guardReason, the Control guard check that refused it (a code,
+//         beside the unchanged reason). From its own foreground host app an AI may focus-app to another app; every
+//         other input into the host stays refused.
+// 1.74.0: list_dialogue_pairings says waiting-me when only the peer accepted; send_dialogue_message's recipientCount
+//         counts offline joined members; create_team still starts a Workroom member whose AI lacks agentstoz_use and
+//         report_team_task manual: true lets the leader transcribe it ([리더 전사 · manual]), never over its own report.
+// 1.75.0: platform_cli adds account switching for AI chats: native-status / native-switch / native-git-setup change this
+//         Mac's own gh·supabase·vercel login, and login-start / login-add-start / login-status / login-code /
+//         login-cancel / archive add and remove accounts through the person's browser sign-in (email, loginId, code);
+//         login-add-start never changes this Mac's account. everywhere-set {enabled} turns project accounts on or off
+//         outside Workrooms (every terminal and git on this Mac); native-status / project report it as everywhere.
+export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.75.0';
 
 export function agentsToZUseMcpServerVersion(buildNumber: number): string {
   return `${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.${buildNumber}`;

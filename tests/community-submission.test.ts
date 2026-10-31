@@ -77,11 +77,14 @@ test('a receiver that advertises submission but refuses it is recognised before 
  expect(late).not.toBeInstanceOf(WorkroomSubmissionUnsupportedError);expect(late.message).toBe(COMMUNITY_CONTROL_TERMINAL_ONLY_ERROR);
 });
 
-test('a status that proves the request was written clears the pending record, and nothing else does',()=>{
+test('a status that proves the request was written or never ran clears the pending record, and nothing else does',()=>{
  const pending={id:'pending-submission',sessionId:'pending-session',receipt:null};
  const receipt=(state:'written'|'unknown'|'prepared'|'held'|'rejected'|'write_started')=>({id:'pending-submission',storeId:'fixture-store',epoch:'fixture-epoch',revision:1,state});
  expect(pendingAfterStatus(pending,receipt('written'))).toBeNull();
- for(const state of ['unknown','prepared','held','rejected','write_started'] as const)expect(pendingAfterStatus(pending,receipt(state))).toEqual({...pending,receipt:receipt(state)});
+ // Refused before the write fence, or prepared before a host restart: nothing was typed, so the composer is not fenced
+ // (2026-10-30 — a refused `prepared` receipt blocked 「현재 세션에 전송」 for good). The draft stays; nothing re-sends.
+ for(const state of ['rejected','held'] as const)expect(pendingAfterStatus(pending,receipt(state))).toBeNull();
+ for(const state of ['unknown','prepared','write_started'] as const)expect(pendingAfterStatus(pending,receipt(state))).toEqual({...pending,receipt:receipt(state)});
 });
 test('a status check that finds the request written clears the composer only when it still holds that request',()=>{
  const draft='이 버그 고쳐줘';

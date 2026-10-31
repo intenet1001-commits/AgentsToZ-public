@@ -50,6 +50,13 @@ public enum ScreenNotice: Equatable, Sendable {
     case macUnlocked
     /// Version 2: the displays the phone may choose between and the one it sees, from 0.
     case displays(count: Int, current: Int)
+    case keyboardState(id: UInt32, ScreenKeyboardState, ScreenControlResult)
+    case spaceResult(ScreenSpaceAction, ScreenControlResult)
+    case spaceChanged
+    case videoQuality(ScreenVideoQuality)
+    case inputAvailability(ScreenInputAvailability)
+    case pointerPosition(ScreenPointerPosition)
+    case textAndReturnResult(id: UInt32, ScreenTextReturnResult)
 }
 
 /// What the phone shows of the Mac beside the picture, from its notices in order. Each notice changes only its own
@@ -63,6 +70,11 @@ public struct ScreenMacState: Equatable, Sendable {
     public private(set) var displayCount = 1
     /// The display shown, from 0.
     public private(set) var currentDisplay = 0
+    public private(set) var keyboard: ScreenKeyboardState?
+    public private(set) var videoQuality: ScreenVideoQuality?
+    public private(set) var inputAvailability: ScreenInputAvailability?
+    public private(set) var pointerPosition: ScreenPointerPosition?
+    public var canSendInput: Bool { !inputPaused && (inputAvailability == nil || inputAvailability == .ready) }
 
     public init() {}
 
@@ -78,6 +90,11 @@ public struct ScreenMacState: Equatable, Sendable {
         case let .displays(count, current):
             displayCount = count
             currentDisplay = current
+        case .keyboardState(_, let state, _): keyboard = state
+        case .videoQuality(let quality): videoQuality = quality
+        case .inputAvailability(let reason): inputAvailability = reason
+        case .pointerPosition(let position): pointerPosition = position
+        case .spaceResult, .spaceChanged, .textAndReturnResult: break
         }
     }
 }
@@ -86,7 +103,8 @@ public struct ScreenMacState: Equatable, Sendable {
 /// on the way out.
 public final class ScreenViewer: Sendable {
     let connection: SecureConnection
-    private let inputs: AsyncStream<InputEvent>.Continuation
+    private enum Outgoing: Sendable { case input(InputEvent), control(ControlMessage) }
+    private let inputs: AsyncStream<Outgoing>.Continuation
     /// Notices in arrival order. One consumer; keeps the newest few while nobody reads. Ends with the session.
     public let notices: AsyncStream<ScreenNotice>
     private let noticeSink: AsyncStream<ScreenNotice>.Continuation
@@ -94,13 +112,20 @@ public final class ScreenViewer: Sendable {
 
     init(connection: SecureConnection) {
         self.connection = connection
-        (notices, noticeSink) = AsyncStream.makeStream(of: ScreenNotice.self, bufferingPolicy: .bufferingNewest(8))
-        let (stream, inputs) = AsyncStream.makeStream(of: InputEvent.self, bufferingPolicy: .bufferingNewest(512))
+        (notices, noticeSink) = AsyncStream.makeStream(of: ScreenNotice.self, bufferingPolicy: .bufferingOldest(64))
+        let (stream, inputs) = AsyncStream.makeStream(of: Outgoing.self, bufferingPolicy: .bufferingOldest(512))
         self.inputs = inputs
         // One sender, so input reaches the Mac in the order the person made it.
-        Task { [connection] in
+        Task { [connection, inputs] in
             for await event in stream {
-                guard (try? await connection.send(.input, InputCodec.encode(event))) != nil else { return }
+                do {
+                    switch event {
+                    case .input(let event):
+                        if case .textAndReturn = event, connection.version < 4 { throw ChannelError.notNegotiated }
+                        try await connection.send(.input, InputCodec.encode(event))
+                    case .control(let message): try await connection.send(message)
+                    }
+                } catch { inputs.finish(); connection.close(); return }
             }
         }
     }
@@ -109,6 +134,12 @@ public final class ScreenViewer: Sendable {
     public static func connect(to endpoint: NWEndpoint, mac: PinnedMac, signer: TranscriptSigner) async throws -> ScreenViewer {
         ScreenViewer(connection: try await ScreenClient.connect(
             to: endpoint, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey), signer: signer))
+    }
+
+    public static func connect(over transport: any ScreenFrameTransport, mac: PinnedMac,
+                               signer: any TranscriptSigner) async throws -> ScreenViewer {
+        ScreenViewer(connection: try await ScreenTransportHandshake.connect(
+            over: transport, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey), signer: signer))
     }
 
     /// Why the Mac ended the session, once `pictures()` finished because it did: idle, time limit, ended at the Mac and
@@ -141,6 +172,13 @@ public final class ScreenViewer: Sendable {
                             case .macLocked: noticeSink.yield(.macLocked)
                             case .macUnlocked: noticeSink.yield(.macUnlocked)
                             case let .displays(count, current): noticeSink.yield(.displays(count: count, current: current))
+                            case let .keyboardState(id, state, result): noticeSink.yield(.keyboardState(id: id, state, result))
+                            case let .spaceResult(action, result): noticeSink.yield(.spaceResult(action, result))
+                            case .spaceChanged: noticeSink.yield(.spaceChanged)
+                            case .videoQuality(let quality): noticeSink.yield(.videoQuality(quality))
+                            case .inputAvailability(let reason): noticeSink.yield(.inputAvailability(reason))
+                            case .pointerPosition(let position): noticeSink.yield(.pointerPosition(position))
+                            case let .textAndReturnResult(id, result): noticeSink.yield(.textAndReturnResult(id: id, result))
                             default: throw ScreenControlWireError.malformed
                             }
                         case .video:
@@ -168,7 +206,21 @@ public final class ScreenViewer: Sendable {
     }
 
     /// Queues one input event; it is sent after every event queued before it. Safe to call from the main thread.
-    public func input(_ event: InputEvent) { inputs.yield(event) }
+    public func input(_ event: InputEvent) { enqueue(.input(event)) }
+
+    /// Version-3 controls share the input sender, so a language switch cannot overtake its preceding key release.
+    public func desktopControl(_ message: ControlMessage) throws {
+        guard message.minimumVersion == 3, message.sender == .device, connection.version >= 3 else { throw ChannelError.notNegotiated }
+        _ = try ControlMessage(decoding: message.encoded, version: connection.version)
+        enqueue(.control(message))
+    }
+
+    private func enqueue(_ item: Outgoing) {
+        if case .dropped = inputs.yield(item) {
+            // Losing a release or language command would corrupt input ordering. End rather than silently drop it.
+            inputs.finish(); connection.close()
+        }
+    }
 
     /// For when the display layer failed and needs to start again from a keyframe.
     public func requestKeyframe() async throws { try await connection.send(ControlMessage.requestKeyframe) }
@@ -218,13 +270,69 @@ public final class ScreenViewer: Sendable {
 public final class BiometricApproval: Sendable {
     private let used = Once()
 
+    /// Hardware-specific wording; this lookup never displays an authentication prompt.
+    public static let methodName: String = {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return name(for: context.biometryType)
+    }()
+
+    static func name(for type: LABiometryType) -> String {
+        switch type {
+        case .touchID: "Touch ID"
+        case .faceID: "Face ID"
+        default: "생체 인증"
+        }
+    }
+
     /// Checks make one without the prompt; only `request` should elsewhere.
     init() {}
 
-    public static func request(reason: String) async throws -> BiometricApproval {
-        let context = try await biometricContext(reason: reason)
+    public static func request(reason: String, authentication: ScreenDeviceAuthentication = .biometricsOnly) async throws -> BiometricApproval {
+        let context: LAContext
+        if authentication == .biometricsOnly {
+            context = try await biometricContext(reason: reason)
+        } else {
+            context = LAContext()
+            do {
+                guard try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) else {
+                    throw LAError(.authenticationFailed)
+                }
+            } catch {
+                context.invalidate()
+                throw error
+            }
+        }
         context.invalidate()
         return BiometricApproval()
+    }
+
+    /// Apple's lockout recovery policy may ask for the device passcode. It only re-enables biometry:
+    /// this context never touches a device key and returns no approval or signer. Discard it even on success;
+    /// a later Mac connection must create its own context and satisfy the protected key's biometric ACL.
+    public static func recoverLockout(reason: String) async throws {
+        try await recoverLockout(authenticateOwner: {
+            let context = LAContext()
+            defer { context.invalidate() }
+            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        }, verifyBiometry: {
+            // Owner authentication can succeed while the OS still refuses biometry. Check a fresh context,
+            // after discarding the passcode context, before telling the person the lockout was recovered.
+            let context = LAContext()
+            defer { context.invalidate() }
+            var error: NSError?
+            guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+                throw error ?? LAError(.biometryNotAvailable) as NSError
+            }
+        })
+    }
+
+    static func recoverLockout(authenticateOwner: @Sendable () async throws -> Bool,
+                               verifyBiometry: @Sendable () throws -> Void) async throws {
+        guard try await authenticateOwner() else {
+            throw LAError(.authenticationFailed)
+        }
+        try verifyBiometry()
     }
 
     /// True the first time only.
@@ -242,39 +350,71 @@ public final class BiometricApproval: Sendable {
 /// The phone's device key, approved by Face ID for one connection (SR-12). Approve *before* connecting, so the Mac's
 /// five-second deadline covers the network and the cryptography, not the person. The approval signs that
 /// connection's transcript once and is then invalidated; the next connection asks again.
+public enum ScreenDeviceAuthentication: String, Codable, Sendable {
+    case biometricsOnly
+    case deviceOwner
+
+    var accessFlags: SecAccessControlCreateFlags {
+        switch self {
+        case .biometricsOnly: [.privateKeyUsage, .biometryCurrentSet]
+        case .deviceOwner: [.privateKeyUsage, .userPresence]
+        }
+    }
+}
+
 public final class FaceIDApprovedSigner: TranscriptSigner, @unchecked Sendable {
     public let publicKey: P256.Signing.PublicKey
-    private let dataRepresentation: Data
+    private let key: SecureEnclave.P256.Signing.PrivateKey
     private let context: LAContext
     private let used = Once()
 
     init(dataRepresentation: Data, context: LAContext) throws {
-        self.dataRepresentation = dataRepresentation
         self.context = context
-        publicKey = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: dataRepresentation, authenticationContext: context).publicKey
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: dataRepresentation, authenticationContext: context)
+        publicKey = key.publicKey
     }
 
-    /// Biometrics only: a failed Face ID does not fall back to the passcode (DESIGN 「Face ID 실패 시」).
-    public static func approve(dataRepresentation: Data, reason: String) async throws -> FaceIDApprovedSigner {
-        let context = try await BiometricApproval.biometricContext(reason: reason)
-        // The signature uses this approval or fails; it never shows a second prompt mid-handshake.
-        context.interactionNotAllowed = true
-        return try FaceIDApprovedSigner(dataRepresentation: dataRepresentation, context: context)
+    /// The Secure Enclave key enforces its registration-time authentication choice. Existing keys remain biometric-only.
+    public static func approve(dataRepresentation: Data, reason: String,
+                               authentication: ScreenDeviceAuthentication = .biometricsOnly) async throws -> FaceIDApprovedSigner {
+        // Authorize the actual protected key, not just a generic LA policy. The key ACL remains authoritative.
+        // The same key reference/context is retained for the one transcript signature;
+        // reopening the key after disabling interaction can lose the authorization obtained by a policy prompt.
+        // Run this blocking Secure Enclave operation away from the UI executor. The probe is local and domain
+        // separated: it is never sent to a Mac and cannot serve as a handshake signature.
+        try await Task.detached {
+            let context = LAContext()
+            context.localizedReason = reason
+            if authentication == .biometricsOnly { context.localizedFallbackTitle = "" }
+            do {
+                let signer = try FaceIDApprovedSigner(dataRepresentation: dataRepresentation, context: context)
+                let nonce = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+                let probe = Data("agentstoz.screen-control.key-approval/v1\n".utf8) + nonce
+                _ = try signer.key.signature(for: probe)
+                // No second prompt during the bounded handshake; a new connection always gets a fresh context.
+                context.interactionNotAllowed = true
+                return signer
+            } catch {
+                context.invalidate()
+                throw error
+            }
+        }.value
     }
 
     public func signature(for data: Data) async throws -> P256.Signing.ECDSASignature {
         guard used.claim() else { throw HandshakeError.alreadyUsed }
         defer { context.invalidate() }
-        return try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: dataRepresentation, authenticationContext: context)
-            .signature(for: data)
+        return try key.signature(for: data)
     }
 
-    /// The device key, made at registration: Secure Enclave, this device only, usable only after Face ID with the
-    /// faces enrolled now. Adding a face makes it unusable, and the device registers again.
-    public static func createDeviceKey() throws -> Data {
+    deinit { context.invalidate() }
+
+    /// The device key is created at registration and remains on this device. Biometric-only keys are bound to the
+    /// current enrollment; owner-authentication keys additionally allow the device passcode.
+    public static func createDeviceKey(authentication: ScreenDeviceAuthentication = .biometricsOnly) throws -> Data {
         var error: Unmanaged<CFError>?
         guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-                                                           [.privateKeyUsage, .biometryCurrentSet], &error) else {
+                                                           authentication.accessFlags, &error) else {
             throw error.map { $0.takeRetainedValue() as Error } ?? HandshakeError.malformed
         }
         return try SecureEnclave.P256.Signing.PrivateKey(accessControl: access).dataRepresentation

@@ -49,8 +49,12 @@ public struct PeerKey: Hashable, Sendable, CustomStringConvertible {
         }
     }
 
+    /// Relay-assigned IDs cannot be trusted as distinct origins. All attempts through one relay share a
+    /// conservative peer bucket, in addition to the gate's global budget.
+    public init(relayEndpoint: URL) { bytes = Data([0xff]) + sha256(Data(relayEndpoint.absoluteString.utf8)) }
+
     public var description: String {
-        bytes.count == 4 ? bytes.map(String.init).joined(separator: ".")
+        bytes.count == 33 ? "internet relay" : bytes.count == 4 ? bytes.map(String.init).joined(separator: ".")
                          : bytes.map { String(format: "%02x", $0) }.joined() + "::/64"
     }
 }

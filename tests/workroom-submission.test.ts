@@ -39,7 +39,9 @@ test('idle payload expires without another request while its durable receipt rem
 });
 test('a reservation expiring during final validation never crosses the write boundary',async()=>{
  const f=fixture(),receipt=await upload(f,'expired before write\r');let writes=0;
- await expect(f.manager.perform({phase:'commit',id:receipt.id,epoch:receipt.epoch},f.context,[],async(_text,start)=>{f.advance(30001);start();writes++;})).rejects.toThrow('기간');expect(writes).toBe(0);expect(f.manager.status(receipt.id,f.context).receipt.state).toBe('prepared');
+ await expect(f.manager.perform({phase:'commit',id:receipt.id,epoch:receipt.epoch},f.context,[],async(_text,start)=>{f.advance(30001);start();writes++;})).rejects.toThrow('기간');expect(writes).toBe(0);
+ // Its writer was refused before the fence, so the receipt says it never ran (2026-10-30) instead of fencing the sender.
+ expect(f.manager.status(receipt.id,f.context).receipt.state).toBe('rejected');
 });
 test('browser sender stops on a missing chunk acknowledgement and never falls back to raw input',async()=>{const f=fixture();let calls=0,prepared=false;await expect(submitWorkroomDraft({id:'browser-submission',sessionId:f.context.sessionId,text:'한글🙂'.repeat(700)+'\r',prepared:()=>{prepared=true;},request:async r=>{calls++;if(r.submission?.phase==='chunk')throw Error('network lost');return{submission:await f.manager.perform(r.submission!,f.context,[],async()=>{throw Error('unexpected write');})};}})).rejects.toThrow('network lost');expect(prepared).toBe(true);expect(calls).toBe(2);});
 test('short and long browser submissions add no preparation round trips beyond payload chunks',async()=>{

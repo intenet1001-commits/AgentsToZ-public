@@ -24,10 +24,14 @@ export interface StoredSubmission extends SubmissionContext {
  startedAt?:string;
  /** Set when the row became written. Absent on rows written before this field existed. */
  writtenAt?:string;
+ /** Set when a person released an unconfirmed receipt's fence (acknowledgeSubmission); its state is unchanged. */
+ acknowledgedAt?:string;
 }
 type Assembly={record:StoredSubmission;command:Omit<Extract<WorkroomSubmissionCommand,{phase:'begin'}>,'firstData'>;references:string[];parts:Map<number,Buffer>;expires:number;writing?:true};
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const keyOf=(context:Pick<SubmissionContext,'owner'|'sessionId'|'scope'>,id:string)=>digest([context.owner,context.scope??context.sessionId,id]);
+/** The same receipt key and owner digest for a host that writes the journal directly (src/contextOrcaCommand.ts). */
+export const submissionKey=keyOf,submissionOwnerDigest=(owner:string)=>digest(owner);
 /** Bounded, volatile payloads; only metadata receipts enter the existing durable history journal. */
 export class WorkroomSubmissions {
  private assemblies=new Map<string,Assembly>();
@@ -37,8 +41,10 @@ export class WorkroomSubmissions {
  /** A prepared launch receipt whose payload is gone can never start a session: record that definitively
   *  (prepared → rejected), so a status says «not started» and the panel's start is not blocked by it. A row already past
   *  its fence keeps its state; an assembly still writing is left to its writer, whose fence check now fails and which
-  *  records the refusal itself. Input submissions keep their prepared receipt (their contract predates this). */
- private dropUnwritten(key:string,record:StoredSubmission){if(record.scope!==WORKROOM_LAUNCH_SCOPE)return;try{this.store().transitionSubmission(key,'prepared','rejected');}catch{/* already past the fence, or gone */}}
+  *  records the refusal itself. Input submissions that merely expire keep their prepared receipt (their contract
+  *  predates this); one its writer refused is rejected by `refuseUnwritten`. */
+ private dropUnwritten(key:string,record:StoredSubmission){if(record.scope!==WORKROOM_LAUNCH_SCOPE)return;this.refuseUnwritten(key);}
+ private refuseUnwritten(key:string){try{this.store().transitionSubmission(key,'prepared','rejected');}catch{/* already past the fence, or gone */}}
  private prune(){for(const [key,a] of this.assemblies)if(this.now()>=a.expires){this.assemblies.delete(key);if(!a.writing)this.dropUnwritten(key,a.record);}this.arm();}
  release(sessionId:string){for(const [key,a] of this.assemblies)if(a.record.sessionId===sessionId){this.assemblies.delete(key);if(!a.writing)this.dropUnwritten(key,a.record);}this.arm();}
  close(){clearTimeout(this.expiry);this.expiry=undefined;this.assemblies.clear();}
@@ -142,9 +148,10 @@ export class WorkroomSubmissions {
     if(!started)throw Error('제출 쓰기 시작 기록이 없습니다.');
     store.transitionSubmission(key,'write_started','written');
   }catch(error){
-    // A launch refused before the fence (CLI missing, session cap, size with references, a moved project…): nothing was
-    // started and the payload is dropped below, so its receipt says so definitively instead of staying «prepared».
-    if(!started){this.dropUnwritten(key,record);throw error;}
+    // Refused before the fence (CLI missing, session cap, a moved project, a question screen, a stale correction…):
+    // nothing was typed and the payload is dropped below, so the receipt says so definitively. An input receipt left
+    // «prepared» here kept the sender's composer fenced for good (2026-10-30), though the same id can never be written.
+    if(!started){this.refuseUnwritten(key);throw error;}
     try{store.transitionSubmission(key,'write_started','unknown');}catch{/* The durable write_started record also prevents replay. */}
   }finally{if(this.assemblies.get(key)===assembly)this.assemblies.delete(key);this.arm();}
   return this.receipt(store.submission(key)!,store);

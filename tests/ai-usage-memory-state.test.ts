@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionMemoryAction, type SessionMemoryStatusState } from '../src/components/aiUsageMemoryState';
+import { dockSyncButtonState, sessionMemoryAction, type SessionMemoryStatusState } from '../src/components/aiUsageMemoryState';
 
 const ready = (exists: boolean, needsRemember: boolean): SessionMemoryStatusState => ({
   kind: 'ready',
@@ -26,5 +26,17 @@ describe('AI usage project-memory action state', () => {
     expect(sessionMemoryAction('/work/회의실', { kind: 'checking' })).toBe('checking');
     expect(sessionMemoryAction('/work/회의실', { kind: 'error', message: 'offline', checkedAt: Date.now() })).toBe('retry');
     expect(sessionMemoryAction(null, ready(true, true))).toBe('unavailable');
+  });
+
+  test('the dock 「동기화」 turns off once both sides are the same, and back on when one side moves', () => {
+    const synced = ready(true, false);
+    expect(dockSyncButtonState(true, synced)).toEqual({ enabled: false, synced: true });
+    // Unsaved activity is 「지금 저장」's question: a synced memory still has nothing to sync.
+    expect(dockSyncButtonState(true, ready(true, true))).toEqual({ enabled: false, synced: true });
+    const remoteMissing: SessionMemoryStatusState = { ...synced, remote: { kind: 'ready', status: { exists: false, createdAt: null, contentHash: null, inSync: false } } } as SessionMemoryStatusState;
+    expect(dockSyncButtonState(true, remoteMissing)).toEqual({ enabled: true, synced: false });
+    expect(dockSyncButtonState(true, { ...synced, remote: { kind: 'error', message: 'offline' } } as SessionMemoryStatusState)).toEqual({ enabled: true, synced: false });
+    expect(dockSyncButtonState(true, { ...synced, remote: { kind: 'checking' } } as SessionMemoryStatusState).enabled).toBe(false);
+    expect(dockSyncButtonState(false, synced)).toEqual({ enabled: false, synced: false });
   });
 });

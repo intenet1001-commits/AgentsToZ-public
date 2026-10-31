@@ -135,6 +135,8 @@ try{
  const saved=profilePanel.getByTestId('control-profile-saved-memory');
  await saved.getByRole('heading',{name:'저장된 운영 기억 · 1',exact:true}).waitFor();
  assert.equal(await saved.getByText('song-app은 노래 앱 프로젝트를 가리킨다.',{exact:true}).count(),0,'Bodies are not loaded with the list');
+ // 2026-10-26: the titles fold under the heading that carries the count; opening it reads nothing more.
+ await saved.getByRole('button',{name:'저장된 운영 기억 · 1',exact:true}).click();
  await saved.getByRole('button',{name:/프로젝트 별칭 규칙/}).click();
  // Review 2026-10-25: the failure line said 「다시 눌러 보세요」 but the next press folded the item away instead of reading again.
  await saved.getByRole('alert').filter({hasText:'내용을 읽지 못했습니다. 다시 눌러 보세요.'}).waitFor();
@@ -284,6 +286,8 @@ try{
  await page.getByText('OPS fixture 열기 요청',{exact:false}).first().waitFor();
  const launchCalls=()=>calls.slice(launchBaseline).filter(c=>c.path==='/api/control-profile/open').map(c=>JSON.parse(c.body));
  assert.deepEqual(launchCalls()[0],{action:'open-code-app',expectedProfileId:profile.profileId,agent:'codex',surface:'app',bypass:false,mode:'reopen'});
+ // 2026-10-26: the surface/AI options fold under 「아젠투지 열기 방식」; the main open button stays in the status card.
+ await profilePanel.getByRole('button',{name:'열기 방식 바꾸기',exact:true}).click();
  await profilePanel.getByLabel('OPS 실행 표면').selectOption('orca-worktree');
  await profilePanel.getByLabel('OPS 실행 AI').selectOption('agy');
  await profilePanel.getByLabel('OPS 승인 없이 실행',{exact:true}).check();

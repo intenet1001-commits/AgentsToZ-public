@@ -1,19 +1,25 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeProjectSlug } from "../src/sessionTranscript";
+import { runWhatISaidExplicitBackfill } from "../src/whatISaidExplicitBackfill";
 import {
   collectWhatISaidTranscripts,
   exactWhatISaidWorktreeRoots,
+  whatISaidCollectionScope,
 } from "../src/whatISaidTranscriptCollector";
 import {
   advanceWhatISaidScan,
+  deriveWhatISaidTranscriptSourceId,
   enableWhatISaidCapture,
   listWhatISaidEntries,
+  probeWhatISaidCollectionReadOnly,
   purgeWhatISaidEntries,
   readWhatISaidStatus,
   readWhatISaidTranscriptClassifications,
+  readWhatISaidTranscriptCursor,
+  setWhatISaidRetention,
 } from "../src/whatISaidStore";
 
 const temporaryRoots: string[] = [];
@@ -281,6 +287,76 @@ describe("What-I-said transcript collector", () => {
       worktreeRoots: [input.projectRoot],
       now: "2026-08-30T10:11:00Z",
     })).toMatchObject({ stored: 0, withheld: 0, unreadable: 0, scanAdvanced: true });
+  });
+
+  test("does not receipt Claude tool results or injected skill context, so an active session's scan stays complete", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const toolResult = (at: string, id: string) => ({
+      type: "user", timestamp: at, toolUseResult: { stdout: "ok" },
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+    });
+    const skillBody = (at: string) => ({
+      type: "user", isMeta: true, timestamp: at,
+      message: { content: [{ type: "text", text: "Base directory for this skill: /tmp/skill" }] },
+    });
+    const path = writeClaude(input.claudeProjectsDir, input.projectRoot, "tools.jsonl", [
+      { type: "user", timestamp: "2026-08-30T10:01:00Z", message: { content: "실제 요청" } },
+      { type: "assistant", timestamp: "2026-08-30T10:01:10Z", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } },
+      toolResult("2026-08-30T10:01:20Z", "t1"),
+      skillBody("2026-08-30T10:01:30Z"),
+      // A pasted image keeps the person's words in an array. It may be a request, so it stays a receipt.
+      { type: "user", timestamp: "2026-08-30T10:01:40Z", message: { content: [
+        { type: "text", text: "이 화면 봐줘" },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+      ] } },
+      // A tool result without a valid timestamp is still malformed.
+      toolResult("not-a-timestamp", "t2"),
+    ]);
+    const collect = (now: string) => collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now });
+    const receipt = () => probeWhatISaidCollectionReadOnly({
+      ...input, scope: whatISaidCollectionScope({ ...input, worktreeRoots: [input.projectRoot] }),
+    });
+
+    expect(collect("2026-08-30T10:10:00Z")).toMatchObject({ stored: 1, withheld: 2, unreadable: 0, pendingFiles: 0, scanAdvanced: true });
+    expect(listWhatISaidEntries({ ...input, now: "2026-08-30T10:10:01Z" }).items.map(item => item.text)).toEqual(["실제 요청"]);
+    expect(receipt()?.complete).toBe(false);
+
+    // The session keeps working: only tool and injected rows arrive before the next scan.
+    appendFileSync(path, `${[
+      line({ ...toolResult("2026-08-30T10:11:00Z", "t3"), cwd: input.projectRoot }),
+      line({ ...skillBody("2026-08-30T10:11:10Z"), cwd: input.projectRoot }),
+    ].join("\n")}\n`);
+    utimesSync(path, new Date("2026-08-30T12:06:00Z"), new Date("2026-08-30T12:06:00Z"));
+    expect(collect("2026-08-30T10:12:00Z")).toMatchObject({ stored: 0, withheld: 0, unreadable: 0, pendingFiles: 0, scanAdvanced: true });
+    expect(receipt()?.complete).toBe(true);
+  });
+
+  test("keeps the words of a typed Claude slash command but not bare, host or model-invoked commands", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const user = (at: string, content: string, extra: Record<string, unknown> = {}) => ({ type: "user", timestamp: at, message: { content }, ...extra });
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "commands.jsonl", [
+      user("2026-08-30T10:01:00Z", "<command-message>agentstoz-unfinished-work</command-message>\n<command-name>/agentstoz-unfinished-work</command-name>\n<command-args>핸드오프 확인하고 진행하자</command-args>"),
+      user("2026-08-30T10:02:00Z", "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      user("2026-08-30T10:03:00Z", "<command-message>remember-session</command-message>\n<command-name>/remember-session</command-name>"),
+      user("2026-08-30T10:04:00Z", "<command-message>workflow-authoring</command-message>\n<command-name>workflow-authoring</command-name>\n<command-args>model words</command-args>", { isMeta: true }),
+      user("2026-08-30T10:05:00Z", "<command-name>/review</command-name><command-args>a</command-args> trailing text"),
+      user("2026-08-30T10:06:00Z", "<command-name>/review</command-name><command-args>a</command-args><command-args>b</command-args>"),
+      user("2026-08-30T10:07:00Z", "<local-command-stdout>output</local-command-stdout>"),
+      user("2026-08-30T10:08:00Z", "<command-name>/figma:figma-use</command-name>\n<command-args>버튼 만들어줘</command-args>", { isSidechain: true }),
+    ]);
+    const collect = (now: string) => collectWhatISaidTranscripts({
+      ...input,
+      worktreeRoots: [input.projectRoot],
+      promptOrigin: (_text, _recordedAt, delivery) => delivery === "user-message" ? "human" : "unknown",
+      now,
+    });
+
+    expect(collect("2026-08-30T10:10:00Z")).toMatchObject({ stored: 1, withheld: 0, unreadable: 0, pendingFiles: 0 });
+    expect(listWhatISaidEntries({ ...input, now: "2026-08-30T10:10:01Z" }).items.map(item => [item.text, item.promptOrigin]))
+      .toEqual([["/agentstoz-unfinished-work 핸드오프 확인하고 진행하자", "human"]]);
+    expect(collect("2026-08-30T10:11:00Z")).toMatchObject({ stored: 0, withheld: 0 });
   });
 
   test("skips a whole stale JSONL before reading historical content", () => {
@@ -660,6 +736,422 @@ describe("What-I-said transcript collector", () => {
     });
     expect(again.stored).toBe(0);
     expect(listWhatISaidEntries({ ...input, now: "2026-08-30T12:06:01Z" }).items).toHaveLength(3);
+  });
+
+  test("backfill resumes over multiple budgets without moving ordinary capture or duplicating records", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const file = writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", Array.from({ length: 120 }, (_, index) => ({
+      type: "user", timestamp: "2026-08-29T08:00:00Z", message: { content: `old-${index}-${"x".repeat(500)}` },
+    })));
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z" };
+    expect(collectWhatISaidTranscripts(common).stored).toBe(0);
+    let remaining = true;
+    let passes = 0;
+    let stored = 0;
+    while (remaining && passes++ < 30) {
+      const result = collectWhatISaidTranscripts({ ...common, backfill: true, scanByteBudget: 8192 });
+      remaining = result.hasMore;
+      stored += result.stored;
+      expect(result.unreadable).toBe(0);
+    }
+    expect(remaining).toBe(false);
+    expect(passes).toBeGreaterThan(1);
+    expect(stored).toBe(120);
+    appendFileSync(file, line({ type: "user", cwd: input.projectRoot, timestamp: "2026-08-30T11:00:00Z", message: { content: "new prompt" } }) + "\n");
+    expect(collectWhatISaidTranscripts(common).stored).toBe(1);
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true }).stored).toBe(0);
+  });
+
+  test("a single explicit request completes multiple actual backfill scan budgets", async () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", Array.from({ length: 30 }, (_, index) => ({
+      type: "user", timestamp: "2026-08-29T08:00:00Z", message: { content: `single-${index}-${"x".repeat(500)}` },
+    })));
+    let passes = 0;
+    const scan = await runWhatISaidExplicitBackfill(async () => {
+      passes++;
+      return collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z", backfill: true, scanByteBudget: 4096 });
+    }, { yieldControl: async () => {} });
+    expect(passes).toBeGreaterThan(1);
+    expect(scan).toMatchObject({ stored: 30, scanAdvanced: true, hasMore: false });
+  });
+
+  test("cooperative scan stop commits processed records and resumes without duplicates", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", Array.from({ length: 30 }, (_, index) => ({
+      type: "user", timestamp: "2026-08-29T08:00:00Z", message: { content: `stop-${index}` },
+    })));
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z", backfill: true };
+    let checks = 0;
+    const partial = collectWhatISaidTranscripts({ ...common, scanShouldStop: () => ++checks > 9 });
+    expect(partial.stored).toBeGreaterThan(0);
+    expect(partial).toMatchObject({ hasMore: true, budgetExhausted: true, scanAdvanced: false });
+    const completed = collectWhatISaidTranscripts(common);
+    expect(completed).toMatchObject({ hasMore: false, scanAdvanced: true, duplicates: 0 });
+    expect(partial.stored + completed.stored).toBe(30);
+  });
+
+  test("repeated bounded backfills advance past early Claude files and eventually reach Codex", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    for (let index = 0; index < 5; index++) writeClaude(input.claudeProjectsDir, input.projectRoot, `history-${index}.jsonl`, [{
+      type: 'user', timestamp: '2026-08-29T08:00:00Z', message: { content: `claude-${index}` },
+    }]);
+    writeCodex(input.codexSessionsDir, 'codex.jsonl', input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: 'codex-history' },
+    }]);
+    let more = true;
+    let passes = 0;
+    while (more && passes++ < 30) {
+      let checks = 0;
+      const allCaptured = listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.length === 5;
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z',
+        backfill: true, scanShouldStop: () => !allCaptured && ++checks > 7 });
+      expect(result.unreadable).toBe(0);
+      more = result.hasMore;
+    }
+    expect(more).toBe(false);
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.map(item => item.text).sort())
+      .toEqual(['claude-0', 'claude-1', 'claude-2', 'claude-3', 'claude-4', 'codex-history']);
+  });
+
+  test("repeated bounded backfills complete across many Codex files", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    for (let index = 0; index < 5; index++) writeCodex(input.codexSessionsDir, `history-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `codex-${index}` },
+    }]);
+    let more = true;
+    let passes = 0;
+    while (more && passes++ < 30) {
+      let checks = 0;
+      const allCaptured = listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.length === 5;
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z',
+        backfill: true, scanShouldStop: () => !allCaptured && ++checks > 7 });
+      expect(result.unreadable).toBe(0);
+      more = result.hasMore;
+    }
+    expect(more).toBe(false);
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items).toHaveLength(5);
+  });
+
+  test("actively changing files, including foreign Codex sessions, do not starve other files", () => {
+    for (const source of ['claude', 'codex'] as const) {
+      const input = setup();
+      enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+      const paths: string[] = [];
+      for (let index = 0; index < 5; index++) {
+        paths.push(source === 'claude'
+          ? writeClaude(input.claudeProjectsDir, input.projectRoot, `active-${index}.jsonl`, [{ type: 'user', timestamp: '2026-08-29T08:00:00Z', message: { content: `baseline-${index}` } }])
+          : writeCodex(input.codexSessionsDir, `active-${index}.jsonl`, input.projectRoot, [{ type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `baseline-${index}` } }]));
+      }
+      const foreign = source === 'codex' ? writeCodex(input.codexSessionsDir, 'foreign.jsonl', input.unrelatedRoot, []) : null;
+      for (let pass = 0; pass < 150; pass++) {
+        appendFileSync(paths[0]!, '\n');
+        if (foreign) appendFileSync(foreign, '\n');
+        let checks = 0;
+        collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true, scanShouldStop: () => ++checks > 7 });
+        if (listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.length === 5) break;
+      }
+      expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.map(item => item.text).sort())
+        .toEqual(['baseline-0', 'baseline-1', 'baseline-2', 'baseline-3', 'baseline-4']);
+    }
+  });
+
+  test("foreign Codex appends do not block completion, while changed ownership is rescanned", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 5; index++) writeCodex(input.codexSessionsDir, `owned-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `ours-${index}` },
+    }]);
+    const foreign = writeCodex(input.codexSessionsDir, 'foreign-active.jsonl', input.unrelatedRoot, []);
+    const foreignId = deriveWhatISaidTranscriptSourceId({ ...input, agent: 'codex', sourceIdentity: realpathSync(foreign) });
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true };
+    let changedOwnership = false;
+    let complete = false;
+    for (let pass = 0; pass < 100; pass++) {
+      if (pass && !changedOwnership) appendFileSync(foreign, '\n');
+      let checks = 0;
+      const allCaptured = listWhatISaidEntries(common).items.some(item => item.text === 'newly-owned');
+      const result = collectWhatISaidTranscripts({ ...common, scanShouldStop: () => !allCaptured && ++checks > 7 });
+      if (!changedOwnership && readWhatISaidTranscriptClassifications({ ...input, sourceIds: [foreignId] })[foreignId]?.owned === false) {
+        writeCodex(input.codexSessionsDir, 'foreign-active.jsonl', input.projectRoot, [{
+          type: 'event_msg', timestamp: '2026-08-29T08:01:00Z', payload: { type: 'user_message', message: 'newly-owned' },
+        }]);
+        changedOwnership = true;
+        continue;
+      }
+      if (!result.hasMore) { complete = true; break; }
+    }
+    expect(changedOwnership).toBe(true);
+    expect(complete).toBe(true);
+    expect(listWhatISaidEntries(common).items.map(item => item.text)).toContain('newly-owned');
+  });
+
+  test("continuous foreign Codex appends do not postpone completion", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 5; index++) writeCodex(input.codexSessionsDir, `owned-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `ours-${index}` },
+    }]);
+    const foreign = writeCodex(input.codexSessionsDir, 'foreign-active.jsonl', input.unrelatedRoot, []);
+    let complete = false;
+    for (let pass = 0; pass < 100; pass++) {
+      appendFileSync(foreign, '\n');
+      let checks = 0;
+      const allCaptured = listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.length === 5;
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true, scanShouldStop: () => !allCaptured && ++checks > 7 });
+      if (!result.hasMore) { complete = true; break; }
+    }
+    expect(complete).toBe(true);
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items).toHaveLength(5);
+  });
+
+  test("Codex header snapshot and verification resume when their aggregate exceeds each byte budget", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 15; index++) writeCodex(input.codexSessionsDir, `owned-budget-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `budget-${index}` },
+    }]);
+    writeCodex(input.codexSessionsDir, 'foreign-budget.jsonl', input.unrelatedRoot, []);
+    // Each call is a separate request: the verification must resume its saved
+    // page instead of restarting, or a budget smaller than all headers never
+    // reaches completion (2026-10-28: every request ended 'uncertain').
+    let complete = false;
+    const verified: number[] = [];
+    for (let pass = 0; pass < 60; pass++) {
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true, scanByteBudget: 1024 });
+      expect(result.bytesRead).toBeLessThanOrEqual(1024);
+      expect(result.bytesRead).toBeGreaterThan(0);
+      expect(result.unreadable).toBe(0);
+      expect(result.verificationUncertain).toBeUndefined();
+      const cursor = readWhatISaidTranscriptCursor({ ...input, agent: 'codex', sourceIdentity: 'what-i-said-backfill-codex-snapshot-v1' });
+      if (cursor?.fileIdentity.split(':')[1] === 'v') verified.push(cursor.lineNumber);
+      if (!result.hasMore) { complete = result.scanAdvanced; break; }
+    }
+    expect(complete).toBe(true);
+    expect(verified.length).toBeGreaterThan(1);
+    expect(verified).toEqual([...verified].sort((left, right) => left - right));
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.map(item => item.text).sort())
+      .toEqual(Array.from({ length: 15 }, (_, index) => `budget-${index}`).sort());
+  });
+
+  test("Codex header snapshot checks cooperative stop and resumes its saved page", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 5; index++) writeCodex(input.codexSessionsDir, `deadline-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `deadline-${index}` },
+    }]);
+    let complete = false;
+    const verified: number[] = [];
+    for (let pass = 0; pass < 50; pass++) {
+      let checks = 0;
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true, scanShouldStop: () => ++checks > 7 });
+      expect(result.unreadable).toBe(0);
+      expect(result.verificationUncertain).toBeUndefined();
+      const cursor = readWhatISaidTranscriptCursor({ ...input, agent: 'codex', sourceIdentity: 'what-i-said-backfill-codex-snapshot-v1' });
+      if (cursor?.fileIdentity.split(':')[1] === 'v') verified.push(cursor.lineNumber);
+      if (!result.hasMore) { complete = result.scanAdvanced; break; }
+    }
+    expect(complete).toBe(true);
+    expect(verified.length).toBeGreaterThan(1);
+    expect(verified).toEqual([...verified].sort((left, right) => left - right));
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items).toHaveLength(5);
+  });
+
+  test("a change after a verification page cannot be reported as complete", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    const files = Array.from({ length: 8 }, (_, index) => writeCodex(input.codexSessionsDir, `race-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `race-${index}` },
+    }]));
+    const sorted = files.map(file => ({ file, id: deriveWhatISaidTranscriptSourceId({ ...input, agent: 'codex', sourceIdentity: realpathSync(file) }) }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true };
+    let observed = false;
+    for (let pass = 0; pass < 100; pass++) {
+      const result = collectWhatISaidTranscripts({ ...common, scanByteBudget: 512 });
+      const cursor = readWhatISaidTranscriptCursor({ ...input, agent: 'codex', sourceIdentity: 'what-i-said-backfill-codex-snapshot-v1' });
+      if (cursor?.fileIdentity.split(':')[1] === 'v' && cursor.lineNumber > 0) {
+        expect(result).toMatchObject({ hasMore: true, scanAdvanced: false });
+        appendFileSync(sorted[0]!.file, `${line({ type: 'event_msg', timestamp: '2026-08-29T08:01:00Z', payload: { type: 'user_message', message: 'after-page-check' } })}\n`);
+        observed = true;
+        break;
+      }
+    }
+    expect(observed).toBe(true);
+    // A new request may resume a verification only if the files it already
+    // checked are unchanged. This one changed, so every file is re-verified
+    // against the baseline and the mismatch restarts the cycle.
+    const resuming = collectWhatISaidTranscripts(common);
+    expect(resuming).toMatchObject({ snapshotChanged: true, hasMore: true, scanAdvanced: false });
+    let complete = false;
+    for (let pass = 0; pass < 5; pass++) {
+      const result = collectWhatISaidTranscripts(common);
+      if (!result.hasMore) { complete = true; break; }
+    }
+    expect(complete).toBe(true);
+    expect(listWhatISaidEntries(common).items.map(item => item.text)).toContain('after-page-check');
+  });
+
+  test("too-small scan budget is reported while a long record fits the default budget", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    const text = 'long-message-' + 'x'.repeat(50_000);
+    writeCodex(input.codexSessionsDir, 'long-record.jsonl', input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: text },
+    }]);
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true };
+    const tooSmall = collectWhatISaidTranscripts({ ...common, scanByteBudget: 32 });
+    expect(tooSmall).toMatchObject({ minimumBudgetInsufficient: true, hasMore: true, scanAdvanced: false });
+    const normal = collectWhatISaidTranscripts(common);
+    expect(normal).toMatchObject({ stored: 1, hasMore: false, scanAdvanced: true });
+    expect(listWhatISaidEntries(common).items[0]?.text).toBe(text);
+  });
+
+  test("too-small scan budget is reported for a Claude record as well", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    const text = 'long-claude-message-' + 'x'.repeat(50_000);
+    writeClaude(input.claudeProjectsDir, input.projectRoot, 'long-record.jsonl', [
+      { type: 'user', timestamp: '2026-08-29T08:00:00Z', message: { content: text } },
+    ]);
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true };
+    const tooSmall = collectWhatISaidTranscripts({ ...common, scanByteBudget: 32 });
+    expect(tooSmall).toMatchObject({ minimumBudgetInsufficient: true, hasMore: true, scanAdvanced: false, stored: 0 });
+    const normal = collectWhatISaidTranscripts(common);
+    expect(normal).toMatchObject({ stored: 1, hasMore: false, scanAdvanced: true });
+    expect(normal.minimumBudgetInsufficient).toBeUndefined();
+    expect(listWhatISaidEntries(common).items[0]?.text).toBe(text);
+  });
+
+  test("a later pass of the same request resumes verification while a checked foreign file keeps growing", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 3; index++) writeCodex(input.codexSessionsDir, `owned-active-${index}.jsonl`, input.projectRoot, [{
+      type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `active-${index}` },
+    }]);
+    // Other projects' live Codex sessions sit in every verification page.
+    const foreign = Array.from({ length: 13 }, (_, index) => writeCodex(input.codexSessionsDir, `foreign-growing-${index}.jsonl`, input.unrelatedRoot, []));
+    let complete = false;
+    for (let pass = 0; pass < 60; pass++) {
+      for (const file of foreign) appendFileSync(file, '\n');
+      const result = collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z',
+        backfill: true, backfillContinuation: pass > 0, scanByteBudget: 1024 });
+      expect(result.unreadable).toBe(0);
+      if (!result.hasMore) { complete = result.scanAdvanced; break; }
+    }
+    expect(complete).toBe(true);
+    expect(listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items).toHaveLength(3);
+  });
+
+  test("an old-dated message appended after its file was visited prevents false completion", () => {
+    for (const source of ['claude', 'codex'] as const) {
+      const input = setup();
+      enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+      const paths = new Map<string, string>();
+      for (let index = 0; index < 5; index++) {
+        const name = `first-${index}`;
+        paths.set(name, source === 'claude'
+          ? writeClaude(input.claudeProjectsDir, input.projectRoot, `${name}.jsonl`, [{ type: 'user', timestamp: '2026-08-29T08:00:00Z', message: { content: name } }])
+          : writeCodex(input.codexSessionsDir, `${name}.jsonl`, input.projectRoot, [{ type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: name } }]));
+      }
+      const common = { ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true };
+      let checks = 0;
+      let alreadyVisited: string | undefined;
+      for (let pass = 0; pass < 30 && !alreadyVisited; pass++) {
+        checks = 0;
+        expect(collectWhatISaidTranscripts({ ...common, scanShouldStop: () => ++checks > 7 }).hasMore).toBe(true);
+        alreadyVisited = listWhatISaidEntries(common).items[0]?.text;
+      }
+      expect(alreadyVisited).toBeDefined();
+      const late = source === 'claude'
+        ? { type: 'user', cwd: input.projectRoot, timestamp: '2026-08-29T08:01:00Z', message: { content: 'late-old-message' } }
+        : { type: 'event_msg', timestamp: '2026-08-29T08:01:00Z', payload: { type: 'user_message', message: 'late-old-message' } };
+      appendFileSync(paths.get(alreadyVisited!)!, `${line(late)}\n`);
+      let complete = false;
+      for (let pass = 0; pass < 30; pass++) {
+        checks = 0;
+        const lateCaptured = listWhatISaidEntries(common).items.some(item => item.text === 'late-old-message');
+        const result = collectWhatISaidTranscripts({ ...common, scanShouldStop: () => !lateCaptured && ++checks > 7 });
+        if (!result.hasMore) { complete = true; break; }
+      }
+      expect(complete).toBe(true);
+      expect(listWhatISaidEntries(common).items.map(item => item.text)).toContain('late-old-message');
+    }
+  });
+
+  test("new files do not reset the rotating start and existing files resume when additions settle", () => {
+    for (const source of ['claude', 'codex'] as const) {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 'forever', now: '2026-08-30T10:00:00Z' });
+    for (let index = 0; index < 5; index++) {
+      if (source === 'claude') writeClaude(input.claudeProjectsDir, input.projectRoot, `original-${index}.jsonl`, [{
+        type: 'user', timestamp: '2026-08-29T08:00:00Z', message: { content: `original-${index}` },
+      }]);
+      else writeCodex(input.codexSessionsDir, `original-${index}.jsonl`, input.projectRoot, [{
+        type: 'event_msg', timestamp: '2026-08-29T08:00:00Z', payload: { type: 'user_message', message: `original-${index}` },
+      }]);
+    }
+    const originals = ['original-0', 'original-1', 'original-2', 'original-3', 'original-4'];
+    const collected = () => listWhatISaidEntries({ ...input, now: '2026-08-30T12:10:00Z' }).items.map(item => item.text).sort();
+    let settledAt = -1;
+    for (let pass = 0; pass < 100; pass++) {
+      if (pass < 5 && source === 'claude') writeClaude(input.claudeProjectsDir, input.projectRoot, `new-${pass}.jsonl`, [{ type: 'assistant', message: { content: 'no user message' } }]);
+      else if (pass < 5) writeCodex(input.codexSessionsDir, `new-${pass}.jsonl`, input.unrelatedRoot, []);
+      let checks = 0;
+      collectWhatISaidTranscripts({ ...input, worktreeRoots: [input.projectRoot], now: '2026-08-30T12:10:00Z', backfill: true, scanShouldStop: () => ++checks > 7 });
+      // Still at most 100 budget-7 passes, but stop once the fifth new file is in and every original was collected.
+      if (pass >= 4 && JSON.stringify(collected()) === JSON.stringify(originals)) { settledAt = pass; break; }
+    }
+    expect(settledAt).toBeGreaterThanOrEqual(4);
+    expect(collected()).toEqual(originals);
+    }
+  });
+
+  test("explicit backfill revisits expired transcript entries after retention expands", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: 30, now: "2026-08-30T10:00:00Z" });
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", [{
+      type: "user", timestamp: "2026-06-01T08:00:00Z", message: { content: "old request" },
+    }]);
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z" };
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true })).toMatchObject({ stored: 0, skippedExpired: 1, hasMore: false });
+    setWhatISaidRetention({ ...input, retention: "forever", now: "2026-08-30T12:11:00Z" });
+    expect(collectWhatISaidTranscripts({ ...common, now: "2026-08-30T12:12:00Z", backfill: true })).toMatchObject({ stored: 1, hasMore: false });
+    expect(listWhatISaidEntries({ ...input, now: "2026-08-30T12:13:00Z" }).items.map(item => item.text)).toEqual(["old request"]);
+  });
+
+  test("backfill tracks file replacement with the same generation as ordinary capture", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const record = (text: string, timestamp = "2026-08-29T08:00:00Z") => ({ type: "user", timestamp, message: { content: text } });
+    const file = writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", [record("original")]);
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z" };
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true }).stored).toBe(1);
+    renameSync(file, `${file}.old`);
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", [record("replacement", "2026-08-30T11:00:00Z")]);
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true }).stored).toBe(1);
+    expect(collectWhatISaidTranscripts(common).stored).toBe(0);
+    expect(listWhatISaidEntries(common).items.map(item => item.text).sort()).toEqual(["original", "replacement"]);
+  });
+
+  test("backfill detects same-inode rewriting even when regular capture has not advanced", () => {
+    const input = setup();
+    enableWhatISaidCapture({ ...input, retention: "forever", now: "2026-08-30T10:00:00Z" });
+    const record = (text: string, timestamp = "2026-08-29T08:00:00Z") => ({ type: "user", timestamp, message: { content: text } });
+    const file = writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", [record("first-old-value")]);
+    const common = { ...input, worktreeRoots: [input.projectRoot], now: "2026-08-30T12:10:00Z" };
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true }).stored).toBe(1);
+    const inode = statSync(file).ino;
+    writeClaude(input.claudeProjectsDir, input.projectRoot, "history.jsonl", [record("other-old-value", "2026-08-30T11:00:00Z")]);
+    expect(statSync(file).ino).toBe(inode);
+    expect(collectWhatISaidTranscripts({ ...common, backfill: true }).stored).toBe(1);
+    expect(collectWhatISaidTranscripts(common).stored).toBe(0);
+    expect(listWhatISaidEntries(common).items.map(item => item.text).sort()).toEqual(["first-old-value", "other-old-value"]);
   });
 });
 

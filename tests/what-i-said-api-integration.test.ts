@@ -122,6 +122,16 @@ describe('What-I-said local HTTP boundary', () => {
     expect(apiSource).toContain('Global opt-in must never turn one save into an all-project scan.');
     expect(apiSource).toContain('onTurnSettled: projectRoot => scheduleWhatISaidCaptureFollowUp(projectRoot)');
     expect(apiSource).toContain('captureRegisteredWhatISaid(key, { onlyIfConfigured: true })');
+    // An explicit import never uploads after each of its passes (up to 32,
+    // unbounded by the deadline); one bounded upload follows the request.
+    expect(apiSource).toContain('backfill: true, background: true, skipRemotePush: true,');
+    expect(apiSource).toContain('backfillContinuation: pass > 0,');
+    expect(apiSource).toContain('await pushWhatISaidAfterCapture(await resolveRegisteredWhatISaidProject(folderPath), result.stored, options.pushDeadlineAt);');
+    // Both import routes explain an unfinished result with one reason code.
+    expect(apiSource).toContain("const outcome = body?.backfill === true ? whatISaidBackfillOutcome(result) : { complete: true as const };");
+    expect(apiSource).toContain("const outcome = input.backfill === true ? whatISaidBackfillOutcome(captured) : { complete: true as const };");
+    // A multi-memory sync shares one deadline (desktop proxy read timeout 35 s).
+    expect(apiSource).toContain('const batch = await runWhatISaidSyncBatch(projects, {');
   });
 
   test('starts every current project immediately and applies the same opt-in lazily to future projects', async () => {
@@ -212,6 +222,39 @@ describe('What-I-said local HTTP boundary', () => {
     expect(captured.response.status).toBe(200);
     expect(captured.body.result.enabled).toBe(true);
     expect(existsSync(whatISaidDatabasePath(location))).toBe(true);
+
+    // A host with no Supabase target has nowhere to upload. A manual sync there
+    // is not an upload failure and has no upload left to finish (it used to
+    // read the cloud exclusion list and report WHAT_I_SAID_EXCLUSIONS_UNAVAILABLE).
+    for (const backfill of [false, true]) {
+      const localSync = await jsonRequest(baseUrl, '/api/what-i-said/sync', { memoryIds: [location.memoryId], backfill });
+      expect(localSync.response.status).toBe(200);
+      expect(localSync.body.items[0]).toMatchObject({ error: null, pushed: 0 });
+      expect(localSync.body.items[0].code).toBeUndefined();
+      expect(localSync.body.items[0].remoteError).toBeUndefined();
+      expect(localSync.body.items[0].uploadIncomplete).toBeUndefined();
+    }
+
+    // A never-configured local host may use the historical import. A partial
+    // cloud configuration is different: its shared consent must be verified.
+    const historical = await jsonRequest(baseUrl, '/api/what-i-said/capture', { folderPath: projectPath, backfill: true });
+    expect(historical.response.status).toBe(200);
+    expect(historical.body.success).toBe(true);
+    expect(historical.body.code).toBeUndefined();
+    const portalPath = join(appDataDir, 'portal.json');
+    const originalPortal = existsSync(portalPath) ? readFileSync(portalPath, 'utf8') : null;
+    const portal = originalPortal ? JSON.parse(originalPortal) : {};
+    writeFileSync(portalPath, JSON.stringify({ ...portal, supabaseUrl: 'https://offline-fixture.supabase.co' }));
+    const unavailable = await jsonRequest(baseUrl, '/api/what-i-said/capture', { folderPath: projectPath, backfill: true });
+    expect(unavailable.response.status).toBe(503);
+    expect(unavailable.body.code).toBe('WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE');
+    const syncFailed = await jsonRequest(baseUrl, '/api/what-i-said/sync', { memoryIds: [location.memoryId], backfill: true });
+    expect(syncFailed.response.status).toBe(207);
+    expect(syncFailed.body.items[0]).toMatchObject({ code: 'WHAT_I_SAID_SHARED_POLICY_UNAVAILABLE' });
+    expect(syncFailed.body.items[0].error).toContain('공유 저장 동의');
+    expect(syncFailed.body.continuation).toBeNull();
+    if (originalPortal === null) rmSync(portalPath, { force: true });
+    else writeFileSync(portalPath, originalPortal);
 
     const futurePath = join(home, 'projects', 'future');
     mkdirSync(futurePath, { recursive: true });

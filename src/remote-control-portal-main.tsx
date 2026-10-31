@@ -15,6 +15,7 @@ import {COMMON_MEMORY_RPC_V2_FEATURE,META_MEMORY_REMOTE_FEATURE} from './metaCom
 import {WORKROOM_HISTORY_REMOTE_FEATURE,WORKROOM_RESTART_REMOTE_FEATURE,remoteHistoryPairing} from './workroomHistoryRemoteProtocol';
 import {RemoteWorkroomHistoryPanel} from './RemoteWorkroomHistoryPanel';
 import {RemoteWorkroomRestartBanner} from './RemoteWorkroomRestartBanner';
+import {RemoteWeeklyUsageCard} from './RemoteWeeklyUsageCard';
 import {selectResumedSessionOn} from './remoteWorkroomHistoryClient';
 import {AI_TERMINAL_REFERENCES_FEATURE} from './aiTerminalProtocol';
 import { buildVocWorkflowPrompt } from './vocWorkflowPrompt';
@@ -37,10 +38,13 @@ import {MobileWorkspacePanel} from './MobileWorkspacePanel';
 import {MOBILE_WORKSPACE_FEATURE,type MobileWorkspaceRequest} from './mobileWorkspaceProtocol';
 import {RemoteCommunityPanel} from './RemoteCommunityPanel';
 import {createCommunityForwardGate,type RemoteCommunityDevice,type RemoteCommunityProjects} from './remoteCommunity';
-import {createProjectCreationIntentStore} from './projectLaunchIntent';
+import {createProjectCreationIntentStore, projectCreationIntentFingerprint} from './projectLaunchIntent';
+import {createCodexNewConversationIntentStore, reserveVerifiedCodexNewIntent} from './codexNewConversationIntent';
+import {runCodexNewConversationFlow} from './codexNewConversationFlow';
 import {AiTerminalPanel, type AiTerminalEntry} from './AiTerminalPanel';
 import {WORKROOM_SESSION_FULLSCREEN_QUERY,isWorkroomNewTaskState,isWorkroomSessionViewState,useWorkroomSessionFullscreen,withoutWorkroomSessionView} from './workroomSessionView';
 import { PortalCatalog } from './portal-main';
+import { remoteFeatureAvailability } from './remoteFeatureAvailability';
 import { WorkspaceThemePicker } from './WorkspaceThemePicker';
 import { initialWorkspaceTab, isWorkspaceTab, type WorkspaceTab } from './workspaceNavigation';
 import { PortalEmailCodeLogin } from './PortalEmailCodeLogin';
@@ -1067,6 +1071,8 @@ function RemoteControlPortalApp() {
     send:async()=>{throw new Error(WORKROOM_ATTACH_COMMUNITY_REFUSAL);}}),[]);
   // Per selected Mac: the transport changes with the controller, so the v2 flag never leaks across hosts.
   const commonMemoryRpcV2=status.supportedFeatures?.includes(COMMON_MEMORY_RPC_V2_FEATURE)??false;
+  // 기록 panels: a feature missing before the extended manifest is confirmed is 「checking」, not 「update the Mac app」.
+  const featureChecking=(feature:string)=>remoteFeatureAvailability(status,feature)==='checking';
   // One 공통기억 view once this connection's cloud list really answered with no local group left outside the cloud;
   // until then (or on an unmigrated cloud) '이 Mac의 기억' stays. Keyed by connection so another Mac starts unknown.
   const [cloudList,setCloudList]=useState<{key:string;state:PortalCloudListState}|null>(null);
@@ -1768,14 +1774,31 @@ function RemoteControlPortalApp() {
     window.location.reload();
   };
 
+  const checkCodexNewSupport = async () => {
+    const controller = selectedController, hostId = selectedHostId;
+    if (!controller || !hostId) return;
+    setError(''); setNotice('Mac의 새 대화 지원 여부를 확인하는 중입니다.');
+    try { await controller.probeSupportedFeatures(false, true); syncHosts(); }
+    catch (error) { if (selectedHostIdRef.current === hostId) reportTapError(error, '새 대화 지원 확인'); }
+    finally { if (selectedHostIdRef.current === hostId) setNotice(''); }
+  };
+
   const runAction = async (project: QrRemoteControlProjectCard, action: QrRemoteControlAction, input?: string) => {
     const controller = selectedController;
     const hostId = selectedHostId;
     if (!controller || !hostId) return;
+    if (action === 'codex.thread.start' && project.kind === 'worktree') {
+      setError('안전한 새 대화 생성은 기본 프로젝트에서 사용하세요. 워크트리는 현재 지원하지 않습니다.');
+      return;
+    }
+    if (action === 'codex.thread.start' && (!controller.status().extendedCapabilitiesChecked || !controller.status().supportedFeatures?.includes('codex-new-receipt-v1'))) {
+      setError('Mac의 새 대화 지원 여부를 다시 확인해 주세요.');
+      return;
+    }
     const host = controller.status().hostName ?? '연결된 Mac';
     const targetKind = project.kind === 'worktree' ? '워크트리' : '프로젝트';
     const firstConversationNotice = action === 'codex.thread.start'
-      ? '\n\n고정된 안전 안내문과 짧은 응답을 새 대화로 저장한 뒤, 이 Mac의 ChatGPT Codex 앱에 그 대화를 열도록 요청합니다. 파일 수정이나 임의 명령은 요청하지 않습니다.'
+      ? '\n\n고정된 안전 안내문과 짧은 응답을 저장하고 Mac의 Codex 앱에 열도록 요청합니다. 이전 요청의 결과가 확인되지 않았다면 그 요청을 먼저 복구할 수 있습니다. 파일 수정이나 임의 명령은 요청하지 않습니다.'
       : action === 'app.codex'
         ? '\n\n이 프로젝트에 정확히 연결된 가장 최근 Codex 대화만 다시 엽니다. 연결 기록이 없으면 다른 대화를 대신 열지 않습니다.'
         : action === 'app.hermes'
@@ -1791,14 +1814,70 @@ function RemoteControlPortalApp() {
     // action itself. Buttons disable, but without a line of text a slow git
     // pull reads as a frozen page.
     // The button's label, quoted (「Pull」 is not a pull request) and without a second 요청 after one it already has.
-    setNotice(`${host} · ${project.name}: 「${remoteControlActionLabel(action).replace(/\s*요청$/, '')}」 요청을 보냈습니다. Mac이 끝낼 때까지 기다리는 중입니다.`);
+    setNotice(action === 'codex.thread.start'
+      ? `${host} · ${project.name}: 이전 요청과 연결 상태를 확인하는 중입니다.`
+      : `${host} · ${project.name}: 「${remoteControlActionLabel(action).replace(/\s*요청$/, '')}」 요청을 보냈습니다. Mac이 끝낼 때까지 기다리는 중입니다.`);
     try {
-      await controller.sendAction(action, project.controlId, undefined, input);
+      if (action === 'codex.thread.start') {
+        const intents = createCodexNewConversationIntentStore(window.localStorage, () => commonMemoryUuid(), projectCreationIntentFingerprint);
+        const identity = controller.projectCreationIdentity();
+        const descriptor = project.controlId;
+        const intent = await reserveVerifiedCodexNewIntent({
+          store: intents, hostId: identity.hostId, controllerId: identity.controllerId,
+          projectControlId: descriptor, fingerprint: projectCreationIntentFingerprint,
+          reviewExact: async id => {
+            const exact = await controller.sendAction('codex.thread.review.v2', project.controlId, undefined, id);
+            if (!exact?.ok || !('codexNewChatReceipt' in exact)) throw new Error('이전 요청의 확인 응답을 받지 못했습니다.');
+            return exact.codexNewChatReceipt;
+          },
+          cancelMissing: async id => {
+            if (!(await confirmAction(`${host}\n${targetKind} ‘${project.name}’\n\n이 기기에 남은 이전 새 대화 요청의 추가 실행을 차단할까요? 현재 선택한 프로젝트가 맞는지 확인하세요. 이미 Mac에 도착한 요청은 취소되지 않으며, 새 대화가 없었다는 뜻은 아닙니다.`))) return false;
+            try {
+              const result = await controller.sendAction('codex.thread.cancel.v2', project.controlId, undefined, id);
+              if (!result?.ok) throw new Error('취소 결과가 확인되지 않았습니다.');
+              return true;
+            } catch {
+              throw new Error('이전 요청이 대기·전송 중이거나 취소 결과가 불확실합니다. 연결을 확인한 뒤 같은 요청을 다시 확인하세요.');
+            }
+          },
+        });
+        if (!intent) {
+          if (selectedHostIdRef.current === hostId) setNotice('이전 요청의 추가 실행을 차단했습니다. 새 대화가 필요하면 다시 요청하세요.');
+          return;
+        }
+        const outcome = await runCodexNewConversationFlow({
+          actionId: intent.actionId,
+          start: async id => {
+            const result = await controller.sendAction('codex.thread.start.v2', project.controlId, undefined, undefined, undefined, id);
+            if (!result?.ok) throw new Error('새 대화 요청의 결과를 확인하지 못했습니다. 같은 요청으로 다시 확인하세요.');
+          },
+          acknowledge: async id => {
+            const result = await controller.sendAction('codex.thread.ack.v2', project.controlId, undefined, id);
+            if (!result?.ok) throw new Error('새 대화 결과 확인을 완료하지 못했습니다. 같은 요청으로 다시 확인하세요.');
+          },
+          review: async () => {
+            const result = await controller.sendAction('codex.thread.review.v2', project.controlId);
+            const receipt = result?.ok && 'codexNewChatReceipt' in result ? result.codexNewChatReceipt : null;
+            if (receipt?.state === 'started') return {actionId: receipt.actionId, state: 'started' as const};
+            if (receipt?.state === 'completed') return {actionId: receipt.actionId, state: 'completed' as const};
+            return null;
+          },
+          confirmReview: () => confirmAction(`${host}\n${targetKind} ‘${project.name}’\n\n이전 원격 새 대화 결과를 Mac의 Codex 프로젝트에서 확인했나요? 확인을 완료하면 다음 새 대화 요청을 허용합니다.`),
+          complete: () => intents.complete(intent),
+        });
+        if (outcome !== 'created-or-recovered') {
+          syncHosts();
+          if (selectedHostIdRef.current === hostId) setNotice(outcome === 'reviewed'
+            ? `${host} · ${project.name}: 이전 요청의 확인을 완료했습니다. 새 대화는 추가로 만들지 않았습니다.`
+            : '이전 요청은 확인 대기 중입니다. Mac의 Codex 프로젝트를 확인해 주세요.');
+          return;
+        }
+      } else {
+        await controller.sendAction(action, project.controlId, undefined, input);
+      }
       syncHosts();
       if (selectedHostIdRef.current === hostId) {
-        setNotice(action === 'codex.thread.start'
-          ? `${host} · ${project.name}: 프로젝트 연결을 확인하고 Mac의 Codex 앱에 열기를 요청했습니다. 실제 화면은 Mac에서 확인하세요.`
-          : action === 'app.hermes'
+        setNotice(action === 'app.hermes'
             ? `${host} · ${project.name}: 최근 Hermes 대화 열기 요청을 Mac에 전달했습니다. 실제 대화 선택은 Mac의 Hermes Desktop에서 확인하세요.`
             : `${host} · ${project.name}: ${remoteControlActionDone(action)}`);
       }
@@ -3321,18 +3400,22 @@ function RemoteControlPortalApp() {
           <button className="remote-secondary" onClick={()=>{setRemotePane('community');navigateWorkspace('workroom');}}>커뮤니티 · 업무 스레드</button>
         </div>
         {status.projects.slice(0, 4).map(project => <button className="workspace-recent-project" key={project.controlId} onClick={() => openProjectWorkroom(project)}><FolderGit2 aria-hidden="true" /><span className="workspace-recent-project-name">{project.name}</span><span className="workspace-recent-project-action">작업하기</span></button>)}
+        {/* This Mac's weekly allowance (read only). It is keyed on the host id and the first project's id string — never on
+            `status.projects`, a new array every status poll (the `list` storm, docs/claude/workroom.md). */}
+        <RemoteWeeklyUsageCard available={status.supportedFeatures?.includes(MOBILE_WORKSPACE_FEATURE)??false} macOnline={status.state==='online'&&!hostSilent(status.hostLastSeenAt)} phoneOnline={phoneOnline}
+          host={selectedHostId??''} hostName={status.hostName??''} controlId={status.projects[0]?.controlId??''} transport={workroomTransport}/>
       </section>}
       {workspaceTab==='workroom'&&!sessionFullscreen&&paneButtons}
       {workspaceTab==='workroom'&&sessionFullscreen&&remotePane!=='workroom'&&moreGroup}
       {workspaceTab==='records'&&<div className="workspace-project-source" role="group" aria-label="기록 종류"><button aria-pressed={recordMode==='said'} onClick={()=>setRecordMode('said')}>{t(lang,'tabWhatISaid')}</button><button aria-pressed={recordMode==='memories'} onClick={()=>{setRecordMode('memories');setCatalogVisited(true);}}>{t(lang,'tabMemory')}</button><button aria-pressed={recordMode==='common'} onClick={()=>setRecordMode('common')}>{t(lang,'tabCommonMemory')}</button><button aria-pressed={recordMode==='device'} onClick={()=>setRecordMode('device')}>{t(lang,'deviceMemory')}</button>{localCommonVisible&&<button aria-pressed={recordMode==='local-common'} onClick={()=>setRecordMode('local-common')}>이전 로컬 기억</button>}</div>}
-      <RemoteCommonMemoryPanel key={'cloud-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='common'} available={status.supportedFeatures?.includes(COMMON_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2} cacheKey={workspaceConnectionKey} onProjectsChanged={syncHosts} onCloudList={reportCloudList} workroom={commonMemoryWorkroom} focusMemoryId={commonFocusMemoryId} onFocusHandled={()=>setCommonFocusMemoryId(undefined)}/>
-      <RemoteDeviceMemoryPanel key={'device-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='device'} available={status.supportedFeatures?.includes(DEVICE_MEMORY_FEATURE)??false} online={status.state==='online'} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
-      <RemoteMetaCommonMemoryPanel key={workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='local-common'} available={status.supportedFeatures?.includes(META_MEMORY_REMOTE_FEATURE)??false} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
+      <RemoteCommonMemoryPanel key={'cloud-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='common'} available={status.supportedFeatures?.includes(COMMON_MEMORY_REMOTE_FEATURE)??false} checking={featureChecking(COMMON_MEMORY_REMOTE_FEATURE)} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2} cacheKey={workspaceConnectionKey} onProjectsChanged={syncHosts} onCloudList={reportCloudList} workroom={commonMemoryWorkroom} focusMemoryId={commonFocusMemoryId} onFocusHandled={()=>setCommonFocusMemoryId(undefined)}/>
+      <RemoteDeviceMemoryPanel key={'device-'+workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='device'} available={status.supportedFeatures?.includes(DEVICE_MEMORY_FEATURE)??false} checking={featureChecking(DEVICE_MEMORY_FEATURE)} online={status.state==='online'} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
+      <RemoteMetaCommonMemoryPanel key={workspaceConnectionKey} visible={workspaceTab==='records'&&recordMode==='local-common'} available={status.supportedFeatures?.includes(META_MEMORY_REMOTE_FEATURE)??false} checking={featureChecking(META_MEMORY_REMOTE_FEATURE)} online={status.state==='online'} phoneOnline={phoneOnline} hostName={status.hostName??undefined} transport={workroomTransport} rpcV2={commonMemoryRpcV2}/>
       {(['records','manage','duty'] as const).map(mode=>{
         // 「프로젝트 작업 마무리」 is not what 원격 작업 opens on: it appears only when a project was chosen
         // for it (its card's 「기억·정리·테스트」, or the workroom's 「세션 기억하기」) and closes again.
         const visible=mode==='records'?workspaceTab==='records'&&recordMode==='said':workspaceTab==='workroom'&&(mode==='duty'?remotePane==='duty':remotePane==='projects'&&!!managementTarget);
-        return <div key={mode} hidden={!visible}><MobileWorkspacePanel key={workspaceConnectionKey} testerAvailable={status.supportedFeatures?.includes('tester-v1')??false} mode={mode} visible={visible} projects={status.projects} available={status.supportedFeatures?.includes(MOBILE_WORKSPACE_FEATURE)??false} online={status.state==='online'} initialTarget={mode==='records'?undefined:managementTarget} onClose={mode==='manage'?()=>setManagementTarget(''):undefined} transport={(request:MobileWorkspaceRequest)=>{if(!selectedController)throw new Error('기기에 연결하세요.');return selectedController.sendTerminal(request)}} onDraft={(targetId,prompt)=>{setTerminalEntry({nonce:Date.now(),targetId,prompt});setRemotePane('workroom');navigateWorkspace('workroom');}} /></div>;
+        return <div key={mode} hidden={!visible}><MobileWorkspacePanel key={workspaceConnectionKey} testerAvailable={status.supportedFeatures?.includes('tester-v1')??false} mode={mode} visible={visible} projects={status.projects} available={status.supportedFeatures?.includes(MOBILE_WORKSPACE_FEATURE)??false} checking={featureChecking(MOBILE_WORKSPACE_FEATURE)} online={status.state==='online'} initialTarget={mode==='records'?undefined:managementTarget} onClose={mode==='manage'?()=>setManagementTarget(''):undefined} transport={(request:MobileWorkspaceRequest)=>{if(!selectedController)throw new Error('기기에 연결하세요.');return selectedController.sendTerminal(request)}} onDraft={(targetId,prompt)=>{setTerminalEntry({nonce:Date.now(),targetId,prompt});setRemotePane('workroom');navigateWorkspace('workroom');}} /></div>;
       })}
       {catalogVisited && <section hidden={!catalogVisible} className="workspace-catalog">
         <PortalCatalog tab={catalogTab} visible={catalogVisible} onOpenCommonMemory={memoryId=>{setCommonFocusMemoryId(memoryId);setRecordMode('common');navigateWorkspace('records');}} onRemoteWork={project=>{setRemotePane('projects');navigateWorkspace('workroom');setNotice(project?`${project.name}에서 작업하려면 작업 기기와 해당 프로젝트를 선택하세요.`:'작업할 기기와 프로젝트를 선택하세요.')}} />
@@ -4104,6 +4187,8 @@ function RemoteControlPortalApp() {
                 key={row.card.controlId}
                 project={row.card}
                 busy={status.busy}
+                codexNewSupported={!status.extendedCapabilitiesChecked ? null : !!status.supportedFeatures?.includes('codex-new-receipt-v1')}
+                onCheckCodexSupport={() => void checkCodexNewSupport()}
                     onWorkroom={openProjectWorkroom} onManage={project=>{setManagementTarget(project.controlId);setRemotePane('projects');navigateWorkspace('workroom');window.scrollTo(0,0)}}
                 onAction={(target, action) => { void runProjectAction(target, action); }}
               />
@@ -4123,6 +4208,8 @@ function RemoteControlPortalApp() {
                     key={card.controlId}
                     project={card}
                     busy={status.busy}
+                    codexNewSupported={!status.extendedCapabilitiesChecked ? null : !!status.supportedFeatures?.includes('codex-new-receipt-v1')}
+                    onCheckCodexSupport={() => void checkCodexNewSupport()}
                     onWorkroom={openProjectWorkroom} onManage={project=>{setManagementTarget(project.controlId);setRemotePane('projects');navigateWorkspace('workroom');window.scrollTo(0,0)}}
                     onAction={(target, action) => { void runProjectAction(target, action); }}
                   />

@@ -57,6 +57,17 @@ guard !FileManager.default.fileExists(atPath: own.path) else { exit(4) }
   deepStrictEqual(readdirSync(join(statusDir, 'AgentsToZ Screen')), ['status.json']);
   if (!existsSync(statusPath)) throw Error('status file missing');
   console.log('status file: matches the main app contract, owner-only, replaced in one rename');
+  // The shared portable suite cannot compile macOS event taps. Keep the pure native ledger regressions in the
+  // configured ios-core check too; these tests never create a tap, request TCC or post an input event.
+  // ScreenControllerTests: the Mac controllers store, grant, session limits and capture exclusion, in memory, never the keychain.
+  // WeeklyUsageOutboxTests: the main app's weekly-alert hand-off files, read strictly and removed before sending, in a temp folder.
+  if (process.platform === 'darwin') {
+    const host = Bun.spawnSync(['swift', 'test', '--package-path', packagePath, '--filter', 'LocalInputMonitorTests|ScreenControllerTests|WeeklyUsageOutboxTests'],
+      {stdout: 'pipe', stderr: 'pipe', timeout: 180_000});
+    if (host.exitCode !== 0) throw Error('Native local-input ledger checks failed:\n' + host.stdout.toString() + host.stderr.toString());
+    console.log(host.stdout.toString().trim());
+  }
+
 } finally {
   rmSync(temporary, {recursive: true, force: true});
 }

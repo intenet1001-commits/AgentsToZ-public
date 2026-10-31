@@ -1,7 +1,7 @@
 /**
  * Codex rejects a reasoning effort its model does not offer («Reasoning effort `X` is not supported for model `Y`»),
- * so 「에포트 자동」 passes `-c model_reasoning_effort` only when the model is proven to be one of the bundled catalog
- * models (all of which offer low, medium and high — strings of codex-cli 0.162.1). Anything else: no flag.
+ * so 「에포트 자동」 passes `-c model_reasoning_effort` only when the model is proven to be one of the catalog models
+ * (Codex's own model metadata; all of them offer low, medium and high — src/teamEffortCatalog.ts). Anything else: no flag.
  * Read-only, bounded; never touches the real ~/.codex in these tests.
  */
 import {afterEach, expect, test} from 'bun:test';
@@ -9,6 +9,7 @@ import {chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {CODEX_EFFORT_CATALOG, CODEX_EFFORT_CONFIG_MAX_BYTES, codexEffortModel, codexTopLevelConfig, type CodexEffortConfigFiles} from '../src/codexEffortModel';
+import {teamEffortLevels} from '../src/teamEffortCatalog';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) { try { chmodSync(dir, 0o700); } catch {} rmSync(dir, {recursive: true, force: true}); } });
@@ -28,9 +29,33 @@ test('no model configured → the Codex default (a catalog model) → low, mediu
 
 test('every catalog model offers low, medium and high', () => {
   expect(Object.keys(CODEX_EFFORT_CATALOG).length).toBeGreaterThan(5);
-  for (const [model, levels] of Object.entries(CODEX_EFFORT_CATALOG)) expect([...levels]).toEqual(['low', 'medium', 'high']);
-  expect(check({[`${CODEX_HOME}/config.toml`]: 'model = "gpt-6-sol"   # mine\n'})).toEqual({ok: true, model: 'gpt-6-sol', allowed: ['low', 'medium', 'high']});
+  for (const [model, levels] of Object.entries(CODEX_EFFORT_CATALOG)) expect(levels.slice(0, 3)).toEqual(['low', 'medium', 'high']);
+  expect(check({[`${CODEX_HOME}/config.toml`]: 'model = "gpt-6-sol"   # mine\n'})).toEqual({ok: true, model: 'gpt-6-sol', allowed: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']});
   expect(check({[`${CODEX_HOME}/config.toml`]: "model = 'gpt-5.5'\n"})).toMatchObject({ok: true, model: 'gpt-5.5'});
+});
+
+test('this Mac\'s configured default gpt-6.1-terra is a catalog model, so a pinned level can be proven (2026-10-28 regression)', () => {
+  // Codex's model metadata (~/.codex/models_cache.json, codex-cli 0.163.0) lists gpt-6.1-terra with low…ultra. Before the
+  // catalog knew it, every pinned Codex member on the CLI default model was refused at the Workroom start ('model-unknown').
+  const user = `${CODEX_HOME}/config.toml`;
+  expect(check({[user]: 'model = "gpt-6.1-terra"\nmodel_reasoning_effort = "low"\n'})).toEqual({ok: true, model: 'gpt-6.1-terra', allowed: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']});
+  // Hidden models a config can still name: their metadata stops at max.
+  expect(CODEX_EFFORT_CATALOG['gpt-reserve']).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  expect(CODEX_EFFORT_CATALOG['codex-auto-review']).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  // Older entries keep only low/medium/high; a model the metadata does not list stays unproven.
+  expect(CODEX_EFFORT_CATALOG['gpt-5.5']).toEqual(['low', 'medium', 'high']);
+  expect(Object.hasOwn(CODEX_EFFORT_CATALOG, 'gpt-7-nova')).toBe(false);
+  expect(codexEffortModel({env: {HOME}, cwd: CWD, launchModel: 'gpt-7-nova', managedConfigPath: '/fixture/etc/managed_config.toml'}, memory({}))).toEqual({ok: false, why: 'model'});
+});
+
+test('the builder\'s Codex effort list is exactly what the launch proof allows, model by model', () => {
+  for (const [model, levels] of Object.entries(CODEX_EFFORT_CATALOG)) {
+    expect(teamEffortLevels('codex', model)).toEqual(levels);
+    expect(codexEffortModel({env: {HOME}, cwd: CWD, launchModel: model, managedConfigPath: '/fixture/etc/managed_config.toml'}, memory({}))).toEqual({ok: true, model, allowed: levels});
+  }
+  // The CLI default offers what every catalog model offers; an uncatalogued model offers nothing to pin (자동 only).
+  expect(teamEffortLevels('codex')).toEqual(['low', 'medium', 'high']);
+  expect(teamEffortLevels('codex', 'gpt-7-nova')).toEqual([]);
 });
 
 test('anything that is not a proven catalog model gives no flag', () => {
@@ -116,7 +141,7 @@ test('a model the app passes with -m (a team member) is the one proven; config m
   const user = `${CODEX_HOME}/config.toml`;
   const chosen = (files: Record<string, string>, launchModel: string, args: string[] = []) =>
     codexEffortModel({env: {HOME}, cwd: CWD, args, launchModel, managedConfigPath: '/fixture/etc/managed_config.toml'}, memory(files));
-  expect(chosen({[user]: 'model = "my-local-llama"\n'}, 'gpt-6.1-sol')).toEqual({ok: true, model: 'gpt-6.1-sol', allowed: ['low', 'medium', 'high']});
+  expect(chosen({[user]: 'model = "my-local-llama"\n'}, 'gpt-6.1-sol')).toEqual({ok: true, model: 'gpt-6.1-sol', allowed: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']});
   expect(chosen({}, 'gpt-next-preview')).toEqual({ok: false, why: 'model'});
   expect(chosen({[user]: 'model_provider = "ollama"\n'}, 'gpt-6.1-sol')).toEqual({ok: false, why: 'provider'});
   expect(chosen({[user]: 'profile = "work"\n'}, 'gpt-6.1-sol')).toEqual({ok: false, why: 'profile'});

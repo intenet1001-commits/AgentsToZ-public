@@ -102,6 +102,15 @@ public struct ScreenPushClient: Sendable {
         return true
     }
 
+    /// Asks the relay to push a weekly allowance alert to its recipients. Returns false, having signed and sent nothing,
+    /// without an endpoint. Sent once: the caller never retries one whose outcome it does not know.
+    @discardableResult
+    public func notify(_ usage: WeeklyUsageEvent, signer: TranscriptSigner) async throws -> Bool {
+        guard isEnabled else { return false }
+        _ = try await post("weekly-usage", try await usage.signed(by: signer))
+        return true
+    }
+
     /// The commands waiting for this Mac. Empty, having signed and sent nothing, without an endpoint.
     public func fetch(_ fetch: MacFetch, signer: TranscriptSigner) async throws -> [SignedPushMessage] {
         guard isEnabled else { return [] }

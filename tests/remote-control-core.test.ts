@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import {createHash} from 'node:crypto';
 import {
   REMOTE_CONTROL_MAX_SESSIONS,
   REMOTE_CONTROL_PROTOCOL_VERSION,
@@ -78,6 +80,34 @@ function action(input: {
     ...input,
   };
 }
+
+test('v2 new chat routes only through an allowed project and derives controller identity on the host',async()=>{
+  const f=gatewayFixture([target({actions:['codex.thread.start']})]);
+  const core=new RemoteControlCore(f.gateway,{hostName:'Mac',randomBytes:sequentialRandom()});
+  const pairing=core.enable('http://192.168.1.20:43210'),ready=await core.pair(pairingToken(pairing.pairingUrl));
+  const controlId=ready.projects[0]!.controlId;
+  const raw=action({sessionToken:ready.sessionToken,actionId:'start-v2',action:'codex.thread.start.v2',controlId,remoteConfirmed:true});
+  expect(parseRemoteControlClientMessage(raw)).toEqual(raw);
+  expect(()=>parseRemoteControlClientMessage({...raw,controllerId:'forged'})).toThrow();
+  const result=await core.perform(raw);expect(result.ok).toBe(true);
+  expect(f.calls[0]?.controllerId).toBe('lan:'+createHash('sha256').update('agentstoz-lan-pairing-v1:'+ready.sessionToken).digest('hex'));
+  expect(f.calls[0]?.sessionExpiresAt).toBeTruthy();
+  expect(JSON.stringify(result)).not.toContain(ready.sessionToken);
+  expect(()=>parseRemoteControlClientMessage(action({sessionToken:ready.sessionToken,actionId:'bad-ack',action:'codex.thread.ack.v2',controlId,input:'bad id',remoteConfirmed:true}))).toThrow();
+});
+
+for(const invalidation of ['revoke','remove-project','expire'] as const) test(`v2 submission guard rejects ${invalidation} during preparation`,async()=>{
+  let targets=[target({actions:['codex.thread.start']})],release!:()=>void,entered!:()=>void,submissions=0,now=1000;
+  const blocked=new Promise<void>(resolve=>{release=resolve;});const readyForRevoke=new Promise<void>(resolve=>{entered=resolve;});
+  const gateway:RemoteControlGateway={listRegisteredProjects:()=>targets,executeRegisteredProjectAction:async input=>{
+    entered();await blocked;await input.assertActive?.();submissions++;
+  }};
+  const core=new RemoteControlCore(gateway,{hostName:'Mac',randomBytes:sequentialRandom(),now:()=>now,absoluteTtlMs:1000});
+  const pairing=core.enable('http://192.168.1.20:43210'),session=await core.pair(pairingToken(pairing.pairingUrl));
+  const pending=core.perform(action({sessionToken:session.sessionToken,actionId:'pending',action:'codex.thread.start.v2',controlId:session.projects[0]!.controlId,remoteConfirmed:true}));
+  await readyForRevoke;if(invalidation==='revoke')core.closeSession(session.sessionToken);else if(invalidation==='remove-project')targets=[];else now+=1001;
+  release();const result=await pending;expect(result.ok).toBe(false);expect(submissions).toBe(0);
+});
 
 describe('QR remote-control core security boundary', () => {
   test('updates only the display name while preserving an existing session', async () => {
@@ -1008,5 +1038,28 @@ describe('w13: workroom-attach-v1 rides the extended list only', () => {
     expect(old.ok && 'supportedFeatures' in old ? old.supportedFeatures : []).toEqual(['terminal-refs-v1', 'workspace-v1', 'meta-memory-v1', 'voc-v1', 'voc-inbox-v1', 'tester-v1', 'voice-v1', 'conversations-v1']);
     const extended = await core.perform(action({ sessionToken: ready.sessionToken, actionId: 'extended-merged-caps', action: 'protocol.capabilities.extended' }));
     expect(extended.ok && 'supportedFeatures' in extended ? extended.supportedFeatures : []).toEqual(all);
+  });
+
+  // The list above is built from hand-picked options and leaves out device memory and threads. This one is built from the
+  // options api-server.ts really passes, at both places it starts the internet host. A 17th entry is not dropped quietly:
+  // `normalizeRemoteControlSupportedFeatures` throws inside the RemoteControlCore constructor, so internet remote control
+  // would not start at all. A phone feature that needs no flag (`workroom.effort`, `usage.weekly`) adds nothing here.
+  test('the production host’s extended list, from the exact api-server.ts options, fits the 16 a RemoteControlCore accepts', async () => {
+    const { remoteControlHostSupportedFeatures } = await import('../src/remoteControlInternetAgent');
+    const { REMOTE_CONTROL_SUPPORTED_FEATURE_LIMIT } = await import('../src/remoteControlProtocol');
+    const source = readFileSync(new URL('../api-server.ts', import.meta.url), 'utf8');
+    const sites = [...source.matchAll(/(?:new RemoteControlInternetAgent|createRemoteControlInternetAgent)\(\{([\s\S]*?)\n\s*\}\);/g)].map(m => m[1]!);
+    expect(sites).toHaveLength(2);
+    const optionsOf = (block: string) => Object.fromEntries([...block.matchAll(/\b(\w+(?:Supported|Gateway))\s*:\s*([A-Za-z_$][\w$]*)/g)].map(([, key, value]) => [key!, value !== 'false']));
+    const [first, second] = sites.map(optionsOf);
+    expect(second).toEqual(first!);
+    expect(Object.keys(first!).sort()).toEqual(['attachmentsSupported', 'commonMemorySupported', 'conversationGateway', 'deviceMemorySupported', 'historySupported', 'metaMemorySupported',
+      'taskGateway', 'terminalGateway', 'testerSupported', 'threadsSupported', 'voiceSupported', 'workspaceSupported']);
+    const production = remoteControlHostSupportedFeatures(first!);
+    expect(production.length).toBeLessThanOrEqual(REMOTE_CONTROL_SUPPORTED_FEATURE_LIMIT);
+    expect(production).not.toContain('usage-weekly-v1');
+    expect(() => new RemoteControlCore(gatewayFixture().gateway, { hostName: 'Mac', randomBytes: sequentialRandom(), supportedFeatures: production })).not.toThrow();
+    const overflow = [...production, ...Array.from({ length: REMOTE_CONTROL_SUPPORTED_FEATURE_LIMIT + 1 - production.length }, (_, i) => `overflow-${i}-v1`)];
+    expect(() => new RemoteControlCore(gatewayFixture().gateway, { hostName: 'Mac', randomBytes: sequentialRandom(), supportedFeatures: overflow })).toThrow('REMOTE_CONTROL_SUPPORTED_FEATURES_INVALID');
   });
 });

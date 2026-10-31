@@ -108,14 +108,19 @@ describe('What I said memory-scoped sharing', () => {
     expect(apiSource).toContain('resolveRegisteredWhatISaidTargets(input.memoryIds)');
     expect(apiSource).toContain(".in('memory_id', memoryIds)");
     expect(apiSource).toContain("source: 'supabase' as const");
-    expect(apiSource).toContain('pushWhatISaidRemote(project, { explicit: true })');
+    // Manual sync stays an explicit push; since 2026-10-28 it also stops at the shared request deadline,
+    // and the bounded wrapper hands those same options to the push.
+    expect(apiSource).toContain('pushWhatISaidRemoteBefore(project, { explicit: true, deadlineAt: window.pushDeadlineAt })');
+    expect(apiSource).toContain('() => withWhatISaidRemoteFileLock(() => pushWhatISaidRemote(project, options), options.deadlineAt),');
     expect(apiSource).not.toContain(".eq('device_id', identity.deviceId);\n          if (error) remoteError");
     expect(rustSource).toContain('("POST", "/api/what-i-said/sync")');
   });
 
   test('panel exposes multi-memory update and sends memory ids to shared search', () => {
     expect(panelSource).toContain('data-testid="what-i-said-memory-sync-selection"');
-    expect(panelSource).toContain('whatISaidApi.sync(selectedMemoryIds, backfill)');
+    // The selected ids go to the sync API through the continuation helper (2026-10-28).
+    expect(panelSource).toContain('syncWhatISaidAcrossRequests(selectedMemoryIds, backfill)');
+    expect(panelSource).toContain('= (ids, value) => whatISaidApi.sync(ids, value)');
     expect(panelSource).toContain('{ memoryIds: [projectFilterMemoryId] }');
     expect(panelSource).toContain("/^wisr1_(?:0|[1-9][0-9]*)$/");
     expect(panelSource).toContain('리멤버세션을 하지 않았어도');
