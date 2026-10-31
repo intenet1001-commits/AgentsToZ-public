@@ -2522,11 +2522,6 @@
       "argv": [
         "bun",
         "scripts/check-maintainer-web.ts",
-        "tests/voice-dock-viewport.e2e.mjs",
-        "src/cornerFloatClearance.ts",
-        "src/components/WorkspaceTools.tsx",
-        "src/components/AgentsToZVoiceDock*",
-        "src/uiZoom.ts",
         "first-project"
       ],
       "requires": [
@@ -2540,7 +2535,12 @@
         "src/SetupWizard.tsx",
         "src/App.tsx",
         "tests/onboarding-first-project-app-ui.mjs",
-        "scripts/check-maintainer-web.ts"
+        "scripts/check-maintainer-web.ts",
+        "tests/voice-dock-viewport.e2e.mjs",
+        "src/cornerFloatClearance.ts",
+        "src/components/WorkspaceTools.tsx",
+        "src/components/AgentsToZVoiceDock*",
+        "src/uiZoom.ts"
       ],
       "covers": [
         "A newcomer registers an existing folder and finds the same project after reloading",

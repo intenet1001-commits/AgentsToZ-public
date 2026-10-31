@@ -100,7 +100,9 @@ try{
  await profileEntry.click();await profilePanel.waitFor();
  await profilePanel.getByRole('button',{name:'아젠투지 설정 닫기',exact:true}).click();
  await profilePanel.waitFor({state:'hidden'});
- await page.getByText('도구 및 설정',{exact:true}).click();
+ // Since d23b8bdc a press inside a dialog the tools popover opened no longer counts as an outside click, so closing the
+ // panel with its own button leaves 도구 및 설정 open. Clicking the toggle again here would close it.
+ assert.equal(await profileEntry.isVisible(),true,'Closing the panel keeps the tools popover that opened it');
  const shortcut=page.getByTestId('control-center-project-shortcut');
  await shortcut.locator('summary').click();
  await shortcut.getByRole('button',{name:'다른 Mac의 아젠투지 복원',exact:true}).click();
@@ -110,7 +112,7 @@ try{
  assert.equal(calls.some(c=>c.path==='/api/control-center/create'),false,'Choosing restore must not create a new Control');
  await dialog.getByRole('button').first().click();
  await dialog.waitFor({state:'hidden'});
- await page.getByText('도구 및 설정',{exact:true}).click();
+ if(!(await profileEntry.isVisible())) await page.getByText('도구 및 설정',{exact:true}).click();
  await page.locator('[data-help-key="btn-setup-wizard"]').click();
  await page.getByRole('heading',{name:'내 기기와 연결',exact:true}).waitFor();
  await page.getByRole('button',{name:'첫 워크룸 열기',exact:true}).click();

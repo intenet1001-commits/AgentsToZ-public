@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1668.0.0"
+version = "1669.0.0"
 description = "포트 관리기 — 로컬 개발 서버 포트 & 워크트리 관리 도구"
 authors = ["CS & Company"]
 license = "Proprietary"
