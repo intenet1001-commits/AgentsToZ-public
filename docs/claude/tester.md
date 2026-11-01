@@ -172,6 +172,19 @@
   - 증거: 화면마다 `.agentstoz/maintainer/click-sweep/<id>/latest.json`(전체)·`summary.json`(작은 요약), 이력은
     `.agentstoz/maintainer/click-sweep/history.jsonl`. 앱의 프로젝트 테스트 세트 화면은 `summary.json`과 기준선 **존재**만 읽어
     세 번째 카드 「전수 클릭 세트」(`tester-click-sweep-set`)를 그린다(`src/testerSetsReader.ts`, 옛 호스트는 카드를 숨김).
+  - **앱에서 켜기(2026-11-01)**: 공통 계층은 설정을 만들지 않는다 — 어느 주소를 누를지는 프로젝트마다 다르다. 그래서 다른
+    프로젝트는 전부 「구성 전」에 머물렀다(사람이 JSON을 직접 써야 했다). 이제 `sets`가 구성 전 프로젝트에
+    `enableUrl`(ports.json의 등록 포트 → `http://127.0.0.1:<port>/`, 워크트리 대상은 null)을 싣는다.
+    문자열이면 카드에 「켜기 · 127.0.0.1:<port>」, null이면 **「대상 아님」**(누를 화면이 없음 — 실패도 통과도 아님),
+    칸이 없으면 옛 호스트라 버튼이 없다. 켜기(`sweep-enable`)는 리스 안에서 `sweep install`로 엔진을 깔고
+    설정을 `wx`로 **없을 때만** 쓴다(손으로 고친 설정·엔진은 덮어쓰지 않는다). 「기준선 만들기」(`sweep-baseline`)는
+    기준선이 없는 화면이 있을 때만 보이고 `sweep run --update`를 리스를 잡은 채 백그라운드로 한 번 돌린다.
+    상태(`job`)는 메모리에만 있고 도는 동안만 카드가 4초마다 다시 읽는다. 종료 코드 3(서버 안 뜸·Playwright 없음)은
+    「실행하지 못했습니다(통과 아님)」로 보인다. 둘 다 커밋하지 않고, MCP 도구·휴대폰에는 열지 않았다(앱 화면 전용).
+    검증: `tests/tester-click-sweep-enable.test.ts`(실제 러너로 설정·엔진·덮어쓰기 거절·실행 불가),
+    `tests/project-tester-sets-ui.mjs`(1440 켜기→기준선, 390 대상 아님).
+  - ⚠️ 앱은 등록 폴더(주 체크아웃)의 **작업 트리**를 읽는다. 2026-11-01 아젠투지 카드가 「구성 전」이던 원인은 주 체크아웃이
+    다른 세션의 옛 브랜치(main보다 95커밋 뒤)에 머물러 설정 파일이 없던 것이었다 — 카드를 고치기 전에 그 폴더의 HEAD부터 본다.
   - 검증: `tests/click-sweep-engine.test.ts`(AgentsToZ가 아닌 작은 정적 페이지에 CLI로 — 기준선 없음 실패 → `--update` →
     통과 → 버튼이 사라지면 실패, 쓰기 요청이 서버에 닿지 않음, loopback 외 거절, 구성 없음 2),
     `tests/maintainer/test_click_sweep.py`(사본 일치·구성 없음은 통과 아님·설치가 로컬 편집을 지킴·command 화면 판정),

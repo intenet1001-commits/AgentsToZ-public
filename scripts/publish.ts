@@ -109,8 +109,10 @@ const PRIVATE_ONLY_PATHS = {
     "docs/plans/voice-remote-growth-2026-10-15/VERIFICATION-791.json",
     "docs/plans/voice-remote-growth-2026-10-15/CODEX-RETURN.md",
     "docs/plans/voice-remote-growth-2026-10-15/SESSION-2026-10-15.md",
+    // Supabase consolidation notes name live project refs and carry migration logs with user ids.
+    "docs/plans/supabase-portmanagement-meokgo-consolidation-2026-10-28.md",
   ]),
-  prefixes: [".agentstoz-private/", "docs/superpowers/", "docs/design/", "docs/handoffs/", "release/"],
+  prefixes: [".agentstoz-private/", "docs/superpowers/", "docs/design/", "docs/handoffs/", "release/", "docs/plans/meokgo-migration-tools/"],
   patterns: [
     /(?:^|\/)\.agent-memory-use(?:\/|$)/,
     /^docs\/PROJECT_MEMORY.*_HANDOFF.*\.md$/i,

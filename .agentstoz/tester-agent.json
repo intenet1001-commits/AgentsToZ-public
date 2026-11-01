@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "templateVersion": "1.7.4",
+  "templateVersion": "1.8.0",
   "instructionVersion": 2,
-  "minimumRunnerVersion": "1.7.4",
-  "managedRunnerHash": "cecdfa60cd718a1ca56a2e5614a5b9f12663cb8f528eb0d44f58b854bb48181e",
+  "minimumRunnerVersion": "1.8.0",
+  "managedRunnerHash": "050fe440a0b3ad60da78e3ad9de23f54121c66b09356137b5aafe0dca1d6f09a",
   "defaultProfile": "quick",
   "scenarioPack": {
-    "version": "1.7.4",
+    "version": "1.8.0",
     "hashes": {
       ".agentstoz/scenarios/common/conflict-markers.json": "a2669d990b24fd35e71614fd371c9bc73939ebbcb9da39f9678a75caa28f3b36",
       ".agentstoz/scenarios/common/json-valid.json": "02a6144e4f420b6ae00dbbc5cc92ef185653924ce8a35d00b04f261514e535ab",

@@ -7,7 +7,7 @@ export const TESTER_ENDPOINT = '/api/agent-runtime/tester';
  * 계층이 자동으로 자란다는 설계가 제안 단계에서 끊겨 있었다(실측: 12개 프로젝트에 제안이 쌓였는데
  * 시나리오가 된 프로젝트는 이 저장소 하나뿐).
  */
-export const TESTER_OPERATIONS = ['sets','status','ensure','plan','apply','start','read','cancel','handoff','proposals','accept','persona-discover','persona-review','persona-accept','persona-reject','persona-create','persona-propose','improvements','improvement-record'] as const;
+export const TESTER_OPERATIONS = ['sets','status','ensure','plan','apply','start','read','cancel','handoff','proposals','accept','persona-discover','persona-review','persona-accept','persona-reject','persona-create','persona-propose','improvements','improvement-record','sweep-enable','sweep-baseline'] as const;
 export type TesterOperation = typeof TESTER_OPERATIONS[number];
 export interface TesterTarget { portId: string; workspaceTargetId?: string }
 /**
@@ -69,7 +69,15 @@ export interface TesterSets {
 export interface TesterClickSweepSet {
   state:'none'|'configured'|'invalid';problem?:string;engine:'present'|'absent';
   surfaces:{id:string;label:string;kind:'command'|'url';baselinePresent:boolean;last:{at:string;passed:boolean;elements:number;clicked:number;failures:number;updated:boolean}|null}[];
+  /**
+   * 구성 전일 때만: 「켜기」가 쓸 이 Mac의 loopback 주소(등록된 포트에서 만든다). `null`은 등록된 포트가 없어 누를 화면을
+   * 정할 수 없다는 뜻이다(대상 아님). 칸이 없으면 옛 호스트다 — 그때는 버튼을 그리지 않는다.
+   */
+  enableUrl?:string|null;
+  /** 이 앱이 시작한 기준선 만들기(`sweep run --update`)의 마지막 상태. 앱이 다시 시작되면 사라진다(결과는 summary.json에 남는다). */
+  job?:TesterClickSweepJob;
 }
+export interface TesterClickSweepJob {state:'running'|'passed'|'failed'|'unavailable';message:string;at:string}
 export interface TesterPersonaEvolution {supported:true;commonPersonas?:TesterCommonPersonaPack;projectRevision?:string;context:{revision:string;changedPaths:string[];changesTruncated?:boolean;memoryTitles:string[];failedChecks:string[];checks:{id:string;covers:string[];paths:string[];kind:'contract'|'screen'}[]};candidates:TesterPersonaCandidate[];existing:{id:string;goal:string;extends?:string;role?:string}[];automaticAI:false;candidateLimit:number;discoveredLimit?:number;personaLimit:number;additionalCandidates?:number;droppedCandidates?:number}
 /** 자동 발견된 제안 하나. 받아들이기 전에는 어떤 프로필에서도 돌지 않는다. */
 export interface TesterProposal { id:string; title:string; intent?:string; origin?:string; safety?:string; tags?:string[]; argv?:string[] }
@@ -81,7 +89,7 @@ export interface TesterResult {improvements?:TesterImprovements;sets?:TesterSets
 export class TesterError extends Error {
   constructor(readonly code:string, message:string, readonly status=409) { super(message); }
 }
-const fields:Record<TesterOperation,string[]> = {sets:[],status:[],ensure:[],plan:[],apply:['revision'],start:['revision','requestId','profileId'],read:['runId'],cancel:['runId'],handoff:['mode','runId','personaId'],proposals:[],accept:['scenarioId'],'persona-discover':[],'persona-review':[],'persona-accept':['candidateId','revision','goal','checkIds'],'persona-reject':['candidateId','revision'],'persona-create':['templateId','revision','goal','checkIds','situation','journey','successCriteria'],'persona-propose':['revision','role','reason','goal','situation','journey','successCriteria','sourcePaths','checkIds'],improvements:[],'improvement-record':['improvement']};
+const fields:Record<TesterOperation,string[]> = {sets:[],status:[],ensure:[],plan:[],apply:['revision'],start:['revision','requestId','profileId'],read:['runId'],cancel:['runId'],handoff:['mode','runId','personaId'],proposals:[],accept:['scenarioId'],'persona-discover':[],'persona-review':[],'persona-accept':['candidateId','revision','goal','checkIds'],'persona-reject':['candidateId','revision'],'persona-create':['templateId','revision','goal','checkIds','situation','journey','successCriteria'],'persona-propose':['revision','role','reason','goal','situation','journey','successCriteria','sourcePaths','checkIds'],improvements:[],'improvement-record':['improvement'],'sweep-enable':[],'sweep-baseline':[]};
 export function parseTesterRequest(input:unknown):TesterRequest {
   const r=input as TesterRequest;
   const bad=()=>{throw new TesterError('TESTER_REQUEST_INVALID','테스터 요청을 확인하세요.',400);};

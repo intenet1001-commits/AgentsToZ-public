@@ -609,7 +609,8 @@
       "covers": [
         "프로젝트·폴더 페이지에서 두 테스트 세트 구성 보기",
         "모바일에서도 역할·상황·여정·성공 기준 확인",
-        "구성 화면을 열 때 테스트나 AI가 실행되지 않음"
+        "구성 화면을 열 때 테스트나 AI가 실행되지 않음",
+        "전수 클릭 카드: 포트가 있으면 켜기·기준선 만들기, 없으면 대상 아님"
       ],
       "evidence": "production-desktop-and-mobile-chromium"
     },
@@ -622,7 +623,8 @@
         "./tests/tester-personas.test.ts",
         "./tests/tester-agent-api.test.ts",
         "./tests/tester-agent-client.test.ts",
-        "./tests/tester-sets.test.ts"
+        "./tests/tester-sets.test.ts",
+        "./tests/tester-click-sweep-enable.test.ts"
       ],
       "timeoutSeconds": 180,
       "requires": [
@@ -2330,7 +2332,9 @@
         "./tests/onboarding-cloud-configuration.test.ts",
         "./tests/supabase-proxy-local-web-integration.test.ts",
         "./tests/mobile-google-setup.test.ts",
-        "./tests/google-workspace-steps.test.ts", "./tests/helpdesk-assist.test.ts", "./tests/helpdesk-assist-control-races.test.ts"
+        "./tests/google-workspace-steps.test.ts",
+        "./tests/helpdesk-assist.test.ts",
+        "./tests/helpdesk-assist-control-races.test.ts"
       ],
       "timeoutSeconds": 120,
       "kind": "contract",

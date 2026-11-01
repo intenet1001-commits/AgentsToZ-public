@@ -9,12 +9,22 @@ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:req=>new Response(Bun.
 const browser=await chromium.launch();
 try{for(const width of [1440,390]){
  const page=await browser.newPage({viewport:{width,height:900},hasTouch:width===390});const requests=[],errors=[];page.on('pageerror',e=>errors.push(e.message));
+ // 전수 클릭 카드(2026-11-01): 넓은 화면은 포트가 등록된 프로젝트로 켜기 → 기준선 만들기를, 좁은 화면은 포트가 없는 「대상 아님」을 본다.
+ const at='2026-11-01T00:00:00.000Z';
+ let sweep=width===390?{state:'none',engine:'absent',surfaces:[],enableUrl:null}:{state:'none',engine:'absent',surfaces:[],enableUrl:'http://127.0.0.1:9050/'};
+ const sets=()=>({...testerSetsFixture,clickSweep:sweep});
  await page.route('**/*',async route=>{
   const u=new URL(route.request().url());if(u.origin===`http://127.0.0.1:${server.port}`&&!u.pathname.startsWith('/api/'))return route.continue();
   const respond=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
   if(u.pathname==='/api/agent-runtime/tester'){
    const request=route.request().postDataJSON();requests.push(request);assert.equal(request.portId,project.id);
-   if(request.operation==='sets')return respond({success:true,sets:testerSetsFixture});
+   if(request.operation==='sets'){
+    const answer=respond({success:true,sets:sets()});
+    if(sweep.job?.state==='running')sweep={...sweep,surfaces:[{...sweep.surfaces[0],baselinePresent:true,last:{at,passed:true,elements:12,clicked:12,failures:0,updated:true}}],job:{state:'passed',message:'첫 기준선을 만들었습니다. 프로젝트 Git에 커밋하면 버튼 목록의 이력이 됩니다.',at}};
+    return answer;
+   }
+   if(request.operation==='sweep-enable'){assert.equal(sweep.enableUrl,'http://127.0.0.1:9050/','No 켜기 without a registered port');sweep={state:'configured',engine:'present',surfaces:[{id:'web',label:'로컬 화면',kind:'url',baselinePresent:false,last:null}]};return respond({success:true,sets:sets()});}
+   if(request.operation==='sweep-baseline'){sweep={...sweep,job:{state:'running',message:'버튼을 하나씩 눌러 첫 기준선을 만드는 중입니다.',at}};return respond({success:true,sets:sets()});}
    if(request.operation==='status')return respond({success:true,status:{installation:'ready',installedVersion:'1.7.0',availableVersion:'1.7.0',configurationRevision:'a'.repeat(64),projectRevision:'b'.repeat(64),profiles:[{id:'quick',checks:['permissions','journey'],configured:true}],defaultProfile:'quick',environmentReady:true,latest:null,active:null,freshness:'unknown',instructionsConnected:true,memoryLinked:false,limitations:[],targets:[{id:project.id,label:project.name}]}});
    throw Error('Viewing composition must not execute: '+request.operation);
   }
@@ -39,6 +49,22 @@ try{for(const width of [1440,390]){
  await composition.getByTestId('tester-persona-set').screenshot({path:join(evidence,`project-persona-set-${width}.png`)});
  await page.screenshot({path:join(evidence,`project-tester-sets-${width}.png`)});
  await composition.getByRole('button',{name:'구성 새로고침',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[data-testid="tester-general-set"]')?.textContent.includes('2개 검사'));
- assert.ok(requests.every(r=>['sets','status'].includes(r.operation)));assert.deepEqual(errors,[]);
+ assert.ok(requests.every(r=>['sets','status'].includes(r.operation)));
+ const card=composition.getByTestId('tester-click-sweep-set');await card.scrollIntoViewIfNeeded();
+ if(width===390){
+  await card.getByText('대상 아님',{exact:true}).waitFor();await card.getByText(/등록된 로컬 포트가 없어 누를 화면이 없습니다/).waitFor();
+  assert.equal(await card.getByRole('button').count(),0,'No 켜기 without a port');
+ }else{
+  await card.getByText('구성 전',{exact:true}).waitFor();
+  await card.getByRole('button',{name:'켜기 · 127.0.0.1:9050',exact:true}).click();
+  await card.getByText('1개 화면',{exact:true}).waitFor();await card.getByText(/기준선 필요 1개 — 개발 서버를 켜 둔 채 만드세요/).waitFor();
+  await card.getByRole('button',{name:'기준선 만들기',exact:true}).click();
+  await card.getByRole('button',{name:'기준선 만드는 중…',exact:true}).waitFor();
+  await card.getByText(/첫 기준선을 만들었습니다/).waitFor({timeout:15000});await card.getByText('기준선 1/1 · 로컬 화면',{exact:true}).waitFor();
+  assert.equal(await card.getByRole('button',{name:'기준선 만들기',exact:true}).count(),0,'The baseline button leaves once every surface has one');
+  assert.deepEqual(requests.filter(r=>r.operation.startsWith('sweep')).map(r=>r.operation),['sweep-enable','sweep-baseline']);
+ }
+ await card.screenshot({path:join(evidence,`project-click-sweep-set-${width}.png`)});
+ assert.deepEqual(errors,[]);
  console.log(`project tester sets production UI ${width}px PASS`);await page.close();
 }}finally{await browser.close();server.stop(true);}

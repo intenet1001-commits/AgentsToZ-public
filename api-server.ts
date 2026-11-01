@@ -1049,6 +1049,12 @@ function getTesterAgentHost():TesterAgentHost {
       return {root:target.cwd,label:target.projectLabel,targets:inventory.targets.filter(t=>t.targetId===base.targetId||t.projectTargetId===base.targetId).map(t=>({id:t.targetId,label:t.label}))};
     },
     lease:async root=>{const lease=await acquireManagedWorkspaceLease(root);return {release:()=>{releaseManagedWorkspaceLease(lease,'project tester');}};},
+    // 전수 클릭 「켜기」: 등록된 포트의 loopback 주소. 워크트리는 그 포트의 서버가 주 체크아웃을 띄우므로 대상이 아니다.
+    localUrl:async(ref:TesterTarget)=>{
+      if(ref.workspaceTargetId&&ref.workspaceTargetId!==ref.portId)return null;
+      const port=Number(((await readPortsFileStrict()).find(p=>p.id===ref.portId) as {port?:unknown}|undefined)?.port);
+      return Number.isInteger(port)&&port>0&&port<65536?`http://127.0.0.1:${port}/`:null;
+    },
   });
 }
 // Source development intentionally opens the local Codex task surface for

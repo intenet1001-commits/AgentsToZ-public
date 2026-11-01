@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {TesterClickSweepSet,TesterSets,TesterTarget} from './testerAgentContract';
 import {testerSetsCache,type TesterSetsSnapshot} from './testerSetsCache';
+import {testerRequest} from './testerAgentClient';
 import './ProjectTesterSets.css';
 
 export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen}:{portId:string;workspaceTargetId?:string;compact?:boolean;onOpen?:()=>void}){
@@ -29,7 +30,7 @@ export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen
       <div className="tester-sets-grid">
         <div data-testid="tester-general-set"><strong>일반 테스트 세트</strong><b>{label(data.general.state,data.general.count,'개 검사')}</b><span>공통 시나리오 {data.general.commonCount}개 · {data.general.commonVersion?`v${data.general.commonVersion}`:'연결 전'}</span><span>프로젝트 검사 {data.general.count}개 · 범위 {data.general.profiles.length}개 · 추가 시나리오 {data.general.projectScenarioCount}개</span>{!!data.general.unconfigured&&<span className="tester-sets-gap">실행 설정 필요 {data.general.unconfigured}개</span>}{!!data.general.commonModified&&<span>공통 파일 수정 {data.general.commonModified}개</span>}</div>
         <div data-testid="tester-persona-set"><strong>페르소나 세트</strong><b>{label(data.personas.state,data.personas.count,'개 역할')}</b><span>공통 관점 {data.personas.templates.length}종 · {data.personas.commonVersion?`v${data.personas.commonVersion}`:'연결 전'}</span><span>프로젝트 역할 {data.personas.count}개 · 검토 후보 {data.personas.candidates}개</span>{!!data.personas.needsChecks&&<span className="tester-sets-gap">검사 구현 필요 {data.personas.needsChecks}개</span>}{!!data.personas.commonModified&&<span>공통 관점 수정 {data.personas.commonModified}개</span>}</div>
-        <ClickSweepCard set={data.clickSweep}/>
+        <ClickSweepCard set={data.clickSweep} portId={portId} workspaceTargetId={workspaceTargetId}/>
       </div>
       {(data.general.problem||data.personas.problem)&&<p role="alert">{data.general.problem??data.personas.problem}</p>}
       <p className="tester-sets-policy">{data.instructionVersion>=2&&data.agents.every(a=>a.instructionsProvided)?'개발 변경 검증 시 두 세트를 사용하는 프로젝트 지침 제공됨':'에이전트 공통 지침 연결·업데이트 필요'} · {data.agents.map(a=>`${a.label} ${a.instructionsProvided?'지침 있음':'지침 필요'}`).join(' · ')}</p>
@@ -39,20 +40,42 @@ export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen
   </div>;
 }
 const sweepTime=(at:string)=>{const d=new Date(at);return Number.isNaN(d.getTime())?'':d.toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});};
-/** 세 번째 세트: 버튼을 하나씩 다 눌러 보는 전수 클릭. 옛 호스트(칸 없음)에서는 카드를 숨긴다 — 「모름」을 「구성 전」으로 말하지 않는다. */
-function ClickSweepCard({set}:{set?:TesterClickSweepSet}){
+/**
+ * 세 번째 세트: 버튼을 하나씩 다 눌러 보는 전수 클릭. 옛 호스트(칸 없음)에서는 카드를 숨긴다 — 「모름」을 「구성 전」으로 말하지 않는다.
+ * 등록된 포트가 있으면 「켜기」 한 번으로 설정·엔진을 깔고, 「기준선 만들기」로 첫 목록을 만든다. 포트가 없으면 누를 화면이 없으니
+ * 「대상 아님」이다(실패도 통과도 아님).
+ */
+function ClickSweepCard({set,portId,workspaceTargetId}:{set?:TesterClickSweepSet;portId:string;workspaceTargetId?:string}){
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const running=set?.job?.state==='running';
+  // 캐시만 새로 읽는다 — 보던 내용을 지우지 않아 카드가 깜빡이지 않는다.
+  const onChanged=()=>testerSetsCache.refresh({portId,...(workspaceTargetId?{workspaceTargetId}:{})});
+  // 기준선 만들기는 몇 분 걸린다. 도는 동안만 4초마다 다시 읽고, 끝나면 멈춘다.
+  useEffect(()=>{if(!running)return;const timer=setInterval(()=>testerSetsCache.refresh({portId,...(workspaceTargetId?{workspaceTargetId}:{})}),4000);return ()=>clearInterval(timer);},[running,portId,workspaceTargetId]);
   if(!set)return null;
+  const act=async(operation:'sweep-enable'|'sweep-baseline')=>{
+    setBusy(true);setError('');
+    try{await testerRequest({portId,...(workspaceTargetId?{workspaceTargetId}:{}),operation});onChanged();}catch(e){setError(e instanceof Error?e.message:'요청을 처리하지 못했습니다.');}finally{setBusy(false);}
+  };
   const surfaces=set.surfaces,last=surfaces.map(s=>s.last).filter((l):l is NonNullable<typeof l>=>!!l).sort((a,b)=>b.at.localeCompare(a.at))[0];
   const missing=surfaces.filter(s=>!s.baselinePresent).length,failing=surfaces.filter(s=>s.last&&!s.last.passed).length;
+  const noScreen=set.state==='none'&&set.enableUrl===null;
+  const job=set.job;
   return <div data-testid="tester-click-sweep-set"><strong>전수 클릭 세트</strong>
-    <b>{set.state==='none'?'구성 전':set.state==='invalid'?'설정 확인':`${surfaces.length}개 화면`}</b>
-    {set.state==='none'&&<span>화면의 버튼을 하나씩 다 눌러 보고 목록을 이력으로 남깁니다 · .agentstoz/click-sweep.json으로 켭니다</span>}
+    <b>{set.state==='none'?(noScreen?'대상 아님':'구성 전'):set.state==='invalid'?'설정 확인':`${surfaces.length}개 화면`}</b>
+    {set.state==='none'&&!noScreen&&<span>화면의 버튼을 하나씩 다 눌러 보고 목록을 이력으로 남깁니다</span>}
+    {set.state==='none'&&set.enableUrl===undefined&&<span>.agentstoz/click-sweep.json으로 켭니다</span>}
+    {noScreen&&<span>등록된 로컬 포트가 없어 누를 화면이 없습니다. 웹 화면이 있으면 프로젝트에 포트를 등록하세요</span>}
+    {set.state==='none'&&typeof set.enableUrl==='string'&&<button type="button" data-testid="tester-click-sweep-enable" disabled={busy} onClick={()=>void act('sweep-enable')}>{busy?'켜는 중…':`켜기 · ${set.enableUrl.replace(/^https?:\/\//,'').replace(/\/$/,'')}`}</button>}
     {set.state==='configured'&&<span>기준선 {surfaces.length-missing}/{surfaces.length} · {surfaces.map(s=>s.label).join(' · ')}</span>}
     {last&&<span>최근 {last.passed?(last.updated?'기준선 갱신':'통과'):'실패'} · 대상 {last.elements}개 · 클릭 {last.clicked}회{sweepTime(last.at)?` · ${sweepTime(last.at)}`:''}</span>}
-    {set.state==='configured'&&!last&&<span>아직 실행 기록이 없습니다</span>}
-    {!!missing&&<span className="tester-sets-gap">기준선 필요 {missing}개 — 처음 한 번 --update</span>}
+    {set.state==='configured'&&!last&&!job&&<span>아직 실행 기록이 없습니다</span>}
+    {!!missing&&!running&&<span className="tester-sets-gap">기준선 필요 {missing}개{surfaces.some(s=>!s.baselinePresent&&s.kind==='url')?' — 개발 서버를 켜 둔 채 만드세요':''}</span>}
+    {set.state==='configured'&&!!missing&&<button type="button" data-testid="tester-click-sweep-baseline" disabled={busy||running} onClick={()=>void act('sweep-baseline')}>{running?'기준선 만드는 중…':'기준선 만들기'}</button>}
+    {job&&<span role="status" className={job.state==='failed'||job.state==='unavailable'?'tester-sets-gap':undefined}>{job.message}</span>}
     {!!failing&&<span className="tester-sets-gap">최근 실패 화면 {failing}개</span>}
     {set.problem&&<span className="tester-sets-gap">{set.problem}</span>}
+    {error&&<span role="alert" className="tester-sets-gap">{error}</span>}
   </div>;
 }
 function TesterSetComposition({data}:{data:TesterSets}){
