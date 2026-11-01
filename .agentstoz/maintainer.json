@@ -2715,14 +2715,16 @@
         "bun",
         "test",
         "./tests/ios-shell-contract.test.ts",
-        "./tests/phone-connect-link.test.ts"
+        "./tests/phone-connect-link.test.ts",
+        "./tests/internet-approval-preset.test.ts"
       ],
       "timeoutSeconds": 90,
       "evidence": "source-contracts-only",
       "covers": [
         "Web and bundled workspace switches preserve separate existing sign-ins and Mac approvals",
         "Legacy web recovery is offered only for the same portal with an existing store outside pending deletion",
-        "Switching does not copy credentials, issue QR or expand Mac grants"
+        "Switching does not copy credentials, issue QR or expand Mac grants",
+        "Mac approval of a new phone pre-selects the last approved permissions only, says so, and still needs the 6-digit code"
       ],
       "paths": [
         "mobile/ios/App/LANWorkroomView.swift",
@@ -2734,7 +2736,10 @@
         "mobile/ios/App/ScreenRegistrationSheet.swift",
         "mobile/ios/App/Info.plist",
         "native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift",
-        "native/screen-control/Sources/ScreenControlCore/Registration.swift"
+        "native/screen-control/Sources/ScreenControlCore/Registration.swift",
+        "tests/internet-approval-preset.test.ts",
+        "src/internetApprovalPreset.ts",
+        "src/InternetQrRemoteControlDialog.tsx"
       ]
     },
     {

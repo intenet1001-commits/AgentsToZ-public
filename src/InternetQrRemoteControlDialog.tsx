@@ -8,6 +8,7 @@ import {approveInternetSessionWithWorkroom} from './internetRemoteWorkroomApprov
 import {ALL_WORKROOM_TARGETS,workroomApprovalScope,workroomApprovalOptions} from './workroomApprovalScope';
 import {MOBILE_WORKSPACE_SCOPE_LABELS,type MobileWorkspaceScope} from './mobileWorkspaceProtocol';
 import {REMOTE_HISTORY_SCOPES,REMOTE_HISTORY_SCOPE_LABELS,historyGrantFields,toggleHistoryScope,type RemoteHistoryScope} from './workroomHistoryRemoteProtocol';
+import {describeInternetApprovalPrefill,prefillFromPreset,readInternetApprovalPreset,rememberInternetApproval} from './internetApprovalPreset';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
@@ -168,9 +169,12 @@ export function InternetQrRemoteControlDialog({
   const [workroomOptions,setWorkroomOptions]=useState<{value:string;label:string}[]>([]);
   const [workroomOptionError,setWorkroomOptionError]=useState('');
   const [pendingWorkroom,setPendingWorkroom]=useState<Record<string,PendingWorkroomGrant>>({});
+  /** Pending phones whose boxes were pre-selected from the last approval (sessionId → the card's one-line summary). */
+  const [approvalPrefills,setApprovalPrefills]=useState<Record<string,string>>({});
+  const prefillAppliedRef=useRef(new Set<string>());
   const [workroomConnections, setWorkroomConnections] = useState<WorkroomConnection[] | null>(null);
   useEffect(()=>{
-    if(!open){setWorkroomApprovals({});setWorkroomScopes({});setWorkroomFeatureScopes({});setWorkroomHistoryScopes({});setWorkroomConnections(null);return;}
+    if(!open){setWorkroomApprovals({});setWorkroomScopes({});setWorkroomFeatureScopes({});setWorkroomHistoryScopes({});setWorkroomConnections(null);prefillAppliedRef.current.clear();setApprovalPrefills({});return;}
     setWorkroomOptions([]);
     let stopped=false;
     Promise.all([terminalLocalRequest(AI_TERMINAL_PREFIX+'/access',{}).then(access=>{if(!stopped)setWorkroomConnections(access.connections??[]);return access;}),new AgentRuntimeClient().targets()]).then(([access,inventory])=>{
@@ -185,6 +189,7 @@ export function InternetQrRemoteControlDialog({
   const grantWorkroom=async(sessionId:string,scope:string,workspaceScopes=workroomFeatureScopes[sessionId]??[],historyScopes=workroomHistoryScopes[sessionId]??workroomConnections?.find(connection=>connection.id==='internet:'+sessionId)?.historyScopes??[])=>{
     const result=await terminalLocalRequest(AI_TERMINAL_PREFIX+'/access',{owner:'internet:'+sessionId,enabled:true,rememberDevice:true,workspaceScopes,...historyGrantFields(historyScopes),...workroomApprovalScope(scope,workroomOptions)});
     setWorkroomConnections(result.connections??[]);
+    rememberInternetApproval({workroom:true,scope,workspaceScopes,historyScopes});
     return result;
   };
   const setWorkroomFeatureScope=(sessionId:string,scope:MobileWorkspaceScope,enabled:boolean)=>setWorkroomFeatureScopes(current=>({
@@ -407,6 +412,40 @@ export function InternetQrRemoteControlDialog({
     [status?.sessions],
   );
 
+  // Pre-select a new pending phone's boxes from the last approval on this Mac — once per phone, so a box the
+  // person then unticks stays unticked. Waits for the workroom targets so a remembered scope is not misread
+  // as gone. Nothing is granted here: approval still needs the 6-digit code.
+  useEffect(() => {
+    if (!open) return;
+    const preset = readInternetApprovalPreset();
+    if (!preset) return;
+    if (preset.workroom && workroomOptions.length === 0 && !workroomOptionError) return;
+    const fresh = pendingSessions.filter(session => !prefillAppliedRef.current.has(session.sessionId));
+    if (!fresh.length) return;
+    const prefill = prefillFromPreset(preset, workroomOptions, AGENT_RUNTIME_MANAGED_EXECUTION_ENABLED);
+    if (!prefill) return;
+    const summary = describeInternetApprovalPrefill(prefill, workroomOptions);
+    for (const { sessionId } of fresh) {
+      prefillAppliedRef.current.add(sessionId);
+      const keep = <T,>(current: Record<string, T>, value: T) => sessionId in current ? current : { ...current, [sessionId]: value };
+      if (prefill.workroom) {
+        setWorkroomApprovals(current => keep(current, true));
+        if (prefill.scope) setWorkroomScopes(current => keep(current, prefill.scope));
+        setWorkroomFeatureScopes(current => keep(current, prefill.workspaceScopes));
+        setWorkroomHistoryScopes(current => keep(current, prefill.historyScopes));
+      }
+      if (prefill.conversation) setConversationScopeApprovals(current => keep(current, true));
+      if (prefill.task) setTaskScopeApprovals(current => keep(current, true));
+      setApprovalPrefills(current => ({ ...current, [sessionId]: summary }));
+    }
+  }, [open, pendingSessions, workroomOptions, workroomOptionError]);
+
+  const clearApprovalPrefill = (sessionId: string) => {
+    const drop = <T,>(current: Record<string, T>) => { const next = { ...current }; delete next[sessionId]; return next; };
+    setWorkroomApprovals(drop); setWorkroomScopes(drop); setWorkroomFeatureScopes(drop); setWorkroomHistoryScopes(drop);
+    setConversationScopeApprovals(drop); setTaskScopeApprovals(drop); setApprovalPrefills(drop);
+  };
+
   // Whether the QR on screen lets the app open its bundled portal (the Mac put its public
   // Supabase key in it). Unknown until a QR is shown in this dialog.
   const appChannelReady = useMemo(() => {
@@ -519,6 +558,9 @@ export function InternetQrRemoteControlDialog({
         grantConversationScope,
       ),workroomApprovals[session.sessionId]?()=>grantWorkroom(session.sessionId,workroomScope!,workroomFeatureScopes[session.sessionId]??[]):undefined);
       applyStatus(approval.status);
+      // The workroom half is remembered by grantWorkroom when it succeeds; an approval without it clears it.
+      rememberInternetApproval({conversation:grantConversationScope,task:grantTaskScope,...(workroomApprovals[session.sessionId]?{}:{workroom:false,workspaceScopes:[],historyScopes:[]})});
+      setApprovalPrefills(current=>{const next={...current};delete next[session.sessionId];return next;});
       if(approval.workroomError)setPendingWorkroom(current=>({...current,[session.sessionId]:{scope:workroomScope!,workspaceScopes:workroomFeatureScopes[session.sessionId]??[]}}));
       setApprovalCodes(current => {
         const next = { ...current };
@@ -582,6 +624,7 @@ export function InternetQrRemoteControlDialog({
         nextTaskScope,
         draft.conversation,
       ));
+      rememberInternetApproval({conversation:draft.conversation,task:nextTaskScope});
       setSessionScopeDrafts(current => {
         const next = { ...current };
         delete next[session.sessionId];
@@ -888,6 +931,7 @@ export function InternetQrRemoteControlDialog({
                               정확히 일치 — 승인
                             </button>
                           </div>
+                          {approvalPrefills[session.sessionId]&&<div className="internet-approval-prefill" data-testid="internet-approval-prefill" role="status"><p>{approvalPrefills[session.sessionId]}</p><button type="button" data-testid="clear-internet-approval-prefill" disabled={busy!==null} onClick={()=>clearApprovalPrefill(session.sessionId)}>미리 고른 권한 지우기</button></div>}
                           <label className="internet-workroom-consent">
                             <input type="checkbox" data-testid="grant-internet-workroom" aria-label={`${connectionDisplayName(internetConnectionLabelKey(session.sessionId),session.controllerName)} · 연결 ${session.sessionId.slice(-8)} 워크룸 작업 허용`} checked={workroomApprovals[session.sessionId]===true} disabled={busy!==null} onChange={e=>setWorkroomApprovals(current=>({...current,[session.sessionId]:e.target.checked}))}/>
                             <span>이 기기에서 워크룸 작업 허용 · 최대 30일<span className="block">선택한 프로젝트에서 CLI를 실행하고 입력·출력을 사용합니다. 재연결과 앱 재시작 후에도 유지됩니다.</span></span>

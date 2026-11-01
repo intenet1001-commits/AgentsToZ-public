@@ -28,3 +28,8 @@
 .internet-workroom-select-all button{min-height:44px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;color:var(--text-primary);background:var(--bg-secondary);cursor:pointer}
 .internet-workroom-select-all button:disabled{opacity:.5;cursor:wait}
 .internet-workroom-select-all span{font-size:11px;overflow-wrap:anywhere}
+.internet-approval-prefill{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px;line-height:1.6}
+.internet-approval-prefill p{flex:1 1 240px;margin:0;overflow-wrap:anywhere}
+.internet-approval-prefill button{min-height:44px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;color:var(--text-primary);background:var(--bg-elevated,var(--bg-secondary));cursor:pointer}
+.internet-approval-prefill button:disabled{opacity:.5;cursor:wait}
+.internet-approval-prefill button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
