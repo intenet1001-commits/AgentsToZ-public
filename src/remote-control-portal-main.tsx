@@ -52,7 +52,7 @@ import { PORTAL_IS_BUNDLED, PORTAL_SUPABASE_ANON_KEY, PORTAL_SUPABASE_URL, porta
 import type { PortalEmailCodeClient } from './portalEmailCodeAuth';
 import { PortalRemoteQrScanner } from './PortalRemoteQrScanner';
 import { PortalRemoteQrError } from './portalRemoteQr';
-import { bundledQrSupabaseMismatch } from './phoneConnectLink';
+import { remoteQrSupabaseMismatch } from './phoneConnectLink';
 import { PORTAL_FOREIGN_PAIRING_APP_HINT, PORTAL_FOREIGN_PAIRING_TITLE, PORTAL_FOREIGN_PAIRING_WHY, portalForeignPairing } from './portalForeignPairing';
 import {nativePortalOAuthAvailable,signInWithNativePortalOAuth} from './nativePortalOAuth';
 import type {AiTerminalRequest,AiTerminalResponse} from './aiTerminalProtocol';
@@ -439,7 +439,19 @@ function controllerPairingUrl(fragment: string): string | null {
   const origin = portalOrigin();
   const url = `${origin}/remote/#${fragment}`;
   const parsed = parseRemoteControlRelayPairingUrl(url);
-  return new URL(parsed.controllerUrl).origin === origin ? url : null;
+  if (new URL(parsed.controllerUrl).origin !== origin) return null;
+  refuseQrForOtherSupabase(parsed.bootstrap.supabase?.url);
+  return url;
+}
+
+/** The iPhone app marks every page it hosts — the web deployment too, not only the bundled one. */
+function qrMismatchSurface(): 'app' | 'browser' {
+  return PORTAL_IS_BUNDLED || (window as Window & { agentstozNativeWorkroom?: boolean }).agentstozNativeWorkroom === true ? 'app' : 'browser';
+}
+
+function refuseQrForOtherSupabase(qrSupabaseUrl: string | undefined): void {
+  const mismatch = remoteQrSupabaseMismatch(qrSupabaseUrl, PORTAL_SUPABASE_URL, qrMismatchSurface());
+  if (mismatch) throw new PortalRemoteQrError('WRONG_PORTAL', mismatch);
 }
 
 /**
@@ -1373,8 +1385,15 @@ function RemoteControlPortalApp() {
     void (async () => {
       const found = new Map<string, RemoteHostSource>();
       let scannedHostId: string | null = null;
+      let fromFragment: string | null = null;
       try {
-        const fromFragment = controllerPairingUrl(capturedPairingFragment);
+        fromFragment = controllerPairingUrl(capturedPairingFragment);
+      } catch (qrError) {
+        // A refused or malformed QR (e.g. another Supabase project) must not hide the phone's
+        // working stored sessions: report it and keep loading them.
+        if (!cancelled) reportError(qrError);
+      }
+      try {
         if (fromFragment) scannedHostId = await vault.seal(fromFragment);
         for (const entry of await sessionVault.loadAll()) {
           found.set(entry.hostId, { hostId: entry.hostId, restoredSession: entry.snapshot });
@@ -3223,10 +3242,9 @@ function RemoteControlPortalApp() {
   const catalogVisible = workspaceTab === 'bookmarks' || (workspaceTab === 'records' && recordMode==='memories') || workspaceTab === 'projects';
   const acceptPairing = async (pairingUrl: string) => {
     const parsed = parseRemoteControlRelayPairingUrl(pairingUrl);
-    // A 「폰 연결 링크」 pinned this app page to one Supabase project; a QR for another project wins,
-    // but only the app's own scanner can switch — refuse here with how, rather than fail later.
-    const mismatch = PORTAL_IS_BUNDLED ? bundledQrSupabaseMismatch(parsed.bootstrap.supabase?.url, PORTAL_SUPABASE_URL) : null;
-    if (mismatch) throw new PortalRemoteQrError('WRONG_PORTAL', mismatch);
+    // A QR for another Supabase project would be claimed in the wrong database and come back as
+    // 「만료된 QR」 — refuse here with how, on the bundled page and the web deployment alike.
+    refuseQrForOtherSupabase(parsed.bootstrap.supabase?.url);
     const hostId = parsed.bootstrap.hostId;
     if (manager.controller(hostId)) {
       selectHost(hostId);

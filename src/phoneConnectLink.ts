@@ -136,8 +136,28 @@ export function parsePhoneConnectLink(link: unknown): PhoneConnectLink {
  * the workroom and a relaunch restores it, so 「앱 첫 화면」 was unreachable without deleting the sign-in.
  */
 export function bundledQrSupabaseMismatch(qrSupabaseUrl: string | null | undefined, currentSupabaseUrl: string): string | null {
-  if (!qrSupabaseUrl || qrSupabaseUrl === currentSupabaseUrl) return null;
-  const host = (value: string) => value.replace(/^https:\/\//u, '');
-  return `이 QR은 다른 Supabase 프로젝트(${host(qrSupabaseUrl)})용입니다. 지금 연결은 ${host(currentSupabaseUrl)}입니다. `
-    + 'QR의 설정으로 바꾸려면 이 화면을 닫고 오른쪽 위 「연결 설정」의 「다른 연결 QR 스캔」으로 다시 찍으세요.';
+  return remoteQrSupabaseMismatch(qrSupabaseUrl, currentSupabaseUrl, 'app');
+}
+
+/**
+ * Any portal page, not only the bundled one. The web deployment shown inside the iPhone app had no
+ * check: on 2026-11-01 the Vercel build still pointed at the old project while the Mac's QR named the
+ * new one, so the claim looked the pairing up in the wrong database and the phone said 「이미 사용했거나
+ * 만료된 QR」 — sending the user to reissue QRs that could never work. Refuse before claiming instead.
+ * `app`: the page runs in the iPhone app (bundled, or the web deployment it hosts — both have the
+ * 「연결 설정」 rescan). `browser`: plain Safari/Chrome, which cannot switch projects at all.
+ */
+export function remoteQrSupabaseMismatch(
+  qrSupabaseUrl: string | null | undefined,
+  currentSupabaseUrl: string,
+  surface: 'app' | 'browser',
+): string | null {
+  const origin = (value: string) => value.trim().replace(/\/+$/u, '');
+  if (!qrSupabaseUrl || !origin(currentSupabaseUrl) || origin(qrSupabaseUrl) === origin(currentSupabaseUrl)) return null;
+  const host = (value: string) => origin(value).replace(/^https:\/\//u, '');
+  const head = `이 QR은 다른 Supabase 프로젝트(${host(qrSupabaseUrl)})용입니다. 지금 연결은 ${host(currentSupabaseUrl)}입니다. `;
+  return surface === 'app'
+    ? head + 'QR의 설정으로 바꾸려면 이 화면을 닫고 오른쪽 위 「연결 설정」의 「다른 연결 QR 스캔」으로 다시 찍으세요.'
+    : head + 'QR이 만료된 것이 아니라 이 웹 포털이 Mac과 다른 프로젝트에 연결돼 있습니다. '
+      + '포털 배포의 Supabase 설정을 Mac과 같게 맞추거나, AgentsToZ iPhone 앱으로 QR을 찍으세요.';
 }

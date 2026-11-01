@@ -207,9 +207,17 @@ push** 다.
   `bun tests/remote-copy-states.e2e.mjs <격리 빌드> [chromium|webkit] records-checking`(수정 전 빌드에서 「업데이트하면」으로 실패).
 - ⚠️ 같은 날의 실제 원인은 따로 있었다: **휴대폰이 옛 Supabase(`fvkmkq…`)에 로그인**해 있었고 이 Mac은 `agentstoz`(`yfbiv…`)였다.
   Vercel 포털(= `DEFAULT_REMOTE_CONTROLLER_ORIGIN`) 빌드도 `VITE_SUPABASE_URL=fvkmkq…`였다. 둘이 다르면 릴레이·로그인이 서로
-  다른 DB로 가서 페어링 요청이 Mac에 닿지 않고(QR은 페이지가 `portalForeignPairing`/`bundledQrSupabaseMismatch`로 요청 전에 거절),
-  기록의 Mac 의존 패널은 전부 「연결하면」에 머물며, 장기기억은 옛 DB를 읽는다. 「휴대폰 기록 탭이 안 된다」면 **먼저 두 DB의 edge 로그에서
-  iPhone 요청이 어느 쪽에 찍히는지** 본다.
+  다른 DB로 가서 페어링 요청이 Mac에 닿지 않고, 기록의 Mac 의존 패널은 전부 「연결하면」에 머물며, 장기기억은 옛 DB를 읽는다.
+  「휴대폰 기록 탭이 안 된다」면 **먼저 두 DB의 edge 로그에서 iPhone 요청이 어느 쪽에 찍히는지** 본다.
+- **해결(2026-11-01):** 포털 Vercel 프로젝트(`DEFAULT_REMOTE_CONTROLLER_ORIGIN`의 배포 — 소유 계정의 Vercel CLI 로그인 필요)의 `VITE_SUPABASE_URL`·
+  `VITE_SUPABASE_ANON_KEY`를 Mac의 `portal.json`과 같은 agentstoz 값으로 바꾸고 `vercel redeploy`했다. 확인은 번들의
+  Supabase 호스트를 직접 본다(`/`와 `/remote/` 둘 다). Vite가 값을 빌드에 굽기 때문에 환경 변수만 바꾸면 반영되지 않고 재빌드가 필요하다.
+  iPhone **네이티브 앱도 이 웹 배포를 앱 안에 띄운다**(앱 자체 스캐너로 Supabase가 든 QR을 찍을 때만 내장 포털을 연다). 그래서 Vercel 값이
+  곧 앱의 원격 제어를 좌우했고, 새 TestFlight 없이 고쳐졌다. 바꾼 뒤에는 휴대폰에서 다시 로그인한다(세션이 프로젝트별이다).
+- ⚠️ 그 전까지 QR 불일치 거절은 **내장 포털에서만** 했다(`PORTAL_IS_BUNDLED ? bundledQrSupabaseMismatch…`). 웹 배포는 옛 DB에서 페어링을
+  찾다가 「이미 사용했거나 만료된 QR」을 띄웠고, 사용자는 될 수 없는 QR을 계속 다시 발급했다. 지금은 `remoteQrSupabaseMismatch`가 모든
+  포털 페이지에서 스캐너 경로와 주소(`#pair=`)로 연 경로 둘 다 요청 전에 거절한다. 앱 안(`agentstozNativeWorkroom`)이면 「연결 설정 →
+  다른 연결 QR 스캔」을, 일반 브라우저면 「QR 만료가 아니라 포털이 다른 프로젝트」라고 안내한다. 거절돼도 저장된 세션은 계속 불러온다.
 
 ## 휴대폰 홈 · 주간 잔여 — 연결한 Mac의 CLI 계정, 읽기 전용 (2026-10-29)
 

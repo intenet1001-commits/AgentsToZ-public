@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import golden from './fixtures/phone-connect-link-golden.json';
-import {buildPhoneConnectLink, bundledQrSupabaseMismatch, extractPhoneConnectLink, parsePhoneConnectLink, phoneConnectHostLabel, PHONE_CONNECT_LINK_PREFIX} from '../src/phoneConnectLink';
+import {buildPhoneConnectLink, bundledQrSupabaseMismatch, remoteQrSupabaseMismatch, extractPhoneConnectLink, parsePhoneConnectLink, phoneConnectHostLabel, PHONE_CONNECT_LINK_PREFIX} from '../src/phoneConnectLink';
 import {pairingSupabaseConfig} from '../src/remoteControlPairingSupabase';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -77,6 +77,32 @@ describe('bundled portal: a QR for another Supabase project', () => {
     // the toolbar 「연결 설정」 sheet's non-destructive 「다른 연결 QR 스캔」 (LANWorkroomView.swift).
     expect(message).toContain('오른쪽 위 「연결 설정」의 「다른 연결 QR 스캔」');
     expect(message).not.toContain('앱 첫 화면');
+  });
+});
+
+// 2026-11-01: the Vercel build still pointed at the old project while the Mac's QR named the new one. The web
+// deployment (shown inside the iPhone app too) had no check, claimed in the wrong database and told the user
+// 「이미 사용했거나 만료된 QR」, so every reissued QR failed the same way.
+describe('any portal page: a QR for another Supabase project is refused before claiming', () => {
+  test('a trailing slash is the same project; an unconfigured portal is left to its own error', () => {
+    expect(remoteQrSupabaseMismatch('https://a.supabase.co', 'https://a.supabase.co/', 'browser')).toBeNull();
+    expect(remoteQrSupabaseMismatch('https://a.supabase.co', '', 'browser')).toBeNull();
+    expect(remoteQrSupabaseMismatch(null, 'https://a.supabase.co', 'app')).toBeNull();
+  });
+  test('inside the iPhone app it points at the rescan; in a browser it says the QR is not expired', () => {
+    expect(remoteQrSupabaseMismatch('https://b.supabase.co', 'https://a.supabase.co', 'app'))
+      .toBe(bundledQrSupabaseMismatch('https://b.supabase.co', 'https://a.supabase.co'));
+    const browser = remoteQrSupabaseMismatch('https://b.supabase.co', 'https://a.supabase.co', 'browser')!;
+    expect(browser).toContain('b.supabase.co');
+    expect(browser).toContain('a.supabase.co');
+    expect(browser).toContain('만료된 것이 아니라');
+    expect(browser).not.toContain('「연결 설정」');
+  });
+  test('the portal checks both the scanner path and a QR opened from the address, on every page', () => {
+    const portal = readFileSync(join(import.meta.dir, '..', 'src', 'remote-control-portal-main.tsx'), 'utf8');
+    expect(portal).not.toContain('PORTAL_IS_BUNDLED ? bundledQrSupabaseMismatch');
+    expect(portal.match(/refuseQrForOtherSupabase\(parsed\.bootstrap\.supabase\?\.url\)/g)).toHaveLength(2);
+    expect(portal).toContain('agentstozNativeWorkroom === true');
   });
 });
 
