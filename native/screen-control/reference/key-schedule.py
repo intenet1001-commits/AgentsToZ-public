@@ -37,11 +37,18 @@ assert shared == mul(scalar('mac ephemeral'), devEph)[0].to_bytes(32, 'big')
 # Version 2 is negotiated inside the nonces: each ends with the marker and a big-endian version (Handshake.swift
 # VersionStamp), and the version both ends settled on is the one in T and in every label.
 stamp = lambda nonce, version: nonce[:22] + b'AZScreen' + version.to_bytes(2, 'big')
-for version, Np, Nm in [(1, b'\x11' * 32, b'\x22' * 32), (2, stamp(b'\x11' * 32, 2), stamp(b'\x22' * 32, 2))]:
-    T = lp([b'agentstoz.screen-control', version.to_bytes(2, 'big'), sha(x963(macId)), sha(x963(devId)), Np, x963(devEph), Nm, x963(macEph)])
-    H = sha(T)
+# Version 4 is what a phone offers and settles on (SR-36), version 5 only a Mac controller's: from 5 on T ends with
+# one more field, the peer class (1 phone, 2 controller). testSessionVersionFiveKeySchedule pins versions 4 and 5 and
+# the phone's version-4 hello bytes.
+for version, Np, Nm, peerClass in [(1, b'\x11' * 32, b'\x22' * 32, None), (2, stamp(b'\x11' * 32, 2), stamp(b'\x22' * 32, 2), None),
+                                   (4, stamp(b'\x11' * 32, 4), stamp(b'\x22' * 32, 4), None),
+                                   (5, stamp(b'\x11' * 32, 5), stamp(b'\x22' * 32, 5), 2)]:
+    fields = [b'agentstoz.screen-control', version.to_bytes(2, 'big'), sha(x963(macId)), sha(x963(devId)), Np, x963(devEph), Nm, x963(macEph)]
+    if peerClass is not None: fields.append(bytes([peerClass]))
+    H = sha(lp(fields))
     base = 'agentstoz.screen-control/v%d' % version
     print('version', version)
+    if version == 4: print('phone hello', lp([b'\x01', sha(x963(devId)), Np, x963(devEph)]).hex())
     print('transcriptHash', H.hex())
     for label in ['mac->device', 'device->mac', 'confirm mac', 'confirm device']:
         print(label, hkdf(H, shared, (base + ' ' + label).encode()).hex())

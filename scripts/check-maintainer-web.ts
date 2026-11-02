@@ -84,7 +84,7 @@ async function ownedViteOrigin() {
   }
   const address=vite.httpServer!.address(); if(!address||typeof address==='string')throw Error('Missing owned fixture address');
   const origin=`http://127.0.0.1:${address.port}`;
-  if(address.port===3001)throw Error('Fixture must not use the live API port');
+  if([3001,4723,52741].includes(address.port))throw Error('Fixture must not use an installed-app or reserved test port');
   return origin;
 }
 async function remoteTerminalChecks(full: boolean) {

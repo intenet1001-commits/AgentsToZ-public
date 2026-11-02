@@ -48,6 +48,10 @@ const labels = {
   en: {heading: 'My profile', empty: 'No personally reviewed profile entries yet.', confirm: 'Personally confirm profile', title: 'Profile entry title', body: 'Profile entry content', scope: 'Profile scope', project: 'Profile project', add: 'Add entry', deactivate: 'Stop using', restore: 'Use again', reread: 'Read saved profile again', review: 'Review draft against latest profile', chooseDraft: 'Use this draft', chooseSaved: 'Use latest saved values', checkSave: 'Check save status', originals: 'View What I Said originals', cancelAddition: 'Cancel addition', saved: 'was saved on this Mac', draftKept: 'Your draft has been preserved', conflictError: 'the saved profile changed', uncertain: 'Could not confirm whether the save completed', confirmed: 'Your saved content has been confirmed', invalid: '4,000 bytes', projectRequired: 'select a registered project', projectOnly: 'Selected project only', allProjects: 'All projects on this Mac', active: 'In use', inactive: 'Inactive', clean: 'Matches saved profile'},
 };
 mkdirSync('.agentstoz/maintainer/user-profile', {recursive: true});
+const previewLabels = {
+  ko: {project: '조회할 프로젝트', query: '작업 주제', action: '적용 이유 확인', empty: '선택한 범위와 주제에 맞는 활성 선호가 없습니다.', overlap: '같은 제목의 다른 내용이 겹칩니다.'},
+  en: {project: 'Project to check', query: 'Task topic', action: 'Explain selection', empty: 'No active preferences match this scope and topic.', overlap: 'Different content shares the same title.'},
+};
 for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) for (const language of ['ko', 'en']) {
   const t = labels[language];
   const browser = await engine.launch();
@@ -96,6 +100,32 @@ for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) for (
       await page.reload(); await title().waitFor();
       assert.equal(await title().inputValue(), '답변 언어'); assert.equal(await project.inputValue(), projectId);
       assert.equal(await confirm.isChecked(), false); assert.deepEqual(await writes(), [], 'reload reads persisted fixture data without saving');
+
+      // Saved-state explanation stays local, respects scope and never saves or resolves overlapping preferences.
+      const pt = previewLabels[language], preview = panel.getByTestId('user-profile-preview');
+      const requestsBeforePreview = await page.evaluate(() => window.profileFixture.calls.length);
+      await preview.locator('summary').click();
+      await preview.getByRole('button', {name: pt.action, exact: true}).click();
+      await preview.getByText(pt.empty, {exact: true}).waitFor();
+      await preview.getByRole('combobox', {name: pt.project, exact: true}).selectOption(projectId);
+      await preview.getByRole('textbox', {name: pt.query, exact: true}).fill('한국어');
+      await preview.getByRole('button', {name: pt.action, exact: true}).click();
+      await preview.getByTestId('user-profile-preview-entry').getByText('한국어로 간결하게 설명해 주세요.', {exact: true}).waitFor();
+      assert.equal(await page.evaluate(() => window.profileFixture.calls.length), requestsBeforePreview, 'explanation makes no API or provider call');
+      assert.deepEqual(await writes(), []);
+      const originalEntries = await page.evaluate(() => window.profileFixture.profile.entries);
+      await page.evaluate(() => {const entries = window.profileFixture.profile.entries; window.profileFixture.setRemoteEntries([...entries, {...entries[0], id: crypto.randomUUID(), scope: 'all-projects', projectMemoryId: null, body: 'Explain in English.'}]);});
+      await panel.getByRole('button', {name: t.reread, exact: true}).click();
+      await panel.getByTestId('user-profile-entry').nth(1).waitFor();
+      await preview.getByRole('textbox', {name: pt.query, exact: true}).fill('답변 언어');
+      await preview.getByRole('button', {name: pt.action, exact: true}).click();
+      await preview.getByRole('alert').filter({hasText: pt.overlap}).waitFor();
+      assert.equal(await preview.getByTestId('user-profile-preview-entry').count(), 2);
+      assert.deepEqual(await writes(), [], 'overlap review neither chooses a winner nor saves');
+      await page.evaluate(entries => window.profileFixture.setRemoteEntries(entries), originalEntries);
+      await panel.getByRole('button', {name: t.reread, exact: true}).click();
+      await panel.getByTestId('user-profile-entry').nth(1).waitFor({state: 'detached'});
+      await preview.locator('summary').click();
 
       await current().getByRole('button', {name: t.deactivate, exact: true}).click();
       assert.equal(await current().getAttribute('data-state'), 'inactive'); assert.deepEqual(await writes(), []);

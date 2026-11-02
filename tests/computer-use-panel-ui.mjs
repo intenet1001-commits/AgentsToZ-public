@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {chromium,webkit} from 'playwright';
 const origin=process.argv[2];
+const DEV1='3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a',DEV2='7c1f2e3d-4b5a-4968-8776-5a4b3c2d1e0f',DEV3='5e6f7a8b-1c2d-4e3f-8a9b-0c1d2e3f4a5b';
 if(!origin||new URL(origin).hostname!=='127.0.0.1'||new URL(origin).port==='3001')throw Error('Owned fixture origin required');
 const module=await fetch(origin+'/src/ComputerUsePanel.tsx').then(r=>r.text()),main=await fetch(origin+'/src/main.tsx').then(r=>r.text());
 const react=module.match(/"([^"\n]*\/deps\/react\.js[^"\n]*)"/)?.[1],dom=main.match(/"([^"\n]*\/deps\/react-dom_client\.js[^"\n]*)"/)?.[1];
@@ -16,7 +17,20 @@ const app={bundleId:'com.example.orca',teamId:'A1B2C3D4E5',codeHash:'b'.repeat(4
 const scopeNative={success:true,scopeProtocolVersion:2,accessibility:true,screenRecording:kind!=='scope-permissions',secureInput:false,operations:['scope-observe','scope-capture','scope-click','scope-type-text','scope-key','scope-scroll','scope-drag','scope-focus-app']};
 let scoped=kind.startsWith('scope')?{native:scopeNative,grants:[],pending:[],recovery:kind==='scope-recovery'?[{id:'scope_recovery1',scopeKind:'application',bundleId:app.bundleId,operation:'scope-click'}]:[]}:null;
 window.fixtureCalls=[];let access={enabled:false};let pending=[],grants=[],recovery=kind==='recovery'?[{id:'recovery1',bundleId:target.bundleId,operation:'set-value'}]:[];
-const request=async body=>{window.fixtureCalls.push(body);if(body.operation==='scope-access-set'){access=body.enabled?{enabled:true,scope:body.scope}:{enabled:false};if(!body.enabled&&scoped){scoped.grants=[];scoped.pending=[];}}if(body.operation==='scope-request-approval')scoped.pending=[{approvalId:'scope_p1',connectionId:body.connectionId,label:body.label,scope:body.scope,expiresAt:Date.now()+120000}];if(body.operation==='scope-revoke')scoped.grants=[];if(body.operation==='scope-review-recovery')scoped.recovery=[];if(body.operation==='request-approval')pending=[{approvalId:'p1',connectionId:body.connectionId,label:body.label,target,expiresAt:Date.now()+120000}];if(body.operation==='revoke')grants=[];if(body.operation==='review-recovery')recovery=[];return {success:true,restartRequired:kind==='disconnected'||kind==='retired-ready',native:kind==='disconnected'?{success:false,code:'helper-unavailable'}:kind==='unsupported'?{success:false,code:'signed-main-required'}:{success:true,accessibility:true,secureInput:false},connections:[{id:'connection-one',code:'00000000-0000-4000-8000-000000000001',label:'codex'},{id:'connection-two',code:'00000000-0000-4000-8000-000000000002',label:'00000000-0000-4000-8000-000000000001'}],pending,grants,recovery,access,...(scoped?{scoped}: {})};};
+// Another Mac's AI on this Mac (receiving) and this Mac's AI on another Mac (outgoing), as the management status carries them.
+const DEV1='3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a',DEV2='7c1f2e3d-4b5a-4968-8776-5a4b3c2d1e0f',DEV3='5e6f7a8b-1c2d-4e3f-8a9b-0c1d2e3f4a5b';
+let remote=['scope-remote','scope-outgoing-late','scope-remote-unreadable'].includes(kind)?{accepting:true,allowRemote:kind!=='scope-remote-unreadable',blockedDevices:[],blockedConnections:[],noticeShown:false,profileReady:true,...(kind==='scope-remote-unreadable'?{settingsUnreadable:true}:{})}:null;
+let remoteConnections=kind==='scope-remote'?[{id:'rcu_one',code:'11111111-0000-4000-8000-000000000001',label:'원격 1호 (3a9d)',scope:'remote-connection',expiresAt:Date.now()+75000,remote:{deviceId:DEV1,deviceName:'1호',deviceCode:'3a9d',connection:'a'.repeat(32)}},{id:'rcu_two',code:'22222222-0000-4000-8000-000000000002',label:'원격 2호 (7c1f)',scope:'remote-connection',expiresAt:Date.now()+75000,remote:{deviceId:DEV2,deviceName:'2호',deviceCode:'7c1f',connection:'b'.repeat(32)}}]:[];
+let outgoing=kind==='scope-remote'?[{deviceId:DEV3,deviceName:'3호',connection:'cccccccc',client:'codex-mcp-client',since:Date.now()-60000,lastCallAt:Date.now()-5000,active:true}]:[];
+if(kind==='scope-remote'){access={enabled:true,scope:{kind:'desktop'},standing:{since:Date.now()-3600000}};scoped.grants=[{id:'scope_remote1',label:'원격 1호 (3a9d) / 연결 11111111 · 전체 Mac',scope:{kind:'desktop'},caller:{sessionId:'rcu_one',lane:'remote'},halted:false,owner:'agent'}];}
+window.fixtureStartOutgoing=()=>{outgoing=[{deviceId:DEV3,deviceName:'3호',connection:'cccccccc',client:'codex-mcp-client',since:Date.now(),lastCallAt:Date.now(),active:true}];};
+const remoteSet=body=>{const ends=gone=>{remoteConnections=remoteConnections.filter(c=>!gone(c));scoped.grants=scoped.grants.filter(g=>!String(g.caller?.sessionId).startsWith('rcu_')||remoteConnections.some(c=>c.id===g.caller.sessionId));};
+ if(body.allowRemote===true||body.unblock)throw Error('This fixture refuses enabling receive and unblocking until Control authentication is available');
+ if('allowRemote' in body){remote={...remote,allowRemote:body.allowRemote};if(!body.allowRemote)ends(()=>true);}
+ if(body.noticeShown===true)remote={...remote,noticeShown:true};
+ const b=body.block;if(b&&b.connection){remote={...remote,blockedConnections:[...remote.blockedConnections,{deviceId:b.deviceId,instance:b.connection,until:Date.now()+b.minutes*60000}]};ends(c=>c.remote.deviceId===b.deviceId&&c.remote.connection===b.connection);}
+ else if(b){remote={...remote,blockedDevices:[...remote.blockedDevices,{deviceId:b.deviceId,name:b.name,since:Date.now()}],blockedConnections:remote.blockedConnections.filter(x=>x.deviceId!==b.deviceId)};ends(c=>c.remote.deviceId===b.deviceId);}};
+const request=async body=>{window.fixtureCalls.push(body);if(body.operation==='scope-remote-set'&&remote)remoteSet(body);if(body.operation==='scope-remote-outgoing-close')outgoing=outgoing.filter(s=>s.deviceId!==body.deviceId);if(body.operation==='scope-access-set'){access=body.enabled?{enabled:true,scope:body.scope}:{enabled:false};if(!body.enabled&&scoped){scoped.grants=[];scoped.pending=[];}}if(body.operation==='scope-request-approval')scoped.pending=[{approvalId:'scope_p1',connectionId:body.connectionId,label:body.label,scope:body.scope,expiresAt:Date.now()+120000}];if(body.operation==='scope-revoke')scoped.grants=[];if(body.operation==='scope-review-recovery')scoped.recovery=[];if(body.operation==='request-approval')pending=[{approvalId:'p1',connectionId:body.connectionId,label:body.label,target,expiresAt:Date.now()+120000}];if(body.operation==='revoke')grants=[];if(body.operation==='review-recovery')recovery=[];return {success:true,restartRequired:kind==='disconnected'||kind==='retired-ready',native:kind==='disconnected'?{success:false,code:'helper-unavailable'}:kind==='unsupported'?{success:false,code:'signed-main-required'}:{success:true,accessibility:true,secureInput:false},connections:[{id:'connection-one',code:'00000000-0000-4000-8000-000000000001',label:'codex'},{id:'connection-two',code:'00000000-0000-4000-8000-000000000002',label:'00000000-0000-4000-8000-000000000001'},...remoteConnections],pending,grants,recovery,access,...(scoped?{scoped}: {}),...(remote?{remote,outgoing}:{})};};
 window.fixtureAiAsks=()=>{scoped.pending=[{approvalId:'scope_p1',connectionId:'connection-one',label:'연결 00000000 / codex · Orca · 전체 Mac',scope:access.scope,expiresAt:Date.now()+120000}];};
 window.fixtureExpireSoon=()=>{const at=Date.now()+1500;pending=pending.map(p=>({...p,expiresAt:at}));if(scoped)scoped.pending=scoped.pending.map(p=>({...p,expiresAt:at}));};
 window.fixtureApproved=()=>{pending=[];grants=[{id:'grant1',label:'fixture edit',target,halted:false}];};
@@ -151,7 +165,70 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   await page.getByRole('radio',{name:'선택한 앱',exact:true}).check();await page.getByRole('button',{name:'닫기',exact:true}).click();
   await page.evaluate(async()=>{window.fixtureReleaseCatalog();await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame)});
   assert.deepEqual(await page.evaluate(()=>window.fixtureCalls.filter(c=>c.native==='catalog'||c.native==='scope-catalog').map(c=>c.native)),['catalog'], 'closing drops queued work and ignores the late result');
-  assert.deepEqual(errors,[]);await page.close();console.log(name+' '+width+': switch/native-only approval/off/recovery/IME/focus PASS');
+  // A sender starts while the panel is already open, with no local access, grant or previous outgoing session.
+  await load('scope-outgoing-late');await page.getByRole('switch',{name:'컴퓨터 유즈',exact:true}).waitFor();
+  assert.equal(await page.getByTestId('computer-use-outgoing').count(),0);
+  await page.evaluate(()=>window.fixtureStartOutgoing());
+  await page.getByTestId('computer-use-outgoing-row').waitFor({timeout:6000});
+  assert.equal(await page.getByTestId('computer-use-outgoing-close').count(),1,'a later outgoing session can be stopped without manually refreshing');
+  await page.getByRole('button',{name:'닫기',exact:true}).click();
+  const statusCallsAfterClose=await page.evaluate(()=>window.fixtureCalls.filter(c=>c.operation==='status').length);
+  await page.waitForTimeout(2300);
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.filter(c=>c.operation==='status').length),statusCallsAfterClose,'closing the panel stops polling');
+  // Another Mac's AI on this Mac and this Mac's AI on another Mac: every switch goes through the management route only.
+  await load('scope-remote');const remoteNotice=page.getByTestId('computer-use-remote-notice');await remoteNotice.waitFor();
+  const remoteCalls=()=>page.evaluate(()=>window.fixtureCalls.filter(c=>typeof c.operation==='string'&&c.operation.startsWith('scope-remote')));
+  const pressRemote=async(locator,expected,label)=>{const before=(await remoteCalls()).length;await locator.click();
+   await page.waitForFunction(n=>window.fixtureCalls.filter(c=>typeof c.operation==='string'&&c.operation.startsWith('scope-remote')).length>n,before);
+   const calls=await remoteCalls();assert.equal(calls.length,before+1,label+': one request');assert.deepEqual(calls.at(-1),expected,label);};
+  assert.deepEqual(await remoteCalls(),[],'opening the panel changes none of the person\'s remote switches');
+  assert.equal(await remoteNotice.getByRole('heading').textContent(),'이제 다른 Mac의 AI도 받습니다');
+  assert.match(await page.getByTestId('computer-use-standing').textContent(),/이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티 다른 Mac의 AI가 다시 묻지 않고 전체 Mac을 씁니다/,'the standing allowance names who it lets in');
+  const remoteRows=page.getByTestId('computer-use-remote-row');assert.equal(await remoteRows.count(),2);
+  assert.equal(await remoteRows.nth(0).locator('p').nth(0).textContent(),'원격 · 1호 (3a9d)');
+  assert.equal(await remoteRows.nth(0).locator('p').nth(1).textContent(),'연결 11111111 · AI가 사용 중 · 전체 Mac');
+  assert.equal(await page.getByRole('button',{name:'제어 종료',exact:true}).count(),0,'a remote grant is ended from its row, not from the generic list');
+  const outgoingRows=page.getByTestId('computer-use-outgoing-row');assert.equal(await outgoingRows.count(),1);
+  assert.equal(await outgoingRows.locator('p').first().textContent(),'이 Mac의 AI가 3호를 사용 중');
+  assert.equal(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+1),true,'remote rows and their buttons fit the narrow dialog');
+  for(const id of ['computer-use-remote-cut','computer-use-remote-block-device','computer-use-outgoing-close','computer-use-remote-switch']){const box=await page.getByTestId(id).first().boundingBox();assert(box&&box.height>=44,id+' keeps a 44 px target');}
+  await page.screenshot({path:evidence+'/'+name+'-'+width+'-remote.png',fullPage:true});
+  await page.getByTestId('computer-use-remote').scrollIntoViewIfNeeded();await page.screenshot({path:evidence+'/'+name+'-'+width+'-remote-rows.png'});
+  await pressRemote(page.getByTestId('computer-use-remote-notice-ok'),{operation:'scope-remote-set',noticeShown:true},'the notice is answered once');
+  await remoteNotice.waitFor({state:'detached'});
+  await pressRemote(remoteRows.nth(0).getByTestId('computer-use-remote-cut'),{operation:'scope-remote-set',block:{deviceId:DEV1,name:'1호',connection:'a'.repeat(32),minutes:30}},'끊기 blocks exactly that connection for 30 minutes');
+  await page.waitForFunction(()=>document.querySelectorAll('[data-testid="computer-use-remote-row"]').length===1);
+  assert.match(await page.getByTestId('computer-use-remote-cut-list').textContent(),/^기기 \(3a9d\) · 끊은 연결 1개/);
+  const uncut=page.getByTestId('computer-use-remote-uncut');assert.equal(await uncut.isDisabled(),true,'a cut cannot be lifted before authenticated settings are available');
+  const beforeUncut=(await remoteCalls()).length;await uncut.evaluate(button=>button.click());
+  assert.equal((await remoteCalls()).length,beforeUncut,'disabled cut release sends no request');
+  assert.equal(await page.getByTestId('computer-use-remote-cut-list').count(),1,'the connection stays blocked');
+  await pressRemote(remoteRows.nth(0).getByTestId('computer-use-remote-block-device'),{operation:'scope-remote-set',block:{deviceId:DEV2,name:'2호'}},'이 기기의 AI 막기 blocks the whole device');
+  await page.waitForFunction(()=>document.querySelectorAll('[data-testid="computer-use-remote-row"]').length===0);
+  assert.match(await page.getByTestId('computer-use-remote-blocked').textContent(),/^2호 \(7c1f\) · 풀 때까지 막음/);
+  const unblock=page.getByTestId('computer-use-remote-unblock');assert.equal(await unblock.isDisabled(),true,'a device cannot be unblocked before authenticated settings are available');
+  const beforeUnblock=(await remoteCalls()).length;await unblock.evaluate(button=>button.click());
+  assert.equal((await remoteCalls()).length,beforeUnblock,'disabled unblock sends no request');
+  assert.equal(await page.getByTestId('computer-use-remote-blocked').count(),1,'the device stays blocked');
+  const receive=page.getByRole('switch',{name:'다른 Mac의 AI 받기',exact:true});assert.equal(await receive.getAttribute('aria-checked'),'true');
+  await pressRemote(receive,{operation:'scope-remote-set',allowRemote:false},'the receiving switch sends only allowRemote');
+  await page.waitForFunction(()=>document.querySelector('[data-testid="computer-use-remote-switch"]')?.getAttribute('aria-checked')==='false');
+  assert.equal(await receive.isDisabled(),true,'receiving cannot be re-enabled before authenticated settings are available');
+  const beforeEnable=(await remoteCalls()).length;await receive.evaluate(button=>button.click());
+  assert.equal((await remoteCalls()).length,beforeEnable,'disabled receive switch sends no request');
+  assert.match(await page.getByTestId('computer-use-remote-state').textContent(),/^꺼짐 · 다른 Mac의 AI를 받지 않습니다/);
+  assert.match(await page.getByTestId('computer-use-standing').textContent(),/다른 Mac의 AI는 막아 두었습니다/);
+  await pressRemote(page.getByTestId('computer-use-outgoing-close'),{operation:'scope-remote-outgoing-close',deviceId:DEV3},'A side 끊기 names only the device');
+  await page.getByTestId('computer-use-outgoing').waitFor({state:'detached'});
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-access-set'||c.operation==='scope-revoke'||c.native==='review')),false,'remote controls never touch this Mac\'s own switch, grants or review');
+  await load('scope-remote-unreadable');
+  const unreadableSwitch=page.getByTestId('computer-use-remote-switch');await unreadableSwitch.waitFor();
+  assert.equal(await unreadableSwitch.isDisabled(),true,'unreadable remote settings cannot be re-enabled');
+  assert.match(await page.getByTestId('computer-use-remote-state').textContent(),/설정 파일을 읽지 못해.*이 버전에서는 다시 켤 수 없습니다/);
+  assert.equal(await page.getByTestId('computer-use-remote-notice').count(),0,'unreadable settings cannot show a receive notice');
+  await unreadableSwitch.evaluate(button=>button.click());
+  assert.deepEqual(await remoteCalls(),[],'the unreadable state sends no remote setting mutation');
+  assert.deepEqual(errors,[]);await page.close();console.log(name+' '+width+': switch/native-only approval/off/recovery/IME/focus/remote PASS');
  }}finally{await browser.close();}
 }
 console.log('Computer Use UI fixtures passed; no actual helper approval, TCC, input or user browser was used.');

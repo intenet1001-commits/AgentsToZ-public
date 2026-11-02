@@ -23,7 +23,7 @@ final class ScreenControllerTests: XCTestCase {
     }
 
     private func controller(_ grant: ScreenControllerGrant = .view, at date: Date = Date(timeIntervalSince1970: 1_793_000_000)) throws -> RegisteredController {
-        RegisteredController(record: try record(), grant: grant, brokerAttestationKeyID: Data(repeating: 3, count: 32), at: date)
+        try RegisteredController(record: record(), grant: grant, brokerAttestationKeyID: Data(repeating: 3, count: 32), at: date)
     }
 
     func testOlderDeviceReaderNeverSeesControllers() throws {
@@ -72,7 +72,7 @@ final class ScreenControllerTests: XCTestCase {
         let data = try ScreenStore.encodeControllers(ScreenControllers(allowMacControllers: true, controllers: [view, control]))
         var document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var rows = try XCTUnwrap(document["controllers"] as? [[String: Any]])
-        XCTAssertEqual(document["format"] as? Int, 1)
+        XCTAssertEqual(document["format"] as? Int, 2)
         XCTAssertEqual(rows.map { $0["grant"] as? String }, ["view", "control"])
 
         var unknownGrant = rows[1]; unknownGrant["grant"] = "admin"
@@ -87,7 +87,7 @@ final class ScreenControllerTests: XCTestCase {
     func testUnknownControllersDocumentFailsClosed() throws {
         let data = try ScreenStore.encodeControllers(ScreenControllers(allowMacControllers: true, controllers: [try controller()]))
         var document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        document["format"] = 2
+        document["format"] = 3
         XCTAssertThrowsError(try ScreenStore.decodeControllers(JSONSerialization.data(withJSONObject: document)))
         for text in ["[]", "{}", "[", #"{"format":1,"controllers":[]}"#] {
             XCTAssertThrowsError(try ScreenStore.decodeControllers(Data(text.utf8)), text)

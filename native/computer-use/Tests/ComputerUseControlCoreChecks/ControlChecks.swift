@@ -270,32 +270,40 @@ struct ControlChecks {
     }
 
     /// A refused scope approval names its cause; the secure-input case tells the person to close the password field.
-    /// Hardware clicks carry no posting process; remote desktops are accepted by verified signing name; anything else
-    /// that posted the event (this process, the engine's marker, an AI or a script) is refused, as is a stale event.
+    /// Only the hand-back pill's own single hardware click can hand back; remote desktop events are refused.
     func testControlBarHandsBackOnlyAPersonsClick() throws {
         let tag: Int64 = 0x41545A53434F5045
-        func decide(up: Bool = true, inBar: Bool = true, age: Double = 0.05, source: Int64 = 0, data: Int64 = 0,
+        func decide(up: Bool = true, inBar: Bool = true, ownDown: Bool = true, inButton: Bool = true, count: Int = 1, age: Double = 0.05, source: Int64 = 0, data: Int64 = 0,
                     poster: ControlBarPoster? = nil) -> String? {
-            ControlBarClick.handBackRefusal(isMouseUp: up, inBar: inBar, ageSeconds: age, sourcePid: source, userData: data,
+            ControlBarClick.handBackRefusal(isMouseUp: up, inBar: inBar, ownMouseDown: ownDown, inButton: inButton, clickCount: count, ageSeconds: age, sourcePid: source, userData: data,
                                             ownPid: 500, syntheticTag: tag, poster: poster)
         }
         try check(decide() == nil, "a hardware click hands back")
         try check(decide(up: false) == "not-a-bar-click" && decide(inBar: false) == "not-a-bar-click", "only the bar's own mouse-up")
+        try check(decide(ownDown: false) == "not-a-bar-click" && decide(inButton: false) == "not-a-bar-click", "only this button can hand back")
+        try check(decide(count: 2) == "not-a-single-click", "double click does not hand back")
         try check(decide(age: 3) == "stale-event" && decide(age: -1) == "stale-event", "an old or future event is not the click")
         try check(decide(data: tag) == "engine-event", "the engine's own marker never hands back")
         try check(decide(source: 500) == "own-event", "Control's own event never hands back")
         try check(decide(source: 77) == "poster-unverified", "an unverified poster never hands back")
-        try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.p5sys.jump.connect", team: "2HCKV38EEC", apple: false)) == nil,
-                  "Jump Desktop Connect, verified, hands back")
+        try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.p5sys.jump.connect", team: "2HCKV38EEC", apple: false)) == "remote-desktop-event",
+                  "even verified Jump Desktop Connect cannot hand back")
         try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.p5sys.jump.connect", team: "XXXXXXXXXX", apple: false)) == "poster-not-remote-desktop",
                   "the same name under another team does not")
-        try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.apple.screensharing.agent", team: nil, apple: true)) == nil,
-                  "Apple screen sharing hands back")
+        try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.apple.screensharing.agent", team: nil, apple: true)) == "remote-desktop-event",
+                  "even verified Apple screen sharing cannot hand back")
         try check(decide(source: 77, poster: ControlBarPoster(identifier: "com.apple.screensharing.agent", team: nil, apple: false)) == "poster-not-remote-desktop",
                   "an Apple name without Apple's anchor does not")
         for agent in ["com.openai.codex", "com.anthropic.claudefordesktop", "com.apple.Terminal", "com.intenet.agentstozbycs"] {
             try check(decide(source: 77, poster: ControlBarPoster(identifier: agent, team: "TEAM", apple: agent.hasPrefix("com.apple."))) == "poster-not-remote-desktop",
                       "\(agent) never hands back")
+        }
+        try check(ControlBarText.title(.agent, callerLane: "remote", label: "원격 3호 (1234) / 연결 567890ab · 전체 Mac") == "원격 · 3호 (1234)", "remote owner and device are visible")
+        try check(ControlBarText.title(.agent, callerLane: "connection", label: "원격 fake / 연결 1") == "AI가 사용 중", "a local caller cannot pose as remote")
+        try check(ControlBarText.title(.agent, callerLane: "remote", label: "malformed") == "원격 AI가 사용 중", "malformed label does not hide remote state")
+        try check(ControlBarText.title(.person, callerLane: "remote", label: "원격 3호 / 연결 1") == "직접 사용 중", "person ownership remains clear")
+        for text in [ControlConsentText.standingOffer, ControlConsentText.standingOff, ControlConsentText.standingOn(since: Date(timeIntervalSince1970: 0))] {
+            try check(text.contains("커뮤니티") && text.contains("다른 Mac AI") && text.contains("받기 설정"), "standing copy describes remote AI and its separate receive setting")
         }
         try check(ControlBarText.primary(.agent) == "직접 하기" && ControlBarText.primary(.person) == "AI에게 넘기기", "the bar's verbs")
         try check(ControlBarText.detail(.agent, scope: "전체 Mac", lastOperation: "scope-type-text", secondsAgo: 12) == "전체 Mac · 마지막 동작: 입력 · 12초 전",
@@ -655,6 +663,23 @@ struct ControlChecks {
     }
 
     static var all: [(String, (ControlChecks) -> () throws -> Void)] { [
+        ("community lease verifies issuer, request and separate signature domain", { _ in CommunityControlChecks.testIssuerRequestAndDomain }),
+        ("mobile host signs only a verified current 24-field controller episode", { _ in CommunityControlChecks.testMobileHostGoldenAndStrictPeers }),
+        ("issuer names preserve UTF8 120-byte and Cc/Cf parity", { _ in CommunityControlChecks.testIssuerNameParity }),
+        ("community software golden matches TypeScript policy hashes and role-bound handshake bytes", { _ in CommunityControlChecks.testSharedSoftwareGolden }),
+        ("receive policy changes and remote caller subjects have strict closed shapes", { _ in CommunityReceiveChecks.testStrictChangesAndSubject }),
+        ("receive bootstrap never restores a durable off fence", { _ in CommunityReceiveChecks.testBootstrapAndDurableOff }),
+        ("receive restoration is revision-bound and rejects late approval", { _ in CommunityReceiveChecks.testReviewCASAndBlocks }),
+        ("receive policy migration and storage failure preserve negative state", { _ in CommunityReceiveChecks.testMigrationAndStorageFailure }),
+        ("receive connection blocks expire only by the chosen duration", { _ in CommunityReceiveChecks.testTimedConnectionBlock }),
+        ("community lease rejects malformed identities, scope and lifetime", { _ in CommunityControlChecks.testShapesAndLifetime }),
+        ("community candidate and foreign key grant no authority", { _ in CommunityControlChecks.testCandidateIsNotAuthorityAndLocalBinding }),
+        ("community purpose preserves owner, human hold and dual-clock expiry", { _ in CommunityControlChecks.testPurposeOwnerHoldAndDeadline }),
+        ("community local off and revision rollback stay fenced after restart", { _ in CommunityControlChecks.testRollbackAndLocalOffSurviveRestart }),
+        ("community renewal needs no new presence but storage failure fails closed", { _ in CommunityControlChecks.testRenewalAndStorageFailure }),
+        ("community protocol is management-only with exact closed shapes", { _ in CommunityControlChecks.testManagementProtocolIsClosed }),
+        ("component signatures bind only enrolled purposes and exact server request subjects", { _ in CommunityControlChecks.testComponentSigningHasClosedPurposeAndSubject }),
+        ("component handshake binds both certificates, portal identities and the signer role", { _ in CommunityControlChecks.testComponentHandshakeBindsBothCertificatesAndPortalIDs }),
         ("scope v2 decoding is strict and channel-scoped", { _ in ScopeProtocolChecks.testStrictV2Shapes }),
         ("scope excludes security surfaces while allowing agent apps", { _ in ScopeProtocolChecks.testProtectedTargets }),
         ("the standing allowance label is exact and desktop only", { _ in ScopeProtocolChecks.testStandingAllowanceLabel }),
@@ -667,6 +692,7 @@ struct ControlChecks {
         ("a refusal names its guard check beside the reason without halting or replaying", { _ in ScopeStateChecks.testRefusalNamesItsGuardCheck }),
         ("a scope grant lasts until ended: no 10 minutes or 64 actions, every spent ID stays refused", { _ in ScopeStateChecks.testGrantLastsUntilEndedAndKeepsEverySpentId }),
         ("a scope approval's actions are bounded in memory and then need a new approval", { _ in ScopeStateChecks.testActionsPerApprovalAreBounded }),
+        ("current human hold is lost when its grant ends (known gap)", { _ in ScopeStateChecks.testCurrentPersonHoldIsLostWhenItsGrantEnds }),
         ("the person holds a scope grant from the control bar without ending it", { _ in ScopeStateChecks.testThePersonHoldsTheGrantFromTheBarWithoutEndingIt }),
         ("the control bar hands back only a person's click", { $0.testControlBarHandsBackOnlyAPersonsClick }),
         ("scope safety refuses unverified state, overlays and changed targets", { _ in ScopedSafetyChecks.testUnknownEvidenceFailsClosed }),

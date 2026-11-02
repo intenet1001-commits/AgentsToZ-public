@@ -1,5 +1,14 @@
 # MCP 런처 · 채널 연동 · OPS 폴더 · 워크룸 오케스트레이션
 
+## 커뮤니티 공통 인증을 사용하는 원격 Teams (2026-11-02)
+
+- `team_remote_devices`는 현재 커뮤니티 라우팅과 Native Teams issuer directory를 함께 확인해 실제 deviceId/endpointId 쌍을 돌려준다. OPS 라우팅 끝점을 커뮤니티 끝점으로 추정하지 않는다. `team_remote_projects`는 이 쌍에 허용 프로젝트 목록만 요청한다. 양쪽의 현재 Native `teams.run` 인증과 실제 Main portal deviceId 결속을 확인하며 AI를 시작하지 않는다.
+- `create_team` 멤버의 `remote:{deviceId,endpointId,projectId}`는 받는 Mac이 사람이 허용한 실제 등록 프로젝트를 뜻한다. 실행 위치는 명시한 `internal`만 지원한다. 계정·bypass·외부 앱·이미 열린 세션·원격 재위임·임의 경로를 받지 않는다. 받는 쪽에서 기존 TeamService가 새 Workroom과 워크트리를 만든다.
+- Main 관리 전용 `/api/agent-runtime/remote-teams`에서 프로젝트를 선택한다. 기본은 빈 목록이며 저장은 revision CAS, 현재 공통 Teams 동의, 실제 등록 inode를 다시 확인한다. 다른 커뮤니티·enrollment·Control key로 바뀌면 이전 허용을 승계하지 않는다. AI/MCP와 원격 dispatcher에 허용 목록 쓰기 경로를 열지 않는다.
+- 소스의 실행 참조는 opaque proxy UUID·수신 device/endpoint·generation·stable projectId다. 실제 팀·세션·체크아웃 경로는 수신 기록에만 남는다. 상대의 브랜치는 소스 저장소에서 자동 병합하지 않는다.
+- 양쪽 SQLite 장부는 전송·부작용 전에 원래 requestId를 기록한다. 미확정 시작·입력은 자동 재전송하지 않고 원래 영수증을 조회한다. 종료는 그 요청이 만든 PTY만 닫고 작업 폴더와 브랜치를 보존한다. 최대 4,096개 장부 뒤에는 새 실행을 거절한다.
+- Git 대기 중 허용이 철회되면 다음 단계가 멈추며, 실제 spawn/input 직전에도 Native 동의와 등록 프로젝트를 확인한다. 이 경로는 Screen 입력이나 macOS 권한을 부여하지 않는다. `tests/remote-teams.test.ts`는 실제 AI·키체인·OS 승인을 사용하지 않는 fixture 검사다.
+
 ## OPS 운영 기억 충돌 비교 (2026-10-28)
 
 아젠투지 설정의 동기화 경고에서 전용 비교 화면을 연다. `control-profile-server.ts`는 연결된 profile/memory/root를 검증하고,
@@ -50,6 +59,14 @@ resources/agentstoz-use-mcp`)이었다. 그런데 앱 업데이트는 그 번들
   `tests/control-profile-connections.test.ts`의 두 테스트가 잡는다.
 - ⚠️ **실행 중인 CLI 세션은 보정해도 도구가 생기지 않는다** — MCP 도구 목록은 **세션 시작 때 고정**된다.
   설정을 고친 뒤에는 그 워크룸/CLI를 **다시 시작**해야 한다. 이것을 안내하지 않으면 「고쳤다는데 그대로」가 된다.
+
+## 회상 확장 1.76.0 — 원본과 사람 선호의 경계를 유지한다
+
+- `recall_control_context`·OPS/DEV `read_reference`는 `includeRelations:true`에서만 현재 기억의 한 단계 관계를 추가한다. USE에는 이 옵션이 없다.
+  `recall_user_profile`은 `includeExplanation:true`에서만 선택 이유·반환 항목 사이의 같은 제목/다른 본문 쌍을 추가한다. 다른 프로젝트·비활성 항목은 설명에서도 제외한다.
+- 기존 기본 키·검색 결과를 유지하며, 사용자 프로필은 설명까지 전체8,000 bytes, 관계는 별도8,000 bytes다. 새 관계는 실행 승인·의미상 모순·완료 판정이 아니다.
+- 두 입력 경계(MCP/sidecar)에서 boolean과 역할을 검증한다. 프로젝트 관계는 조회 전후 등록을 재확인하고 OPS 관계는 바인딩·리비전을 재확인한다.
+  `src/agentstozUseMcpVersion.ts`가 계약1.76.0을 알리며, 이미 실행 중인 MCP는 새 도구 설명을 받으려면 재연결해야 한다.
 
 ## 채널 연동 상태 — 설정은 연결이 아니다
 
@@ -443,6 +460,9 @@ canonical parser는 그 기본값을 정규화해 기존 fingerprint를 유지�
     정책 문구 정본은 `src/agentstozTeamSkill.ts` 5단계 — 그 스킬 설치는 사이드카 시작마다 내용 비교로 다시 쓰므로 `AGENTSTOZ_INVOCATION_VERSION`을 올리지 않았다.
   - 자기 호스트 거절은 [컴퓨터 유즈](computer-use.md)의 「자기 호스트 앱」 절. 검증: `team-external-host`(키 전송·재생·충돌·결속 변경·exit 가드·unknown 무재전송),
     `team-runtime-bridge`(리더 전용·자기 세션·닫힌 팀·결과 매핑), `team-launch-options`·`workroom-team-instruction`(옵트인), `workroom-team-builder-ui.mjs`(체크박스).
+- 사람이 다른 Mac의 컴퓨터 유즈 작업을 요청한 팀에서는 리더가 `devices`로 대상을 확인하고 Mac별 담당을 한 명씩 조율한다.
+  결과 불명 입력은 원래 담당자의 연결에서 같은 device/requestId로 receipt를 조회하며, 다른 팀원·새 연결로 재전송하지 않는다.
+  이 규칙은 기기 전체의 강제 잠금이 아니다. 앱 팀원의 `computerUseApprovals`로 원격 전체 Mac 승인을 대신하지 않는다.
 - **앱 재시작 뒤 읽기 전용(`EXTERNAL_HOST_RESTART_READ_ONLY`)**: 이전 실행이 연 Orca 팀원은 새 실행에서 결속이 낡았다(`EXTERNAL_GENERATION_STALE`).
   그때 read만 `teamOrcaRecoveryRead.ts`로 한 번 더 확인해 돌려준다 — 팀 결속(generation·target·cwd·agent·surface·active)이 그대로이고, 기록에 미해결 쓰기
   (reserved)가 없고, `terminal show`가 같은 handle·worktree·`executionHostId:'local'`·agent·연결·Orca runtime+incarnation을 **읽기 앞뒤로** 보여 줄 때만.

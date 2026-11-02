@@ -113,8 +113,9 @@ test('the portal bridge is limited to portal pages and hands items over as JSON,
 });
 
 test('the Workroom fixture compiles the production bundled-portal scheme handler with its view',()=>{
-  const fixture=read('scripts/check-workroom.ts');
-  const compile=fixture.slice(fixture.indexOf("await command(['xcrun','swiftc','-parse-as-library','-target'"));
-  expect(compile).toContain("join(root,'mobile/ios/App/PortalSchemeHandler.swift')");
+  // check-workroom takes its swiftc list from the shared recipe (tests/ios-workroom-fixture-compile.test.ts checks the commands).
+  expect(read('scripts/check-workroom.ts')).toContain("from './workroomFixtureCompile'");
+  const compile=read('scripts/workroomFixtureCompile.ts');
+  expect(compile).toContain("'mobile/ios/App/PortalSchemeHandler.swift'");
   expect(compile.indexOf('PortalSchemeHandler.swift')).toBeLessThan(compile.indexOf('LANWorkroomView.swift'));
 });

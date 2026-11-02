@@ -152,7 +152,8 @@ func scopedLayoutValid(_ layout: [ScopedDisplayGeometry]) -> Bool {
 /// Internal seam for deterministic tests; the public entry point always checks the real macOS Screen Recording TCC.
 @MainActor
 func captureScopedDisplay<Source: ScopedDisplayCaptureSource>(scope: ScopeApprovalScope, displayID: String,
-    layout: [ScopedDisplayGeometry], checks: ScopedCaptureChecks, screenPermission: () -> Bool, source: Source) async throws -> [String: Any] {
+    layout: [ScopedDisplayGeometry], checks: ScopedCaptureChecks, maxBytes: Int? = nil, screenPermission: () -> Bool, source: Source) async throws -> [String: Any] {
+    guard maxBytes == nil || (1024...WindowCaptureLimits.jpegBytes).contains(maxBytes!) else { throw ControlError.invalid }
     guard ComputerUseScopeApproval.validScope(scope), scopedLayoutValid(layout),
           let selected = layout.first(where: { $0.id == displayID }) else { throw ControlError.refuse("display-unavailable") }
     func safety(_ human: String?) throws -> String {
@@ -204,7 +205,7 @@ func captureScopedDisplay<Source: ScopedDisplayCaptureSource>(scope: ScopeApprov
         guard let destination = CGImageDestinationCreateWithData(buffer, UTType.jpeg.identifier as CFString, 1, nil) else { break }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { break }
-        if buffer.length <= WindowCaptureLimits.jpegBytes { encoded = buffer as Data; break }
+        if buffer.length <= (maxBytes ?? WindowCaptureLimits.jpegBytes) { encoded = buffer as Data; break }
     }
     guard let encoded else { throw ControlError.refuse("screen-image-too-large") }
     _ = try safety(before)
@@ -218,7 +219,7 @@ func captureScopedDisplay<Source: ScopedDisplayCaptureSource>(scope: ScopeApprov
 /// this unless all closures above are backed by genuine, current OS evidence and the user approved screen access.
 @MainActor
 public func captureScopedDisplay(scope: ScopeApprovalScope, displayID: String, layout: [ScopedDisplayGeometry],
-                                 checks: ScopedCaptureChecks) async throws -> [String: Any] {
-    try await captureScopedDisplay(scope: scope, displayID: displayID, layout: layout, checks: checks,
+                                 checks: ScopedCaptureChecks, maxBytes: Int? = nil) async throws -> [String: Any] {
+    try await captureScopedDisplay(scope: scope, displayID: displayID, layout: layout, checks: checks, maxBytes: maxBytes,
                                    screenPermission: { CGPreflightScreenCaptureAccess() }, source: ScreenCaptureKitScopedDisplays())
 }

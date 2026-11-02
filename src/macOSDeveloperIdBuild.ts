@@ -22,6 +22,7 @@ import {
   MACOS_RUNTIME_PRODUCTION_USE_MCP_IDENTIFIER,
 } from './macOSRuntimeProductionAppSigningPlan';
 import { resolveMacOSRuntimeProductionIdentity } from './macOSRuntimeProductionIdentity';
+import {assertViewerBundleEntitlements, VIEWER_HELPER_BUNDLE_PATH, VIEWER_HELPER_IDENTIFIER, VIEWER_HELPER_REQUIREMENT} from '../stageViewerControlBundle';
 import { assertScreenBundleEntitlements, SCREEN_HELPER_BUNDLE_PATH, SCREEN_HELPER_IDENTIFIER, SCREEN_HELPER_REQUIREMENT } from '../stageScreenControlBundle';
 
 export const DEVELOPER_ID_TEAM_IDENTIFIER = 'DA8QKAQ2C9';
@@ -102,7 +103,7 @@ export function assertTeamAnchoredDesignatedRequirement(output: string, identifi
   return line;
 }
 
-export type DeveloperIdTargetKind = 'executable' | 'library' | 'framework' | 'helper-app' | 'screen-app' | 'app';
+export type DeveloperIdTargetKind = 'executable' | 'library' | 'framework' | 'helper-app' | 'screen-app' | 'viewer-app' | 'app';
 export interface DeveloperIdSigningTarget {
   /** Path given to codesign, relative to the app bundle ('' is the app itself). */
   readonly path: string;
@@ -136,6 +137,9 @@ export function classifyDeveloperIdMachO(relativePath: string): DeveloperIdSigni
   if (relativePath === `${SCREEN_HELPER_BUNDLE_PATH}/Contents/MacOS/AgentsToZScreen`) {
     return { path: SCREEN_HELPER_BUNDLE_PATH, kind: 'screen-app', entitlements: 'none' };
   }
+  if (relativePath === `${VIEWER_HELPER_BUNDLE_PATH}/Contents/MacOS/AgentsToZViewer`) {
+    return {path: VIEWER_HELPER_BUNDLE_PATH, kind: 'viewer-app', entitlements: 'none'};
+  }
   const loose = LOOSE_EXECUTABLES[relativePath];
   if (loose) return { path: relativePath, kind: 'executable', identifier: loose.identifier, entitlements: loose.entitlements };
   if (relativePath === `${CEF_FRAMEWORK}/Chromium Embedded Framework`) return { path: CEF_FRAMEWORK, kind: 'framework', entitlements: 'none' };
@@ -152,7 +156,7 @@ export function classifyDeveloperIdMachO(relativePath: string): DeveloperIdSigni
   throw new Error(`Unplanned Mach-O in the app bundle: ${relativePath} — add it to the Developer ID signing plan (src/macOSDeveloperIdBuild.ts) with its own entitlements.`);
 }
 
-const SIGNING_ORDER: readonly DeveloperIdTargetKind[] = ['executable', 'library', 'framework', 'helper-app', 'screen-app', 'app'];
+const SIGNING_ORDER: readonly DeveloperIdTargetKind[] = ['executable', 'library', 'framework', 'helper-app', 'screen-app', 'viewer-app', 'app'];
 
 /** Inside-out order: loose executables, framework dylibs, the framework, helper apps, then the app. */
 export function planDeveloperIdSigning(machOPaths: readonly string[]): readonly DeveloperIdSigningTarget[] {
@@ -178,7 +182,7 @@ export interface DeveloperIdCodesignInput {
 }
 
 export function developerIdCodesignArguments(target: DeveloperIdSigningTarget, input: DeveloperIdCodesignInput): readonly string[] {
-  if (target.kind === 'screen-app') throw new Error('The independently signed Screen app must be preserved, never re-signed by the GUI pipeline');
+  if (target.kind === 'screen-app' || target.kind === 'viewer-app') throw new Error('The independently signed companion app must be preserved, never re-signed by the GUI pipeline');
   if (!/^[0-9A-F]{40}$/u.test(input.certificateFingerprint)) throw new Error('Developer ID certificate fingerprint rejected');
   return Object.freeze([
     '--force', '--sign', input.certificateFingerprint, '--options', 'runtime', '--timestamp',
@@ -441,6 +445,11 @@ export function signAndVerifyDeveloperIdApp(app: string, workDir: string, identi
       log('[developer-id] preserving independent Screen signature and keychain entitlements');
       continue;
     }
+    if (target.kind === 'viewer-app') {
+      verifyPreservedViewerApp(join(app, target.path));
+      log('[developer-id] preserving independent Viewer signature and keychain entitlements');
+      continue;
+    }
     run(['codesign', ...developerIdCodesignArguments(target, { appBundlePath: app, certificateFingerprint: identity.certificateFingerprint, entitlementPaths })],
       `codesign ${target.path || 'AgentsToZ_byCS.app'}`);
     log(`[developer-id]   ${target.path || 'AgentsToZ_byCS.app'} (${target.entitlements === 'none' ? 'no entitlements' : `${target.entitlements} entitlements`})`);
@@ -453,6 +462,10 @@ export function signAndVerifyDeveloperIdApp(app: string, workDir: string, identi
       verifyPreservedScreenApp(path);
       continue;
     }
+    if (target.kind === 'viewer-app') {
+      verifyPreservedViewerApp(path);
+      continue;
+    }
     // Loose executables are sealed as resources, so --deep does not check their own signatures.
     run(['codesign', '--verify', '--strict', `-R=${developerIdTeamRequirement()}`, path], `codesign --verify ${target.path || 'app'}`);
     verifyEntitlements(path, target.entitlements, target.path || 'AgentsToZ_byCS.app');
@@ -460,6 +473,12 @@ export function signAndVerifyDeveloperIdApp(app: string, workDir: string, identi
   const designatedRequirement = assertTeamAnchoredDesignatedRequirement(run(['codesign', '--display', '-r-', app], 'codesign -d -r-'));
   log(`[developer-id] ${designatedRequirement}`);
   return Object.freeze({ plan, designatedRequirement });
+}
+
+function verifyPreservedViewerApp(path: string): void {
+  run(['codesign', '--verify', '--deep', '--strict', `-R=${VIEWER_HELPER_REQUIREMENT}`, path], 'verify independent Viewer app');
+  assertTeamAnchoredDesignatedRequirement(run(['codesign', '--display', '-r-', path], 'Viewer designated requirement'), VIEWER_HELPER_IDENTIFIER);
+  assertViewerBundleEntitlements(run(['codesign', '--display', '--entitlements', '-', '--xml', path], 'Viewer entitlements'));
 }
 
 function verifyPreservedScreenApp(path: string): void {
@@ -488,6 +507,8 @@ export function signNotarizeAndStaple(options: DeveloperIdReleaseOptions): Devel
   // The outer submission issues a ticket for nested code too. Carry Screen's own ticket
   // when the signed payload is copied out as an independent app on another Mac.
   if (existsSync(screen)) stapleAndValidate(screen, 'screen', log);
+  const viewer = join(app, VIEWER_HELPER_BUNDLE_PATH);
+  if (existsSync(viewer)) stapleAndValidate(viewer, 'viewer', log);
   stapleAndValidate(app, 'app', log);
   run(['codesign', '--verify', '--deep', '--strict', app], 'verify app after companion stapling');
   const gatekeeper = assertNotarizedGatekeeperVerdict(run(['spctl', '--assess', '--type', 'execute', '-vv', app], 'spctl --assess (app)'), 'the app');

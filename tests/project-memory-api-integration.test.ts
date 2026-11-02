@@ -221,6 +221,15 @@ describe("project-memory local HTTP API", () => {
     expect(recallWithAdvice.response.status).toBe(200);
     expect(recallWithAdvice.body.effortAdvice).toEqual({cliMode:'auto',desktopMode:'recommend',desktopControl:'advice-only',scope:'this-execution-host'});
     expect(recallWithAdvice.body.hits).toEqual(recalled.body.hits);
+    const recallWithRelations = await post(baseUrl,'/api/project-memory/recall',{
+      folderPath:project,query:'remote head stale parent',limit:3,includeRelations:true,
+    });
+    expect(recallWithRelations.response.status).toBe(200);
+    expect(recallWithRelations.body.hits).toEqual(recalled.body.hits);
+    expect(recallWithRelations.body.relations).toMatchObject({state:'ready',memoryId:recalled.body.memoryId,authority:'association-only',grantsAuthority:false});
+    expect(Buffer.byteLength(JSON.stringify(recallWithRelations.body.relations))).toBeLessThanOrEqual(8_000);
+    const invalidRelations = await post(baseUrl,'/api/project-memory/recall',{folderPath:project,query:'remote head',includeRelations:'true'});
+    expect(invalidRelations.response.status).toBe(400);
     expect(recalled.body.hits[0]?.title).toBe("원격 최신본 확인");
     const entryKey = recalled.body.hits[0]?.entryKey;
     expect(entryKey).toBe(parseProjectMemoryEntries(readFileSync(sourcePath, "utf8"))[0]?.entryKey);

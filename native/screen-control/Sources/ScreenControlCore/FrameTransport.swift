@@ -35,33 +35,25 @@ public enum ScreenTransportHandshake {
     }
 
     /// Reads nothing before the existing admission gate accepts this peer. The same five-second deadline,
-    /// registration lifetime and signed key confirmation apply to every network path.
+    /// registration lifetime and signed key confirmation apply to every network path. `accepting` is what this path
+    /// serves (SR-33): the self-hosted relay takes phones only.
     public static func accept(over framed: any ScreenFrameTransport, peer: PeerKey, handshake: MacHandshake,
-                              gate: PreAuthGate) async throws -> MacSession {
+                              gate: PreAuthGate, accepting: Set<ScreenPeerClass> = [.phone]) async throws -> MacSession {
         framed.setMaxFrame(ScreenListener.preAuthMaxFrame)
         let ticket: PreAuthTicket
         switch await gate.admit(peer, at: .now) {
         case .success(let admitted): ticket = admitted
         case .failure(let refusal): framed.cancel(); throw refusal
         }
-        let settled = Once()
-        let watchdog = Task {
-            guard (try? await Task.sleep(until: ticket.deadline, clock: .continuous)) != nil else { return }
-            if settled.claim() { framed.cancel() }
-        }
-        defer { watchdog.cancel() }
         do {
-            let (reply, pending) = try await handshake.respond(to: try await framed.receive())
-            try await framed.send(reply)
-            let channel = try await pending.confirm(try await framed.receive())
-            guard settled.claim() else { throw TransportError.timedOut }
+            let outcome = try await MacKeyExchange.run(over: framed, ticket: ticket, gate: gate, handshake: handshake,
+                                                       accepting: accepting)
             _ = await gate.finish(ticket, succeeded: true, at: .now)
-            return MacSession(deviceID: pending.deviceID, peer: peer,
-                              connection: SecureConnection(framed: framed, channel: channel))
+            return MacSession(deviceID: outcome.pending.deviceID, peer: outcome.peer, peerClass: outcome.pending.peerClass,
+                              connection: SecureConnection(framed: framed, channel: outcome.channel))
         } catch {
-            framed.cancel()
             _ = await gate.finish(ticket, succeeded: false, at: .now)
-            throw settled.claim() ? error : TransportError.timedOut
+            throw error
         }
     }
 }

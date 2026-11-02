@@ -3,6 +3,7 @@ import {createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import type {BrowserRecovery,WorkroomBrowserRecovery} from './workroomBrowserRecovery';
 import {discoverChromeProfiles} from './browserProfilesServer';
 import {chromeDebugEndpoint,WorkroomCdpTransport,type BrowserCdp} from './workroomCdpTransport';
+import type {CommunityAdapterAuthorization,CommunityAdapterWitness} from './communityAdapterAuthorization';
 import {BROWSER_TAB_LIMIT,parseBrowserAgentRequest,parseWorkroomBrowserRequest,workroomBrowserUrl,type BrowserAgentRequest,type BrowserElement,type BrowserFrameSummary,type BrowserPage,type BrowserScreenshot,type BrowserScroll,type BrowserUnobservable,type BrowserWorkspace,type WorkroomBrowserRequest,type WorkroomBrowserResult,type BrowserActionState,type BrowserReceipt} from './workroomBrowserProtocol';
 
 /** One frame of the attached page, as the observation that named it saw it. Its isolated world is the only place its
@@ -14,8 +15,8 @@ type FrameRef={session:string;frameId:string;context:number;stale:boolean};
 type Tab={page:BrowserPage;session:string;frame?:string;context?:number;children:Map<string,string>;armed:Set<string>;navigations:number;discovery:boolean;arming?:boolean};
 /** `tabs` is the Workroom's own tab set and `tab` its active tab (`state.page` is that tab's page). `allowed` limits a
  * built-in browser to the native pages this Workroom itself opened. */
-type Binding={state:BrowserWorkspace;recoveryId?:string;cdp:BrowserCdp;endpoint:string;allowed?:Set<string>;tab?:Tab;tabs:Map<string,Tab>;frames:Map<string,FrameRef>;grant?:string;tail:Promise<unknown>;queued:number;receipts:Map<string,{fingerprint:string;state:BrowserActionState}>;off?:()=>void;inputs:number};
-type Deps={runningSession:(id:string)=>{targetId:string}|null;profiles?:typeof discoverChromeProfiles;endpoint?:()=>Promise<string>;connect?:(endpoint:string)=>Promise<BrowserCdp>;recovery?:WorkroomBrowserRecovery;sleep?:(ms:number)=>Promise<void>;now?:()=>number};
+type Binding={state:BrowserWorkspace;recoveryId?:string;cdp:BrowserCdp;endpoint:string;allowed?:Set<string>;tab?:Tab;tabs:Map<string,Tab>;frames:Map<string,FrameRef>;grant?:string;community?:CommunityAdapterWitness;tail:Promise<unknown>;queued:number;receipts:Map<string,{fingerprint:string;state:BrowserActionState}>;off?:()=>void;inputs:number};
+type Deps={runningSession:(id:string)=>{targetId:string}|null;profiles?:typeof discoverChromeProfiles;endpoint?:()=>Promise<string>;connect?:(endpoint:string)=>Promise<BrowserCdp>;recovery?:WorkroomBrowserRecovery;community?:CommunityAdapterAuthorization;sleep?:(ms:number)=>Promise<void>;now?:()=>number};
 /** Observation budgets. The main document keeps its original 80 elements and 12,000 characters; each child frame adds
  * at most 16 elements and 1,500 characters, for at most 6 frames. */
 const MAIN_ELEMENTS=80,MAIN_TEXT=12000,FRAME_ELEMENTS=16,FRAME_TEXT=1500,MAX_FRAMES=6,MAX_CHILD_SESSIONS=16,SHADOW_CHECKS=8;
@@ -58,8 +59,32 @@ const number=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)?Math.round(v):
 /** No settings, profile launch, browser-wide methods, cookies, network bodies or arbitrary JS reach agents. */
 export class WorkroomBrowserHost {
  private spaces=new Map<string,Binding>();private opening=false;
+ private readonly communityStarts=new Set<string>();
  constructor(private deps:Deps){}
- private invalidate(b:Binding,owner:BrowserWorkspace['owner']='human'){b.state.epoch++;b.state.owner=owner;b.state.observation=null;delete b.state.waiting;b.frames.clear();b.grant=undefined;}
+ private invalidate(b:Binding,owner:BrowserWorkspace['owner']='human'){b.state.epoch++;b.state.owner=owner;b.state.observation=null;delete b.state.waiting;b.frames.clear();b.grant=undefined;b.community=undefined;}
+ /** Only the first, fresh built-in page attachment can reuse the enrolled browser consent. Never resumes a saved,
+  * manually held, navigated or uncertain task, nor a borrowed Chrome profile. The UI still chooses what task gets it. */
+ private async initialCommunityGrant(b:Binding,key:string,fresh:boolean):Promise<WorkroomBrowserResult>{
+  const authority=this.deps.community;
+  if(!authority||!fresh||b.state.source!=='owned'||this.communityStarts.has(key)||this.communityStarts.size>=128)return this.result(b);
+  this.communityStarts.add(key);
+  const epoch=b.state.epoch;
+  let witness:CommunityAdapterWitness;
+  try{witness=await authority.authorize('computer-use.browser');}catch{return this.result(b);}
+  if(!authority.isCurrent(witness,'computer-use.browser')||b.state.epoch!==epoch||b.state.owner!=='human'||b.state.connection!=='connected')return this.result(b);
+  try{
+   await this.perform({operation:'resume',workspaceId:b.state.id});
+   if(!authority.isCurrent(witness,'computer-use.browser')||(b.state.owner as string)!=='agent'){
+    if((b.state.owner as string)==='agent')this.invalidate(b);return this.result(b);
+   }
+   const result=await this.perform({operation:'grant',workspaceId:b.state.id});
+   if(!authority.isCurrent(witness,'computer-use.browser')){this.invalidate(b);return this.result(b);}
+   // The grant response can be late too. Never attach a common lease or return its stale token after takeover.
+   if(!result.success||!result.grant||b.grant!==result.grant||(b.state.owner as string)!=='agent'
+     ||result.workspace?.epoch!==b.state.epoch)return this.result(b);
+   b.community=witness;return result;
+  }catch{if((b.state.owner as string)==='agent'||(b.state.owner as string)==='observing')this.invalidate(b);return this.result(b);}
+ }
  private bound(id:string,requireRunning=true){const b=this.spaces.get(id);if(!b)fail('workspace-not-found','Browser workspace not found.');const s=this.deps.runningSession(b.state.sessionId);if(!s||s.targetId!==b.state.targetId){this.disconnect(b);if(requireRunning)fail('session-ended','The original Workroom session is no longer running.');}return b;}
  private connected(b:Binding){if(b.state.connection!=='connected')fail('chrome-disconnected','Chrome disconnected. Reconnect and select the page again.');}
  /** A lost connection has no tab set: nothing is attached any more, so no tab, closed or not, is reported as in it. */
@@ -273,7 +298,11 @@ export class WorkroomBrowserHost {
     b.recoveryId=saved?.id??(this.deps.recovery?id:undefined);
     if(b.recoveryId){if(saved)this.deps.recovery!.save(b.state,b.recoveryId);b.receipts=new Map(this.deps.recovery!.receipts(b.recoveryId).map(({id,...receipt})=>[id,receipt]));}
     b.off=cdp.onEvent((method,p,sid)=>this.onEvent(b,method,p,sid));this.spaces.set(id,b);created=id;
-    if(r.operation==='connect-owned'){b.allowed=new Set([r.pageId]);return await this.perform({operation:'select',workspaceId:id,pageId:r.pageId,confirmProfile:true});}
+    if(r.operation==='connect-owned'){
+     b.allowed=new Set([r.pageId]);const prior=this.deps.recovery?.matching(b.state.profileId,r.pageId);
+     await this.perform({operation:'select',workspaceId:id,pageId:r.pageId,confirmProfile:true});
+     return await this.initialCommunityGrant(b,JSON.stringify([r.sessionId,r.targetId,r.pageId]),!saved&&!prior&&!r.recoveryId);
+    }
     return this.result(b);
    }catch(e){cdp?.close();if(created)this.spaces.delete(created);throw e;}finally{this.opening=false;}
   }
@@ -371,13 +400,23 @@ export class WorkroomBrowserHost {
   if(result.success&&result.workspace){const w=result.workspace;delete w.activity;delete w.waiting;if(w.receipt)w.receipt={id:w.receipt.id,state:w.receipt.state};}
   return result;
  }
- private async agentResult(value:unknown):Promise<WorkroomBrowserResult>{
+ private async agentResult(value:unknown,guard?:{active():boolean;beforeEffect():Promise<void>}):Promise<WorkroomBrowserResult>{
   const r=parseBrowserAgentRequest(value);
   const b=this.bound(r.workspaceId);const grant=b.grant;
   if(!grant||!/^[a-f0-9]{64}$/.test(r.grant)||!timingSafeEqual(Buffer.from(grant),Buffer.from(r.grant)))fail('grant-unavailable','Browser grant revoked or unavailable.');
   return this.queue(b,async()=>{
+   await guard?.beforeEffect();if(guard&&!guard.active())fail('grant-unavailable','Mobile browser authorization ended.');
    // Recheck after queueing; takeover revokes immediately.
    if(b.grant!==grant||b.state.owner!=='agent'||b.state.epoch!==r.epoch)fail('grant-unavailable','Stale browser control lease.');this.connected(b);
+   if(b.community){
+    try{
+     const witness=await this.deps.community!.authorize('computer-use.browser');
+     if(!this.deps.community!.isCurrent(witness,'computer-use.browser'))throw Error('community-expired');
+     // A human takeover while the native authorization was read must never be undone by that late result.
+     if(b.grant!==grant||b.state.owner!=='agent'||b.state.epoch!==r.epoch)fail('grant-unavailable','Stale browser control lease.');
+     b.community=witness;
+    }catch{if(b.grant===grant)this.invalidate(b);fail('grant-unavailable','Community browser authorization ended. Take control before continuing.');}
+   }
    if(r.operation==='request-human'){
     // No CDP call, observation, receipt or durable write: only the person may open a requested address.
     b.state.waiting??={reason:r.reason!,...(r.note!==undefined?{note:r.note}:{}),...(r.url!==undefined?{url:r.url}:{}),at:this.now()};
@@ -419,6 +458,11 @@ export class WorkroomBrowserHost {
     const expression=r.operation==='fill'?`(()=>{const e=globalThis.__atzElements?.get(${selector});if(!e?.isConnected||!(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement)||e.type==='password'||e.type==='file'||e.disabled||e.readOnly)throw Error('Observed field unavailable');const setter=Object.getOwnPropertyDescriptor(e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set;setter.call(e,${text});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`
      :r.operation==='select'?`(()=>{const e=globalThis.__atzElements?.get(${selector});if(!e?.isConnected||!(e instanceof HTMLSelectElement)||e.disabled)throw Error('Observed list unavailable');const v=${choice},all=[...e.options],label=o=>(o.label||o.textContent||'').trim(),cut=v.length>=${OPTION_TEXT}?all.filter(o=>o.value.startsWith(v)||label(o).startsWith(v)):[],o=cut.length>1?undefined:all.find(o=>o.value===v)||all.find(o=>label(o)===v)||cut[0];if(!o||o.disabled)throw Error('Option unavailable');for(const other of all)other.selected=other===o;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`
      :`(()=>{const e=globalThis.__atzElements?.get(${selector});if(!e?.isConnected||!(e instanceof HTMLElement)||e.matches('input[type=file],input[type=password]'))throw Error('Observed element unavailable');e.click();return true;})()`;
+    await guard?.beforeEffect();
+    if(guard&&!guard.active()||b.grant!==grant||b.state.owner!=='agent'||b.state.epoch!==r.epoch||b.community&&!this.deps.community!.isCurrent(b.community,'computer-use.browser')){
+     if(b.recoveryId)this.deps.recovery!.record(b.recoveryId,{id:r.requestId,fingerprint,state:'rejected'},pageId);
+     receipt.state='rejected';fail('grant-unavailable','Browser authority ended before dispatch.');
+    }
     const result=await b.cdp.send('Runtime.evaluate',{expression:`if(globalThis.__atzHumanTouched)throw Error('Human takeover');${expression}`,contextId:ref.context,returnByValue:true,timeout:3000},ref.session);
     if(result.exceptionDetails)fail('take-control-first','Page action failed; inspect its effect before retrying.');
     if(b.recoveryId)this.deps.recovery!.record(b.recoveryId,{id:r.requestId,fingerprint,state:'completed'},pageId);receipt.state='completed';b.state.receipt=this.receipt(b,r.requestId,'completed');
@@ -499,6 +543,13 @@ export class WorkroomBrowserHost {
    if(data.length<=SHOT_CHARS)return {mimeType:'image/jpeg',data,width:Math.max(1,Math.round(clip.width*scale)),height:Math.max(1,Math.round(clip.height*scale))};
   }
   return fail('observe-failed','Screenshot too large. Capture one observed element instead.');
+ }
+ /** Trusted mobile adapter gets existing owned contexts only; grants never leave this object. */
+ mobileContexts(){return [...this.spaces.values()].filter(b=>b.state.source==='owned'&&b.state.owner==='agent'&&b.state.connection==='connected'&&!!b.grant&&b.state.profileVerification==='user-confirmed'&&this.deps.runningSession(b.state.sessionId)?.targetId===b.state.targetId).map(b=>({workspaceId:b.state.id,sessionId:b.state.sessionId,targetId:b.state.targetId,epoch:b.state.epoch,label:b.state.page?.title.slice(0,120)||'워크룸 브라우저'}));}
+ async mobileAgent(workspaceId:string,epoch:number,request:Readonly<Record<string,unknown>>,guard:{active():boolean;beforeEffect():Promise<void>}){
+  const context=this.mobileContexts().find(c=>c.workspaceId===workspaceId&&c.epoch===epoch);if(!context)fail('grant-unavailable','The original owned browser context ended.');
+  if(!['observe','click','fill','select','receipt'].includes(String(request.operation)))fail('generic','Unsupported mobile browser operation.');
+  const b=this.bound(workspaceId);return this.agentResult({...request,workspaceId,epoch,grant:b.grant},guard);
  }
  /** In-process only, for the helpdesk's own instance; no HTTP route reaches these. The connected workspace of one
   * session, and its control facts without any page content: who holds it, the active tab's address as the browser

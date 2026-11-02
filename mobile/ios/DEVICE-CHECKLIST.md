@@ -25,14 +25,18 @@ bun run test:ios
 swift test --package-path mobile/ios/AgentsToZCore
 
 # 자동: 온보딩 XCUITest — 시뮬레이터(기본) / USB iPhone
+# 시뮬레이터 실행은 test20(같은 Wi-Fi 여정)용 샌드박스 픽스처 호스트를 en0 사설 IPv4에 띄웁니다. 빌드 전에 먼저 묻고
+# (lan-journey-host.ts probe), en0 사설 주소가 없거나 macOS 방화벽이 켜져 있으면 test20만 skip(result.json의 lanJourneyBlocked,
+# 통과로 세지 않음)하고 나머지는 그대로 돕니다. 포트는 호스트를 띄우는 그 순간 en0에서 고릅니다(겹치면 새 포트로 다시).
 python3 mobile/ios/scripts/check-ui.py
+bun scripts/emulator-e2e.ts j1-lan                                      # 같은 실행을 하네스 레인(J1-LAN-APP)으로 — --require-lan-journey: 위 경우 skip이 아니라 막힘(exit 78, 빌드 전)
 python3 mobile/ios/scripts/check-ui.py --device '<device-id>'          # 팀 기본값 사용
 python3 mobile/ios/scripts/check-ui.py --device '<device-id>' --plan   # 명령만 출력, 아무것도 실행 안 함
 # 조건: 개인 포털 탭 시험까지 — 본인 HTTPS origin을 로컬에서만 지정
 AGENTSTOZ_IOS_PORTAL_URL='https://<개인 포털>' python3 mobile/ios/scripts/check-ui.py --device '<device-id>'
 
-# 자동: LAN 워크룸(가짜 프로젝트·CLI) — 시뮬레이터 / 격리 번들 실기기
-bun mobile/ios/scripts/check-workroom.ts
+# 자동: LAN 워크룸(가짜 프로젝트·CLI) — 시뮬레이터(하네스 샌드박스 안에서만) / 격리 번들 실기기
+bun scripts/emulator-e2e.ts j1-pty
 bun mobile/ios/scripts/check-workroom.ts --device '<device-id>' '<signed-isolated-app-path>' '<Apple Development signing identity>'
 
 # 사람: 실제 앱으로 손 검증할 개발 빌드 설치 (com.intenet.agentstoz.mobile.dev 덮어쓰기)
@@ -93,6 +97,10 @@ bun run install:ios:development -- --device '<device-id>'
 
 | 확인 | 판정 |
 |---|---|
+| **실제 앱**: 연결 주소에 같은 Wi-Fi URL → 「같은 네트워크에서 연결」 → 픽스처 프로젝트 A·B 목록 → A 「실행」 → 「작업 확인」 → 「실행 중」(Mac 쪽 시작 정확히 1회) | **자동·시뮬레이터 전용** (check-ui test20, 샌드박스 픽스처 호스트; 실기기는 skip) |
+| **실제 앱**: 「워크룸에서 작업」 → 허용 전 거부 문구 → Mac 허용(스크립트) → Bypass 끄고 「작업 시작」 → `hello` 전송 → 터미널에 `RESULT:hello`(화면 OCR + 호스트 영수증) | **자동·시뮬레이터 전용** (test20) |
+| **실제 앱**: Home → 그동안 호스트가 기록을 지킨 채 리스너를 다시 시작(소켓 1012로 끊김, 세션은 분리 상태로 남음 — 스크립트로 일으킨 끊김) → 복귀 시 페이지가 스스로 `session.restore`로 같은 세션에 다시 붙음(새 QR·새 페어링 없음, 관리 id 새로, 분리 → 연결 전환이 호스트 영수증에) | **자동·시뮬레이터 전용** (test20) |
+| **실제 앱**: 연결 정보 지우기(`session.end`) → 호스트 세션 0개 → 같은 URL 다시 입력 → 호스트가 페이지를 내주고 소비된 페어링을 거절(1008, `lan.pair` refused 영수증) → 페이지 자체의 「연결 종료」(앱의 로드 실패 화면은 인정 안 함), 실행 횟수 그대로 | **자동·시뮬레이터 전용** (test20) |
 | 프로젝트·AI 선택, 터미널 허용 전 거부/후 허용, 중복 시작·전송·종료 방지, 실제 출력 | **자동** (check-workroom, 가짜 CLI) |
 | 기억 초안 채우기(자동 전송 안 함), 외부 탐색·팝업 차단 | **자동** (check-workroom) |
 | background 복귀 후 같은 WKWebView·연결 소유자 유지, 새 연결의 권한 격리 | **자동** (check-workroom) |
@@ -198,8 +206,15 @@ Mac 잠금 화면에서 유니코드 글자 입력이 먹는지는 위 잠김 �
 
 ## 3. 자동으로 아직 못 하는 것
 
-- XCUITest는 2개뿐입니다(test00 온보딩, test10 포털 — 포털 주소가 없으면 skip). 개인 포털 없이
-  돌리면 **1 pass / 1 skipped** 가 정상이며, skip을 통과로 세지 않습니다.
+- 기본 XCUITest는 4개입니다(test00 온보딩, test10 포털, test20 같은 Wi-Fi 여정, test30 합성 Mac 컨트롤러 QR 거절).
+  test20과 test30은 시뮬레이터 전용이며 실제 등록 버튼은 누르지 않습니다. 기대 개수는 `check-ui.py`의
+  `NORMAL_LANE_TESTS` 표에서 나옵니다 (`--plan`의 `expected`): 시뮬레이터 포털 없음 **3 pass / 1 skipped**,
+  시뮬레이터 포털 있음 4 / 0, 실기기 포털 없음 **1 pass / 3 skipped**, 실기기 포털 있음 2 / 2.
+  이 Mac에서 같은 Wi-Fi 여정을 못 돌리면(en0 사설 주소 없음·방화벽 켜짐) test20이 skip이라 2 / 2
+  (포털 있으면 3 / 1)이고 `--plan`의 `expectedIfLanBlocked`가
+  그 값입니다. 시험별 결과(`test.log`)도 표와 같아야 하며,
+  skip을 통과로 세지 않습니다. test20이 입력한 일회용 URL은 `UI.xcresult`·`test.log`·`attachments`에 남습니다
+  (호스트가 이미 소비했고 꺼졌습니다 — `result.json`의 `consumedFixtureToken`). 그 밖의 증거에 `#pair=`가 있으면 실패입니다.
 - 카메라 QR 스캔, OS 권한 대화상자, Google 로그인, SAS 승인, 음성, 키보드 조합, VoiceOver는
   XCUITest가 없습니다. 위 **사람** 항목은 매 빌드마다 직접 눌러야 합니다.
 - Mac 화면 뷰어는 시뮬레이터에서 열 수 없습니다. 시뮬레이터는 App Attest를 지원하지 않아 등록을 끝낼 수 없고,

@@ -1,6 +1,8 @@
 import {chromium,webkit} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
+import {workModeCopy} from '../src/i18n';
+const copy=workModeCopy('ko');
 const built=await Bun.build({entrypoints:['tests/fixtures/voice/popout.tsx'],target:'browser',format:'esm',define:{'process.env.NODE_ENV':'"production"'}});
 if(!built.success)throw Error(built.logs.join('\n'));
 const js=built.outputs.find(f=>f.path.endsWith('.js')),css=built.outputs.find(f=>f.path.endsWith('.css'));
@@ -123,6 +125,96 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await page.getByTestId('work-mode-screen-open').click();
   await page.getByText('AgentsToZ Screen 실행 중 · 화면 제어 꺼짐',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').slice(-2).map(c=>c.args)),[{},{}],'retry uses the same bounded install/open command');
+  // An old running Screen remains usable while its update waits; opening proves running, never latest.
+  await page.evaluate(()=>window.setScreenHelper({running:true,updatePending:true,state:{power:'on',viewing:true,devices:2,capture:true,control:true,loginItem:'off'}}));await reopen();
+  await page.getByText(copy.screenUpdatePending,{exact:true}).waitFor();
+  await page.getByText('현재 연결 1대 · 이 Mac 화면을 보고 있어요',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-screen-open').isEnabled(),true,'pending alone does not stop opening the current installed app');
+  await page.getByTestId('work-mode-screen-open').click();await page.getByText(copy.screenUpdatePending,{exact:true}).waitFor();
+  await page.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-screen-update-pending.png`});
+  const screenCalls=await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').length);
+  await page.evaluate(()=>window.setScreenHelper({otherInstanceRunning:true,running:false,state:null}));await reopen();
+  await page.getByText(copy.screenOtherInstance,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-screen-open').count(),0,'another-path instance is not opened or mistaken for the installed copy');
+  await page.evaluate(()=>window.setScreenHelper({otherInstanceRunning:false,instanceStatusUnknown:true}));await reopen();
+  await page.getByText(copy.screenInstanceUnknown,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-screen-open').count(),0,'unknown process observations do not authorize opening');
+  assert.equal(await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').length),screenCalls,'status and blocked rendering never launch a helper');
+  await page.evaluate(()=>window.setScreenHelper({otherInstanceRunning:false,instanceStatusUnknown:false,updatePending:false,running:true,state:{power:'off',viewing:false,devices:0,capture:true,control:false,loginItem:'off'}}));await reopen();
+  await page.getByText(copy.screenOff,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-screen-open').isEnabled(),true,'a fresh clear observation restores the human open action');
+  // AgentsToZ Viewer (docs/design/mac-to-mac-2026-11-01 5.4): 「다른 Mac 화면 보기」 opens the app, naming no Mac and starting nothing.
+  await page.getByTestId('work-mode-viewer-status').waitFor();
+  assert.match(await page.getByTestId('work-mode-viewer-status').innerText(),/AgentsToZ Viewer가 꺼져 있어요/);
+  await page.getByRole('button',{name:'다른 Mac 화면 보기',exact:true}).click();
+  await page.getByText('AgentsToZ Viewer 실행 중',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_viewer_helper').map(c=>c.args)),[{}],'opening the Viewer takes no arguments');
+  // Asked but not yet seen running: where to look, neither success nor failure.
+  await page.evaluate(()=>window.unverifiedViewerOpen=true);await page.getByTestId('work-mode-viewer-open').click();
+  await page.getByText(/Dock에서 AgentsToZ Viewer를 확인하세요/).waitFor();
+  // A failure is said, and the button stays to try again.
+  await page.evaluate(()=>{window.unverifiedViewerOpen=false;window.failViewerOpen=true;});await page.getByTestId('work-mode-viewer-open').click();
+  await page.getByRole('alert').filter({hasText:'AgentsToZ Viewer를 열지 못했습니다'}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isEnabled(),true,'a failed Viewer open can be retried');
+  await page.evaluate(()=>window.failViewerOpen=false);
+  // Carried but not installed (a failed startup installation): the same button retries it.
+  await page.evaluate(()=>window.setViewerHelper({installed:false,running:false}));await reopen();
+  await page.getByText(/AgentsToZ Viewer 설치가 필요해요/).waitFor();
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isEnabled(),true,'a failed Viewer installation can be retried');
+  // A newer Viewer waiting for the running one to close is said, not done under the person (SR-35).
+  await page.evaluate(()=>window.setViewerHelper({installed:true,running:true,updatePending:true}));await reopen();
+  await page.getByText(/새 버전이 기다리고 있어요/).waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'the Viewer section wraps in the dock');
+  await page.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-viewer.png`});
+  const viewerCalls=await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_viewer_helper').length);
+  await page.evaluate(()=>window.setViewerHelper({running:false,otherInstanceRunning:true}));await reopen();
+  await page.getByText(copy.viewerOtherInstance,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isDisabled(),true,'a different Viewer path is a blocker, not the installed running app');
+  await page.evaluate(()=>window.setViewerHelper({otherInstanceRunning:false,instanceStatusUnknown:true}));await reopen();
+  await page.getByText(copy.viewerInstanceUnknown,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isDisabled(),true,'unknown Viewer observations block opening without claiming another app runs');
+  assert.equal(await page.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_viewer_helper').length),viewerCalls,'blocked or observed Viewer states start no app or session');
+  await page.evaluate(()=>window.setViewerHelper({otherInstanceRunning:false,instanceStatusUnknown:false,updatePending:false,running:true}));await reopen();
+  await page.getByText(copy.viewerRunning,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isEnabled(),true,'opening recovers after a fresh clear observation');
+  // Older successes cannot overwrite a newer unknown result; each mock keeps a bounded number of replies per helper.
+  await page.evaluate(()=>{window.holdNextScreenStatus=true;window.holdNextViewerStatus=true;});
+  await page.waitForFunction(()=>window.heldHelperStatuses().length===2);
+  await page.evaluate(()=>{window.failScreenStatus=true;window.failViewerStatus=true;});
+  await page.getByText(copy.screenInstanceUnknown,{exact:true}).waitFor();await page.getByText(copy.viewerInstanceUnknown,{exact:true}).waitFor();
+  await page.evaluate(()=>window.releaseHeldHelperStatuses(true));await page.waitForTimeout(100);
+  assert.equal(await page.getByText(copy.screenInstanceUnknown,{exact:true}).count(),1,'late success cannot erase the newer unknown Screen state');
+  assert.equal(await page.getByText(copy.viewerInstanceUnknown,{exact:true}).count(),1,'late success cannot erase the newer unknown Viewer state');
+  assert.equal(await page.getByTestId('work-mode-screen-open').count(),0,'a rejected status read fences the previous Screen state');
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isDisabled(),true,'a rejected status read fences the previous Viewer state');
+  // Nor can an older failure erase a newer recovery through the same existing 5s poll.
+  await page.evaluate(()=>{window.holdNextScreenStatus=true;window.holdNextViewerStatus=true;window.failScreenStatus=false;window.failViewerStatus=false;});
+  await page.waitForFunction(()=>window.heldHelperStatuses().length===2);
+  await page.getByText(copy.screenOff,{exact:true}).waitFor();await page.getByText(copy.viewerRunning,{exact:true}).waitFor();
+  await page.evaluate(()=>window.releaseHeldHelperStatuses(false));await page.waitForTimeout(100);
+  assert.equal(await page.getByText(copy.screenOff,{exact:true}).count(),1,'late failure cannot erase a newer Screen recovery');
+  assert.equal(await page.getByText(copy.viewerRunning,{exact:true}).count(),1,'late failure cannot erase a newer Viewer recovery');
+  assert.equal(await page.getByTestId('work-mode-screen-open').isEnabled(),true);
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isEnabled(),true);
+  // A newer query that is only pending cannot erase the observed rejection of its predecessor.
+  await page.evaluate(()=>{window.holdNextScreenStatus=true;window.holdNextViewerStatus=true;});
+  await page.waitForFunction(()=>window.heldHelperStatuses().length===2);
+  await page.evaluate(()=>{window.holdNextScreenStatus=true;window.holdNextViewerStatus=true;});
+  await page.waitForFunction(()=>window.heldHelperStatuses().length===4);
+  await page.evaluate(()=>window.releaseHeldHelperStatuses(false,true));
+  await page.getByText(copy.screenInstanceUnknown,{exact:true}).waitFor();await page.getByText(copy.viewerInstanceUnknown,{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.heldHelperStatuses().length),2,'the newer reads are still pending, not evidence of success');
+  assert.equal(await page.getByTestId('work-mode-screen-open').count(),0,'the older known failure blocks Screen while the newer read is pending');
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isDisabled(),true,'the older known failure blocks Viewer while the newer read is pending');
+  await page.evaluate(()=>window.releaseHeldHelperStatuses(true));
+  await page.getByText(copy.screenOff,{exact:true}).waitFor();await page.getByText(copy.viewerRunning,{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('work-mode-screen-open').isEnabled(),true);
+  assert.equal(await page.getByTestId('work-mode-viewer-open').isEnabled(),true);
+  // An app that carries no Viewer and has none installed offers no button that could only fail.
+  await page.evaluate(()=>window.setViewerHelper({installed:false,bundled:false,running:false,updatePending:false}));await reopen();
+  assert.equal(await page.getByTestId('work-mode-viewer').count(),0,'no Viewer section without a Viewer');
+  assert.equal(await page.evaluate(()=>window.nativeCalls.some(c=>c.command==='agent_runtime_request'&&c.args.body.action==='prepare')),false,'opening the Viewer never starts AI');
+  await page.evaluate(()=>window.setViewerHelper({installed:true,bundled:true,running:false,updatePending:false}));
   assert.deepEqual(errors,[]);
   const main=await browser.newPage({viewport:{width:960,height:720}});await main.goto(server.url+'?workmode-main=1');
   // The trigger used to sit on x=0 and read as cut while the brand and tabs are inset (UI audit 2026-10-24).
@@ -132,6 +224,15 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   const mainPanel=await main.getByRole('region',{name:'근무 모드 설정'}).boundingBox();assert.ok(mainPanel.x>=0&&mainPanel.x+mainPanel.width<=264,'main settings stay inside the sidebar');
   assert.equal(await main.getByRole('region',{name:'근무 모드 설정'}).evaluate(n=>n.scrollWidth>n.clientWidth),false,'main copy wraps within the sidebar');
   await main.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-main.png`});
+  // A first read failure keeps status null: explain the hidden action without inventing an installed app.
+  await main.goto(server.url+'?workmode-main=1&helper-status-fail=1');await main.getByTestId('work-mode-open').click();
+  await main.getByText(copy.screenInstanceUnknown,{exact:true}).waitFor();await main.getByText(copy.viewerInstanceUnknown,{exact:true}).waitFor();
+  assert.equal(await main.getByTestId('work-mode-screen-open').count(),0);
+  assert.equal(await main.getByTestId('work-mode-viewer-open').count(),0);
+  await main.evaluate(()=>{window.failScreenStatus=false;window.failViewerStatus=false;});
+  await main.getByText(copy.screenStopped,{exact:true}).waitFor();await main.getByText(copy.viewerStopped,{exact:true}).waitFor();
+  assert.equal(await main.getByTestId('work-mode-screen-open').isEnabled(),true);
+  assert.equal(await main.getByTestId('work-mode-viewer-open').isEnabled(),true);
   // The QR remote-control dialog is where people look for AgentsToZ Screen (2026-10-25): the same status and 「열기」.
   const qr=await browser.newPage({viewport:{width:960,height:720}}),qrErrors=[];qr.on('pageerror',e=>qrErrors.push(e.message));
   await qr.goto(server.url+'?qr-remote=1');await qr.getByTestId('qr-remote-control-lan-folded').waitFor();
@@ -144,10 +245,26 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   await qr.getByText('AgentsToZ Screen 실행 중 · 화면 제어 꺼짐',{exact:true}).waitFor();
   assert.deepEqual(await qr.evaluate(()=>window.nativeCalls.filter(c=>c.command==='open_screen_helper').map(c=>c.args)),[{}],'the dialog opens it the same way');
   await qr.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-qr-remote-screen.png`});
+  // Both entry surfaces consume the same pending note; a verified open cannot erase the old-copy warning.
+  await qr.evaluate(()=>window.setScreenHelper({updatePending:true}));
+  await qr.getByText(copy.screenUpdatePending,{exact:true}).waitFor();
+  await qr.getByTestId('qr-remote-screen-open').click();await qr.getByText(copy.screenUpdatePending,{exact:true}).waitFor();
+  await qr.screenshot({path:`.agentstoz/maintainer/work-mode/${name}-qr-screen-update-pending.png`});
+  await qr.evaluate(()=>window.setScreenHelper({otherInstanceRunning:true,running:false,state:null}));
+  await qr.getByText(copy.screenOtherInstance,{exact:true}).waitFor();
+  assert.equal(await qr.getByTestId('qr-remote-screen-open').count(),0,'the QR entry also blocks a conflicting QA instance');
+  await qr.evaluate(()=>window.setScreenHelper({otherInstanceRunning:false,instanceStatusUnknown:false,updatePending:false,running:true,state:{power:'off',viewing:false,devices:0,capture:true,control:false,loginItem:'off'}}));
+  await qr.getByText(copy.screenOff,{exact:true}).waitFor();
+  assert.equal(await qr.getByTestId('qr-remote-screen-open').isEnabled(),true,'the QR entry recovers when the blocker clears');
+  await qr.goto(server.url+'?qr-remote=1&helper-status-fail=1');
+  await qr.getByText(copy.screenInstanceUnknown,{exact:true}).waitFor();
+  assert.equal(await qr.getByTestId('qr-remote-screen-open').count(),0,'initial QR status failure explains the unavailable action');
+  await qr.evaluate(()=>window.failScreenStatus=false);await qr.getByText(copy.screenStopped,{exact:true}).waitFor();
+  assert.equal(await qr.getByTestId('qr-remote-screen-open').isEnabled(),true,'normal QR status recovers through the existing poll');
   await qr.goto(server.url+'?qr-remote=1&browser=1');await qr.getByTestId('qr-remote-control-lan-folded').waitFor();
   assert.equal(await qr.getByTestId('qr-remote-screen').count(),0,'no Screen entry in a browser');
   assert.equal(await qr.evaluate(()=>window.nativeCalls.filter(c=>c.command==='get_screen_helper').length),0,'a browser never asks for the helper');
   assert.deepEqual(qrErrors,[]);
-  console.log(`${name}: presets, always-on, custom bounds, screen option, closed-lid grant, AgentsToZ Screen status and open (panel and QR remote dialog), failure, stop, native events, Escape, narrow dock and main sidebar passed`);
+  console.log(`${name}: presets, always-on, custom bounds, screen option, closed-lid grant, AgentsToZ Screen status and open (panel and QR remote dialog), AgentsToZ Viewer status and open, failure, stop, native events, Escape, narrow dock and main sidebar passed`);
  }finally{await browser.close();}
 }}finally{server.stop(true);}

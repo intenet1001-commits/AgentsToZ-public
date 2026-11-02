@@ -201,6 +201,17 @@ func selfTest(seconds: Double, scale: Double) async -> Int32 {
 
 let arguments = CommandLine.arguments.dropFirst()
 switch arguments.first {
+case "--community-broker":
+    guard arguments.count == 1 else { exit(2) }
+    do {
+        let broker = try ScreenCommunityBroker()
+        let server = try ScreenCommunitySocketServer { await broker.handle($0) }
+        print("community enrollment broker ready")
+        Task {
+            while !Task.isCancelled { try? await broker.refresh(); try? await Task.sleep(for: .seconds(30)) }
+        }
+        await server.run(); exit(0)
+    } catch { print("community enrollment broker unavailable"); exit(1) }
 case "--selftest":
     // Half the display by default: the phone's default stream size (DESIGN S0-4).
     let numbers = arguments.dropFirst().compactMap(Double.init)

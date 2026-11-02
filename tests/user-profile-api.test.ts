@@ -272,6 +272,13 @@ test('real isolated API keeps local management and authenticated MCP read separa
   const recalled = await call('/api/agentstoz-use/action', action, { [CONTROL_PROFILE_HEADER]: token });
   expect(recalled.status).toBe(200);
   expect(recalled.body).toMatchObject({ success: true, performed: true, action: 'recall-user-profile', effect: 'read-only', userProfile: { revision: '0', entries: [], truncated: false }, userProfilePolicy: USER_PROFILE_POLICY });
+  expect(recalled.body.userProfile).not.toHaveProperty('explanation');
+  const explained = await call('/api/agentstoz-use/action', {...action, includeExplanation: true}, {[CONTROL_PROFILE_HEADER]: token});
+  expect(explained.status).toBe(200);
+  expect(explained.body.userProfile.entries).toEqual(recalled.body.userProfile.entries);
+  expect(explained.body.userProfile.explanation).toEqual({scope:'this-device',projectMemoryId:managed.memoryId,comparisonScope:'returned-entries',selections:[],overlaps:[]});
+  expect(Buffer.byteLength(JSON.stringify(explained.body.userProfile))).toBeLessThanOrEqual(8_000);
+  expect((await call('/api/agentstoz-use/action', {...action, includeExplanation:'true'}, {[CONTROL_PROFILE_HEADER]: token})).status).toBe(400);
   expect((await call('/api/agentstoz-use/action', { ...action, portId: 'ops' }, { [CONTROL_PROFILE_HEADER]: token })).status).toBe(409);
   expect((await call('/api/agentstoz-use/action', { ...action, portId: 'ops-alias' }, { [CONTROL_PROFILE_HEADER]: token })).status).toBe(409);
   expect((await call('/api/agentstoz-use/action', { ...action, portId: 'ops-clone' }, { [CONTROL_PROFILE_HEADER]: token })).status).toBe(409);

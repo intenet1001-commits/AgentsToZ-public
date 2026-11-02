@@ -104,3 +104,6 @@ for(const [name,engine] of [['chromium',chromium],['webkit',webkit]]){
 console.log(JSON.stringify({fixture:true,physicalDevice:false,report},null,2));
 // The phone's common-memory surfaces run here too: the tester manifest is at its check limit.
 await import('./common-memory-phone-surfaces-ui.mjs');
+
+// Exercise the cross-page discovery journey through the same real panel.
+await import('./common-memory-cross-page-ui.mjs');

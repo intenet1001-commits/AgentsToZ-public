@@ -66,7 +66,8 @@ MCP `agentstoz_use_recall_common_memory`, 휴대폰. 끝은 모두 `common-memor
 ## 주제 발견 — 같은 교훈 묶음 (2026-11-01)
 
 「교집합·카테고리 후보 확인」과 MCP `recommend_common_memory_topics`(op `topic-candidates`)는 읽기 전용이다. 카탈로그 한 쪽의 원본
-8개(또는 고른 `memoryIds` 최대 16개)를 읽고, 한 조회는 500개 항목·2 MB(`COMMON_MEMORY_DISCOVERY_MAX_ENTRIES`·`_BYTES`)에서 멈춘다.
+8개(또는 고른 `memoryIds` 최대 16개)를 읽는다. 페이지를 이어 보면 임시 비교 색인에서 관련 원본 최대 8개를 더 찾아 현재 원본을 다시 읽는다.
+한 조회의 새 원본과 재확인 근거 합계는 500개 항목·2 MB(`COMMON_MEMORY_DISCOVERY_MAX_ENTRIES`·`_BYTES`)에서 멈춘다.
 
 - **방법**(`src/commonMemoryLessonClusters.ts`의 `clusterCrossMemoryLessons`, 순수·결정적): 제목+본문을 정규화(마크다운·코드 블록·경로·URL·
   날짜·id·버전·숫자 제거)하고, 공백을 뺀 문자 n-gram(한글은 3자, 라틴 문자에서 시작하면 5자)의 Jaccard가 `LESSON_CLUSTER_THRESHOLD`(0.1)
@@ -82,10 +83,19 @@ MCP `agentstoz_use_recall_common_memory`, 휴대폰. 끝은 모두 `common-memor
   서로 무관한 영어 항목이 0.20–0.25로 실제 공유 교훈(0.22–0.23)과 같은 높이에 섞여 어떤 문턱도 둘을 가르지 못했다. 지금 방식에서는 무관한 쌍이 0.08 미만이고,
   0.07–0.1 사이에는 같은 교훈(0.069–0.096)과 주제만 같은 쌍(최대 0.093)이 섞이며, 0.1 이상은 같은 절차를 다른 프로젝트에 적은 두 쌍뿐이었다.
   사람이 후보를 모두 읽으므로 정밀도를 택했다. 바꿔 쓴 시험 교훈은 0.19–0.32, 조금 고친 사본은 0.5 이상이다.
-- ⚠️ **한계 — 쪽 경계**: 한 번에 그 쪽의 원본만 비교한다. 실측에서 전체를 한꺼번에 비교하면(조회 한도 밖, 오프라인) 묶음이 1개(기억 3개)였지만 그 세 기억은
-  memoryId 순서로 15·57·98번째라 어느 쪽에서도 만나지 않았다 — 13쪽 모두 키워드 주제로 돌아가 예전과 같은 41개를 냈다. 범위를 `memoryIds`로 고르면
-  그 안에서는 찾는다. 쪽을 넘는 비교(앞 쪽 항목의 n-gram 요약 보관 등)는 다음 단계다.
-- 검증: `tests/common-memory-lesson-clusters.test.ts`(한국어·영어 바꿔 쓰기, 무관한 교훈, 모든 기억의 상투문, 같은 기억의 반복, 500개·2 MB 한도와 순서 무관,
+- **쪽을 넘는 비교(2026-11-02)**: `src/commonMemoryDiscoveryIndex.ts`가 페이지에서 읽은 항목의 정규화된 800자 이내 텍스트와 출처 ID를 임시 보관한다.
+  클라우드 scope·client partition별로 분리하며 서비스 객체를 새로 만들어도 같은 sidecar 안에서 이어진다. 전체 2,048항목·JSON 8 MB·8범위,
+  기억별 10분 만료이고 새 타이머·파일·DB·AI 호출은 없다. 임시 n-gram 비교도 정규화된 텍스트 합계 250,000 UTF-16 code units로 제한하며,
+  현재 쪽과 최근 원본을 우선한다. 관련 n-gram으로 이전 원본을 최대 8개 고른 뒤 `sources()`가 현재 head·alias·보관 상태와
+  본문 해시를 다시 검증한다. 후보의 근거는 그 새 읽기에서만 오며 색인에 남은 옛 리비전을 응답으로 쓰지 않는다.
+- **불완전 범위 표시**: 이전 페이지가 없거나 순서가 끊김, 만료·축출·후보/근거 예산 초과는 `warnings`와 `scanComplete:false`다. 한도 때문에 원본을
+  삭제하거나 비교 예산을 늘리지 않는다. 직접 고른 `memoryIds`는 색인으로 확장하거나 색인에 추가하지 않는다. 같은 모듈의 쓰기/명시 비우기 이전에
+  시작한 요청은 늦게 끝나도 색인을 되살리지 않는다. 최초 실행·재시작 뒤에는 페이지를 다시 이어 읽어 재생성한다.
+- **남은 범위**: 정규화된 어휘 유사도 기반의 제한된 후보 발견이다. 페이지 전체의 전역 그래프나 의미·인과관계 검색이 아니며, 후보 최대 16개와
+  페이지별 상투문 판정의 기존 제약도 유지한다. 예전 실측에서는 같은 교훈의 기억이 15·57·98번째여서 어느 쪽에서도 만나지 않았다.
+  새 회귀는 103개 기억·1,033항목에서 그 배치를 재현해 세 기억이 하나의 후보로 발견됨을 검사한다. 이는 운영 데이터 전체의 정확도 실측과 별도다.
+- 검증: `tests/common-memory-cross-page.test.ts`(페이지 간 발견·원본 변경/보관/alias·격리·수명·예산·늦은 응답),
+  `tests/common-memory-cross-page-ui.mjs`(Chromium·WebKit 3쪽 실제 조작), `tests/common-memory-lesson-clusters.test.ts`(한국어·영어 바꿔 쓰기, 무관한 교훈, 모든 기억의 상투문, 같은 기억의 반복, 500개·2 MB 한도와 순서 무관,
   클라우드 서비스의 근거 참조와 쓰기 없음). 폴백 경로는 기존 `tests/common-memory-topics.test.ts`·`tests/common-memory-cloud-topics-ui.mjs`가 지킨다.
 
 ## 호스트 디스패치와 능력

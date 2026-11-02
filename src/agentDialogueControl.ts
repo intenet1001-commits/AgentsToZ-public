@@ -1,3 +1,6 @@
+// Type only: agentDialogueHost imports this module, so a value import would be a cycle.
+import type {AGENT_DIALOGUE_CONTROL_DETACHED} from './agentDialogueHost';
+import {COMPUTER_USE_REMOTE_ERRORS,COMPUTER_USE_REMOTE_KIND} from './computerUseRemoteProtocol';
 import {REMOTE_HISTORY_COMMUNITY_REFUSAL,isRemoteHistoryAction} from './workroomHistoryRemoteProtocol';
 import {WORKROOM_ATTACH_COMMUNITY_REFUSAL,isWorkroomAttachAction} from './workroomRemoteAttachmentProtocol';
 import {WORKROOM_EFFORT_COMMUNITY_REFUSAL} from './workroomEffortView';
@@ -29,15 +32,43 @@ export interface CommunityControlProjects {
   opsTargetId:string|null;
   deviceName:string;
 }
+/** The sending device as the mailbox recorded the row (never the request body's claim). */
+export interface CommunityControlFrom {deviceId:string;name:string;endpointId?:string}
+/** What a `computer-use` row may return instead of an answer: it was handed to the receiving host's own lane. */
+export type CommunityControlDetached=typeof AGENT_DIALOGUE_CONTROL_DETACHED;
 export interface CommunityControlExecutorDependencies {
   terminal(body:Record<string,unknown>,options:CommunityControlTerminalOptions):Promise<unknown>;
   workspace(body:Record<string,unknown>,options?:CommunityControlTerminalOptions):Promise<unknown>;
   projects():Promise<CommunityControlProjects>;
-  opsRequest?(request:Record<string,unknown>,from:{deviceId:string;name:string;endpointId?:string}):Promise<unknown>;
+  opsRequest?(request:Record<string,unknown>,from:CommunityControlFrom):Promise<unknown>;
+  /**
+   * Computer use from another Mac (src/computerUseRemoteHost.ts). It answers hello, part, heartbeat, disconnect and
+   * receipt at once and may hand a `call` row to its lane (CommunityControlDetached), answering it later through the
+   * mailbox's controlRespond — pass `communityControlDetachable` as the poll's `detach`.
+   */
+  computerUse?(request:Record<string,unknown>,from:CommunityControlFrom,controlId:string):Promise<Record<string,unknown>|CommunityControlDetached>;
+}
+/** The executor; it returns CommunityControlDetached only when its dependencies include `computerUse`. */
+export type CommunityControlExecutor<D extends CommunityControlExecutorDependencies=CommunityControlExecutorDependencies>=
+  (request:Record<string,unknown>,from?:CommunityControlFrom,controlId?:string)
+    =>Promise<Record<string,unknown>|('computerUse' extends keyof D?CommunityControlDetached:never)>;
+const deviceIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The poll's `detach` predicate: only a computer-use `call` may be answered after the poll moved on (§7.5-§7.6). */
+export function communityControlDetachable(request:Record<string,unknown>):boolean{
+  return request?.kind===COMPUTER_USE_REMOTE_KIND&&request.op==='call';
 }
 
-export function createCommunityControlExecutor(deps:CommunityControlExecutorDependencies){
-  return async(request:Record<string,unknown>,from?:{deviceId:string;name:string;endpointId?:string}):Promise<Record<string,unknown>>=>{
+export function createCommunityControlExecutor<D extends CommunityControlExecutorDependencies>(deps:D):CommunityControlExecutor<D>{
+  const execute=async(request:Record<string,unknown>,from?:CommunityControlFrom,controlId?:string):Promise<Record<string,unknown>|CommunityControlDetached>=>{
+    if(request.kind===COMPUTER_USE_REMOTE_KIND){
+      // A Mac that cannot receive (an older build path, Windows, a server that is not the bundled sidecar) says so with the
+      // fixed sentence the sender reads as REMOTE_UNSUPPORTED, never the unknown-kind sentence (that one means outdated).
+      if(!deps.computerUse)throw new Error(COMPUTER_USE_REMOTE_ERRORS.REMOTE_UNSUPPORTED.message);
+      // The sending device is the mailbox's record; without it (or without the row to answer) nothing is decrypted.
+      if(!from||typeof from.deviceId!=='string'||!deviceIdPattern.test(from.deviceId)||typeof controlId!=='string'||!controlId)
+        throw new Error(COMPUTER_USE_REMOTE_ERRORS.REMOTE_BAD_REQUEST.message);
+      return deps.computerUse(request,from,controlId);
+    }
     if(request.kind==='ops-request'){
       if(!deps.opsRequest||!from?.endpointId)throw new Error('이 기기의 OPS 작업 수신 기능을 확인하세요.');
       return {receipt:await deps.opsRequest(request,from)};
@@ -72,6 +103,7 @@ export function createCommunityControlExecutor(deps:CommunityControlExecutorDepe
       throw new Error('다른 기기에서는 권한 우회나 다시 시작으로 세션을 열 수 없습니다. 세션을 열 기기 앞에서 직접 여세요.');
     return {result:await deps.terminal(b,{receiptOwner:communityReceiptOwner(from?.endpointId)})};
   };
+  return execute as CommunityControlExecutor<D>;
 }
 
 /** Fast while another Mac is driving this one, slow otherwise. The idle cost is one inbox read per

@@ -220,13 +220,91 @@ public final class SecureConnection: Sendable {
 
 public struct MacSession: Sendable {
     public let deviceID: Data
+    /// The bucket the gate counted the attempt in: its address, the relay, or a connector device's sub-bucket.
     public let peer: PeerKey
+    /// The registry the device's key was found in (DESIGN 6.4).
+    public let peerClass: ScreenPeerClass
     public let connection: SecureConnection
+}
+
+/// The Mac's half of one admitted key exchange, the same on every path. It reads the first frame against the ticket's
+/// first-frame deadline, counts a connector attempt under its device before anything is signed (`PreAuthGate.rekey`),
+/// answers only the peer classes the path serves, and cuts everything at the ticket's deadline. A refusal before message
+/// 2 is named in one unauthenticated `PreAuthNotice` frame to a peer that offered version 5 or more (DESIGN 7.7); a
+/// phone offers 4 and hears nothing new.
+enum MacKeyExchange {
+    struct Outcome: Sendable {
+        let pending: PendingMacSession
+        let channel: SecureChannel
+        /// The bucket the attempt ended up in.
+        let peer: PeerKey
+    }
+
+    static func run(over framed: any ScreenFrameTransport, ticket: PreAuthTicket, gate: PreAuthGate,
+                    handshake: MacHandshake, accepting: Set<ScreenPeerClass>,
+                    open: @Sendable () async throws -> Void = {},
+                    counted: @Sendable (PeerKey) -> Void = { _ in }) async throws -> Outcome {
+        let settled = Once(), heard = Once()
+        let watchdog = Task {
+            if let first = ticket.firstFrameDeadline {
+                guard (try? await Task.sleep(until: first, clock: .continuous)) != nil else { return }
+                // Nothing yet: a connector attempt ends here, counted against no device.
+                if heard.claim() { if settled.claim() { framed.cancel() }; return }
+            }
+            guard (try? await Task.sleep(until: ticket.deadline, clock: .continuous)) != nil else { return }
+            if settled.claim() { framed.cancel() }
+        }
+        defer { watchdog.cancel() }
+        var offered: UInt16 = 1
+        do {
+            try await open()
+            let hello = try await framed.receive()
+            let arrived = ContinuousClock.now
+            guard heard.claim() else { throw TransportError.timedOut }
+            let summary = try DeviceHelloSummary(hello)
+            offered = summary.offeredVersion
+            var peer = ticket.peer
+            if ticket.peer.isConnector {
+                // Told before the lookup, which may outlast the first-frame deadline: a frame that came in time stays in time.
+                await gate.heardFirstFrame(ticket, at: arrived)
+                let known = await handshake.knows(summary.deviceID)
+                switch await gate.rekey(ticket, device: summary.deviceID, known: known, at: .now) {
+                case .success(let rekeyed):
+                    peer = rekeyed.peer
+                    counted(peer)
+                case .failure(let refusal): throw refusal
+                }
+            }
+            let (reply, pending) = try await handshake.respond(to: hello, accepting: accepting)
+            try await framed.send(reply)
+            let channel = try await pending.confirm(try await framed.receive())
+            guard settled.claim() else { throw TransportError.timedOut }
+            return Outcome(pending: pending, channel: channel, peer: peer)
+        } catch {
+            // Still inside the deadline: the watchdog cuts a peer that will not take the notice.
+            if offered >= PreAuthNotice.minimumVersion, let notice = PreAuthNotice(refusal: error) {
+                try? await framed.send(notice.message)
+            }
+            let inTime = settled.claim()
+            framed.cancel()
+            throw inTime ? error : TransportError.timedOut
+        }
+    }
 }
 
 /// The Mac's screen listener. No Bonjour, no peer-to-peer, local-network peers only. `host` binds it to one local
 /// address: the approved network's, or loopback in checks.
 public final class ScreenListener: Sendable {
+    /// Which attempts count as a connector's (SR-25, DESIGN 7.5).
+    public enum ConnectorRule: Sendable, Equatable {
+        /// A peer at loopback, or at the very address it reached, is on this Mac: a tunnel connector such as cloudflared.
+        /// No other host can open TCP from the Mac's own address.
+        case sameHost
+        /// Every peer is counted by its address. The default for a listener bound to loopback, every one of whose peers
+        /// is local: the checks and the self-test.
+        case off
+    }
+
     /// For the audit log and the registered devices.
     public enum Event: Equatable, Sendable {
         case refused(PeerKey, PreAuthRefusal)
@@ -247,18 +325,55 @@ public final class ScreenListener: Sendable {
     private let queue = DispatchQueue(label: "agentstoz.screen-control.listener")
     private let handshake: MacHandshake
     private let gate: PreAuthGate
+    private let accepting: Set<ScreenPeerClass>
+    private let connectors: ConnectorRule
 
+    /// `accepting` is what this listener serves (SR-33): phones only unless the host opts in, so a listener that was
+    /// never told about Mac controllers never answers one. `connectors` defaults to `.off` on loopback and `.sameHost`
+    /// elsewhere. `nearbyTXT` goes into the nearby advertisement's TXT record (unauthenticated hints only, such as the
+    /// newest session version `pv`, DESIGN 7.7); none by default, so the advertisement stays as it was.
     public init(handshake: MacHandshake, gate: PreAuthGate, host: NWEndpoint.Host? = nil, port: NWEndpoint.Port = .any,
-                nearbyServiceName: String? = nil) throws {
-        listener = try Self.makeListener(host: host, port: port, nearbyServiceName: nearbyServiceName)
+                nearbyServiceName: String? = nil, accepting: Set<ScreenPeerClass> = [.phone],
+                connectors: ConnectorRule? = nil, nearbyTXT: [String: String] = [:]) throws {
+        listener = try Self.makeListener(host: host, port: port, nearbyServiceName: nearbyServiceName, nearbyTXT: nearbyTXT)
         self.handshake = handshake
         self.gate = gate
+        self.accepting = accepting
+        self.connectors = connectors ?? (host.map(Self.isLoopback) == true ? .off : .sameHost)
         (sessions, sessionSink) = AsyncStream.makeStream()
         (events, eventSink) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(256))
     }
 
+    static func isLoopback(_ host: NWEndpoint.Host) -> Bool {
+        switch host {
+        case .ipv4(let address): address.isLoopback
+        case .ipv6(let address): address.isLoopback || address.asIPv4?.isLoopback == true
+        case .name(let name, _): name.lowercased() == "localhost"
+        @unknown default: false
+        }
+    }
+
+    /// An address as bytes, an IPv4-mapped IPv6 address as its IPv4 one.
+    static func addressBytes(_ host: NWEndpoint.Host) -> Data? {
+        switch host {
+        case .ipv4(let address): address.rawValue
+        case .ipv6(let address): address.asIPv4?.rawValue ?? address.rawValue
+        default: nil
+        }
+    }
+
+    /// Whether an inbound connection comes from this Mac: from loopback, or from the address it reached. Read from the
+    /// connection's path before it starts, so nothing is read from a peer to classify it.
+    static func isSameHost(remote: NWEndpoint, local: NWEndpoint?) -> Bool {
+        guard case .hostPort(let remoteHost, _) = remote else { return false }
+        if isLoopback(remoteHost) { return true }
+        guard case .hostPort(let localHost, _)? = local, let remoteAddress = addressBytes(remoteHost) else { return false }
+        return addressBytes(localHost) == remoteAddress
+    }
+
     /// Local-network peers only, no peer-to-peer, no delay; bound to `host` when given.
-    static func makeListener(host: NWEndpoint.Host?, port: NWEndpoint.Port, nearbyServiceName: String? = nil) throws -> NWListener {
+    static func makeListener(host: NWEndpoint.Host?, port: NWEndpoint.Port, nearbyServiceName: String? = nil,
+                             nearbyTXT: [String: String] = [:]) throws -> NWListener {
         if let nearbyServiceName, !ScreenNearby.isValidServiceName(nearbyServiceName) || host != nil {
             throw TransportError.badFrame
         }
@@ -273,7 +388,11 @@ public final class ScreenListener: Sendable {
         } else {
             listener = try NWListener(using: parameters, on: port)
         }
-        if let nearbyServiceName { listener.service = NWListener.Service(name: nearbyServiceName, type: ScreenNearby.serviceType) }
+        if let nearbyServiceName {
+            listener.service = nearbyTXT.isEmpty
+                ? NWListener.Service(name: nearbyServiceName, type: ScreenNearby.serviceType)
+                : NWListener.Service(name: nearbyServiceName, type: ScreenNearby.serviceType, domain: nil, txtRecord: NWTXTRecord(nearbyTXT))
+        }
         return listener
     }
 
@@ -294,7 +413,10 @@ public final class ScreenListener: Sendable {
     }
 
     func handle(_ connection: NWConnection) async {
-        guard let peer = PeerKey(connection.endpoint) else { return connection.cancel() }
+        guard let address = PeerKey(connection.endpoint) else { return connection.cancel() }
+        let fromConnector = connectors == .sameHost
+            && Self.isSameHost(remote: connection.endpoint, local: connection.currentPath?.localEndpoint)
+        let peer = fromConnector ? PeerKey.connector : address
         let ticket: PreAuthTicket
         switch await gate.admit(peer, at: .now) {
         case .failure(let reason):
@@ -305,27 +427,20 @@ public final class ScreenListener: Sendable {
             ticket = admitted
         }
         let framed = FramedConnection(connection, maxFrame: Self.preAuthMaxFrame)
-        let settled = Once()
-        let watchdog = Task {
-            guard (try? await Task.sleep(until: ticket.deadline, clock: .continuous)) != nil else { return }
-            if settled.claim() { connection.cancel() }
-        }
+        // A connector attempt's failure is reported under the device it named, as the gate counts it.
+        let account = OSAllocatedUnfairLock(initialState: peer)
         do {
-            try await connection.open(on: queue)
-            let (reply, pending) = try await handshake.respond(to: try await framed.receive())
-            try await framed.send(reply)
-            let channel = try await pending.confirm(try await framed.receive())
-            guard settled.claim() else { throw TransportError.timedOut }
-            watchdog.cancel()
+            let outcome = try await MacKeyExchange.run(over: framed, ticket: ticket, gate: gate, handshake: handshake,
+                                                       accepting: accepting, open: { [queue] in try await connection.open(on: queue) },
+                                                       counted: { counted in account.withLock { $0 = counted } })
             await report(gate.finish(ticket, succeeded: true, at: .now))
-            let session = MacSession(deviceID: pending.deviceID, peer: peer,
-                                     connection: SecureConnection(framed: framed, channel: channel))
+            let session = MacSession(deviceID: outcome.pending.deviceID, peer: outcome.peer, peerClass: outcome.pending.peerClass,
+                                     connection: SecureConnection(framed: framed, channel: outcome.channel))
             if case .terminated = sessionSink.yield(session) { session.connection.close() }
+        } catch let refused as PreAuthAccountRefusal {
+            eventSink.yield(.refused(refused.peer, refused.refusal))
         } catch {
-            let reason = settled.claim() ? error : TransportError.timedOut
-            watchdog.cancel()
-            connection.cancel()
-            eventSink.yield(.failed(peer, reason: "\(reason)"))
+            eventSink.yield(.failed(account.withLock { $0 }, reason: "\(error)"))
             await report(gate.finish(ticket, succeeded: false, at: .now))
         }
     }

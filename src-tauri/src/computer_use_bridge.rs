@@ -6,6 +6,7 @@ const MAX_RESPONSE: usize = 524_288;
 const AGENT_OPERATIONS: &[&str] = &["status", "open-grant", "observe", "capture", "click", "press", "set-value", "receipt", "revoke", "revoke-session", "approval-status", "request-approval"];
 const MANAGEMENT_OPERATIONS: &[&str] = &["status", "catalog", "approvals", "request-approval", "approval-status", "cancel-approval", "revoke", "revoke-session", "show-review", "disconnect-owner"];
 const SCOPE_AGENT_OPERATIONS: &[&str] = &["scope-status", "scope-request-approval", "scope-approval-status", "scope-open-grant", "scope-observe", "scope-capture", "scope-click", "scope-type-text", "scope-key", "scope-scroll", "scope-drag", "scope-focus-app", "scope-receipt", "scope-revoke", "scope-revoke-session", "scope-disconnect-owner", "scope-standing-off"];
+const COMMUNITY_MANAGEMENT_OPERATIONS: &[&str] = &["community-prepare", "community-install", "community-status", "community-disable", "community-authorize", "community-refresh", "community-sign", "community-receive-status", "community-receive-restrict", "community-receive-review", "community-receive-review-status"];
 const SCOPE_MANAGEMENT_OPERATIONS: &[&str] = &["scope-status", "scope-catalog", "scope-request-approval", "scope-approval-status", "scope-revoke", "scope-revoke-session", "scope-disconnect-owner"];
 
 
@@ -16,11 +17,12 @@ fn native_request(mut value: Value, management: bool) -> Result<Vec<u8>, &'stati
     let allowed = if management { MANAGEMENT_OPERATIONS } else { AGENT_OPERATIONS };
     let scoped_allowed = if management { SCOPE_MANAGEMENT_OPERATIONS } else { SCOPE_AGENT_OPERATIONS };
     let scoped = scoped_allowed.contains(&operation);
-    if !allowed.contains(&operation) && !scoped { return Err("operation-not-allowed"); }
+    let community = management && COMMUNITY_MANAGEMENT_OPERATIONS.contains(&operation);
+    if !allowed.contains(&operation) && !scoped && !community { return Err("operation-not-allowed"); }
     let operation = operation.to_owned();
     object.remove("operation");
     object.insert("op".into(), json!(operation));
-    object.insert("v".into(), json!(if scoped { 2 } else { 1 }));
+    object.insert("v".into(), json!(if community { 3 } else if scoped { 2 } else { 1 }));
     object.insert("channel".into(), json!(if management { "management" } else { "agent" }));
     let encoded = serde_json::to_vec(&value).map_err(|_| "invalid-request")?;
     if encoded.len() > MAX_REQUEST { return Err("request-too-large"); }
@@ -31,7 +33,14 @@ fn native_request(mut value: Value, management: bool) -> Result<Vec<u8>, &'stati
 unsafe extern "C" {
     fn agentstoz_control_request(request: *const u8, length: usize, response: *mut *mut u8, response_length: *mut usize) -> i32;
     fn agentstoz_control_open() -> i32;
+    fn agentstoz_community_enrollment_start() -> i32;
     fn agentstoz_control_response_free(response: *mut u8);
+}
+
+/// The listener self-checks the installed Main signature and audits each signed Viewer peer. It exposes no agent operations.
+pub(crate) fn start_community_enrollment() {
+    #[cfg(target_os = "macos")]
+    { let _ = unsafe { agentstoz_community_enrollment_start() }; }
 }
 
 /// Native dispatch can have happened even when foreground coordination or the reply fails.
@@ -117,7 +126,7 @@ mod private_link {
             drop(self.child);
             let _ = std::thread::Builder::new().name("computer-use-private-link".into())
                 .spawn(move || {
-                    serve(self.parent, |value| request(value, false));
+                    serve(self.parent, agent_request);
                     // Sidecar death retires its authority even while the main app remains alive. This call only
                     // revokes the audited main owner; no PID or credential can select somebody else.
                     retire_owner(|value| request(value, true));
@@ -128,6 +137,68 @@ mod private_link {
         let _ = invoke(json!({"operation":"disconnect-owner"}));
         // An older helper's v2 refusal must not prevent the existing v1 retirement above.
         let _ = invoke(json!({"operation":"scope-disconnect-owner"}));
+    }
+    /// Read-only community authority query from the inherited, verified Main link. It cannot create/install grants.
+    fn agent_request(value: Value) -> Value {
+        if value.get("operation").and_then(Value::as_str) == Some("community-adapter-authorize") {
+            let capability = value.get("capability").and_then(Value::as_str);
+            if value.as_object().map(|object| object.len()) != Some(2)
+                || !matches!(capability, Some("computer-use.agent-settings" | "computer-use.browser")) {
+                return json!({"success":false,"code":"invalid-request","notDispatched":true});
+            }
+            // Native FFI verifies this installed Main process and Control's signing identity on every call.
+            return request(json!({"operation":"community-authorize","capability":capability}), true);
+        }
+        if let Some(operation) = value.get("operation").and_then(Value::as_str) {
+            let shape = match operation {
+                "community-receive-status" => Some((2, value.get("legacyRestricted").map(Value::is_boolean).unwrap_or(false))),
+                "community-receive-restrict" => Some((2, value.get("change").map(Value::is_object).unwrap_or(false))),
+                "community-receive-review" => Some((4, value.get("requestId").and_then(Value::as_str).map(valid_id).unwrap_or(false)
+                    && value.get("expectedRevision").and_then(Value::as_u64).map(|v|v<=9_007_199_254_740_991).unwrap_or(false)
+                    && value.get("change").map(Value::is_object).unwrap_or(false))),
+                "community-receive-review-status" => Some((2, value.get("reviewId").and_then(Value::as_str).map(valid_id).unwrap_or(false))),
+                _ => None,
+            };
+            if let Some((count, valid)) = shape {
+                if !valid || value.as_object().map(|o|o.len()) != Some(count) {return json!({"success":false,"code":"invalid-request","notDispatched":true});}
+                return request(value,true);
+            }
+        }
+        match value.get("operation").and_then(Value::as_str) {
+            Some("community-component-context") => {
+                if value.as_object().map(|object| object.len()) != Some(1) {
+                    return json!({"success":false,"code":"invalid-request","notDispatched":true});
+                }
+                return request(json!({"operation":"community-status"}), true);
+            }
+            Some("community-component-refresh") => {
+                if value.as_object().map(|object| object.len()) != Some(3)
+                    || !value.get("requestId").and_then(Value::as_str).map(valid_id).unwrap_or(false)
+                    || !value.get("envelope").map(Value::is_object).unwrap_or(false) {
+                    return json!({"success":false,"code":"invalid-request","notDispatched":true});
+                }
+                return request(json!({"operation":"community-refresh","requestId":value["requestId"],"envelope":value["envelope"]}), true);
+            }
+            Some("community-component-sign") => {
+                let purpose = value.get("purpose").and_then(Value::as_str);
+                let payload = value.get("payload");
+                let kind = payload.and_then(|object| object.get("kind")).and_then(Value::as_str);
+                if value.as_object().map(|object| object.len()) != Some(3)
+                    || !matches!(purpose, Some("agent" | "teams" | "mobile-agent" | "mobile-teams" | "mobile-agent-settings" | "mobile-browser"))
+                    || !payload.map(Value::is_object).unwrap_or(false)
+                    || !matches!(kind, Some("access" | "relay-bind" | "handshake" | "mobile-host-handshake")) {
+                    return json!({"success":false,"code":"invalid-request","notDispatched":true});
+                }
+                if (purpose.unwrap_or("").starts_with("mobile-") && kind == Some("handshake"))
+                    || (!purpose.unwrap_or("").starts_with("mobile-") && kind == Some("mobile-host-handshake")) {
+                    return json!({"success":false,"code":"invalid-request","notDispatched":true});
+                }
+                // Control validates its exact purpose/capability, issuer, subject, transcript and key before signing.
+                return request(json!({"operation":"community-sign","purpose":purpose,"payload":payload}), true);
+            }
+            _ => {}
+        }
+        request(value, false)
     }
     fn valid_id(id: &str) -> bool {
         id.len() == 36 && id.bytes().enumerate().all(|(i,b)| if [8,13,18,23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() })
@@ -156,6 +227,27 @@ mod private_link {
     #[cfg(test)]
     mod tests {
         use super::*;
+        #[test]
+        fn community_adapter_cannot_widen_its_readonly_management_query() {
+            assert_eq!(agent_request(json!({"operation":"community-adapter-authorize","capability":"screen.control"})),
+                json!({"success":false,"code":"invalid-request","notDispatched":true}));
+            assert_eq!(agent_request(json!({"operation":"community-adapter-authorize","capability":"computer-use.browser","op":"community-install"})),
+                json!({"success":false,"code":"invalid-request","notDispatched":true}));
+            assert_eq!(agent_request(json!({"operation":"community-prepare","profileId":"spoof"})),
+                json!({"success":false,"code":"operation-not-allowed","notDispatched":true}));
+        }
+        #[test]
+        fn community_component_private_queries_cannot_supply_channels_keys_or_opaque_signatures() {
+            for input in [
+                json!({"operation":"community-component-context","agentDeviceId":"spoof"}),
+                json!({"operation":"community-component-refresh","requestId":"bad","envelope":{}}),
+                json!({"operation":"community-component-sign","purpose":"browser","payload":{"kind":"access"}}),
+                json!({"operation":"community-component-sign","purpose":"agent","payload":{"kind":"raw","bytes":"opaque"}}),
+                json!({"operation":"community-component-sign","purpose":"teams","payload":{"kind":"handshake"},"channel":"management"}),
+            ] {
+                assert_eq!(agent_request(input), json!({"success":false,"code":"invalid-request","notDispatched":true}));
+            }
+        }
         #[test]
         fn eof_retirement_covers_both_scope_generations_even_if_one_is_refused() {
             let mut calls=Vec::new();
@@ -187,6 +279,14 @@ pub(crate) use private_link::ChildLink;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn community_management_never_enters_agent_channel() {
+        for operation in COMMUNITY_MANAGEMENT_OPERATIONS {
+            assert_eq!(native_request(json!({"operation":operation}), false), Err("operation-not-allowed"));
+            let result: Value = serde_json::from_slice(&native_request(json!({"operation":operation}), true).unwrap()).unwrap();
+            assert_eq!(result["v"], 3); assert_eq!(result["channel"], "management"); assert_eq!(result["op"], *operation);
+        }
+    }
     #[test] fn review_activation_failure_is_unconfirmed_not_a_safe_to_replay_refusal() {
         assert_eq!(native_failure(-8), json!({"success":false,"code":"review-visibility-unconfirmed","notDispatched":false}));
         assert_eq!(native_failure(-5), json!({"success":false,"code":"native-outcome-unknown","notDispatched":false}));

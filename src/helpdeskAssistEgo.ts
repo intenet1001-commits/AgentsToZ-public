@@ -1,11 +1,13 @@
 import {homedir,tmpdir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import {accessSync,constants} from 'node:fs';
-import {spawn} from 'node:child_process';
+import {spawn as nodeSpawn,type ChildProcess,type SpawnOptions} from 'node:child_process';
 import type {AssistDestination} from './helpdeskAssistRecipes';
 import {AssistDriverUnavailable,AssistHumanControl,assistReadable,sanitizeObservation,type AssistBrowserDriver,type AssistControl,type AssistDispatch,type AssistObservation} from './helpdeskAssistBrowser';
 /** Runs one fixed `ego-browser nodejs` script and returns its stdout. Tests replace it at this boundary. */
 export type EgoRunner=(script:string,timeoutMs:number,signal?:AbortSignal)=>Promise<{code:number;stdout:string}>;
+/** Trusted host/test dependency; never read from a wire request, script or environment. */
+type EgoSpawn=(file:string,args:readonly string[],options:SpawnOptions)=>ChildProcess;
 /** The SDK's hard stop when the person holds the space (after handOff or a takeover in the browser). Its output replaces
  * the round's earlier output, so a change sent in that round has an unknown outcome. */
 const HARD_STOP=/Control of this task space is with the user|browser commands are paused/;
@@ -33,8 +35,9 @@ process.once('exit',()=>{for(const kill of egoGroups)kill();});
  * timeout, an output overflow or a cancellation signals that group, TERM then KILL after `graceMs`, and stops reading.
  * A descendant that still holds the output pipes after the command itself ended is in the same group and stopped too, so
  * no call waits on a process it did not need. A process that left the group with setsid() is outside this ownership. */
-export function createEgoRunner(options:{home?:string;searchPaths?:string[];cap?:number;graceMs?:number}={}):EgoRunner{
+export function createEgoRunner(options:{home?:string;searchPaths?:string[];cap?:number;graceMs?:number;spawn?:EgoSpawn}={}):EgoRunner{
  const home=options.home??homedir(),cap=options.cap??EGO_OUTPUT_CAP,grace=options.graceMs??1500;
+ const spawn=options.spawn??nodeSpawn;
  const paths=options.searchPaths??[join(home,'.local/bin'),...(process.env.PATH??'').split(':').filter(isAbsolute),'/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin'];
  const exe=()=>{for(const p of paths)try{const f=join(p,'ego-browser');accessSync(f,constants.X_OK);return f;}catch{}return null;};
  return (script,timeoutMs,signal)=>new Promise((resolve,reject)=>{

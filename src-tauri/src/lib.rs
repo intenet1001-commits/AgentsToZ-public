@@ -574,6 +574,11 @@ async fn onboarding_management_request(
     }).await.map_err(|_| "설치 도우미 연결에 실패했습니다.".to_string())?
 }
 
+fn agent_runtime_surface_allows(label: &str, path: &str, method: &str) -> bool {
+    if path == "/api/agent-runtime/remote-teams" { return label == "main" && method == "POST"; }
+    voice_popout::allows_runtime(label, path, method)
+}
+
 #[tauri::command]
 async fn agent_runtime_request(
     path: String,
@@ -582,7 +587,7 @@ async fn agent_runtime_request(
     window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    if !voice_popout::allows_runtime(window.label(),&path,&method) {
+    if !agent_runtime_surface_allows(window.label(),&path,&method) {
         return Err("이 창에서는 해당 런타임 요청을 사용할 수 없습니다.".to_string());
     }
     let capability = state.agent_runtime_capability
@@ -1467,6 +1472,7 @@ fn is_agent_runtime_task_id(value: &str) -> bool {
 }
 
 fn is_allowed_agent_runtime_route(method: &str, path: &str) -> bool {
+    if path == "/api/agent-runtime/remote-teams" { return method == "POST"; }
     if path == "/api/agent-runtime/memory-save-recovery" { return method == "POST"; }
     if path == "/api/agent-runtime/desktop-effort" { return method == "POST"; }
     if path == "/api/agent-runtime/workroom-schedules" { return method == "POST"; }
@@ -9617,6 +9623,8 @@ pub fn run() {
         work_mode::set_closed_lid_grant,
         screen_helper::get_screen_helper,
         screen_helper::open_screen_helper,
+        screen_helper::get_viewer_helper,
+        screen_helper::open_viewer_helper,
         load_ports,
         save_ports,
         save_ports_merged,
@@ -9751,6 +9759,7 @@ pub fn run() {
       }
       work_mode::init(app.handle());
       screen_helper::install_bundled_on_startup();
+      computer_use_bridge::start_community_enrollment();
       if let (Ok(host), Ok(data)) = (bundled_api_sidecar_path(app.handle()), legacy_app_data_dir()) {
         let _ = EXTERNAL_CLI_EFFORT_HOST.set((host.to_string_lossy().into_owned(), data.to_string_lossy().into_owned()));
       }
@@ -10288,6 +10297,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn remote_teams_permissions_are_exact_post_and_main_window_only() {
+        assert!(is_allowed_agent_runtime_route("POST", "/api/agent-runtime/remote-teams"));
+        for path in ["/api/agent-runtime/remote-teams?operation=set-permissions", "/api/agent-runtime/remote-teams/", "/api/agent-runtime/remote-teams/permissions"] {
+            assert!(!is_allowed_agent_runtime_route("POST", path));
+        }
+        assert!(!is_allowed_agent_runtime_route("GET", "/api/agent-runtime/remote-teams"));
+        assert!(super::agent_runtime_surface_allows("main", "/api/agent-runtime/remote-teams", "POST"));
+        for label in ["voice-dock", "voice-dock-2", "portal", "workroom", "workroom-1", "workroom-123"] {
+            assert!(!super::agent_runtime_surface_allows(label, "/api/agent-runtime/remote-teams", "POST"));
+        }
+    }
     #[test]
     fn remote_control_management_proxy_is_path_free_and_has_an_exact_route_allowlist() {
         for path in [

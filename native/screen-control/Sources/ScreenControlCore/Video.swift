@@ -175,14 +175,40 @@ public enum ControlMessage: Equatable, Sendable {
     case pointerPosition(ScreenPointerPosition)
     /// v4: `posted` is a HID post attempt, never target application receipt.
     case textAndReturnResult(id: UInt32, ScreenTextReturnResult)
+    /// Version 5, Mac → Mac controller, once at the start: what the controller's registration grants and the limits the
+    /// Mac holds the session to on its own clock (DESIGN 6.5). Whole seconds on the wire: idle 1...`maxLimitSeconds`,
+    /// maximum none or 1...`maxLimitSeconds`.
+    case sessionLimits(grant: ScreenSessionGrant, limits: SessionLimits)
+    /// Version 5, Mac → Mac controller, once at the start: up to `maxAddressHints` distinct private IPv4 addresses the
+    /// Mac answers on, which the Viewer may offer to save as its private-network route. Only ever saved when asked.
+    case addressHint([ScreenPrivateNetworkRoute])
+    /// Version 5, Mac controller → Mac: remove this controller's registration from the Mac (DESIGN 6.6).
+    case unenrollSelf
+    /// Version 5, Mac → controller: the person at B explicitly holds input until they hand it back.
+    case inputHeldAtMac(Bool)
 
     /// The most displays a session names; a Mac with more offers the first sixteen.
     public static let maxDisplays = 16
+    /// The longest limit `sessionLimits` names: one day.
+    public static let maxLimitSeconds: UInt32 = 86_400
+    /// The most addresses one `addressHint` names.
+    public static let maxAddressHints = 4
 
     private enum Tag: UInt8 {
         case requestKeyframe = 1, remoteInputPaused, remoteInputResumed, macLocked, macUnlocked, displays, nextDisplay,
              selectDisplay, hideCursor, showCursor, turnOff, keyboardAction, keyboardState, navigateSpace,
-             spaceResult, spaceChanged, setVideoQuality, videoQuality, inputAvailability, pointerPosition, textAndReturnResult
+             spaceResult, spaceChanged, setVideoQuality, videoQuality, inputAvailability, pointerPosition, textAndReturnResult,
+             sessionLimits, addressHint, unenrollSelf, inputHeldAtMac
+    }
+
+    /// `limits` as `sessionLimits` can carry them: whole seconds, rounded up, within 1...`maxLimitSeconds`.
+    public static func wireLimits(_ limits: SessionLimits) -> SessionLimits {
+        func seconds(_ duration: Duration) -> Int64 {
+            let parts = duration.components
+            let whole = parts.seconds + (parts.attoseconds > 0 ? 1 : 0)
+            return min(max(whole, 1), Int64(maxLimitSeconds))
+        }
+        return SessionLimits(idle: .seconds(seconds(limits.idle)), maximum: limits.maximum.map { .seconds(seconds($0)) })
     }
 
     /// `version` is the session's negotiated version: a message newer than it is malformed there.
@@ -238,6 +264,25 @@ public enum ControlMessage: Equatable, Sendable {
         case (.setVideoQuality, 2), (.videoQuality, 2):
             guard let quality = ScreenVideoQuality(rawValue: bytes[1]) else { throw ScreenControlWireError.malformed }
             message = tag == .setVideoQuality ? .setVideoQuality(quality) : .videoQuality(quality)
+        case (.sessionLimits, 10):
+            let idle = bytes[2...5].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            let maximum = bytes[6...9].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            guard let grant = ScreenSessionGrant(rawValue: bytes[1]), (1...Self.maxLimitSeconds).contains(idle),
+                  maximum <= Self.maxLimitSeconds else { throw ScreenControlWireError.malformed }
+            message = .sessionLimits(grant: grant, limits: SessionLimits(idle: .seconds(Int64(idle)),
+                                                                         maximum: maximum == 0 ? nil : .seconds(Int64(maximum))))
+        case (.addressHint, _):
+            let count = bytes.count >= 2 ? Int(bytes[1]) : 0
+            guard (1...Self.maxAddressHints).contains(count), bytes.count == 2 + 4 * count else { throw ScreenControlWireError.malformed }
+            let routes = (0..<count).compactMap { index in
+                try? ScreenPrivateNetworkRoute(address: bytes[(2 + 4 * index)..<(6 + 4 * index)].map(String.init).joined(separator: "."))
+            }
+            guard routes.count == count, Set(routes).count == count else { throw ScreenControlWireError.malformed }
+            message = .addressHint(routes)
+        case (.unenrollSelf, 1): message = .unenrollSelf
+        case (.inputHeldAtMac, 2):
+            guard bytes[1] <= 1 else { throw ScreenControlWireError.malformed }
+            message = .inputHeldAtMac(bytes[1] == 1)
         default: throw ScreenControlWireError.malformed
         }
         guard message.minimumVersion <= version else { throw ScreenControlWireError.malformed }
@@ -247,18 +292,21 @@ public enum ControlMessage: Equatable, Sendable {
     public var sender: ChannelRole {
         switch self {
         case .requestKeyframe, .nextDisplay, .selectDisplay, .hideCursor, .showCursor, .turnOff,
-             .keyboardAction, .navigateSpace, .setVideoQuality: .device
+             .keyboardAction, .navigateSpace, .setVideoQuality, .unenrollSelf: .device
         case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays,
-             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult: .mac
+             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult,
+             .sessionLimits, .addressHint, .inputHeldAtMac: .mac
         }
     }
 
     /// The first session version that carries this message.
     public var minimumVersion: UInt16 {
         switch self {
+        case .sessionLimits, .addressHint, .unenrollSelf, .inputHeldAtMac: 5
+        case .inputAvailability(let reason): reason.minimumVersion
         case .textAndReturnResult: 4
         case .requestKeyframe, .remoteInputPaused, .remoteInputResumed: 1
-        case .keyboardAction, .keyboardState, .navigateSpace, .spaceResult, .spaceChanged, .setVideoQuality, .videoQuality, .inputAvailability, .pointerPosition: 3
+        case .keyboardAction, .keyboardState, .navigateSpace, .spaceResult, .spaceChanged, .setVideoQuality, .videoQuality, .pointerPosition: 3
         default: 2
         }
     }
@@ -288,8 +336,27 @@ public enum ControlMessage: Equatable, Sendable {
         case .inputAvailability(let reason): Data([Tag.inputAvailability.rawValue, reason.rawValue])
         case .pointerPosition(let position): Data([Tag.pointerPosition.rawValue]) + position.x.bigEndianData + position.y.bigEndianData
         case let .textAndReturnResult(id, result): Data([Tag.textAndReturnResult.rawValue]) + id.bigEndianData + Data([result.rawValue])
+        case let .sessionLimits(grant, limits):
+            Data([Tag.sessionLimits.rawValue, grant.rawValue]) + Self.wireSeconds(limits.idle).bigEndianData
+                + (limits.maximum.map(Self.wireSeconds) ?? 0).bigEndianData
+        case .addressHint(let routes):
+            Data([Tag.addressHint.rawValue, UInt8(clamping: routes.count)]) + Data(routes.flatMap(\.octets))
+        case .unenrollSelf: Data([Tag.unenrollSelf.rawValue])
+        case .inputHeldAtMac(let held): Data([Tag.inputHeldAtMac.rawValue, held ? 1 : 0])
         }
     }
+
+    /// Whole seconds, or a value no receiver accepts for anything else (a fraction, zero, or past a day).
+    private static func wireSeconds(_ duration: Duration) -> UInt32 {
+        let parts = duration.components
+        guard parts.attoseconds == 0, parts.seconds > 0, parts.seconds <= Int64(maxLimitSeconds) else { return UInt32.max }
+        return UInt32(parts.seconds)
+    }
+}
+
+extension ScreenPrivateNetworkRoute {
+    /// The address's four bytes; the initializer accepted only dotted-decimal IPv4.
+    var octets: [UInt8] { address.split(separator: ".").map { UInt8($0) ?? 0 } }
 }
 
 #if os(macOS)

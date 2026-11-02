@@ -115,6 +115,20 @@ Claude command와 Hermes skill은 네이티브 슬래시를 사용할 수 있지
 | `agentstoz_use_recall_control_context` | 질의와 관련된 운영 기억 최대 8개·16 KiB |
 | `agentstoz_use_propose_control_memory` | 운영 기억 저장 후보. 실제 저장 완료가 아님 |
 
+### 관련 근거 조회 (MCP 1.76.0)
+
+`recall_control_context({query,includeRelations:true})`와 `read_reference({role:'ops'|'dev',query,...,includeRelations:true})`는
+현재 선택한 기억 안의 한 단계 관계와 검토 질문을 추가한다. 기본 호출은 응답과 검색 결과를 그대로 유지한다.
+관계 JSON의 추가 상한은8,000 UTF-8 bytes이며, OPS의 기존 `bytes`는 기존 hits의16KiB 예산만 센다.
+직접 검색 결과·관계 원본은 버전으로 결속하고, 교정 이력을 읽지 못하면 관계를 보류한다. 운영 기억의 기기별 hits를 프로젝트 그래프로 합치지 않는다.
+
+다른 프로젝트를 조사하려면 등록 목록/`resolve_target`으로 정확한 DEV 대상을 확인하고 그 대상에 별도 `read_reference`를 한다.
+이때 관계 조회 전후 등록·canonical root·memoryId가 같아야 한다. OPS 기억에 적힌 이름·ID·경로 자체가 읽기 권한이 되지 않으며,
+USE는 이 옵션을 받지 않고 기존 제한된 서비스 기억 경로를 유지한다. 실행·새 기억 저장·자동 공통기억 확정은 하지 않는다.
+
+관계 경로·문서 해시·원본 항목 버전으로 출처를 확인한다. `association-only`와 검토 질문은 사실 관계나 새 업무를 확정하지 않는다.
+전체 원본을 합친 전역 GraphRAG가 아니며, 세부 문법과 예산은 [장기기억 노트](claude/project-memory.md)의 「관련 근거 회상」을 따른다.
+
 후보는 「아젠투지 설정」에서 내용·근거를 검토하고 저장합니다. 로컬 저장과 원격 백업 결과는 따로 표시합니다.
 후보 목록은 상태·지금 할 일 카드 아래에 있습니다. 긴 후보는 **전체 보기**로 확인한 뒤 저장합니다.
 이미 저장된 운영 기억은 같은 패널의 **저장된 운영 기억 · N**을 펼쳐 읽기 전용으로 봅니다

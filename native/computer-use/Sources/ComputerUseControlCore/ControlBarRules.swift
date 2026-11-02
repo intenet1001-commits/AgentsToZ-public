@@ -12,9 +12,8 @@ public struct ControlBarPoster: Equatable, Sendable {
 }
 
 /// 「AI에게 넘기기」 accepts a person's click only. Pure: the bar passes in what it read from the event.
-/// Hardware input carries no posting process. A person working through a remote desktop reaches the Mac through that
-/// tool's signed agent, so those identities are accepted by name. Every other poster — an AI app, a script, a test
-/// tool, this process — is refused. `syntheticTag` is the engine's own forgeable marker: it can only refuse.
+/// Hardware input carries no posting process. Remote desktop and every other posted event are refused: an AI could
+/// otherwise drive a remote-desktop client as if it were the person. `syntheticTag` is forgeable and only refuses.
 /// 「직접 하기」 and 「중단」 take nothing from the person and need no such check.
 public enum ControlBarClick {
     public static let appleRemoteDesktop: Set<String> = ["com.apple.screensharing.agent", "com.apple.screensharing.daemon",
@@ -25,22 +24,32 @@ public enum ControlBarClick {
     public static let freshSeconds = 1.0
 
     /// nil accepts; otherwise a short code for the log.
-    public static func handBackRefusal(isMouseUp: Bool, inBar: Bool, ageSeconds: Double, sourcePid: Int64, userData: Int64,
+    public static func handBackRefusal(isMouseUp: Bool, inBar: Bool, ownMouseDown: Bool, inButton: Bool, clickCount: Int, ageSeconds: Double, sourcePid: Int64, userData: Int64,
                                        ownPid: Int64, syntheticTag: Int64, poster: ControlBarPoster?) -> String? {
-        guard isMouseUp, inBar else { return "not-a-bar-click" }
+        guard isMouseUp, inBar, ownMouseDown, inButton else { return "not-a-bar-click" }
+        guard clickCount == 1 else { return "not-a-single-click" }
         guard ageSeconds >= 0, ageSeconds <= freshSeconds else { return "stale-event" }
         guard userData != syntheticTag else { return "engine-event" }
         if sourcePid == 0 { return nil }
         guard sourcePid != ownPid else { return "own-event" }
         guard let poster else { return "poster-unverified" }
-        if poster.apple { return appleRemoteDesktop.contains(poster.identifier) ? nil : "poster-not-remote-desktop" }
-        guard let team = poster.team, teamRemoteDesktop[team]?.contains(poster.identifier) == true else { return "poster-not-remote-desktop" }
-        return nil
+        if poster.apple && appleRemoteDesktop.contains(poster.identifier) { return "remote-desktop-event" }
+        if let team = poster.team, teamRemoteDesktop[team]?.contains(poster.identifier) == true { return "remote-desktop-event" }
+        return "poster-not-remote-desktop"
     }
 }
 
 public enum ControlBarText {
-    public static func title(_ owner: ControlBarOwner) -> String { owner == .agent ? "AI가 사용 중" : "직접 사용 중" }
+    /// A remote label is display-only: the device name comes from the community and is not a verified device key.
+    public static func title(_ owner: ControlBarOwner, callerLane: String = "", label: String = "") -> String {
+        guard owner == .agent else { return "직접 사용 중" }
+        guard callerLane == "remote" else { return "AI가 사용 중" }
+        guard label.hasPrefix("원격 "), let end = label.range(of: " / 연결 ", options: .backwards) else { return "원격 AI가 사용 중" }
+        let name = String(label.dropFirst(3)[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 32,
+              name.unicodeScalars.allSatisfy({ $0.properties.generalCategory != .control && $0.properties.generalCategory != .format }) else { return "원격 AI가 사용 중" }
+        return "원격 · " + name
+    }
     public static func primary(_ owner: ControlBarOwner) -> String { owner == .agent ? "직접 하기" : "AI에게 넘기기" }
     public static let stop = "중단"
     /// A refused hand-back, as the bar's two lines (each fits the bar without truncation).

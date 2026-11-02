@@ -6,14 +6,26 @@
  * authorizes nothing, and a host that cannot be read is `unknown`, which refuses application scopes and desktop input.
  */
 import {execFile} from 'node:child_process';
+import {COMPUTER_USE_REMOTE_CALLER_REFUSED} from './computerUseScopeProtocol';
 
-export type ComputerCallerHost = {state: 'known'; bundleIds: readonly string[]} | {state: 'unknown'; reason: string};
+/**
+ * `remote`: an AI on another community Mac (DESIGN remote-computer-use RC-4). Its own host app is not on this screen, so
+ * its `bundleIds` are this Mac's terminals, AI apps, script tools and IDEs that a remote AI never types into
+ * (COMPUTER_USE_REMOTE_CALLER_REFUSED). The device fields are the sender's claim as the community mailbox relayed it and
+ * only name the connection; they authorize nothing.
+ */
+export type ComputerCallerHost = {state: 'known'; bundleIds: readonly string[]}
+  | {state: 'remote'; deviceId: string; deviceName: string; bundleIds: readonly string[]}
+  | {state: 'unknown'; reason: string};
 export interface ComputerCallerOrigin {peerPort: number}
 export type ComputerCallerHostResolver = (origin: ComputerCallerOrigin | null) => Promise<ComputerCallerHost>;
 
 const BUNDLE_ID = /^[A-Za-z0-9.-]{1,200}$/;
 const MAX_DEPTH = 64;
 export const unknownCallerHost = (reason: string): ComputerCallerHost => ({state: 'unknown', reason});
+/** A remote caller is never read from a socket: the receiving host names it, and its refused set is fixed. */
+export const remoteCallerHost = (deviceId: string, deviceName: string): ComputerCallerHost =>
+  ({state: 'remote', deviceId, deviceName, bundleIds: COMPUTER_USE_REMOTE_CALLER_REFUSED});
 
 /** Only a loopback TCP peer has a socket this Mac can trace; anything else has no origin. */
 export function computerCallerOrigin(peer: {address?: string; port?: number} | null | undefined): ComputerCallerOrigin | null {
@@ -93,7 +105,7 @@ export function createComputerCallerHostResolver(deps: {run?: Run; ownPid?: numb
     return {state: 'known', bundleIds};
   };
 }
-/** Bundle ids compare case-insensitively, as Launch Services does. */
+/** Bundle ids compare case-insensitively, as Launch Services does. A remote caller "owns" its refused set. */
 export function callerHostOwns(host: ComputerCallerHost, bundleId: string | null | undefined): boolean {
-  return host.state === 'known' && !!bundleId && host.bundleIds.some(id => id.toLowerCase() === bundleId.toLowerCase());
+  return host.state !== 'unknown' && !!bundleId && host.bundleIds.some(id => id.toLowerCase() === bundleId.toLowerCase());
 }

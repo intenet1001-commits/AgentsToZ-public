@@ -70,6 +70,15 @@ import AgentsToZCore
         do {
             let data = try Data(contentsOf: Bundle.main.url(forResource: "bootstrap", withExtension: "json")!)
             let bootstrap = try JSONSerialization.jsonObject(with: data) as! [String:String]
+            // The Mac's LAN page must keep its CSP. Checked here, over the phone's own network path: the host runs in
+            // a sandbox that allows no outbound LAN connection, so it cannot fetch its own page. The fragment (the
+            // one-time pairing token) is dropped; a page GET never consumes the pairing.
+            try report("lan-page-csp")
+            var page = URLComponents(string: bootstrap["pairingURL"]!)!
+            page.fragment = nil
+            let (_, pageResponse) = try await URLSession(configuration: .ephemeral).data(from: page.url!)
+            let pageHTTP = pageResponse as? HTTPURLResponse
+            try check(pageHTTP?.statusCode == 200 && (pageHTTP?.value(forHTTPHeaderField: "Content-Security-Policy")?.contains("default-src 'none'") ?? false), "lan-page-csp-default-src-none")
             session = LANWorkroomSession(pairing: try LANPairing(scanned: bootstrap["pairingURL"]!))
             try await waitJS("Boolean(document.querySelector('#terminal-panel') && !document.querySelector('#terminal-panel').hidden)", label: "lan-connected")
             try check(try await js("location.hash === '' && document.querySelector('#terminal-project').options.length === 2"), "fragment-cleared-and-projects")
@@ -111,7 +120,16 @@ import AgentsToZCore
             session?.webView?.endEditing(true)
             try await waitJS("document.querySelector('.xterm-rows').textContent.includes('RESULT:native-safe-fixture')", label: "terminal-input-output")
             try check(try await js("document.querySelector('#terminal-line').value === ''"), "input-receipt-clears-sent-draft")
-            _ = try await js("document.querySelector('#terminal-close').click(); document.querySelector('#terminal-close').click(); true")
+            // 「세션 종료」 asks first (ddbc3b4d). The page's confirm() blocks its script until the native dialog is
+            // answered, so the double tap runs off this evaluation and the probe answers the production dialog.
+            _ = try await js("setTimeout(()=>{document.querySelector('#terminal-close').click(); document.querySelector('#terminal-close').click();},0); true")
+            try report("close-confirm")
+            for _ in 0..<100 { if session?.isJavaScriptDialogPresented == true { break }; try await pause() }
+            guard let closeConfirm = session?.activeJavaScriptDialog else { throw NSError(domain: "FixtureCloseConfirmMissing", code: 1) }
+            try check(closeConfirm.kind == .confirm && closeConfirm.message.contains("종료"), "explicit-stop-asks-first")
+            session?.completeJavaScriptDialog(closeConfirm.id, response: "")
+            try await Task.sleep(for: .milliseconds(300))
+            try check(session?.activeJavaScriptDialog == nil, "explicit-stop-double-tap-asks-once")
             // The session list shows workroomSessionStateLabel (「종료 N」), not the wire state "exited".
             try await waitJS("document.querySelector('#terminal-session').value === '' && document.querySelector('#terminal-session').textContent.includes('종료')", label: "explicit-stop")
             try check(true, "explicit-stop-completed")

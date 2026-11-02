@@ -176,6 +176,8 @@ public final class InputReceiver: Sendable {
 
     /// Whether remote input is paused because someone at the Mac is using it.
     public var isPaused: Bool { state.withLock { $0.priority.isPaused } }
+    /// Whether the latest physical snapshot includes the Mac's explicit session-bar hold.
+    public var heldAtMac: Bool { state.withLock { $0.priority.heldAtMac } }
 
     /// A bounded keyboard/Spaces operation uses the same authorization lifetime, limiter and local-input priority
     /// as ordinary input. Holding the lock through the operation prevents a revoked session injecting afterwards.

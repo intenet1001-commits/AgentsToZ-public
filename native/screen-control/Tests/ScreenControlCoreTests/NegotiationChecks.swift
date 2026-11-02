@@ -4,22 +4,24 @@ import Foundation
 @testable import ScreenControlCore
 #endif
 
-// Version negotiation (DESIGN 「버전 협상」): a version-2 Mac serves a version-1 phone, a version-2 phone works with a
-// version-1 Mac, two version-2 ends settle on version 2, and the settled version is bound into the transcript so a
-// stamp removed or changed in transit fails the handshake instead of downgrading it.
+// Version negotiation (DESIGN 「버전 협상」): a newer Mac serves an older phone, a newer phone works with an older Mac,
+// and the settled version is bound into the transcript so a stamp removed or changed in transit fails the handshake
+// instead of downgrading it. This build's phone offers 4 (`VersionPolicy.phone`) and this build's Mac (`.current`, 5)
+// answers every phone in 4 at most (SR-36); Mac controllers' version 5: SessionV5Checks.swift.
 
-/// The combinations that must connect: (phone, Mac, settled version).
+/// The phone-key combinations that must connect: (phone's offer, Mac, settled version).
 let negotiationMatrix: [(phone: VersionPolicy, mac: VersionPolicy, settled: UInt16, name: String)] = [
     (.only(1), .only(1), 1, "two version-1 builds"),
-    (.only(1), .current, 1, "a version-2 Mac serves a version-1 phone"),
-    (.current, .only(1), 1, "a version-2 phone works with a version-1 Mac"),
-    (.upTo(2), .current, 2, "a version-3 Mac serves a version-2 phone"),
-    (.current, .upTo(2), 2, "a version-3 phone works with a version-2 Mac"),
-    (.upTo(3), .current, 3, "a v4 Mac serves a v3 phone"),
-    (.current, .upTo(3), 3, "a v4 phone works with a v3 Mac"),
-    (.current, .current, 4, "two version-4 builds"),
-    (.upTo(5), .current, 4, "a newer phone settles on what this Mac speaks"),
-    (.current, .upTo(5), 4, "a newer Mac settles on what this phone speaks"),
+    (.only(1), .current, 1, "this Mac serves a version-1 phone"),
+    (.phone, .only(1), 1, "this phone works with a version-1 Mac"),
+    (.upTo(2), .current, 2, "this Mac serves a version-2 phone"),
+    (.phone, .upTo(2), 2, "this phone works with a version-2 Mac"),
+    (.upTo(3), .current, 3, "this Mac serves a version-3 phone"),
+    (.phone, .upTo(3), 3, "this phone works with a version-3 Mac"),
+    (.phone, .upTo(4), 4, "this phone works with a version-4 Mac"),
+    (.phone, .current, 4, "this phone and this Mac settle on 4"),
+    (.upTo(5), .current, 4, "a phone key that offers 5 is held to 4 by this Mac"),
+    (.upTo(5), .upTo(4), 4, "a phone key that offers 5 settles on a version-4 Mac's newest"),
 ]
 
 func offersVersions(_ policy: VersionPolicy) -> Bool {

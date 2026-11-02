@@ -1,5 +1,6 @@
 import {describe,test,expect,afterEach} from 'bun:test';
 import {mkdtempSync,rmSync,writeFileSync,chmodSync,mkdirSync,readFileSync,existsSync} from 'node:fs';
+import {spawn,spawnSync,type ChildProcess} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {parseAssistRequest,parseAssistIntent,type AssistIntent} from '../src/helpdeskAssistProtocol';
@@ -26,6 +27,7 @@ describe('protocol and recipes',()=>{
   expect(()=>parseAssistIntent({...gws(),scope:{kind:'project'}})).toThrow('프로젝트');
   expect(parseAssistIntent({...gws(),email:'Person@Example.com'}).email).toBe(EMAIL);
   expect(()=>parseAssistRequest({operation:'assist-start',runId:'run-00000001',expectedRevision:1,browser:'ego',ai:'none',scopeConfirmed:false})).toThrow();
+  expect(()=>parseAssistRequest({operation:'assist-start',runId:'run-00000001',expectedRevision:1,browser:'ego',ai:'none',scopeConfirmed:true,spawn:'untrusted'})).toThrow();
   expect(()=>parseAssistRequest({operation:'assist-start',runId:'run-00000001',expectedRevision:1,browser:'ego',ai:'none',scopeConfirmed:true,decisions:{project:{mode:'existing',id:'Bad Id'}}})).toThrow('프로젝트 ID');
   expect(()=>parseAssistRequest({operation:'assist-browser',runId:'run-00000001',browser:{operation:'grant'}})).toThrow();
   expect(()=>parseAssistRequest({operation:'assist-browser',runId:'run-00000001',browser:{operation:'resume'}})).toThrow();
@@ -115,21 +117,57 @@ describe('ego driver',()=>{
  const alive=(pid:number)=>{for(let i=0;i<40;i++){try{process.kill(pid,0);}catch{return false;}Bun.sleepSync(25);}return true;};
  // A fresh executable's first launch can take a moment on macOS (policy check), so the descendant sleeps far longer
  // than any bound here: waiting for it would take 20 s, the fix takes timeout + grace.
- const descendant=(dir:string,tail:string)=>{const file=join(dir,'ego-browser');writeFileSync(file,`#!/bin/sh\n/bin/sleep 20 &\necho $! > ${join(dir,'child.pid')}\n${tail}\n`);chmodSync(file,0o755);return ()=>Number(readFileSync(join(dir,'child.pid'),'utf8').trim());};
+ const descendant=(dir:string,tail:string)=>{
+  const file=join(dir,'ego-browser'),marker=join(dir,'child.pid');
+  const quote=(value:string)=>"'"+value.replaceAll("'","'\\''")+"'";
+  writeFileSync(file,`#!/bin/sh\n/bin/sleep 20 &\ndescendant=$!\nprintf '{"leader":%s,"descendant":%s}\\n' "$$" "$descendant" > ${quote(marker+'.tmp')}\n/bin/mv ${quote(marker+'.tmp')} ${quote(marker)}\n${tail}\n`);chmodSync(file,0o755);
+  const read=()=>{
+   const value=JSON.parse(readFileSync(marker,'utf8')) as {leader:number;descendant:number};
+   if(!Number.isSafeInteger(value.leader)||value.leader<=1||!Number.isSafeInteger(value.descendant)||value.descendant<=1||value.leader===value.descendant)throw Error('Fixture readiness: invalid leader/descendant PID');
+   return value;
+  };
+  return {marker,read,pid:()=>read().descendant};
+ };
+ const positivePid=(pid:number|undefined):pid is number=>typeof pid==='number'&&Number.isSafeInteger(pid)&&pid>1&&pid!==process.pid;
+ const stopFixture=(child:ChildProcess)=>{if(positivePid(child.pid))try{process.kill(-child.pid,'SIGKILL');}catch{}child.stdout?.destroy();child.stderr?.destroy();};
+ const processGroup=(pid:number,deadline:number)=>{
+  const remaining=deadline-Date.now();if(remaining<=0)throw Error('Fixture readiness: preparation exceeded 5000ms');
+  const r=spawnSync('/bin/ps',['-o','pgid=','-p',String(pid)],{encoding:'utf8',timeout:Math.min(1000,remaining)});
+  const group=Number(r.stdout?.trim());
+  if(r.status!==0||!positivePid(group))throw Error('Fixture readiness: process group unavailable');
+  return group;
+ };
  const appeared=async(file:string)=>{for(let i=0;i<200&&!existsSync(file);i++)await Bun.sleep(25);};
  test('timeout, cancellation and an ended command stop the inherited-pipe descendants of its own group within the grace',async()=>{
-  const a=temp(),pidA=descendant(a,'wait');
-  let t=Date.now(),r=await createEgoRunner({searchPaths:[a],graceMs:100})('timeout',2000);expect(r.code).toBe(-1);expect(Date.now()-t).toBeLessThan(5000);expect(alive(pidA())).toBe(false);
-  const b=temp(),pidB=descendant(b,'wait');const ctl=new AbortController();void appeared(join(b,'child.pid')).then(()=>ctl.abort());
-  t=Date.now();r=await createEgoRunner({searchPaths:[b],graceMs:100})('cancel',15_000,ctl.signal);expect(r.code).toBe(-1);expect(Date.now()-t).toBeLessThan(8000);expect(alive(pidB())).toBe(false);
+  const a=temp(),aChild=descendant(a,'wait');let readyAt:number|undefined;
+  // Only this fixture waits before returning spawn: the real 2000ms timer is installed after a live descendant exists.
+  // A startup/precondition failure is a failure with owned-group cleanup, never a skipped descendant assertion.
+  const spawnReady:NonNullable<Parameters<typeof createEgoRunner>[0]>['spawn']=(file,args,options)=>{
+   const deadline=Date.now()+5000,child=spawn(file,args,options);child.once('error',()=>{});
+   try{
+    if(!positivePid(child.pid))throw Error('Fixture readiness: no owned leader PID');
+    while(!existsSync(aChild.marker)&&Date.now()<deadline)Bun.sleepSync(10);
+    if(!existsSync(aChild.marker))throw Error('Fixture readiness: descendant did not become ready within 5000ms');
+    const marker=aChild.read();
+    expect(options.detached).toBe(true);expect(marker.leader).toBe(child.pid);
+    process.kill(marker.leader,0);process.kill(marker.descendant,0);
+    expect(processGroup(marker.leader,deadline)).toBe(child.pid);expect(processGroup(marker.descendant,deadline)).toBe(child.pid);
+    if(Date.now()>deadline)throw Error('Fixture readiness: preparation exceeded 5000ms');
+    readyAt=Date.now();return child;
+   }catch(error){stopFixture(child);throw error;}
+  };
+  let r=await createEgoRunner({home:a,searchPaths:[a],graceMs:100,spawn:spawnReady})('timeout',2000);
+  expect(readyAt).toBeDefined();expect(r.code).toBe(-1);expect(Date.now()-readyAt!).toBeLessThan(5000);expect(alive(aChild.pid())).toBe(false);
+  const b=temp(),bChild=descendant(b,'wait');const ctl=new AbortController();void appeared(bChild.marker).then(()=>ctl.abort());
+  let t=Date.now();r=await createEgoRunner({searchPaths:[b],graceMs:100})('cancel',15_000,ctl.signal);expect(r.code).toBe(-1);expect(Date.now()-t).toBeLessThan(8000);expect(alive(bChild.pid())).toBe(false);
   // The command itself printed its result and exited; its background child still held stdout.
-  const c=temp(),pidC=descendant(c,'echo \'ATZ_RESULT {"ok":true}\'\nexit 0');
-  t=Date.now();r=await createEgoRunner({searchPaths:[c],graceMs:100})('ended',15_000);expect(r.code).toBe(0);expect(r.stdout).toContain('ATZ_RESULT {"ok":true}');expect(Date.now()-t).toBeLessThan(8000);expect(alive(pidC())).toBe(false);
+  const c=temp(),cChild=descendant(c,'echo \'ATZ_RESULT {"ok":true}\'\nexit 0');
+  t=Date.now();r=await createEgoRunner({searchPaths:[c],graceMs:100})('ended',15_000);expect(r.code).toBe(0);expect(r.stdout).toContain('ATZ_RESULT {"ok":true}');expect(Date.now()-t).toBeLessThan(8000);expect(alive(cChild.pid())).toBe(false);
   // Overflow while a descendant writes as well.
   const d=temp(),file=join(d,'ego-browser');writeFileSync(file,`#!/bin/sh\n(while :; do echo child; done; /bin/sleep 20) &\necho $! > ${join(d,'child.pid')}\nwhile :; do echo parent; done\n`);chmodSync(file,0o755);
   t=Date.now();r=await createEgoRunner({searchPaths:[d],cap:4096,graceMs:100})('big',15_000);expect(r.code).toBe(-1);expect(r.stdout.length).toBeLessThan(5000);expect(Date.now()-t).toBeLessThan(8000);
   await appeared(join(d,'child.pid'));expect(alive(Number(readFileSync(join(d,'child.pid'),'utf8').trim()))).toBe(false);
- },30_000);
+ },35_000); // Existing 30s body budget plus the bounded 5s fixture preparation; runtime deadlines above are unchanged.
 });
 
 class Cdp implements BrowserCdp{

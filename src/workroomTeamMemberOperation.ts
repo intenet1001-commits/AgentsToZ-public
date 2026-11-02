@@ -32,6 +32,15 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
   if(request.operation==='keys'&&!caller)throw new WorkroomTeamError('팀원 화면의 키 입력은 이 팀을 이끄는 워크룸에서만 요청합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
   if(request.operation!=='read'&&team.state!=='active')throw new WorkroomTeamError('정리된 팀에는 지시를 보내지 않습니다.','WORKROOM_TEAM_CLOSED',409);
   const ref=member.execution;
+  if(member.remote){
+    if(ref?.kind!=='remote'||!host.service.host.remote)throw new WorkroomTeamError('원격 팀 실행을 확인하지 못했습니다. 새 작업으로 다시 시작하지 않습니다.','REMOTE_TEAMS_REF_INVALID',409);
+    if(request.operation==='read'){
+      const status=await host.service.host.remote.observe(ref);
+      return{memberId:member.id,remote:true,...status,success:status.state!=='unknown',performed:true,effect:'read-only',text:status.report?.summary??status.note??'',cursor:ref.generation};
+    }
+    if(request.operation!=='send')return{memberId:member.id,remote:true,success:false,performed:false,effect:'remote-team-operation-unsupported'};
+    const sent=await host.service.host.remote.send(ref,request.text,request.requestId);return{memberId:member.id,remote:true,...sent,success:sent.delivery==='verified',performed:sent.delivery==='verified'};
+  }
   if(ref?.kind==='external'){
     if(request.operation==='read'){
       const result=await host.external.read(ref,{cursor:request.cursor,limit:request.limit});

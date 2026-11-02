@@ -11,8 +11,13 @@ export interface UserProfileEntry {
 }
 export interface UserProfileSnapshot { revision: string; entries: UserProfileEntry[] }
 export interface UserProfileSave { expectedRevision: string; entries: UserProfileEntry[] }
-export interface UserProfileRecallRequest { projectMemoryId: string | null; query?: string }
-export interface UserProfileRecall extends UserProfileSnapshot { truncated: boolean }
+export interface UserProfileRecallRequest { projectMemoryId: string | null; query?: string; includeExplanation?: boolean }
+export interface UserProfileExplanation {
+  scope: 'this-device'; projectMemoryId: string | null; comparisonScope: 'returned-entries';
+  selections: Array<{entryId: string; scope: UserProfileEntry['scope']; matchedTerms: string[]; fields: Array<'title' | 'body'>; reason: 'query-match' | 'active-in-scope'}>;
+  overlaps: Array<{entryIds: [string, string]; reason: 'same-title-different-content'}>;
+}
+export interface UserProfileRecall extends UserProfileSnapshot { truncated: boolean; explanation?: UserProfileExplanation }
 export const USER_PROFILE_MAX_ENTRIES = 64;
 export const USER_PROFILE_MAX_BODY_BYTES = 4_000;
 export const USER_PROFILE_RECALL_MAX_HITS = 5;
@@ -70,14 +75,16 @@ export function normalizeUserProfileSnapshot(value: unknown): UserProfileSnapsho
   return result;
 }
 export function normalizeUserProfileRecallRequest(value: unknown): UserProfileRecallRequest {
-  const row = record(value, ['projectMemoryId'], ['query']);
+  const row = record(value, ['projectMemoryId'], ['query', 'includeExplanation']);
   const projectMemoryId = row.projectMemoryId === null ? null : uuid(row.projectMemoryId);
-  if (!Object.hasOwn(row, 'query')) return { projectMemoryId };
+  if (Object.hasOwn(row, 'includeExplanation') && typeof row.includeExplanation !== 'boolean') invalid();
+  const extra = row.includeExplanation === true ? {includeExplanation: true} : {};
+  if (!Object.hasOwn(row, 'query')) return { projectMemoryId, ...extra };
   if (typeof row.query !== 'string' || !row.query.isWellFormed() || bytes(row.query) > 1_024
     || /[\x00-\x1f\x7f]/.test(row.query)) invalid();
   const query = row.query.normalize('NFKC').trim();
   if (bytes(query) > 1_024) invalid();
-  return { projectMemoryId, query };
+  return { projectMemoryId, query, ...extra };
 }
 
 /** Lexical matching only. No AI, history lookup, collection, or implicit project fallback. */
@@ -93,13 +100,32 @@ export function selectUserProfileRecall(value: UserProfileSnapshot, request: Use
     return score > 0 ? [{ entry, score, order }] : [];
   }).sort((a, b) => b.score - a.score || a.order - b.order);
   const result: UserProfileRecall = { revision: snapshot.revision, entries: [], truncated: false };
+  const explanation = (selected: UserProfileEntry[]): UserProfileExplanation => {
+    const overlaps: UserProfileExplanation['overlaps'] = [];
+    for (let a = 0; a < selected.length; a++) for (let b = a + 1; b < selected.length; b++) {
+      const left = selected[a]!, right = selected[b]!;
+      if (left.title.normalize('NFKC').toLocaleLowerCase('en-US').trim() === right.title.normalize('NFKC').toLocaleLowerCase('en-US').trim()
+        && left.body.normalize('NFC').replace(/\r\n?/g, '\n') !== right.body.normalize('NFC').replace(/\r\n?/g, '\n'))
+        overlaps.push({entryIds: [left.id, right.id], reason: 'same-title-different-content'});
+    }
+    return {scope: 'this-device', projectMemoryId: input.projectMemoryId, comparisonScope: 'returned-entries',
+      selections: selected.map(entry => {
+        const title = entry.title.normalize('NFKC').toLocaleLowerCase('en-US'), body = entry.body.normalize('NFKC').toLocaleLowerCase('en-US');
+        const matched = tokens.length ? tokens.filter(token => title.includes(token) || body.includes(token)) : query && (title.includes(query) || body.includes(query)) ? [query] : [];
+        return {entryId: entry.id, scope: entry.scope, matchedTerms: matched.slice(0, 8).map(token => [...token].slice(0, 64).join('')),
+          fields: [...(query && (title.includes(query) || tokens.some(t => title.includes(t))) ? ['title' as const] : []),
+            ...(query && (body.includes(query) || tokens.some(t => body.includes(t))) ? ['body' as const] : [])], reason: query ? 'query-match' : 'active-in-scope'};
+      }), overlaps};
+  };
   for (const { entry } of candidates) {
+    const selected = [...result.entries, entry], details = input.includeExplanation ? {explanation: explanation(selected)} : {};
     if (result.entries.length >= USER_PROFILE_RECALL_MAX_HITS
-      || bytes(JSON.stringify({ ...result, entries: [...result.entries, entry], truncated: true })) > USER_PROFILE_RECALL_MAX_BYTES) {
+      || bytes(JSON.stringify({ ...result, entries: selected, truncated: false, ...details })) > USER_PROFILE_RECALL_MAX_BYTES) {
       result.truncated = true;
       continue;
     }
     result.entries.push(entry);
   }
+  if (input.includeExplanation) result.explanation = explanation(result.entries);
   return result;
 }

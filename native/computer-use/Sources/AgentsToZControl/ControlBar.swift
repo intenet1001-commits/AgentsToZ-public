@@ -28,7 +28,7 @@ final class ControlBar: NSObject {
         guard let grant = service.grant, !grant.halted else { hide(); return }
         let panel = self.panel ?? make()
         let owner: ControlBarOwner = grant.person ? .person : .agent
-        var title = ControlBarText.title(owner)
+        var title = ControlBarText.title(owner, callerLane: grant.caller.lane, label: grant.label)
         let detail: String
         let showsNotice: Bool
         if let notice, notice.until > Date() { title = notice.title; detail = notice.text; showsNotice = true }
@@ -39,6 +39,7 @@ final class ControlBar: NSObject {
             detail = ControlBarText.detail(owner, scope: scopeName(grant.scope),
                                            lastOperation: service.lastAction?.operation, secondsAgo: seconds)
         }
+        view.primary.requiresPhysicalHandBack = owner == .person
         view.show(tone: owner == .agent ? .agent : .person, title: title, detail: detail,
                   notice: showsNotice, primary: ControlBarText.primary(owner))
         if panel.level != .statusBar { panel.level = .statusBar }
@@ -79,6 +80,11 @@ final class ControlBar: NSObject {
         panel.hasShadow = true
         panel.appearance = NSAppearance(named: .darkAqua)
 
+        view.primary.refusedAccessibilityPress = { [weak self] in
+            guard let self, self.service.grant?.person == true else { return }
+            self.notice = (ControlBarText.handBackRefusedTitle, ControlBarText.handBackRefused, Date().addingTimeInterval(4))
+            self.update()
+        }
         view.primary.target = self
         view.primary.action = #selector(primaryPressed)
         view.stop.target = self
@@ -112,7 +118,7 @@ final class ControlBar: NSObject {
         ScopedControlLog.bar.notice("control bar: primary pressed owner=\(self.service.grant.map { $0.halted ? "halted" : $0.person ? "person" : "agent" } ?? "none", privacy: .public)")
         guard let grant = service.grant, !grant.halted else { update(); return }
         if !grant.person { service.handToPerson(); update(); return }
-        let refusal = Self.handBackRefusal(NSApp.currentEvent, bar: panel)
+        let refusal = Self.handBackRefusal(NSApp.currentEvent, bar: panel, button: view.primary)
         if !service.handToAgent(click: refusal), refusal != nil {
             notice = (ControlBarText.handBackRefusedTitle, ControlBarText.handBackRefused, Date().addingTimeInterval(4))
         }
@@ -121,7 +127,7 @@ final class ControlBar: NSObject {
     @objc private func stopPressed() { service.stop(); update() }
 
     /// What the bar can read about the click that ran the button (ControlBarClick decides).
-    static func handBackRefusal(_ event: NSEvent?, bar: NSWindow?) -> String? {
+    static func handBackRefusal(_ event: NSEvent?, bar: NSWindow?, button: ControlBarView.PillButton) -> String? {
         guard let event, let bar, let cg = event.cgEvent else { return "not-a-bar-click" }
         let source = cg.getIntegerValueField(.eventSourceUnixProcessID)
         let poster = source > 0 && source <= Int64(Int32.max) ? poster(pid: pid_t(source)) : nil
@@ -129,6 +135,8 @@ final class ControlBar: NSObject {
         ScopedControlLog.bar.notice("control bar: hand-back click source=\(source, privacy: .public) poster=\(poster?.identifier ?? "-", privacy: .public) apple=\(poster?.apple ?? false, privacy: .public)")
         return ControlBarClick.handBackRefusal(
             isMouseUp: event.type == .leftMouseUp, inBar: event.window === bar,
+            ownMouseDown: button.tracksOwnMouseDown,
+            inButton: button.bounds.contains(button.convert(event.locationInWindow, from: nil)), clickCount: event.clickCount,
             ageSeconds: ProcessInfo.processInfo.systemUptime - event.timestamp,
             sourcePid: source, userData: cg.getIntegerValueField(.eventSourceUserData),
             ownPid: Int64(ProcessInfo.processInfo.processIdentifier), syntheticTag: ScopedSyntheticEvents.tag,

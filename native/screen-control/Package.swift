@@ -7,12 +7,20 @@ let package = Package(
     name: "ScreenControlCore",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "ScreenControlCore", targets: ["ScreenControlCore"]),
-               .executable(name: "AgentsToZScreen", targets: ["AgentsToZScreen"])],
+               .executable(name: "AgentsToZScreen", targets: ["AgentsToZScreen"]),
+               .executable(name: "AgentsToZViewer", targets: ["AgentsToZViewer"]),
+               // Human-run diagnostic only; never included in the Screen/Viewer distribution bundles.
+               .executable(name: "AgentsToZInputProbe", targets: ["AgentsToZInputProbe"])],
     targets: [.target(name: "ScreenControlCore"),
               // Mac only: screen capture and the host pipeline. `scripts/build-screen-app.ts` wraps the executable
               // into AgentsToZ Screen.app, the one bundle that holds screen recording permission (DESIGN S0-5).
               .target(name: "ScreenHost", dependencies: ["ScreenControlCore"]),
               .executableTarget(name: "AgentsToZScreen", dependencies: ["ScreenControlCore", "ScreenHost"]),
+              // Mac A: sees and, with B's grant, controls a registered Mac B (docs/design/mac-to-mac-2026-11-01 5.1). Links
+              // ScreenControlCore only: no capture, no injection, no TCC permission but local network (SR-32).
+              .executableTarget(name: "AgentsToZViewer", dependencies: ["ScreenControlCore"]),
+              .executableTarget(name: "AgentsToZInputProbe", dependencies: ["ScreenControlCore"]),
               .testTarget(name: "ScreenControlCoreTests", dependencies: ["ScreenControlCore"]),
-              .testTarget(name: "ScreenHostTests", dependencies: ["ScreenHost", "ScreenControlCore"])]
+              .testTarget(name: "ScreenHostTests", dependencies: ["ScreenHost", "ScreenControlCore"]),
+              .testTarget(name: "ViewerUITests", dependencies: ["AgentsToZViewer", "ScreenControlCore"])]
 )

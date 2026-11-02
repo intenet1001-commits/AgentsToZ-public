@@ -16,6 +16,7 @@ import {isExternalTeamSurface, teamLaunchSummary, teamReportProvenance, type Tea
 export {TEAM_LAUNCH_SURFACES, type TeamExternalLaunch, type TeamExternalRuntime, type TeamExternalStarted, type TeamLaunchPlan, type TeamLaunchSurface} from './teamLaunchPlan';
 import {TEAM_AGENT_LABEL as AGENT_LABEL, TEAM_MAX_MEMBERS, TEAM_SESSION_ID, teamMemberLabel as modelLabel, type AiTerminalLaunchModel} from './workroomTeamInstruction';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
+import {parseRemoteTeamTarget,parseTeamMemberWithRemote,type RemoteTeamTarget,type RemoteTeamRef} from './remoteTeamProtocol';
 export {teamLeaderInstruction, TEAM_MAX_MEMBERS} from './workroomTeamInstruction';
 
 export const TEAM_WAIT_MAX_MS = 50_000;
@@ -49,6 +50,7 @@ export interface TeamMemberInput {
    * by itself — each computer session still needs its own human approval in Control.
    */
   computerUseApprovals?: boolean;
+  remote?:RemoteTeamTarget;
 }
 /**
  * A member is addressed through its team binding, including external members without a Workroom sessionId.
@@ -62,6 +64,8 @@ export type WorkroomTeamMemberRequest = {op: 'member'; teamId: string; memberId:
   | {operation: 'keys'; requestId: string; keys: WorkroomKey[]}
 );
 export type WorkroomTeamRequest =
+  | {op:'remote-devices'}
+  | {op:'remote-projects';deviceId:string;endpointId:string}
   | WorkroomTeamMemberRequest
   | {op: 'create'; portId: string; requestId: string; title: string; goal: string; members: TeamMemberInput[]}
   | {op: 'read'; teamId?: string; portId?: string}
@@ -110,6 +114,7 @@ export interface TeamMember {
    * `delivery` is how the brief arrived; `unknown` stays unknown and is never resent.
    */
   surface?: TeamLaunchSurface; launchOptions?: TeamLaunchOptions; execution?: TeamExecutionRef; delivery?: TeamDelivery;
+  remote?:RemoteTeamTarget;
   /** One short line of the runtime's own words for the team status: no secret, path, command or environment. */
   note?: string;
   /** Last bounded runtime observation; it does not establish task completion. */
@@ -182,7 +187,7 @@ export interface WorkroomTeamHost {
    * unchanged. Host-only, like `model` and `effort`: a remote request can never carry them.
    */
   start(input: {targetId: string; agent: AiTerminalAgent; prompt: string; requestId: string; model?: AiTerminalLaunchModel; accountId?: string; bypassPermissions?: true;
-    effort: {pinned: WorkroomEffortLevel} | {requestText: string}}): Promise<{sessionId: string}>;
+    effort: {pinned: WorkroomEffortLevel} | {requestText: string};guard?:TeamEffectGuard}): Promise<{sessionId: string}>;
   session(sessionId: string, targetId: string): {state: 'running' | 'exited' | 'missing'; lastOutputAt: number | null};
   /**
    * The latest session that continues `sessionId` through the Workroom's own 「다시 시작」 (its exact `resumeFrom`
@@ -216,7 +221,8 @@ export interface WorkroomTeamHost {
     agent: AiTerminalAgent; targetId: string; cwd: string; sameRepository: boolean; linked: boolean; baseCheckout: boolean; branch: string | null; containsBase: boolean;
   } | null>;
   /** Types a member's brief into an open Workroom once, under a host receipt: never typed again, `unknown` is reported as such. */
-  instruct(input: {sessionId: string; prompt: string; requestId: string}): Promise<'written' | 'unknown'>;
+  instruct(input: {sessionId: string; prompt: string; requestId: string;guard?:TeamEffectGuard}): Promise<'written' | 'unknown'>;
+  remote?:TeamRemoteRuntime;
   close(sessionId: string): Promise<void>;
   /** `merged`: already an ancestor of the base checkout's HEAD — where the leader merges. */
   branchGit(scope: TeamGitScope, base: string, branch: string): Promise<TeamMemberGit | null>;
@@ -228,6 +234,16 @@ export interface WorkroomTeamHost {
 
 export class WorkroomTeamError extends Error {
   constructor(message: string, readonly code: string, readonly status = 400, readonly details?: Record<string, unknown>) { super(message); }
+}
+/** Host-only effect proof; no wire request can construct or activate one. */
+export interface TeamEffectGuard {active():boolean;beforeEffect():Promise<void>;effortPolicy?:import('./aiTerminalService').AiTerminalEffortPolicy}
+export interface TeamRemoteObserved {state:TeamMemberState;delivery?:TeamDelivery;note?:string;lastOutputAt?:number|null;report?:TeamMember['report']}
+export interface TeamRemoteRuntime {
+  projects(target:Pick<RemoteTeamTarget,'deviceId'|'endpointId'>):Promise<{projectId:string;name:string}[]>;
+  start(input:{target:RemoteTeamTarget;title:string;goal:string;member:TeamMemberInput;requestId:string}):Promise<{ref:RemoteTeamRef;state:TeamMemberState;delivery:TeamDelivery;note?:string}>;
+  observe(ref:RemoteTeamRef):Promise<TeamRemoteObserved>;
+  send(ref:RemoteTeamRef,text:string,requestId:string):Promise<{delivery:TeamDelivery;note?:string}>;
+  close(ref:RemoteTeamRef):Promise<{closed:'closed'|'not-running'|'unknown';note?:string}>;
 }
 const invalid = (message: string) => new WorkroomTeamError(message, 'WORKROOM_TEAM_REQUEST_INVALID');
 const text = (value: unknown, field: string, max: number, min = 1): string => {
@@ -255,12 +271,16 @@ export function parseWorkroomTeamRequest(input: unknown): WorkroomTeamRequest {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid('팀 작전 요청 객체가 필요합니다.');
   const value = input as Record<string, unknown>;
   switch (value.op) {
+    case 'remote-devices':exact(value,['op']);return{op:'remote-devices'};
+    case 'remote-projects':{
+      exact(value,['op','deviceId','endpointId']);const target=parseRemoteTeamTarget({deviceId:value.deviceId,endpointId:value.endpointId,projectId:'discovery'});return{op:'remote-projects',deviceId:target.deviceId,endpointId:target.endpointId};
+    }
     case 'create': {
       exact(value, ['op', 'portId', 'requestId', 'title', 'goal', 'members']);
       if (!Array.isArray(value.members) || value.members.length < 1 || value.members.length > TEAM_MAX_MEMBERS) throw invalid(`팀원은 1명부터 ${TEAM_MAX_MEMBERS}명까지입니다.`);
       const members = value.members.map((raw, index): TeamMemberInput => {
-        let selected: ReturnType<typeof parseTeamMemberSelection>;
-        try { selected = parseTeamMemberSelection(raw, index); }
+        let selected:ReturnType<typeof parseTeamMemberWithRemote>;
+        try {selected=parseTeamMemberWithRemote(raw,index);}
         catch (error) { throw invalid(error instanceof Error ? error.message : `팀원 ${index + 1}을 확인하세요.`); }
         // Drafts may leave task blank for the leader to divide; an actual create must supply it.
         return {...selected, task: text(selected.task, `팀원 ${index + 1}의 작업`, 4_000)};
@@ -499,7 +519,7 @@ export class WorkroomTeamService {
   #waiters = new Set<() => void>();
   #revision = new WeakMap<Team, number>();
   #closing = new Set<string>();
-  #externalFlights = new WeakMap<TeamMember, {ref: TeamExecutionRef; result: Promise<TeamExternalObserved | null>}>();
+  #externalFlights = new WeakMap<TeamMember, {ref: TeamExecutionRef; result: Promise<TeamExternalObserved|TeamRemoteObserved|null>}>();
   /**
    * Settle events of a team in this run: a member entering a settled state, or bringing a new report. The `settled`
    * count can go back down — a slow external read makes a member `unknown`, the next read finds it working — so a wait
@@ -549,7 +569,7 @@ export class WorkroomTeamService {
     for (const member of team.members) {
       if (member.state !== 'starting' && member.state !== 'working') continue;
       // An external surface is not a Workroom: only its own runtime may say what it sees (#observeExternal).
-      if (member.execution?.kind === 'external') continue;
+      if (member.execution?.kind === 'external'||member.remote) continue;
       const live = member.sessionId && member.targetId ? this.host.session(member.sessionId, member.targetId).state : null;
       // A member still 「starting」 in an earlier run never got its Workroom: that create did not reach it.
       const next = !member.sessionId ? (earlier ? 'unknown' as const : null)
@@ -573,7 +593,7 @@ export class WorkroomTeamService {
     const leader = team.leader.sessionId && team.leader.targetId ? this.host.continuation(team.leader.sessionId, team.leader.targetId) : null;
     if (leader && leader.sessionId !== team.leader.sessionId) { team.leader.sessionId = leader.sessionId; changed = true; }
     for (const member of team.members) {
-      if (member.execution?.kind === 'external' || !member.sessionId || !member.targetId || member.state === 'closed') continue;
+      if (member.execution?.kind === 'external'||member.remote || !member.sessionId || !member.targetId || member.state === 'closed') continue;
       const next = this.host.continuation(member.sessionId, member.targetId);
       if (!next || next.sessionId === member.sessionId) continue;
       member.sessionId = next.sessionId;
@@ -598,8 +618,10 @@ export class WorkroomTeamService {
     return member.execution?.kind !== 'external' && !!member.targetId && this.host.continuation?.(member.sessionId, member.targetId)?.sessionId === sessionId;
   }
 
-  create(request: Extract<WorkroomTeamRequest, {op: 'create'}>, caller: TeamCaller | null): Promise<{team: TeamView; replayed: boolean; untracked: number}> {
+  create(request: Extract<WorkroomTeamRequest, {op: 'create'}>, caller: TeamCaller | null,guard?:TeamEffectGuard): Promise<{team: TeamView; replayed: boolean; untracked: number}> {
     return this.#serial(async () => {
+      const check=()=>{if(guard&&!guard.active())throw new WorkroomTeamError('원격 Teams 실행 동의가 변경되었습니다.','REMOTE_TEAMS_CONSENT_REQUIRED',403);};
+      check();
       const fingerprint = JSON.stringify([request.portId, request.title, request.goal, request.members]);
       const existing = this.store.byRequest(request.requestId);
       if (existing) {
@@ -656,16 +678,16 @@ export class WorkroomTeamService {
         members: request.members.map((input, index) => {
           const memberId = `m${index + 1}`, name = input.name ?? `${memberId}-${input.agent}`;
           const joined = input.sessionId ? joining.get(input.sessionId)! : null;
-          const base = {id: memberId, name, agent: input.agent, ...(input.model ? {model: input.model} : {}), ...(input.provider ? {provider: input.provider} : {}), ...(input.effort ? {effort: input.effort} : {}), ...(input.role ? {role: input.role} : {}),
+          const base = {id: memberId, name, agent: input.agent,...(input.remote?{remote:input.remote}:{}), ...(input.model ? {model: input.model} : {}), ...(input.provider ? {provider: input.provider} : {}), ...(input.effort ? {effort: input.effort} : {}), ...(input.role ? {role: input.role} : {}),
             // Launch options belong to a Workroom this team starts; a joined session runs with its own (the parser refuses them there).
             ...(input.sessionId ? {} : {...(input.accountId ? {accountId: input.accountId} : {}), ...(input.bypassPermissions ? {bypassPermissions: true as const} : {}),
               // The chosen surface is kept as asked, whatever its runtime does next. Absent = the Workroom, as before.
               ...(input.surface && input.surface !== 'internal' ? {surface: input.surface} : {}), ...(input.launchOptions ? {launchOptions: input.launchOptions} : {}),
               ...(input.surface === 'app' && input.computerUseApprovals ? {computerUseApprovals: true as const} : {})}),
-            ...(toolless.has(input.agent) && !teamInputExternal(input) ? {reportsThroughLeader: true as const, note: teamToollessNote(input.agent)} : {}),
+            ...(toolless.has(input.agent) && !teamInputExternal(input)&&!input.remote ? {reportsThroughLeader: true as const, note: teamToollessNote(input.agent)} : {}),
             task: input.task, state: 'starting' as const};
           // Joined: its own checkout and branch (a reviewer has none to merge), and its session from the start.
-          return joined
+          return input.remote?{...base,branch:'',worktreePath:'',targetId:null,sessionId:null}:joined
             ? {...base, attached: true as const, ...(input.role !== 'reviewer' && !joined.containsBase ? {behindBase: true as const} : {}),
               branch: input.role === 'reviewer' ? '' : joined.branch!, worktreePath: joined.cwd, targetId: joined.targetId, sessionId: input.sessionId!}
             : {...base, branch: `team/${short}/${name}`, worktreePath: `${primary.path}/worktrees/team-${short}-${name}`, targetId: null, sessionId: null};
@@ -680,6 +702,15 @@ export class WorkroomTeamService {
       this.#touch(team);
       for (const member of team.members) {
         try {
+          check();
+          if(member.remote){
+            if(guard)throw Error('원격 요청으로 다른 기기에 다시 위임할 수 없습니다.');
+            if(!this.host.remote)throw Error('이 Mac의 인증된 원격 Teams 연결을 준비하지 못했습니다.');
+            const source=request.members[Number(member.id.slice(1))-1]!;
+            const started=await this.host.remote.start({target:member.remote,title:team.title,goal:team.goal,member:source,requestId:`team-${team.id}-${member.id}`});
+            member.execution=started.ref;member.state=started.state;member.delivery=started.delivery;if(started.note)member.note=started.note.slice(0,300);
+            this.#touch(team);continue;
+          }
           if (member.attached) {
             // Typed once under a host receipt. An outcome it cannot confirm is said so, and never typed a second time.
             const typed = await this.host.instruct({sessionId: member.sessionId!, prompt: teamMemberBrief(team, member), requestId: `team-${team.id}-${member.id}`})
@@ -698,6 +729,7 @@ export class WorkroomTeamService {
           }
           // Preserve the four-argument host contract for existing Workroom members. Orca may choose its own managed
           // path/branch; record those before target derivation or any launch, including if the next step fails.
+          await guard?.beforeEffect();check();
           const checkout = member.surface
             ? await this.host.addWorktree(team.primaryPath, member.worktreePath, member.branch, team.baseCommit, member.surface)
             : await this.host.addWorktree(team.primaryPath, member.worktreePath, member.branch, team.baseCommit);
@@ -709,6 +741,7 @@ export class WorkroomTeamService {
           // Durable before the Workroom starts: from here on the worktree exists, so a crash must leave a ledger row
           // that still names it — otherwise close reads 「missing」 and that worktree and branch are never cleaned up.
           this.#touch(team);
+          check();
           const prompt = teamMemberBrief(team, member), requestId = `team-${team.id}-${member.id}`;
           const launch = {...(member.model ? {model: member.model} : {}), ...(member.provider ? {provider: member.provider} : {}),
             ...(member.accountId ? {accountId: member.accountId} : {}), ...(member.bypassPermissions ? {bypassPermissions: true as const} : {}),
@@ -726,7 +759,7 @@ export class WorkroomTeamService {
             const started = await this.host.start({targetId: member.targetId, agent: member.agent, prompt, requestId,
               ...(member.model ? {model: {model: member.model, ...(member.provider ? {provider: member.provider} : {})}} : {}),
               ...(member.accountId ? {accountId: member.accountId} : {}), ...(member.bypassPermissions ? {bypassPermissions: true} : {}),
-              effort: launch.effort});
+              effort: launch.effort,...(guard?{guard}:{})});
             member.sessionId = started.sessionId; member.execution = {kind: 'workroom', sessionId: started.sessionId};
             member.state = 'working'; member.delivery = 'verified';
           }
@@ -741,7 +774,7 @@ export class WorkroomTeamService {
 
   /** The AIs among these Workroom members that the host knows lack the team tool. Unknown or a failed check is not missing. */
   async #toollessAgents(members: TeamMemberInput[]): Promise<Set<AiTerminalAgent>> {
-    const agents = [...new Set(members.filter(input => !teamInputExternal(input)).map(input => input.agent))];
+    const agents = [...new Set(members.filter(input => !teamInputExternal(input)&&!input.remote).map(input => input.agent))];
     if (!this.host.teamTool || !agents.length) return new Set();
     const checked = await Promise.all(agents.map(agent => Promise.resolve().then(() => this.host.teamTool!(agent)).catch(() => 'unknown' as const)));
     return new Set(agents.filter((_, index) => checked[index] === 'missing'));
@@ -759,10 +792,10 @@ export class WorkroomTeamService {
    * member keeps the honest state its start produced (`awaiting-ack` and friends never settle a wait), and a team from
    * an earlier run of the app that nothing can observe becomes `unknown` rather than 「working」 forever.
    */
-  async #externalObservation(member: TeamMember, ref: Extract<TeamExecutionRef, {kind: 'external'}>, timeoutMs: number): Promise<TeamExternalObserved | null> {
+  async #externalObservation(member: TeamMember, ref: Extract<TeamExecutionRef, {kind: 'external'|'remote'}>, timeoutMs: number): Promise<TeamExternalObserved|TeamRemoteObserved|null> {
     let flight = this.#externalFlights.get(member);
     if (!flight || flight.ref !== ref) {
-      const result = Promise.resolve().then(() => this.host.external!.observe!(ref)).catch(() => null);
+      const result = Promise.resolve().then(async():Promise<TeamExternalObserved|TeamRemoteObserved|null> => ref.kind==='remote'?await this.host.remote?.observe(ref)??null:await this.host.external?.observe?.(ref)??null).catch(() => null);
       flight = {ref, result}; this.#externalFlights.set(member, flight);
       const current = flight;
       void result.finally(() => { if (this.#externalFlights.get(member) === current) this.#externalFlights.delete(member); });
@@ -774,13 +807,13 @@ export class WorkroomTeamService {
 
   async #observeExternal(team: Team, timeoutMs = EXTERNAL_OBSERVE_MAX_MS): Promise<void> {
     if (team.state !== 'active' || this.#closing.has(team.id) || timeoutMs <= 0) return;
-    const pending = team.members.filter(member => member.execution?.kind === 'external'
+    const pending = team.members.filter(member => (member.execution?.kind === 'external'||member.execution?.kind==='remote')
       && (member.state === 'starting' || member.state === 'working' || member.state === 'unknown' || member.state === 'awaiting-connection' || member.state === 'awaiting-manual-join' || member.state === 'awaiting-ack'));
     if (pending.length === 0) return;
     const revision = this.#revision.get(team) ?? 0, earlier = this.store.fromEarlierRun(team.id);
-    const snapshots = pending.map(member => ({member, ref: member.execution as Extract<TeamExecutionRef, {kind: 'external'}>, state: member.state, manual: member.manual, report: member.report}));
+    const snapshots = pending.map(member => ({member, ref: member.execution as Extract<TeamExecutionRef, {kind: 'external'|'remote'}>, state: member.state, manual: member.manual, report: member.report}));
     // Parallel and bounded, with one underlying read per member. A timed-out read never applies later or launches anything.
-    const results = this.host.external?.observe
+    const results = this.host.external?.observe||this.host.remote
       ? await Promise.all(snapshots.map(({member, ref}) => this.#externalObservation(member, ref, Math.min(EXTERNAL_OBSERVE_MAX_MS, timeoutMs))))
       : snapshots.map(() => undefined);
     if (team.state !== 'active' || this.#closing.has(team.id) || this.store.get(team.id) !== team || (this.#revision.get(team) ?? 0) !== revision) return;
@@ -794,6 +827,7 @@ export class WorkroomTeamService {
         return;
       }
       const waiting = seen.state === 'awaiting-connection' || seen.state === 'awaiting-manual-join' || seen.state === 'awaiting-ack';
+      if(ref.kind==='remote'&&'report'in seen&&seen.report){member.report=seen.report;changed=true;}
       if (!(manual && waiting) && seen.state !== member.state) { member.state = seen.state; changed = true; }
       if (seen.delivery && !(manual?.confirmed === 'delivered' && seen.delivery !== 'verified') && seen.delivery !== member.delivery) { member.delivery = seen.delivery; changed = true; }
       if (seen.note && seen.note.slice(0, 300) !== member.note) { member.note = seen.note.slice(0, 300); changed = true; }
@@ -873,7 +907,7 @@ export class WorkroomTeamService {
      * report apart: a member on an external surface has no Workroom session to be recognised by, so a report for it
      * must say `manual: true` and is recorded as the leader's own words — never as that AI's verified report.
      */
-    const external = member.execution?.kind === 'external' || !!member.surface && isExternalTeamSurface(member.surface);
+    const external = member.remote||member.execution?.kind === 'external' || !!member.surface && isExternalTeamSurface(member.surface);
     if (external && !request.manual) {
       throw new WorkroomTeamError(`${member.id}은(는) ${member.surface ?? '외부'} 표면에서 실행 중이어서 그 팀원의 보고를 호스트가 확인할 수 없습니다. 화면에서 읽은 내용을 manual: true로 보내면 「사람이 옮긴 보고」로 기록합니다.`,
         'WORKROOM_TEAM_REPORT_UNVERIFIED', 409);
@@ -940,6 +974,13 @@ export class WorkroomTeamService {
       let unfinished = false;
       for (const member of team.members) {
         let session: 'closed' | 'not-running' = 'not-running';
+        if(member.remote){
+          const remote=member.execution?.kind==='remote'?member.execution:null;
+          const ended=remote&&this.host.remote?await this.host.remote.close(remote).catch(()=>({closed:'unknown' as const})):{closed:'unknown' as const};
+          const confirmed=ended.closed!=='unknown';member.state=confirmed?'closed':'unknown';if(!confirmed)unfinished=true;
+          outcomes.push({memberId:member.id,session:ended.closed==='closed'?'closed':ended.closed==='not-running'?'not-running':'kept',worktree:'kept',branch:'kept',...(!confirmed?{error:'상대 Mac의 종료 결과가 미확정입니다. 작업 폴더를 보존했습니다.'}:{})});
+          continue;
+        }
         if (member.attached) {
           // Joined from an open session: the team made none of it, so it ends nothing, removes nothing and deletes nothing.
           if (member.state === 'starting' || member.state === 'working') member.state = 'closed';

@@ -1,5 +1,6 @@
 import {assertComputerUseBuildOutput} from './computerUseBuildOutput';
 import {prepareControlSigningProfile} from './computerUseSigningProfile';
+import {communityBuildConfigPlistEntry,readCommunityBuildConfig,type CommunityBuildConfig} from './communityBuildConfig';
 import {assertNotaryAccepted,assertNotarizedGatekeeperVerdict,notaryLogIssues,parseNotarySubmission,type NotarySubmission} from '../src/macOSDeveloperIdBuild';
 import {checkMacOSNotary,notaryAuthArgs,type CheckProcessResult,type CheckRunner,type NotaryCheckStatus,type NotaryOptions} from '../src/macOSNotaryPreflight';
 // Builds AgentsToZ Control.app, the signed sibling app that alone holds the Accessibility permission for computer use
@@ -38,6 +39,8 @@ export interface ControlBuildOptions {
   readonly appPath: string;
   readonly version: string;
   readonly debug: boolean;
+  readonly communityQA?:true;
+  readonly communityConfig?:CommunityBuildConfig;
   readonly identity?: string;
   readonly profile?: string;
   /** Only meaningful for a signed build. */
@@ -50,6 +53,7 @@ export function parseControlBuildArgs(args: readonly string[], defaultAppPath: s
   let appPath = defaultAppPath;
   let version = '0.1';
   let identity: string | undefined, profile: string | undefined, notaryProfile: string | undefined, notaryKeychain: string | undefined;
+  let communityConfigPath:string|undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === '--output') {
@@ -60,9 +64,19 @@ export function parseControlBuildArgs(args: readonly string[], defaultAppPath: s
     else if (arg === '--profile') profile = args[++i];
     else if (arg === '--notary-profile') notaryProfile = args[++i] ?? '';
     else if (arg === '--notary-keychain') notaryKeychain = args[++i] ?? '';
-    else if (!['--debug', '--timestamp', '--timestamp=none', '--notarize'].includes(arg)) throw Error(`Unsupported AgentsToZ Control build option: ${arg}`);
+    else if (arg === '--community-config') {
+      if(communityConfigPath!==undefined||!args[i+1]||args[i+1]!.startsWith('--'))throw Error('Choose one explicit public community config file');
+      communityConfigPath=resolve(args[++i]!);
+    }
+    else if (!['--debug', '--timestamp', '--timestamp=none', '--notarize','--community-qa'].includes(arg)) throw Error(`Unsupported AgentsToZ Control build option: ${arg}`);
   }
   const debug = args.includes('--debug');
+  const communityQA=args.includes('--community-qa');
+  if(communityQA&&communityConfigPath!==undefined)throw Error('Community QA and public configuration cannot be combined');
+  if(communityConfigPath!==undefined&&(identity===undefined||debug))throw Error('Public community configuration requires a signed release helper');
+  const communityConfig=communityConfigPath===undefined?undefined:readCommunityBuildConfig(communityConfigPath);
+  // The existing build-output guard restricts artifacts to owned package/temporary roots and never installs them.
+  if(communityQA&&!args.includes('--output'))throw Error('--community-qa requires an explicit separate QA build output');
   if ((identity === undefined) !== (profile === undefined)) throw Error('--sign and --profile go together');
   if (identity !== undefined && (debug || !identity.trim())) throw Error('A signed build is a release build with an explicit identity');
   if (profile !== undefined && (!isAbsolute(profile) || !existsSync(profile))) throw Error('The provisioning profile must be an existing absolute path');
@@ -79,7 +93,15 @@ export function parseControlBuildArgs(args: readonly string[], defaultAppPath: s
     notary = Object.freeze({profile: notaryProfile, ...(notaryKeychain === undefined ? {} : {keychain: notaryKeychain})});
     notaryAuthArgs(notary); // a malformed profile name or a relative keychain path stops here, before anything runs
   }
-  return Object.freeze({appPath, version, debug, identity, profile, timestamp, notary});
+  return Object.freeze({appPath, version, debug, identity, profile, timestamp, notary,...(communityQA?{communityQA:true as const}:{}),...(communityConfig?{communityConfig}:{})});
+}
+export function controlSwiftBuildArguments(configuration:string,communityQA=false):string[]{
+  return ['swift','build','-c',configuration,'--package-path',packagePath,'--disable-automatic-resolution',...(communityQA?['-Xswiftc','-DCONTROL_COMMUNITY_QA']:[])];
+}
+export function controlBuildInfoPlist(version:string,communityQA=false,communityConfig?:CommunityBuildConfig):string{
+  if(communityQA&&communityConfig)throw Error('Community QA and public configuration cannot be combined');
+  const info=controlInfoPlist(version).replace('</dict>',communityBuildConfigPlistEntry(communityConfig)+'</dict>');return communityQA?info.replace(`<key>CFBundleDisplayName</key><string>${CONTROL_APP_NAME}</string>`,`<key>CFBundleDisplayName</key><string>${CONTROL_APP_NAME} · Community QA</string>`)
+    .replace('</dict>','  <key>AgentsToZCommunityQA</key><true/>\n</dict>'):info;
 }
 
 export function controlCodesignArguments(identity: string, entitlementsPath: string, appPath: string, timestamp: ControlTimestamp): string[] {
@@ -278,7 +300,7 @@ function run(command: string[], output: 'stdout' | 'all' = 'stdout'): string {
 function main(): void {
   const options = parseControlBuildArgs(process.argv.slice(2), join(packagePath, '.build', `${CONTROL_APP_NAME}.app`));
   const {appPath, identity, profile} = options;
-  const info = controlInfoPlist(options.version);
+  const info = controlBuildInfoPlist(options.version,options.communityQA,options.communityConfig);
   const configuration = options.debug ? 'debug' : 'release';
   // Refuse the wrong App ID/profile before compiling or creating an install candidate. Never renew a profile,
   // alter a team/account, or substitute Screen's keychain entitlement to make this check pass.
@@ -300,7 +322,7 @@ function main(): void {
   if (identity !== undefined && options.timestamp === 'none') {
     console.error('[control] --timestamp=none: local-only signature without a secure timestamp. Apple notarization rejects this build; it is not notarizable.');
   }
-  const build = ['swift', 'build', '-c', configuration, '--package-path', packagePath, '--disable-automatic-resolution'];
+  const build = controlSwiftBuildArguments(configuration,options.communityQA);
   run([...build, '--product', CONTROL_PRODUCT]);
   const binPath = run([...build, '--show-bin-path']);
 

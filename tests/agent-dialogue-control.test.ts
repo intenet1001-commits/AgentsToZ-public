@@ -1,5 +1,7 @@
 import {expect,test} from 'bun:test';
-import {createCommunityControlExecutor,communityControlPollDelay,COMMUNITY_CONTROL_ACTIVE_POLL_MS,COMMUNITY_CONTROL_IDLE_POLL_MS} from '../src/agentDialogueControl';
+import {createCommunityControlExecutor,communityControlDetachable,communityControlPollDelay,COMMUNITY_CONTROL_ACTIVE_POLL_MS,COMMUNITY_CONTROL_IDLE_POLL_MS} from '../src/agentDialogueControl';
+import {AGENT_DIALOGUE_CONTROL_DETACHED} from '../src/agentDialogueHost';
+import {COMPUTER_USE_REMOTE_ERRORS} from '../src/computerUseRemoteProtocol';
 import {communityDeviceLabel} from '../src/workroomDeviceLabel';
 import {REMOTE_HISTORY_ACTIONS} from '../src/workroomHistoryRemoteProtocol';
 
@@ -122,4 +124,48 @@ test('conversation history is never reachable from another Mac, even though it i
   for (const action of new Set([...REMOTE_HISTORY_ACTIONS, 'history.restart', 'history.restart.dismiss']))
     await expect(run({kind: 'terminal', body: {operation: 'workspace', requestId: 'request-0001', targetId: 'project-aaaa', workspace: {action, history: {}}}})).rejects.toThrow('대화 기록');
   expect(calls).toEqual([]);
+});
+
+test('a computer-use row goes to the receiving host with the mailbox\'s sender and row; without that host it is the unsupported sentence', async () => {
+  const terminalCalls: string[] = [];
+  const handed: {request: Record<string, unknown>; from: unknown; controlId: string}[] = [];
+  const base = {
+    terminal: async (body: Record<string, unknown>) => {terminalCalls.push(String(body.operation)); return {sessions: []};},
+    workspace: async () => ({ok: true}),
+    projects: async () => ({projects: [], opsTargetId: null, deviceName: '3호'}),
+  };
+  const from = {deviceId: '0a1b2c3d-0000-4000-8000-000000000001', name: '1호 / 아젠투지(OPS)', endpointId: '0a1b2c3d-0000-4000-8000-0000000000e1'};
+  const hello = {kind: 'computer-use', v: 1, op: 'hello', session: 'a'.repeat(32), seq: 0, sentAt: 1, pub: 'x', instance: 'b'.repeat(32), platform: 'darwin'};
+  const call = {kind: 'computer-use', v: 1, op: 'call', session: 'a'.repeat(32), seq: 1, sentAt: 1, box: 'y'};
+
+  // A Mac whose server cannot receive (no host wired) says so with the fixed sentence, never the unknown-kind one.
+  const without = createCommunityControlExecutor(base);
+  for (const request of [hello, call])
+    await expect(without(request, from, 'c1')).rejects.toThrow(COMPUTER_USE_REMOTE_ERRORS.REMOTE_UNSUPPORTED.message);
+
+  const run = createCommunityControlExecutor({...base, computerUse: async (request, sender, controlId) => {
+    handed.push({request, from: sender, controlId});
+    return request.op === 'call' ? AGENT_DIALOGUE_CONTROL_DETACHED : {v: 1, pub: 'p', bootId: 'c'.repeat(32)};
+  }});
+  expect(await run(hello, from, 'control-1')).toEqual({v: 1, pub: 'p', bootId: 'c'.repeat(32)});
+  expect(await run(call, from, 'control-2')).toBe(AGENT_DIALOGUE_CONTROL_DETACHED);
+  expect(handed).toEqual([{request: hello, from, controlId: 'control-1'}, {request: call, from, controlId: 'control-2'}]);
+  // Without the mailbox's sender device or the row, nothing reaches the host.
+  const missing: [typeof from | undefined, string | undefined][] = [[undefined, 'c3'], [{...from, deviceId: ''}, 'c3'], [{...from, deviceId: '1호'}, 'c3'], [from, undefined], [from, '']];
+  for (const [sender, controlId] of missing)
+    await expect(run(call, sender, controlId)).rejects.toThrow(COMPUTER_USE_REMOTE_ERRORS.REMOTE_BAD_REQUEST.message);
+  expect(handed).toHaveLength(2);
+
+  // Only a computer-use call may be answered after the poll moved on.
+  expect(communityControlDetachable(call)).toBe(true);
+  for (const request of [hello, {...call, op: 'part'}, {...call, op: 'heartbeat'}, {kind: 'terminal', body: {operation: 'list'}, op: 'call'}, {kind: 'projects'}])
+    expect(communityControlDetachable(request)).toBe(false);
+
+  // The other kinds are untouched by the new branch.
+  expect(await run({kind: 'projects'})).toEqual({projects: [], opsTargetId: null, deviceName: '3호'});
+  expect(await run({kind: 'terminal', body: {operation: 'list'}}, from, 'c4')).toEqual({result: {sessions: []}});
+  await expect(run({kind: 'ops-request'}, from)).rejects.toThrow('이 기기의 OPS 작업 수신 기능을 확인하세요.');
+  await expect(run({kind: 'computer-use-x'}, from, 'c5')).rejects.toThrow('지원하지 않는 기기 제어 요청입니다.');
+  expect(terminalCalls).toEqual(['list']);
+  expect(handed).toHaveLength(2);
 });

@@ -215,7 +215,11 @@ async function waitForProgress(baseUrl: string, taskId: string): Promise<void> {
     // do not change the gate's timeout or turn a terminal failure into a successful wait.
     const listed = await request(baseUrl, '/api/agent-runtime/tasks').catch(() => null);
     const task = (listed?.body.tasks as Array<Record<string, any>> | undefined)?.find(candidate => candidate.taskId === taskId);
-    throw new Error('Runtime progress gate failed: ' + JSON.stringify({taskId, task, events:events.slice(-12)}), {cause:error});
+    const diagnostic = await request(baseUrl, `/test/fixture-diagnostics?taskId=${encodeURIComponent(taskId)}`)
+      .catch(() => null);
+    throw new Error('Runtime progress gate failed: ' + JSON.stringify({
+      taskId, task, events:events.slice(-12), fixture:diagnostic?.body,
+    }), {cause:error});
   }
 }
 
@@ -351,6 +355,21 @@ describe('Agent Runtime restart vertical gate', () => {
         join(workspacePath, 'fake-codex-descendant-path.txt'),
         descendantExecutable,
       );
+      // Prove the diagnostic comes from the isolated compiled provider and does
+      // not swallow/relax bootstrap failure. It is never printed on success.
+      writeFileSync(modePath, 'invalid-fixture-mode');
+      const bootstrapFailure = Bun.spawnSync([executable], {
+        cwd: workspacePath,
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(bootstrapFailure.exitCode).toBe(64);
+      expect(bootstrapFailure.stdout.byteLength).toBe(0);
+      expect(bootstrapFailure.stderr.byteLength).toBeLessThanOrEqual(4096);
+      expect(JSON.parse(bootstrapFailure.stderr.toString())).toMatchObject({
+        fixture: 'agent-runtime-fake-codex', phase: 'read-mode', exitCode: 64, signal: null,
+        descendantPid: null, descendantExitCode: null, observedReadyText: null,
+      });
       writeFileSync(modePath, 'hold');
       writeFileSync(timeoutPath, '30000');
 
@@ -365,6 +384,13 @@ describe('Agent Runtime restart vertical gate', () => {
       await waitForProgress(baseUrl, cancelledTask.taskId);
       const cancelledState = await nextProviderState(statePath, null);
       assertProviderBinding(appDataDir, cancelledTask.taskId, cancelledState);
+      const runningDiagnostic = await request(baseUrl,
+        `/test/fixture-diagnostics?taskId=${encodeURIComponent(cancelledTask.taskId)}`);
+      expect(runningDiagnostic.status).toBe(200);
+      expect(runningDiagnostic.body).toMatchObject({
+        phase: 'spawned', guardPid: cancelledState.guardPid, exitCode: null,
+        signal: null, requestedSignal: null, stderr: '',
+      });
       const cancelled = await request(
         baseUrl,
         `/api/agent-runtime/tasks/${cancelledTask.taskId}/cancel`,

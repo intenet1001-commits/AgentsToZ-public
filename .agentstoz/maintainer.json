@@ -575,7 +575,9 @@
         "src/projectMemoryFeedback.ts",
         "src/projectMemoryRecall.ts",
         "project-memory-server.ts",
-        "tests/project-memory-corrections*"
+        "tests/project-memory-corrections*",
+        "src/projectMemoryRelations.ts",
+        "tests/project-memory-relations.test.ts"
       ],
       "covers": [
         "user correction and failure cause reach next task context",
@@ -778,7 +780,38 @@
         "team-restart-read-only.test.ts",
         "team-runtime-bridge.test.ts",
         "team-external-host.test.ts",
-        "team-external-runtime.test.ts"
+        "team-external-runtime.test.ts",
+        "work-mode-screen-helper.test.ts",
+        "viewer-community-directory.test.ts",
+        "screen-community-registry.test.ts",
+        "emulator-computer-use-process.test.ts",
+        "emulator-screen-controller-lane.test.ts",
+        "emulator-screen-viewer-lane.test.ts",
+        "emulator-wp13-contracts.test.ts",
+        "community-access-registry.test.ts",
+        "community-relay-sdk.test.ts",
+        "community-adapter-authorization.test.ts",
+        "workroom-browser-community.test.ts",
+        "computer-use-authenticated-hello.test.ts",
+        "authenticated-community-transport.test.ts",
+        "community-component-golden.test.ts",
+        "computer-use-main-link.test.ts",
+        "remote-teams.test.ts",
+        "remote-teams-permissions-client.test.ts",
+        "community-control-ledger.test.ts",
+        "community-build-config.test.ts",
+        "community-main-packaging.test.ts",
+        "tests/community-mobile-principal.test.ts",
+        "tests/community-mobile-native-identity.test.ts",
+        "tests/community-mobile-control-protocol.test.ts",
+        "tests/community-mobile-control-ledger.test.ts",
+        "tests/community-mobile-control-host.test.ts",
+        "tests/community-mobile-consumers.test.ts",
+        "tests/community-mobile-agent.test.ts",
+        "tests/community-mobile-runtime.test.ts",
+        "tests/admitted-ops-effort-fallback.test.ts",
+        "tests/ios-community-build.test.ts",
+        "tests/community-mobile-data-key.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -797,7 +830,13 @@
         "queued requests cannot cross a host-session replacement",
         "A natural-language operator chooses the agent, execution location and Hermes default/Claude/Codex configuration before any window or session is launched.",
         "Each fresh team member keeps its own explicit location and Hermes configuration; attached sessions retain their settings, unsupported combinations refuse, and button selection blocks preserve settled choices without repeated questions.",
-        "Hermes Workroom presets reach the isolated CLI argv; identical request retries deliver once, changed presets conflict, and reuse never borrows another provider configuration."
+        "Hermes Workroom presets reach the isolated CLI argv; identical request retries deliver once, changed presets conflict, and reuse never borrows another provider configuration.",
+        "Viewer status and open controls do not start a person-to-person session",
+        "isolated emulator lane contracts and fixture-only evidence boundaries",
+        "One reviewed enrollment binds desktop and mobile purposes, native component keys and portal identity without legacy downgrade",
+        "Mobile use expires after sixty minutes of actual-user inactivity; replay and heartbeat cannot extend it",
+        "Computer-use peers verify both native device proofs and key confirmation before runtime admission",
+        "동일 모바일 사용 인증으로 OPS·Teams·CLI 에포트·브라우저를 쓰고, 원래 작업 ID·영수증과 철회 경계를 보존한다."
       ],
       "memoryQueries": [
         "workroom remote session regression",
@@ -1041,7 +1080,9 @@
         "cancel request",
         "Mac screen protocol",
         "Mac screen session controls",
-        "Mac controller enrollment"
+        "Mac controller enrollment",
+        "Viewer registration guidance starts nearby discovery only on request, ends a search within its deadline, and preserves guarded enrollment while allowing dismissal",
+        "Viewer discovery files reject expired, shared, linked and malformed hints without creating enrollment keys"
       ],
       "memoryQueries": [
         "native transport resume session"
@@ -1119,7 +1160,8 @@
         "./tests/sdk-project-folders.test.ts",
         "./tests/common-memory-topics.test.ts",
         "./tests/common-memory-lesson-clusters.test.ts",
-        "./tests/common-memory-phone-surfaces.test.tsx"
+        "./tests/common-memory-phone-surfaces.test.tsx",
+        "./tests/common-memory-cross-page.test.ts"
       ],
       "timeoutSeconds": 120,
       "evidence": "goal-selection-cloud-CAS-and-portable-SDK",
@@ -1146,7 +1188,8 @@
         "remote cloud/root grants and transfer admission",
         "actual stdio MCP source catalog/read",
         "The same lesson written in two long-term memories is one evidence-backed discovery candidate; keyword topics only when no lesson repeats",
-        "A phone without its own network says so on both common-memory tabs; links read as names and states and history rows in words"
+        "A phone without its own network says so on both common-memory tabs; links read as names and states and history rows in words",
+        "Cross-page shared lessons use fresh source evidence and bounded scope-isolated hints; missing coverage remains explicit"
       ],
       "memoryQueries": [
         "공통기억 목표 SDK"
@@ -1169,7 +1212,8 @@
         "tests/common-memory-ui.mjs",
         "tests/fixtures/common-memory/*",
         "src/RemoteMetaCommonMemoryPanel.tsx",
-        "tests/common-memory-phone-surfaces-ui.mjs"
+        "tests/common-memory-phone-surfaces-ui.mjs",
+        "tests/common-memory-cross-page*"
       ],
       "covers": [
         "first-use and overlapping groups",
@@ -1178,7 +1222,8 @@
         "reload receipt with no original memory body in storage",
         "16px inputs 44px buttons no mobile overflow",
         "A phone user's unsaved create form and entry draft survive a tab switch but never follow the phone to another Mac",
-        "With OPS the phone's AI button only prepares the OPS request; without OPS it is off and says why; a saved link change is marked until the next edit"
+        "With OPS the phone's AI button only prepares the OPS request; without OPS it is off and says why; a saved link change is marked until the next edit",
+        "A curator continues three cloud catalog pages and sees one shared lesson with both source names and no automatic save"
       ]
     },
     {
@@ -2441,7 +2486,9 @@
         "./tests/project-memory-activity.test.ts",
         "./tests/user-profile-store.test.ts",
         "./tests/user-profile-api.test.ts",
-        "./tests/user-profile-mcp.test.ts"
+        "./tests/user-profile-mcp.test.ts",
+        "./tests/user-profile-explanation.test.ts",
+        "./tests/project-memory-relations.test.ts"
       ],
       "timeoutSeconds": 120,
       "kind": "contract",
@@ -2461,7 +2508,8 @@
         "Result windows preserve all instructions and report unavailable or partial reads honestly",
         "Dated request bodies reconstruct losslessly across bounded pages and finalized collection receipts survive restart without importing history during reads",
         "Locally encrypted user-confirmed preferences stay separate from historical instructions and OPS memory",
-        "Inactive and other-project preferences are withheld from bounded authenticated recall; stale writes and key loss preserve existing data"
+        "Inactive and other-project preferences are withheld from bounded authenticated recall; stale writes and key loss preserve existing data",
+        "Opt-in selection explanations preserve active scope and byte limits; same-title overlaps never resolve automatically; one-hop memory relations exclude withdrawn versions"
       ]
     },
     {
@@ -2484,7 +2532,8 @@
       "covers": [
         "A first-time user distinguishes personal instructions, operating memory and project results",
         "Reopening, same-memory refresh, partial or failed reads and delayed results retain correct instructions and counts",
-        "A person reviews, scopes, edits, disables and restores confirmed preferences without importing history or automatically applying model, account or permission settings"
+        "A person reviews, scopes, edits, disables and restores confirmed preferences without importing history or automatically applying model, account or permission settings",
+        "Saved preference preview explains scope and query matches locally and flags overlapping content without API calls or automatic saves"
       ]
     },
     {
@@ -2780,7 +2829,8 @@
         "src-tauri/src/work_mode*",
         "src-tauri/src/work_mode/**",
         "src/workModeScreenHelper.ts",
-        "src-tauri/src/screen_helper.rs"
+        "src-tauri/src/screen_helper.rs",
+        "src/useViewerHelper.ts"
       ],
       "evidence": "chromium-webkit-component-native-ipc-fixture",
       "covers": [
@@ -2790,7 +2840,8 @@
         "Always-on (연중무휴) holds the mode with no end time until stopped and takes no duration",
         "Closed-lid work (Mac) stays behind a cancellable one-time grant, is requested only when chosen, never on stop, and reports waiting for power",
         "The panel shows where AgentsToZ Screen is (missing, stopped, off, on with devices, viewed, permission needed) and opens it with a failed or unconfirmed open said plainly",
-        "While AgentsToZ Screen is on but off an approved network the panel says it is not accepting connections, never a count of devices that can connect"
+        "While AgentsToZ Screen is on but off an approved network the panel says it is not accepting connections, never a count of devices that can connect",
+        "The operator can open the Mac Viewer without naming a target or starting a person-to-person screen session"
       ]
     },
     {

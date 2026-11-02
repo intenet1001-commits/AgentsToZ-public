@@ -39,8 +39,11 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/portal",
         "GET /api/supabase-proxy/rest/v1/portmgr_devices",
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -330,7 +333,9 @@
         "network"
       ],
       "requests": [
-        "GET /api/supabase-proxy/rest/v1/portmgr_push_snapshots"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "GET /api/supabase-proxy/rest/v1/portmgr_push_snapshots",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root/#top-level-portal-panel>clickable:올리기(Push) 기록 — 북마크": {
@@ -451,6 +456,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/code-app-launch-options"
       ]
     },
@@ -601,7 +608,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/ai-usage/claude",
         "POST /api/agent-runtime/terminals"
       ]
@@ -723,9 +729,14 @@
       ],
       "count": 1,
       "reactions": [
-        "disabled"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/dialog(computer-use-panel)>button:닫기": {
       "role": "button",
@@ -737,13 +748,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(computer-use-panel)>button:도우미 열기": {
       "role": "button",
@@ -755,13 +762,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(computer-use-panel)>button:상태 다시 확인": {
       "role": "button",
@@ -773,7 +776,6 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
         "network"
       ],
       "requests": [
@@ -792,9 +794,14 @@
       ],
       "count": 1,
       "reactions": [
-        "disabled"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/dialog(computer-use-panel)>radio:desktop": {
       "role": "radio",
@@ -806,9 +813,13 @@
       ],
       "count": 1,
       "reactions": [
-        "disabled"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/dialog(computer-use-panel)>radio:window": {
       "role": "radio",
@@ -839,13 +850,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(control-profile-panel)>button:아젠투지 설정 닫기": {
       "role": "button",
@@ -861,8 +868,7 @@
         "network"
       ],
       "requests": [
-        "GET /api/control-profile/status",
-        "POST /api/agent-runtime/terminals"
+        "GET /api/control-profile/status"
       ]
     },
     "#root/dialog(control-profile-panel)>summary:고급 정보": {
@@ -897,7 +903,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -916,6 +921,8 @@
       ],
       "requests": [
         "DELETE /api/what-i-said/source",
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/memory-archive"
       ]
     },
@@ -947,9 +954,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/dialog(desktop-effort-panel)>button:연결 상태 다시 확인": {
       "role": "button",
@@ -965,7 +975,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/desktop-effort",
         "POST /api/agent-runtime/terminals"
       ]
@@ -984,7 +993,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/pick-folder",
         "POST /api/agent-runtime/terminals"
       ]
@@ -1401,6 +1409,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/quick-labels",
         "POST /api/agent-runtime/terminals"
       ]
@@ -1563,9 +1572,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/dialog(에이전트 기기 간 대화)>button:닫기": {
       "role": "button",
@@ -1581,7 +1594,9 @@
         "network"
       ],
       "requests": [
-        "POST /api/agent-dialogue/manage"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-dialogue/manage",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root/dialog(에이전트 기기 간 대화)>checkbox:on": {
@@ -1598,6 +1613,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -1611,13 +1627,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(초기 설정)>button:# 두 번째·추가 기기 연결": {
       "role": "button",
@@ -1643,13 +1655,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(초기 설정)>button:# 웹앱으로도 쓰기 (선택) · 고급 설정": {
       "role": "button",
@@ -1661,12 +1669,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root/dialog(초기 설정)>button:# 첫 기기 · 동기화 설정": {
       "role": "button",
@@ -1825,7 +1830,8 @@
         "network"
       ],
       "requests": [
-        "GET /api/pick-file"
+        "GET /api/pick-file",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root/folder-rename-prompt-modal>#folder-rename-prompt-copy": {
@@ -1843,7 +1849,6 @@
         "clipboard"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals",
         "POST /api/what-i-said/prompt-origin/register"
       ]
@@ -1864,6 +1869,7 @@
       ],
       "requests": [
         "GET /api/agent-runtime/targets",
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/ports",
         "POST /api/agent-dialogue/control",
         "POST /api/agent-runtime/terminals",
@@ -1882,9 +1888,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/folder-rename-prompt-modal>button:이름 변경": {
       "role": "button",
@@ -1896,9 +1906,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "POST /api/agent-dialogue/control"
+      ]
     },
     "#root/folder-rename-prompt-modal>button:취소": {
       "role": "button",
@@ -1927,9 +1940,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation"
+      ]
     },
     "#root/github-repository-create-control>#github-visibility-private": {
       "role": "button",
@@ -2021,9 +2037,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/memory-archive-panel>button:(unnamed 1)": {
       "role": "button",
@@ -2354,6 +2374,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals",
         "POST /api/last-visits",
         "POST /api/open-cmux-hermes"
@@ -2373,8 +2394,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/last-visits",
         "POST /api/open-cmux-hermes"
       ]
@@ -2527,7 +2546,9 @@
         "network"
       ],
       "requests": [
-        "GET /api/memory-archive"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "GET /api/memory-archive",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root/top-toolbar>#open-internet-qr-remote-control": {
@@ -2588,7 +2609,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -2851,7 +2871,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/onboarding/progress",
         "GET /api/onboarding/status",
         "GET /api/onboarding/tools"
@@ -2870,7 +2889,8 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root/top-toolbar>button:실행 중 #": {
@@ -3062,6 +3082,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/open-browser"
       ]
     },
@@ -3136,6 +3158,7 @@
       ],
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/force-restart-command"
       ]
     },
@@ -3153,7 +3176,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/detect-start-command",
         "POST /api/agent-runtime/terminals"
       ]
@@ -3171,6 +3193,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/stop-command"
       ]
     },
@@ -3183,9 +3207,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root/worktree-local-git-control>#worktree-git-init": {
       "role": "button",
@@ -3202,6 +3230,7 @@
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/orca-worktrees",
+        "POST /api/agent-runtime/terminals",
         "POST /api/git-branch-hygiene",
         "POST /api/git-init",
         "POST /api/list-git-worktrees",
@@ -3215,24 +3244,6 @@
       "via": [
         "#root/top-toolbar>summary:도구 및 설정",
         "#root/top-toolbar>#btn-channel-health"
-      ],
-      "count": 1,
-      "reactions": [
-        "ui",
-        "network"
-      ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
-    },
-    "#root>#control-profile-panel": {
-      "role": "dialog",
-      "name": "아젠투지 설정",
-      "depth": 2,
-      "via": [
-        "#root/top-toolbar>#top-level-memory-tab",
-        "top-level-memory-view/memory-role-boundaries>button:아젠투지 설정 열기"
       ],
       "count": 1,
       "reactions": [
@@ -3259,11 +3270,9 @@
         "clipboard"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/supabase-proxy/rest/v1/portmgr_devices",
         "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
-        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
-        "POST /api/agent-runtime/terminals"
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items"
       ]
     },
     "#root>#detail-edit-cancel": {
@@ -3345,13 +3354,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root>#edit-detect-github-detail": {
       "role": "button",
@@ -3400,7 +3405,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -3414,12 +3418,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#root>#folder-rename-prompt-modal": {
       "role": "clickable",
@@ -3487,7 +3488,9 @@
         "network"
       ],
       "requests": [
-        "GET /api/log-content/11111111-aaaa-4aaa-8aaa-000000000001"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "GET /api/log-content/11111111-aaaa-4aaa-8aaa-000000000001",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root>#memory-archive-panel": {
@@ -3639,6 +3642,7 @@
         "network"
       ],
       "requests": [
+        "POST /api/agent-runtime/terminals",
         "POST /api/workspace-roots"
       ]
     },
@@ -3655,7 +3659,9 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/orca-worktrees",
+        "POST /api/agent-runtime/terminals",
         "POST /api/git-branch-hygiene",
         "POST /api/git-init",
         "POST /api/list-git-worktrees",
@@ -3694,7 +3700,8 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "#root>button:고정 해제": {
@@ -3745,9 +3752,12 @@
       "count": 1,
       "reactions": [
         "dialog",
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation"
+      ]
     },
     "#root>button:상단 고정": {
       "role": "button",
@@ -3783,6 +3793,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/log-content/11111111-aaaa-4aaa-8aaa-000000000001",
         "POST /api/agent-runtime/terminals"
       ]
@@ -3854,7 +3865,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals",
         "POST /api/check-port-status"
       ]
@@ -3869,9 +3879,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "#root>button:현재 Git 워크트리 #개": {
       "role": "button",
@@ -3900,6 +3914,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -4019,8 +4034,6 @@
       ],
       "requests": [
         "DELETE /api/what-i-said/source",
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/memory-archive"
       ]
     },
@@ -4033,9 +4046,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation"
+      ]
     },
     "#root>clickable:프로젝트 추가": {
       "role": "clickable",
@@ -4099,11 +4115,9 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/supabase-proxy/rest/v1/portmgr_devices",
         "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
-        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
-        "POST /api/agent-runtime/terminals"
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items"
       ]
     },
     "#top-level-portal-panel/dialog(북마크 추가)>checkbox:on": {
@@ -4120,7 +4134,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/supabase-proxy/rest/v1/portmgr_devices",
         "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
         "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
@@ -4142,6 +4155,9 @@
       ],
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
+        "GET /api/supabase-proxy/rest/v1/portmgr_devices",
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
+        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
         "POST /api/agent-runtime/terminals",
         "POST /api/supabase-service-key/from-cli"
       ]
@@ -4174,11 +4190,7 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/portal",
-        "GET /api/supabase-proxy/rest/v1/portmgr_devices",
-        "GET /api/supabase-proxy/rest/v1/portmgr_portal_categories",
-        "GET /api/supabase-proxy/rest/v1/portmgr_portal_items",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -4683,13 +4695,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "#top-level-terminal-panel/community-workspace>button:다시 확인": {
       "role": "button",
@@ -4830,6 +4838,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -4883,6 +4892,98 @@
         "POST /api/agent-runtime/terminals"
       ]
     },
+    "computer-use-outgoing/computer-use-outgoing-row>#computer-use-outgoing-close": {
+      "role": "button",
+      "name": "#호 사용 끊기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
+    "computer-use-remote/computer-use-remote-blocked>#computer-use-remote-unblock": {
+      "role": "button",
+      "name": "#호 (#c#f) 막기 풀기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "POST /api/agent-runtime/computer-use"
+      ]
+    },
+    "computer-use-remote/computer-use-remote-cut-list>#computer-use-remote-uncut": {
+      "role": "button",
+      "name": "#호 (#a#d) 끊은 연결 풀기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
+    "computer-use-remote/computer-use-remote-row>#computer-use-remote-block-device": {
+      "role": "button",
+      "name": "#호 (#a#d)의 AI 막기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
+    "computer-use-remote/computer-use-remote-row>#computer-use-remote-cut": {
+      "role": "button",
+      "name": "원격 #호 (#a#d) 연결 HEX 끊기 · #분",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
     "control-profile-guide/#control-profile-guide-heading>button:기억 종류·호출 안내 펼치기": {
       "role": "button",
       "name": "기억 종류·호출 안내 펼치기",
@@ -4897,6 +4998,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -4914,6 +5016,61 @@
       ],
       "requests": []
     },
+    "dialog(computer-use-panel)/computer-use-remote-notice>#computer-use-remote-notice-block": {
+      "role": "button",
+      "name": "막기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "POST /api/agent-runtime/computer-use"
+      ]
+    },
+    "dialog(computer-use-panel)/computer-use-remote-notice>#computer-use-remote-notice-ok": {
+      "role": "button",
+      "name": "확인",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
+    "dialog(computer-use-panel)/computer-use-remote>#computer-use-remote-switch": {
+      "role": "switch",
+      "name": "다른 Mac의 AI 받기",
+      "depth": 2,
+      "via": [
+        "#root/top-toolbar>summary:도구 및 설정",
+        "top-toolbar/top-toolbar-project-actions>#computer-use-open"
+      ],
+      "count": 1,
+      "reactions": [
+        "ui",
+        "network"
+      ],
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/computer-use",
+        "POST /api/agent-runtime/terminals"
+      ]
+    },
     "dialog(control-profile-panel)/control-profile-guide>button:내 지시·결과 기록 보기": {
       "role": "button",
       "name": "내 지시·결과 기록 보기",
@@ -4928,9 +5085,7 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/control-profile/status",
-        "POST /api/agent-runtime/terminals",
         "POST /api/what-i-said/global-status",
         "POST /api/what-i-said/list",
         "POST /api/what-i-said/remote-key/status",
@@ -4991,8 +5146,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/control-profile/prepare"
       ]
     },
@@ -5034,13 +5187,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "dialog(cs-duty-dialog)/cs-duty-legacy>summary:기존 방식 · 공유한 자료만으로 /cs 질문에 답하기 (고급)": {
       "role": "summary",
@@ -5098,8 +5247,10 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/common-memory/list",
-        "GET /api/common-memory/roots"
+        "GET /api/common-memory/roots",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "dialog(new-project-dialog)/new-project-cli-accounts>summary:계정 GitHub 이 Mac 계정 · Supabase 이 Mac 계정 · Vercel 이 Mac 계정": {
@@ -5129,6 +5280,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -5142,13 +5294,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "dialog(service-use-setup)>button:다시 확인": {
       "role": "button",
@@ -5234,6 +5382,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -5421,7 +5570,9 @@
         "network"
       ],
       "requests": [
-        "POST /api/agent-runtime/platform-cli"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/platform-cli",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "dialog(앱 설정)/platform-cli-settings>button:프로젝트에 연결": {
@@ -5452,8 +5603,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/open-browser"
       ]
     },
@@ -5482,13 +5631,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "dialog(앱 설정)/platform-cli-settings>summary:프로젝트 작업용 CLI 계정 관리": {
       "role": "summary",
@@ -5544,7 +5689,9 @@
         "network"
       ],
       "requests": [
-        "POST /api/agent-dialogue/manage"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-dialogue/manage",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "dialog(초기 설정)/onboarding-infrastructure-center>#onboarding-web-app-optional": {
@@ -5607,8 +5754,10 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/onboarding/status",
-        "GET /api/onboarding/tools"
+        "GET /api/onboarding/tools",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "dialog(초기 설정)/onboarding-infrastructure-center>link:아주 쉬운 설명서": {
@@ -5622,9 +5771,13 @@
       "count": 1,
       "reactions": [
         "popup",
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "dialog(프로젝트 별명·카테고리 작업)/legacy-project-name-work>#legacy-project-name-dismiss": {
       "role": "button",
@@ -5914,9 +6067,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "onboarding-infrastructure-center/onboarding-step-by-step>button:AWS 화면 없는 서버를 호스트로 먼저 등록한 뒤 프로젝트를 연결합니다.": {
       "role": "button",
@@ -5928,13 +6085,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "onboarding-infrastructure-center/onboarding-step-by-step>button:AWS·Linux": {
       "role": "button",
@@ -5968,6 +6121,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -6022,7 +6176,6 @@
         "clipboard"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -6077,6 +6230,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -6094,7 +6248,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -6163,7 +6316,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/agent-runtime/terminals"
       ]
     },
@@ -6250,13 +6402,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "page>clickable:(unnamed 1)": {
       "role": "clickable",
@@ -6329,9 +6477,7 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/platform-cli",
-        "POST /api/agent-runtime/terminals"
+        "POST /api/agent-runtime/platform-cli"
       ]
     },
     "project-main-actions/agent-visibility-agy>checkbox:on": {
@@ -6344,9 +6490,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "project-main-actions/agent-visibility-claude>checkbox:on": {
       "role": "checkbox",
@@ -6358,9 +6508,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "project-main-actions/agent-visibility-codex>checkbox:on": {
       "role": "checkbox",
@@ -6390,9 +6543,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "project-main-actions/header-agent-launcher>#header-agents-launch": {
       "role": "button",
@@ -6536,8 +6692,7 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
+        "GET /api/agentstoz-use/workroom-navigation"
       ]
     },
     "project-main-actions/launch-options-group>#claude-bg-toggle": {
@@ -6553,7 +6708,8 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation"
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
       ]
     },
     "project-main-actions/launch-options-group>#terminal-app-cmux": {
@@ -6565,9 +6721,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "project-main-actions/launch-options-group>#terminal-app-internal": {
       "role": "button",
@@ -6578,9 +6738,13 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals"
+      ]
     },
     "project-main-actions/launch-options-group>#terminal-app-iterm": {
       "role": "button",
@@ -6637,9 +6801,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation"
+      ]
     },
     "project-main-header/project-main-actions>#agent-visibility-toggle": {
       "role": "button",
@@ -6698,9 +6865,12 @@
       ],
       "count": 1,
       "reactions": [
-        "ui"
+        "ui",
+        "network"
       ],
-      "requests": []
+      "requests": [
+        "GET /api/agentstoz-use/workroom-navigation"
+      ]
     },
     "project-main-header/project-main-actions>summary:실행 도구": {
       "role": "summary",
@@ -6755,13 +6925,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "session-directory/session-directory-device>button:다시 확인": {
       "role": "button",
@@ -6954,7 +7120,6 @@
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/common-memory/list",
-        "POST /api/agent-runtime/terminals",
         "POST /api/common-memory/updates"
       ]
     },
@@ -7001,13 +7166,9 @@
       ],
       "count": 1,
       "reactions": [
-        "ui",
-        "network"
+        "ui"
       ],
-      "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals"
-      ]
+      "requests": []
     },
     "top-toolbar-project-actions/ai-name-refresh-group>#copy-batch-ai-name-chat-prompt": {
       "role": "button",
@@ -7087,7 +7248,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/control-profile/connections",
         "GET /api/control-profile/launch-preference",
         "GET /api/control-profile/pending",
@@ -7512,6 +7672,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/agent-runtime/voice"
       ]
     },
@@ -7595,8 +7757,6 @@
         "network"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/agent-runtime/voice"
       ]
     },
@@ -7733,6 +7893,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/last-visits",
         "POST /api/open-claude-bg",
         "POST /api/repository-workflow/status"
@@ -7751,6 +7913,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/last-visits",
         "POST /api/open-cmux-codex",
         "POST /api/repository-workflow/status"
@@ -7770,7 +7934,6 @@
       ],
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
-        "POST /api/agent-runtime/terminals",
         "POST /api/last-visits",
         "POST /api/open-cmux-hermes"
       ]
@@ -7801,7 +7964,9 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "GET /api/orca-worktrees",
+        "POST /api/agent-runtime/terminals",
         "POST /api/git-branch-hygiene",
         "POST /api/git-init",
         "POST /api/git-pull",
@@ -7836,7 +8001,6 @@
         "clipboard"
       ],
       "requests": [
-        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/what-i-said/prompt-origin/register"
       ]
     },
@@ -7872,6 +8036,7 @@
       ],
       "requests": [
         "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/open-code-app"
       ]
     },
@@ -7888,6 +8053,7 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
         "POST /api/open-code-app"
       ]
     },
@@ -7905,6 +8071,8 @@
         "network"
       ],
       "requests": [
+        "GET /api/agentstoz-use/workroom-navigation",
+        "POST /api/agent-runtime/terminals",
         "POST /api/code-app-launch-options"
       ]
     },

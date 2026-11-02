@@ -5,8 +5,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {AGENT_DIALOGUE_SQL} from '../src/agentDialogueSql';
-import {AgentDialogueHost} from '../src/agentDialogueHost';
+import {AGENT_DIALOGUE_CONTROL_DETACHED,AgentDialogueHost,type AgentDialogueControlSent} from '../src/agentDialogueHost';
 import type {AgentDialogueTarget} from '../src/agentDialogueContract';
+import {COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE} from '../src/opsRequestProtocol';
 
 const temporary:string[]=[];
 afterEach(()=>{for(const path of temporary.splice(0))rmSync(path,{recursive:true,force:true});});
@@ -667,3 +668,206 @@ test('overlapping fresh checks of one endpoint share the fresh server response',
   expect((await second)?.roomId).toBe('room-one');
   expect(concurrentCalls).toBe(1);
 });
+
+/** Hosts over the real mailbox SQL, with a count of the control rows it holds. */
+async function mailbox(){
+  const db=new PGlite();
+  await db.exec("create role anon; create role authenticated; create role service_role;create schema auth;create function auth.role() returns text language sql stable as $$ select current_setting('request.jwt.claim.role',true) $$;set request.jwt.claim.role='service_role';");
+  await db.exec(AGENT_DIALOGUE_SQL);
+  const profileId=randomUUID();
+  /** `failResponds` makes that many `control-respond` writes fail (as a dropped connection would) before any reaches the database. */
+  const makeHost=(deviceId:string,options:{controlDetachedDeadlineMs?:number;failResponds?:{count:number}}={})=>{
+    const appDataDir=mkdtempSync(join(tmpdir(),'agent-dialogue-detach-'));temporary.push(appDataDir);
+    return new AgentDialogueHost({appDataDir,identity:()=>({profileId,deviceId}),secret:async()=>deviceId.padEnd(44,'x'),
+      resolveTarget:async(target:AgentDialogueTarget)=>'target' in target?{kind:'ops',displayName:`${deviceId} / 아젠투지(OPS)`}
+        :{kind:'project',portId:target.portId,displayName:`${deviceId} ${target.portId}`,memoryId:'qq'},
+      ...(options.controlDetachedDeadlineMs?{controlDetachedDeadlineMs:options.controlDetachedDeadlineMs}:{}),
+      rpc:async(operation,p,d,secret,args)=>{
+        if(operation==='control-respond'&&options.failResponds&&options.failResponds.count>0){options.failResponds.count--;throw new Error('network down');}
+        const {rows}=await db.query<{value:Record<string,any>}>(
+          'select public.portmgr_agent_dialogue_call($1,$2,$3,$4,$5::jsonb) as value',[operation,p,d,secret,JSON.stringify(args)]);
+        return rows[0]!.value;
+      }});
+  };
+  const rowCount=async()=>(await db.query<{count:number}>('select count(*)::int count from public.portmgr_agent_dialogue_controls')).rows[0]!.count;
+  return {db,makeHost,rowCount};
+}
+const detachedCount=(host:AgentDialogueHost)=>(host as unknown as {detachedControls:Map<string,unknown>}).detachedControls.size;
+
+test('a detached control row is answered by controlRespond, not by the poll, and background rows do not count as activity',async()=>{
+  const {db,makeHost}=await mailbox();
+  try{
+    const ops:AgentDialogueTarget={target:'ops'};
+    const one=makeHost('mac-one-1'),three=makeHost('mac-three-3');
+    for(const host of [one,three]){await host.enable(ops,true);await host.uiCommunity(ops,'join');}
+    const target=(await one.controlDevices()).devices[0]!.endpointId;
+    const sent:AgentDialogueControlSent[]=[];
+    const call=(request:Record<string,unknown>)=>one.controlCall(target,request,8_000,{onSent:value=>sent.push(value)});
+    const slow=call({kind:'computer-use',op:'call',n:1});
+    const early=call({kind:'computer-use',op:'call',n:2});
+    const beat=call({kind:'computer-use',op:'heartbeat',bg:1});
+    const plain=call({kind:'projects'});
+    const misuse=call({kind:'not-detachable'});
+    while(sent.length<5)await new Promise(resolve=>setTimeout(resolve,10));
+    // onSent names the row, the endpoint that wrote it and the device the database addressed.
+    const oneEndpoint=one.status().enabled[0]!.endpointId;
+    expect(sent.every(value=>value.sourceEndpointId===oneEndpoint&&value.targetDeviceId==='mac-three-3'&&/^[0-9a-f-]{36}$/.test(value.controlId))).toBe(true);
+    let held='';
+    const polled=await three.controlPoll(async(request,from,controlId)=>{
+      expect(from.deviceId).toBe('mac-one-1');
+      if(request.kind==='computer-use'&&request.op==='call'){
+        if(request.n===1)held=controlId;
+        // Answered inside the executor, before the poll registers the detach: no safety net is left behind.
+        else expect(await three.controlRespond(controlId,{ok:true,body:{early:true}})).toEqual({responded:true});
+        return AGENT_DIALOGUE_CONTROL_DETACHED;
+      }
+      if(request.kind==='not-detachable')return AGENT_DIALOGUE_CONTROL_DETACHED;
+      return {echo:request.kind,bg:request.bg??null};
+    },{detach:request=>request.kind==='computer-use'&&request.op==='call'});
+    // Five rows taken; the heartbeat is not activity (RC-9), so four count toward fast polling.
+    expect(polled).toEqual({handled:4});
+    expect(held).not.toBe('');
+    expect(detachedCount(three)).toBe(1);
+    expect(await early).toEqual({ok:true,body:{early:true}});
+    expect(await beat).toEqual({ok:true,body:{echo:'computer-use',bg:1}});
+    expect(await plain).toEqual({ok:true,body:{echo:'projects',bg:null}});
+    // A row the predicate did not accept cannot be left unanswered.
+    expect(await misuse).toEqual({ok:false,error:'제어 요청을 처리하지 못했습니다.'});
+    // The slow row is still waiting: the poll did not answer it.
+    expect((await db.query<{state:string}>('select state from public.portmgr_agent_dialogue_controls where control_id=$1',[held])).rows[0]?.state).toBe('taken');
+    expect(await three.controlRespond(held,{ok:true,body:{late:true}})).toEqual({responded:true});
+    expect(detachedCount(three)).toBe(0);
+    expect(await slow).toEqual({ok:true,body:{late:true}});
+    // One answer per row.
+    expect(await three.controlRespond(held,{ok:true,body:{again:true}})).toEqual({responded:false});
+    await expect(three.controlRespond('not-a-row',{ok:true})).rejects.toThrow('답할 제어 요청');
+    // A poll with only a background row reports no activity at all.
+    const quiet=call({kind:'computer-use',op:'heartbeat',bg:1});
+    while(sent.length<6)await new Promise(resolve=>setTimeout(resolve,10));
+    expect(await three.controlPoll(async()=>({beat:true}),{detach:()=>false})).toEqual({handled:0});
+    expect(await quiet).toEqual({ok:true,body:{beat:true}});
+  }finally{await db.close();}
+},20_000);
+
+test('a detached row its executor never answers is answered by the safety net with the deadline sentence',async()=>{
+  const {db,makeHost}=await mailbox();
+  try{
+    const ops:AgentDialogueTarget={target:'ops'};
+    const one=makeHost('mac-one-1'),three=makeHost('mac-three-3',{controlDetachedDeadlineMs:300});
+    for(const host of [one,three]){await host.enable(ops,true);await host.uiCommunity(ops,'join');}
+    const target=(await one.controlDevices()).devices[0]!.endpointId;
+    let sent:AgentDialogueControlSent|null=null;
+    const started=Date.now();
+    const lost=one.controlCall(target,{kind:'computer-use',op:'call'},8_000,{onSent:value=>{sent=value;}});
+    while(!sent)await new Promise(resolve=>setTimeout(resolve,10));
+    expect(await three.controlPoll(async()=>AGENT_DIALOGUE_CONTROL_DETACHED,{detach:()=>true})).toEqual({handled:1});
+    expect(detachedCount(three)).toBe(1);
+    // The executor never answers: the sender hears the deadline sentence (its outcome unknown), long before its own timeout.
+    expect(await lost).toEqual({ok:false,error:COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE});
+    expect(Date.now()-started).toBeLessThan(8_000);
+    expect(detachedCount(three)).toBe(0);
+    // A late answer after the net finds the row already answered.
+    expect(await three.controlRespond((sent as unknown as AgentDialogueControlSent).controlId,{ok:true,body:{late:true}})).toEqual({responded:false});
+  }finally{await db.close();}
+},20_000);
+
+test('controlRespond keeps the safety net when its answer could not be written, or arms it again when none was left',async()=>{
+  const {db,makeHost}=await mailbox();
+  try{
+    const ops:AgentDialogueTarget={target:'ops'};
+    const failResponds={count:0};
+    const one=makeHost('mac-one-1'),three=makeHost('mac-three-3',{controlDetachedDeadlineMs:400,failResponds});
+    for(const host of [one,three]){await host.enable(ops,true);await host.uiCommunity(ops,'join');}
+    const target=(await one.controlDevices()).devices[0]!.endpointId;
+    const sent:AgentDialogueControlSent[]=[];
+    const call=()=>one.controlCall(target,{kind:'computer-use',op:'call'},8_000,{onSent:value=>sent.push(value)});
+    // 1. Detached first, then the executor's answer is lost (both the answer and its too-large fallback fail to write).
+    const first=call();
+    while(sent.length<1)await new Promise(resolve=>setTimeout(resolve,10));
+    expect(await three.controlPoll(async()=>AGENT_DIALOGUE_CONTROL_DETACHED,{detach:()=>true})).toEqual({handled:1});
+    failResponds.count=2;
+    await expect(three.controlRespond(sent[0]!.controlId,{ok:true,body:{lost:true}})).rejects.toThrow('network down');
+    expect(failResponds.count).toBe(0);
+    // The net is still armed, and it answers the sender.
+    expect(detachedCount(three)).toBe(1);
+    expect(await first).toEqual({ok:false,error:COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE});
+    expect(detachedCount(three)).toBe(0);
+    // 2. Answered inside the executor (before the poll marks it detached), and that answer is lost: a net is armed anyway.
+    const second=call();
+    while(sent.length<2)await new Promise(resolve=>setTimeout(resolve,10));
+    expect(await three.controlPoll(async(_request,_from,controlId)=>{
+      failResponds.count=2;
+      await expect(three.controlRespond(controlId,{ok:true,body:{lost:true}})).rejects.toThrow('network down');
+      return AGENT_DIALOGUE_CONTROL_DETACHED;
+    },{detach:()=>true})).toEqual({handled:1});
+    expect(detachedCount(three)).toBe(1);
+    expect(await second).toEqual({ok:false,error:COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE});
+    expect(detachedCount(three)).toBe(0);
+    // 3. A written answer drops the net: the sender gets the executor's answer, and no deadline sentence follows it.
+    const third=call();
+    while(sent.length<3)await new Promise(resolve=>setTimeout(resolve,10));
+    expect(await three.controlPoll(async()=>AGENT_DIALOGUE_CONTROL_DETACHED,{detach:()=>true})).toEqual({handled:1});
+    expect(await three.controlRespond(sent[2]!.controlId,{ok:true,body:{done:true}})).toEqual({responded:true});
+    expect(detachedCount(three)).toBe(0);
+    expect(await third).toEqual({ok:true,body:{done:true}});
+  }finally{await db.close();}
+},20_000);
+
+test('controlCall refuses a moved source before writing a row, and controlResult reads late answers only through the endpoint that sent them',async()=>{
+  const {db,makeHost,rowCount}=await mailbox();
+  try{
+    const ops:AgentDialogueTarget={target:'ops'},project:AgentDialogueTarget={portId:'project-a'};
+    const one=makeHost('mac-one-1'),three=makeHost('mac-three-3');
+    const oneOps=await one.enable(ops,true),oneProject=await one.enable(project,true);
+    await three.enable(ops,true);
+    await one.uiCommunity(project,'join');await one.uiCommunity(ops,'join');await three.uiCommunity(ops,'join');
+    expect(await one.controlSource()).toEqual({deviceId:'mac-one-1',endpointId:oneOps.endpointId});
+    const target=(await one.controlDevices()).devices[0]!.endpointId;
+    await expect(one.controlCall(target,{kind:'projects'},2_000,{sourceEndpointId:oneProject.endpointId}))
+      .rejects.toMatchObject({code:'AGENT_DIALOGUE_CONTROL_SOURCE_CHANGED'});
+    expect(await rowCount()).toBe(0);
+    // Nobody polls: the call times out after its row was written.
+    let sent:AgentDialogueControlSent|null=null;
+    await expect(one.controlCall(target,{kind:'projects'},300,{sourceEndpointId:oneOps.endpointId,onSent:value=>{sent=value;}}))
+      .rejects.toThrow('요청이 실행됐는지는 알 수 없습니다');
+    const row=sent as AgentDialogueControlSent|null;
+    expect(row?.sourceEndpointId).toBe(oneOps.endpointId);
+    expect(await one.controlResult([row!.controlId],oneOps.endpointId)).toEqual({results:[],waiting:[row!.controlId]});
+    expect(await three.controlPoll(async()=>({echo:'late'}))).toEqual({handled:1});
+    // This Mac's OPS endpoint leaves: the community endpoint is now the project's, but the answer stays with the OPS row.
+    await one.uiCommunity(ops,'leave');
+    expect((await one.controlSource())?.endpointId).toBe(oneProject.endpointId);
+    expect(await one.controlResult([row!.controlId],oneProject.endpointId)).toEqual({results:[],waiting:[]});
+    expect(await one.controlResult([row!.controlId],oneOps.endpointId)).toEqual({results:[{controlId:row!.controlId,response:{ok:true,body:{echo:'late'}}}],waiting:[]});
+    // Read once: the database deletes an answer as it returns it.
+    expect(await one.controlResult([row!.controlId],oneOps.endpointId)).toEqual({results:[],waiting:[]});
+    await expect(one.controlResult([],oneOps.endpointId)).rejects.toMatchObject({code:'AGENT_DIALOGUE_CONTROL_INVALID'});
+    await expect(one.controlResult([row!.controlId,row!.controlId],oneOps.endpointId)).rejects.toMatchObject({code:'AGENT_DIALOGUE_CONTROL_INVALID'});
+    await one.disable(ops);
+    await expect(one.controlResult([row!.controlId],oneOps.endpointId)).rejects.toMatchObject({code:'AGENT_DIALOGUE_SOURCE_UNAVAILABLE'});
+  }finally{await db.close();}
+},20_000);
+
+test('communityNotice posts one observation per requestId, and a failed post can be tried again',async()=>{
+  const {db,makeHost}=await mailbox();
+  try{
+    const ops:AgentDialogueTarget={target:'ops'};
+    const one=makeHost('mac-one-1'),two=makeHost('mac-two-2');
+    for(const host of [one,two])await host.enable(ops,true);
+    await two.uiCommunity(ops,'join');
+    const text='아젠투지 1호의 AI가 이 Mac(아젠투지 2호)의 컴퓨터 유즈를 시작했습니다 · 전체 Mac.';
+    await expect(one.communityNotice(text,'notice-remote-0001')).rejects.toMatchObject({code:'AGENT_DIALOGUE_COMMUNITY_OUTSIDE'});
+    await one.uiCommunity(ops,'join');
+    const [first,second]=await Promise.all([one.communityNotice(text,'notice-remote-0001'),one.communityNotice(text,'notice-remote-0001')]);
+    expect(first).toMatchObject({posted:true,duplicate:false});
+    expect(second).toEqual({posted:true,duplicate:true,seq:first.seq});
+    expect(await one.communityNotice(text,'notice-remote-0001')).toEqual({posted:true,duplicate:true,seq:first.seq});
+    const messages=await db.query<{body:string;message_kind:string}>("select body,message_kind from public.portmgr_agent_dialogue_events where kind='message'");
+    expect(messages.rows).toEqual([{body:text,message_kind:'observation'}]);
+    expect((await one.communityNotice(text,'notice-remote-0002')).duplicate).toBe(false);
+    expect((await db.query<{count:number}>("select count(*)::int count from public.portmgr_agent_dialogue_events where kind='message'")).rows[0]!.count).toBe(2);
+    await expect(one.communityNotice(text,'bad id')).rejects.toMatchObject({code:'AGENT_DIALOGUE_REQUEST_ID_REQUIRED'});
+    await expect(one.communityNotice('  ','notice-remote-0003')).rejects.toMatchObject({code:'AGENT_DIALOGUE_MESSAGE_INVALID'});
+    await expect(one.communityNotice('x'.repeat(4001),'notice-remote-0003')).rejects.toMatchObject({code:'AGENT_DIALOGUE_MESSAGE_INVALID'});
+  }finally{await db.close();}
+},20_000);

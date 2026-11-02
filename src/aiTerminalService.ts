@@ -154,6 +154,9 @@ export interface AiTerminalRemoteAttachments {
 }
 /** A phone's own text may not carry a block naming this Mac's files; only the host builds that block. */
 const REMOTE_TEXT_BLOCK_REFUSAL='다른 기기에서 보낸 요청에는 이 기기의 이미지·파일을 첨부할 수 없습니다. 작성 내용은 유지했습니다.';
+export type AiTerminalEffortPolicy = (setting: WorkroomEffortSettingStore) => Promise<{mode: WorkroomEffortMode; isAuthorized: () => boolean; beforeEffect?: () => Promise<boolean>}>;
+/** An already admitted OPS job may survive loss of settings consent. The host must freshly prove its separate job authority. */
+export type AiTerminalAdmittedEffortFallback = () => Promise<() => boolean>;
 export interface AiTerminalDependencies {
   submissions?:()=>import('./workroomConversationJournal').WorkroomConversationJournal;
   /** Phone attachment ids → this Mac's saved files; absent on a host that does not advertise workroom-attach-v1. */
@@ -201,6 +204,8 @@ export interface AiTerminalDependencies {
    * launch arguments stay exactly as before (tests and older callers).
    */
   effortAuto?: WorkroomEffortSettingStore;
+  /** Common-origin requests retain this host's CLI policy and need the selected Native settings purpose. */
+  communityEffortPolicy?:(owner:string,setting:WorkroomEffortSettingStore)=>Promise<{mode:WorkroomEffortMode;isAuthorized:()=>boolean;beforeEffect?:()=>Promise<boolean>}>;
   /** Tests may provide a native-control adapter; it must not run inference. */
   effortRuntime?: typeof changeWorkroomEffort;
   effortRuntimeSupport?: typeof workroomEffortRuntimeSupport;
@@ -763,11 +768,20 @@ export class AiTerminalService {
       ...(request.desktopEffortModes && setting?.getDesktopMode ? {desktopMode:setting.getDesktopMode()} : {}), sessions}};
   }
   #effortMode(): WorkroomEffortMode { try { return this.dependencies.effortAuto?.getMode?.() ?? (this.dependencies.effortAuto?.get() ? 'auto' : 'off'); } catch { return 'off'; } }
-  async #adjustEffort(session: Session, text: string, active: () => boolean) {
+  async #requestEffortPolicy(owner:string,override?:AiTerminalEffortPolicy){
+    const mode=this.#effortMode();
+    if(!override&&!owner.startsWith('community'))return{mode,isAuthorized:()=>this.#effortMode()===mode,beforeEffect:async()=>this.#effortMode()===mode};
+    try{
+      const setting=this.dependencies.effortAuto;if(!setting||!override&&!this.dependencies.communityEffortPolicy)throw Error('common settings unsupported');
+      const policy=await (override?override(setting):this.dependencies.communityEffortPolicy!(owner,setting));
+      if(policy.mode!==mode||!policy.isAuthorized())throw Error('common settings refused');return policy;
+    }catch{return{mode:'off' as const,isAuthorized:()=>false,beforeEffect:async()=>false};}
+  }
+  async #adjustEffort(session: Session, text: string, active: () => boolean,owner='local',effortPolicy?:AiTerminalEffortPolicy) {
     const state=session.effort;
     // A level the person pinned for this session (a team member) is never changed by auto.
     if(!state||state.pinned||!this.dependencies.effortAuto?.getMode||session.launchProfile)return;
-    const mode=this.#effortMode();
+    const policy=await this.#requestEffortPolicy(owner,effortPolicy),mode=policy.mode;
     if(mode==='off'){state.advice=undefined;state.runtimeStatus=undefined;return;}
     const decision=classifyWorkroomEffort(workroomEffortRequestText(text));if(!decision)return;
     noteWorkroomEffortRequest(state,session.summary.agent,text,true,new Date().toISOString());
@@ -783,13 +797,14 @@ export class AiTerminalService {
     const executable=this.dependencies.executable(session.summary.agent);if(!executable){state.runtimeStatus='unsupported';return;}
     const support=(this.dependencies.effortRuntimeSupport??workroomEffortRuntimeSupport)(executable,session.summary.agent,session.historyEnv??{},session.cwd);
     const revision=session.inputRevision;
-    const allowed=()=>active()&&session.inputRevision===revision&&this.#effortMode()==='auto'&&!state.manual;
+    const allowed=()=>active()&&policy.isAuthorized()&&session.inputRevision===revision&&this.#effortMode()==='auto'&&!state.manual;
     state.automaticPending=true;state.runtimeStatus='deferred';
     // Whether any key reached the CLI. Without one the CLI still runs at `seen`, and this request goes at that level.
     let typed=false;
     try{
       const outcome=await (this.dependencies.effortRuntime??changeWorkroomEffort)({agent:session.summary.agent,level:decision.tier,current,
         read:()=>session.screen!.plainRows(),write:async data=>{
+          if(policy.beforeEffect&&!await policy.beforeEffect())throw Error('공통 설정 조정 권한이 변경되었습니다.');
           if(!allowed())throw Error('워크룸 입력이 변경되었습니다.');
           let valid=false;
           try{
@@ -854,6 +869,19 @@ export class AiTerminalService {
       catch { throw new Error('에포트 자동 설정을 저장하지 못했습니다. Mac에서 저장 공간과 앱 데이터 접근 권한을 확인한 뒤 다시 시도하세요.'); }
     }
     return workroomEffortView(this.#effortAuto(), session ? workroomEffortRecord(session.summary.id, session.summary.agent, session.effort) : undefined, input.effortModes ? this.#effortMode() : undefined, input.effortExtended === true);
+  }
+  /** Trusted common-settings adapter only: reevaluates this existing CLI, never types a task or changes the host mode. */
+  async reevaluateCommonEffort(input:{sessionId:string;targetId:string;text:string;active:()=>boolean;effortPolicy:AiTerminalEffortPolicy}){
+    if(this.#pendingMutations>=AI_TERMINAL_MAX_PENDING_MUTATIONS)throw Error('처리 중인 터미널 입력이 너무 많습니다.');
+    const key=input.sessionId;this.#pendingMutations++;
+    const work=(this.#queues.get(key)??Promise.resolve()).catch(()=>{}).then(async()=>{
+      const session=this.#session(input.sessionId,input.targetId);if(!input.active()||session.closing)throw Error('현재 설정 조정 권한을 확인하세요.');
+      await this.#adjustEffort(session,input.text,()=>input.active()&&!session.closing&&session.summary.state==='running','common-settings',input.effortPolicy);
+      if(!input.active())throw Error('설정 조정 결과의 현재 권한을 확인하세요.');
+      return this.workspaceEffort({targetId:input.targetId,sessionId:input.sessionId,effortModes:true,effortExtended:true});
+    });
+    this.#queues.set(key,work);
+    try{return await work;}finally{this.#pendingMutations--;if(this.#queues.get(key)===work)this.#queues.delete(key);}
   }
   /** One sweep (the 1 s timer calls this): rows at most once per running session, then bounded transcript tails. */
   sampleActivity(): Promise<void> {
@@ -947,7 +975,7 @@ export class AiTerminalService {
    *  authority it names another community device driving this Workroom; with one it is the transport's stable principal
    *  (a LAN controller survives a restore that rotates `authority.owner`). It is a lookup key only — every grant, target
    *  and execution decision below reads `authority`, never this. */
-  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; launchModel?: AiTerminalLaunchModel; launchEffort?: WorkroomLaunchEffort; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:AiTerminalStartGuard;beforeInput?:()=>Promise<void>;writeEffectGate?:AiTerminalEffectGate;startEffectGate?:AiTerminalEffectGate;opsWorker?:boolean} = {}): Promise<AiTerminalResponse> {
+  async perform(value: unknown, authority?: AiTerminalAuthority, options: {launchProfile?: AiTerminalLaunchProfile; launchModel?: AiTerminalLaunchModel; launchEffort?: WorkroomLaunchEffort; historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch; receiptOwner?: string; skipCorrections?: boolean; startGuard?:AiTerminalStartGuard;beforeInput?:()=>Promise<void>;writeEffectGate?:AiTerminalEffectGate;startEffectGate?:AiTerminalEffectGate;opsWorker?:boolean;effortPolicy?:AiTerminalEffortPolicy;admittedEffortFallback?:AiTerminalAdmittedEffortFallback} = {}): Promise<AiTerminalResponse> {
     const request = normalizeAiTerminalRequest(value);
     if (options.receiptOwner !== undefined && (options.receiptOwner === 'local' || (authority
       ? typeof options.receiptOwner !== 'string' || options.receiptOwner.length < 3 || options.receiptOwner.length > 300 || /[\x00-\x1f\x7f]/.test(options.receiptOwner) || /^community(?::|$)/.test(options.receiptOwner)
@@ -1051,7 +1079,7 @@ export class AiTerminalService {
     // Stop does not wait for a stalled checkout proof or queued keystrokes.
     // The mutation fence below prevents those writes after close is requested.
     const effortInterrupt=!!session?.effort?.automaticPending&&request.operation==='input'&&request.data==='\x1b';
-    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard,options.launchModel,options.launchEffort,options.beforeInput,options.writeEffectGate,options.startEffectGate,options.opsWorker === true));
+    const promise = (closing||effortInterrupt ? Promise.resolve() : this.#queues.get(queueKey) ?? Promise.resolve()).catch(()=>{}).then(()=>this.#mutate(request, session, authority, epoch, options.launchProfile, options.historyResume, undefined, receiptOwner, options.skipCorrections === true,undefined,undefined,options.startGuard,options.launchModel,options.launchEffort,options.beforeInput,options.writeEffectGate,options.startEffectGate,options.opsWorker === true,options.effortPolicy,options.admittedEffortFallback));
     if (!closing&&!effortInterrupt) this.#queues.set(queueKey,promise);
     if (closing) session!.closing = promise;
     else {
@@ -1072,7 +1100,7 @@ export class AiTerminalService {
     return !!authority && (!(authority.deviceConsentActive ? authority.deviceConsentActive() : this.remoteAllowed(authority.owner)) || authority.isActive?.()===false || this.#grantEpoch.get(authority.owner) !== epoch);
   }
   /** `remoteAttachmentIds` is host-only: the ids of an admitted submission (never read from a wire `input`). */
-  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:AiTerminalStartGuard,launchModel?:AiTerminalLaunchModel,launchEffort?:WorkroomLaunchEffort,beforeInput?:()=>Promise<void>,writeEffectGate?:AiTerminalEffectGate,startEffectGate?:AiTerminalEffectGate,opsWorker=false): Promise<AiTerminalResponse> {
+  async #mutate(r: AiTerminalRequest, session: Session | null | undefined, authority?: AiTerminalAuthority, epoch?: number, launchProfile?: AiTerminalLaunchProfile, historyResume?: import('./workroomConversationHost').WorkroomHistoryLaunch,submissionWrite?:(exposure?:CorrectionTaskExposure)=>void,receiptOwner=authority?.owner??'local',skipCorrections=false,launchStart?:{sessionId:string;started:()=>void},remoteAttachmentIds?:readonly string[],startGuard?:AiTerminalStartGuard,launchModel?:AiTerminalLaunchModel,launchEffort?:WorkroomLaunchEffort,beforeInput?:()=>Promise<void>,writeEffectGate?:AiTerminalEffectGate,startEffectGate?:AiTerminalEffectGate,opsWorker=false,effortPolicyOverride?:AiTerminalEffortPolicy,admittedEffortFallback?:AiTerminalAdmittedEffortFallback): Promise<AiTerminalResponse> {
     if (this.#authorityLost(authority, epoch)) throw new Error('원격 터미널 권한이 해제되었습니다.');
     if (authority && (r.operation === 'accounts' || r.accountId !== undefined) && !authority.accountSelectionAllowed?.()) throw new Error('계정 선택 권한이 해제되었습니다.');
     if(this.#closed)throw new Error('터미널 서버가 종료 중입니다.');
@@ -1188,9 +1216,11 @@ export class AiTerminalService {
       // restart replaces. A team member brings a pinned level or the task text to classify (launchEffort). Read-only; a
       // level a model may reject is never passed (codexEffortModel.ts) — a model we chose is proven against the catalog, and a
       // Hermes model and provider we chose against the levels its adapter carries (teamHermesEffortLevels).
-      const effort = planWorkroomEffort({agent:r.agent!,...(r.prompt!==undefined?{prompt:r.prompt}:{}),auto:this.#effortAuto(),mode:this.#effortMode(),restricted:!!profile,historyResume:!!historyResume,
+      const effortPolicy=await this.#requestEffortPolicy(receiptOwner,effortPolicyOverride);
+      const effortInput = {agent:r.agent!,...(r.prompt!==undefined?{prompt:r.prompt}:{}),auto:effortPolicy.mode==='auto',mode:effortPolicy.mode,restricted:!!profile,historyResume:!!historyResume,
         ...(previous?{previous:previous.effort??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,...(r.agent==='hermes'&&model?{hermesModel:model}:{}),
-        codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[],...(model?{launchModel:model.model}:{})});return proof.ok?proof.allowed:null;}catch{return null;}}});
+        codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[],...(model?{launchModel:model.model}:{})});return proof.ok?proof.allowed:null;}catch{return null;}}};
+      let effort = planWorkroomEffort(effortInput);
       if (effort.pinned && !effort.level) throw new Error(`고정 에포트 ${effort.pinned}를 적용할 수 없어 시작하지 않았습니다 (${effort.skipped ?? 'unsupported'}).`);
       // A restricted (duty) session talks to outsiders: its transcript is not the user's work, so it never
       // feeds session memory or 「내가 한 말」 capture.
@@ -1220,7 +1250,8 @@ export class AiTerminalService {
         ?? (process.platform === 'win32'
           ? ((args,options) => spawnWindowsPty(args as string[],options as any) as any)
           : ((args,options) => (Bun.spawn as any)(args,options)));
-      const args = [executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null, model, opsWorker && !previous)];
+      const launchArgs=()=>[executable, ...(accountLaunch?.args ?? []), ...aiTerminalLaunchArgs(r.agent!, summary.id, prompt, bypass, resume, profile, codexHookTrust, effort.level ?? null, model, opsWorker && !previous)];
+      let args=launchArgs();
       // Only the account feature introduced an authentication await here. Legacy adapters without
       // account management keep their original checkout proof and admission timing.
       if (accountLaunch) {
@@ -1260,11 +1291,29 @@ export class AiTerminalService {
           }
         } catch(error) { console.warn('[AgentsToZ] agy 스킬 맞춤 실패:', (error as Error)?.message ?? String(error)); }
       }
+      let admittedJobFence:(()=>boolean)|undefined;
+      if(effort.level&&!effort.pinned&&(!!effortPolicyOverride||receiptOwner.startsWith('community'))){
+        try{
+          if(effortPolicy.beforeEffect&&!await effortPolicy.beforeEffect()||!effortPolicy.isAuthorized())throw Error('공통 설정 조정 권한이 변경되어 워크룸을 시작하지 않았습니다.');
+        }catch(error){
+          // Only a host-owned, already admitted OPS start can fall back, and only before any launch fence/spawn.
+          // Teams, active remote grants, restricted/history/restart launches and explicit pins retain their refusal.
+          if(!admittedEffortFallback||!opsWorker||previous||authority||profile||historyResume||!effortPolicyOverride||effortPolicy.mode!=='auto')throw error;
+          const fence=await admittedEffortFallback();
+          if(typeof fence!=='function'||!fence()||this.#closed)throw Error('이미 접수한 OPS 작업의 현재 실행 권한을 확인하지 못했습니다.');
+          const fresh=target.revalidate?await target.revalidate():await this.dependencies.resolveTarget(targetId);
+          if(realpathSync(fresh.cwd)!==cwd)throw Error('OPS 프로젝트가 변경되어 시작하지 않았습니다.');
+          if(accountLaunch)this.dependencies.accounts!.validateLaunch(accountLaunch.accountId);
+          if(!fence()||this.#closed)throw Error('이미 접수한 OPS 작업의 실행 권한이 변경되었습니다.');
+          admittedJobFence=fence;
+          effort=planWorkroomEffort({...effortInput,auto:false,mode:'off'});record.effort=effort;args=launchArgs();
+        }
+      }
       historyResume?.launching();
       // A launch receipt crosses its write fence (prepared → write_started) here, right before the spawn: a crash
       // from now on reads as «unknown» and is never started again.
       launchStart?.started();
-      const spawnChild=()=>spawn(args,{cwd,env,detached:true,terminal:{cols:r.cols,rows:r.rows,exit:()=>eof(),data:(_pty:Pty,data:Uint8Array)=>append(record.decoder.decode(data,{stream:true}))}});
+      const spawnChild=()=>{if(admittedJobFence&&!admittedJobFence())throw Error('이미 접수한 OPS 작업의 실행 권한이 변경되었습니다.');if(effort.level&&!effort.pinned&&(!!effortPolicyOverride||receiptOwner.startsWith('community'))&&!effortPolicy.isAuthorized())throw Error('공통 설정 조정 권한이 변경되었습니다.');return spawn(args,{cwd,env,detached:true,terminal:{cols:r.cols,rows:r.rows,exit:()=>eof(),data:(_pty:Pty,data:Uint8Array)=>append(record.decoder.decode(data,{stream:true}))}});};
       record.child=startEffectGate?startEffectGate(spawnChild):spawnChild();
       this.#sessions.set(summary.id,record);
       // Only a start that replaced a validated `previous` (same target, AI and folder) records a continuation.
@@ -1356,7 +1405,7 @@ export class AiTerminalService {
             if(this.#closed||session!.closing||session!.summary.state!=='running'||this.#authorityLost(authority,epoch))return false;
             try{authority?.validateTarget?.(session!.summary.targetId,cwd);}catch{return false;}
             return true;
-          });
+          },receiptOwner);
           if(submissionWrite&&session!.screen)bracketedPaste=aiTerminalPasteCandidate(data)&&(await session!.screen.settledModes()).bracketedPaste;
           const threadWritten=(submissionWrite||workroomInputIsRequest(typed))?await this.dependencies.threadInput?.(session!.summary.id,typed,session!.inputRevision+1):undefined;
           await beforeInput?.();

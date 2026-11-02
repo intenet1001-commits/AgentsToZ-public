@@ -112,7 +112,7 @@ public final class ScopedNativeSession {
                 "foreground": front as Any? ?? NSNull()]
     }
 
-    public func capture(snapshotId: String, displayId: String) async throws -> [String: Any] {
+    public func capture(snapshotId: String, displayId: String, maxBytes: Int? = nil) async throws -> [String: Any] {
         guard !busy else { throw ControlError.refuse("process-busy") }
         busy = true; defer { busy = false }
         let snap = try current(snapshotId)
@@ -132,7 +132,7 @@ public final class ScopedNativeSession {
                 // filter must retain it so the menu bar and background remain present. Overlay checks are separate.
                 ScopedOSGuard.isVerifiedCompositor($0) ? false : ScopedProtectedTargets.refuses(bundleId: $0.bundleId)
             })
-        let result = try await captureScopedDisplay(scope: scope, displayID: displayId, layout: snap.displays, checks: checks)
+        let result = try await captureScopedDisplay(scope: scope, displayID: displayId, layout: snap.displays, checks: checks, maxBytes: maxBytes)
         _ = try current(snapshotId); try requireCurrentLayout(snap); capturedDisplay = displayId
         return result
     }
@@ -220,7 +220,9 @@ public final class ScopedNativeSession {
                     return ScopedAccessibilityInput.perform(click)
                 }
             }
-            return dispatcher.click(display: display.frame, x: x, y: y, right: button == "right", count: count)
+            return ScopedClickFallback.perform(accessibilityOnly: body["axOnly"] as? Bool == true) {
+                dispatcher.click(display: display.frame, x: x, y: y, right: button == "right", count: count)
+            }
         case "scope-scroll":
             guard let display = selected, let dx = (body["deltaX"] as? NSNumber)?.int32Value, let dy = (body["deltaY"] as? NSNumber)?.int32Value else { return .refused("invalid-request") }
             return dispatcher.scroll(display: display.frame, x: x, y: y, deltaX: dx, deltaY: dy)

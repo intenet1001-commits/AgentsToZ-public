@@ -38,16 +38,50 @@ public struct SessionFeatures: Sendable {
     public var desktop: (any DesktopControlling)?
     public var reportsInputAvailability: Bool
     public var pointerPosition: (@Sendable () -> ScreenPointerPosition?)?
+    /// Version 5: what the Mac controller's registration grants, told with the session's limits at the start. Without it,
+    /// a session with input is told `control` and one without `view`. `view` makes the session view-only whatever input
+    /// the pump was given (SR-21).
+    public var grant: ScreenSessionGrant?
+    /// Version 5: private IPv4 addresses the Mac answers on, told once at the start (at most four, the first of each).
+    public var addressHint: [ScreenPrivateNetworkRoute]
+    /// Version 5: removes the Mac controller's registration, as asked by its `unenrollSelf`. The pump has already ended
+    /// the session with `revoked` when it calls this. Without it the request changes nothing.
+    public var unenrollSelf: (@Sendable () -> Void)?
+    /// Version 5: why a Mac controller granted control only watches, when the host gave the pump no input
+    /// (`notificationsUnconfirmed`, `controlNotInThisBuild`, `permissionsRequired`; DESIGN 6.5, 12절). Told as the
+    /// session's first input availability. Without it, and whenever the grant is `view`, such a session hears `viewOnly`;
+    /// an older session hears `permissionsRequired` as before.
+    public var viewOnlyReason: ScreenInputAvailability?
 
     public init(lockStates: (@Sendable () -> AsyncStream<Bool>)? = nil, capture: (any CaptureControl)? = nil,
                 turnOff: (@Sendable () -> Void)? = nil, desktop: (any DesktopControlling)? = nil,
-                reportsInputAvailability: Bool = false, pointerPosition: (@Sendable () -> ScreenPointerPosition?)? = nil) {
+                reportsInputAvailability: Bool = false, pointerPosition: (@Sendable () -> ScreenPointerPosition?)? = nil,
+                grant: ScreenSessionGrant? = nil, addressHint: [ScreenPrivateNetworkRoute] = [],
+                unenrollSelf: (@Sendable () -> Void)? = nil, viewOnlyReason: ScreenInputAvailability? = nil) {
         self.lockStates = lockStates
         self.capture = capture
         self.turnOff = turnOff
         self.desktop = desktop
         self.reportsInputAvailability = reportsInputAvailability
         self.pointerPosition = pointerPosition
+        self.grant = grant
+        self.addressHint = addressHint
+        self.unenrollSelf = unenrollSelf
+        self.viewOnlyReason = viewOnlyReason
+    }
+
+    /// Whether a session of `version` was granted only to watch. Then the Mac drops the controller's input and refuses its
+    /// keyboard and Spaces requests in the pump itself, not only in how the host wires it (SR-21). Phones (version 4 and
+    /// older) have no grant.
+    func grantsViewOnly(version: UInt16) -> Bool { version >= 5 && grant == .view }
+
+    /// What a session of `version` without input hears first: an older one `permissionsRequired`, as it always did; a
+    /// version-5 controller `viewOnly` for a view grant, otherwise the host's reason when that version carries it.
+    func availabilityWithoutInput(version: UInt16) -> ScreenInputAvailability {
+        guard version >= 5 else { return .permissionsRequired }
+        guard !grantsViewOnly(version: version), let reason = viewOnlyReason, reason != .ready, reason.minimumVersion <= version
+        else { return .viewOnly }
+        return reason
     }
 }
 
@@ -107,7 +141,8 @@ public final class VideoPump: @unchecked Sendable {
     private let ending: OSAllocatedUnfairLock<Ending>
     private let qualityLimiter = OSAllocatedUnfairLock(initialState: TokenBucket(perSecond: 1, burst: 2))
 
-    /// Without `input`, the phone's input records are read and dropped: a view-only session. `localInput` lets
+    /// Without `input`, the phone's input records are read and dropped: a view-only session, as is a version-5 session
+    /// granted `view` (`SessionFeatures.grant`) whatever `input` is. `localInput` lets
     /// local input win; without it the phone's input is never paused.
     public convenience init(connection: SecureConnection, settings: VideoEncoder.Settings, input: InputReceiver? = nil,
                             limits: SessionLimits = .standard, localInput: LocalInputProbe? = nil) throws {
@@ -148,6 +183,9 @@ public final class VideoPump: @unchecked Sendable {
 
     /// Why the Mac ended the session, once it has.
     public var endReason: SessionEndReason? { ending.withLock { $0.reason } }
+
+    /// When the next session limit runs out on the session's clock, and which: what the Mac's session bar counts down.
+    public var deadline: (at: ContinuousClock.Instant, reason: SessionEndReason) { ending.withLock { $0.timer.deadline } }
 
     /// Replaces the encoder, for a new display or size, and returns its generation for `offer`. The new encoder's first
     /// frame is a keyframe with its own parameter sets; nothing the old one still emits reaches the phone.
@@ -254,14 +292,29 @@ public final class VideoPump: @unchecked Sendable {
         }
         let reportsInputAvailability = features.reportsInputAvailability
         let features = connection.version >= 2 ? features : SessionFeatures()
-        if input?.observesPhysicalInput == true { _ = input?.checkLocalInput(at: clock.now()) }
-        let initialAvailability = input?.availability ?? .permissionsRequired
+        // A view grant runs the session as one without input, whatever receiver the host passed (SR-21).
+        let receiver = features.grantsViewOnly(version: connection.version) ? nil : input
+        if receiver?.observesPhysicalInput == true { _ = receiver?.checkLocalInput(at: clock.now()) }
+        // A version-5 controller is told it may only watch, and why; an older peer hears the reason it always heard.
+        let initialAvailability = receiver?.availability ?? features.availabilityWithoutInput(version: connection.version)
+        let initialHold = receiver?.heldAtMac == true
         do {
+            if connection.version >= 5 {
+                let limits = ControlMessage.wireLimits(ending.withLock { $0.timer.limits })
+                try await connection.send(ControlMessage.sessionLimits(grant: features.grant ?? (receiver == nil ? .view : .control),
+                                                                       limits: limits))
+                var hinted: [ScreenPrivateNetworkRoute] = []
+                for route in features.addressHint where !hinted.contains(route) && hinted.count < ControlMessage.maxAddressHints {
+                    hinted.append(route)
+                }
+                if !hinted.isEmpty { try await connection.send(ControlMessage.addressHint(hinted)) }
+            }
             if reportsInputAvailability, connection.version >= 3 { try await connection.send(ControlMessage.inputAvailability(initialAvailability)) }
+            if connection.version >= 5, initialHold { try await connection.send(ControlMessage.inputHeldAtMac(true)) }
             if connection.version >= 3, let position = features.pointerPosition?() { try await connection.send(ControlMessage.pointerPosition(position)) }
             if reportsInputAvailability, initialAvailability != .ready { try await connection.send(ControlMessage.remoteInputPaused) }
             // Each task returns true when the session is over, false when only its own part is done.
-            try await withThrowingTaskGroup(of: Bool.self) { [connection, frames, coding, input, clock, localInput, ending] group in
+            try await withThrowingTaskGroup(of: Bool.self) { [connection, frames, coding, receiver, clock, localInput, ending] group in
                 group.addTask {
                     for await frame in frames {
                         // Nothing after the goodbye. Draining rather than returning keeps the group, and with it the
@@ -295,8 +348,8 @@ public final class VideoPump: @unchecked Sendable {
                             // Input keeps the session alive even while it is paused or view-only: someone is there.
                             let now = clock.now()
                             ending.withLock { $0.timer.noteInput(at: now) }
-                            if let input {
-                                if let (id, result) = try input.receive(record.payload, version: connection.version, at: now) {
+                            if let receiver {
+                                if let (id, result) = try receiver.receive(record.payload, version: connection.version, at: now) {
                                     try await connection.send(ControlMessage.textAndReturnResult(id: id, result))
                                 }
                             } else if case let .textAndReturn(id, _) = try InputCodec.decode(record.payload, version: connection.version) {
@@ -317,17 +370,23 @@ public final class VideoPump: @unchecked Sendable {
                         }
                     }
                 }
-                if let input, localInput != nil || input.observesPhysicalInput {
+                if let receiver, localInput != nil || receiver.observesPhysicalInput {
                     group.addTask {
                         var previousAvailability = initialAvailability
+                        var previousHold = initialHold
                         while true {
-                            try await clock.sleep(clock.now() + input.localPriority.pollInterval)
-                            let change = input.checkLocalInput(localInput, at: clock.now())
-                            let availability = input.availability
+                            try await clock.sleep(clock.now() + receiver.localPriority.pollInterval)
+                            let change = receiver.checkLocalInput(localInput, at: clock.now())
+                            let availability = receiver.availability
                             if reportsInputAvailability, connection.version >= 3, availability != previousAvailability {
                                 try await connection.send(ControlMessage.inputAvailability(availability))
                                 previousAvailability = availability
                             }
+                            let held = receiver.heldAtMac
+                            if connection.version >= 5, held != previousHold {
+                                try await connection.send(ControlMessage.inputHeldAtMac(held))
+                            }
+                            previousHold = held
                             if change == .resumed, connection.version >= 3, let position = features.pointerPosition?() {
                                 // The client receives the real position before it is allowed to resume relative input.
                                 try await connection.send(ControlMessage.pointerPosition(position))
@@ -424,14 +483,27 @@ public final class VideoPump: @unchecked Sendable {
             if first { turnOff() }
             await goodbye.value
             return true
+        case .unenrollSelf:
+            guard let unenrollSelf = features.unenrollSelf else { return false }
+            // As with turning off: a reason the Mac already gave stands, and then nothing is removed.
+            let (goodbye, first) = begin(.revoked)
+            if first { unenrollSelf() }
+            await goodbye.value
+            return true
         case let .keyboardAction(id, action):
             guard let desktop = features.desktop else { throw ScreenControlWireError.malformed }
             ending.withLock { $0.timer.noteInput(at: clock.now()) }
-            let (state, result) = await desktop.keyboard(action)
+            // A view grant changes nothing at the Mac (SR-21): the controller hears the keyboard as it is, and why.
+            let (state, result) = features.grantsViewOnly(version: connection.version)
+                ? (await desktop.keyboardState(), ScreenControlResult.blocked) : await desktop.keyboard(action)
             try await connection.send(ControlMessage.keyboardState(id: id, state, result))
         case .navigateSpace(let action):
             guard let desktop = features.desktop else { throw ScreenControlWireError.malformed }
             ending.withLock { $0.timer.noteInput(at: clock.now()) }
+            guard !features.grantsViewOnly(version: connection.version) else {
+                try await connection.send(ControlMessage.spaceResult(action, .blocked))
+                return false
+            }
             let result = await desktop.navigate(action)
             requestKeyframe()
             try await connection.send(ControlMessage.spaceResult(action, result))
@@ -441,7 +513,8 @@ public final class VideoPump: @unchecked Sendable {
             try await capture.setVideoQuality(quality)
             try await connection.send(ControlMessage.videoQuality(quality))
         case .remoteInputPaused, .remoteInputResumed, .macLocked, .macUnlocked, .displays,
-             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult:
+             .keyboardState, .spaceResult, .spaceChanged, .videoQuality, .inputAvailability, .pointerPosition, .textAndReturnResult,
+             .sessionLimits, .addressHint, .inputHeldAtMac:
             // The Mac's own messages, sent by the phone.
             throw ScreenControlWireError.malformed
         }

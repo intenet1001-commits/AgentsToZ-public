@@ -1,13 +1,28 @@
+import {CommunityReceiveAuthorization} from './src/communityReceiveAuthorization';
 // Establish the private native channel and CLOEXEC before any child-spawning dependency evaluates.
 import {inheritedComputerUseMainLink} from './src/computerUseMainLink';
 import {runWhatISaidExplicitBackfill, runWhatISaidSyncBatch, whatISaidBackfillOutcome, WHAT_I_SAID_SYNC_PUSH_RESERVE_MS, WHAT_I_SAID_SYNC_REQUEST_BUDGET_MS} from './src/whatISaidExplicitBackfill';
-import {ComputerUseRuntime} from './src/computerUseRuntime';
+import {ComputerUseRuntime,computerUseRemoteSettingsFile} from './src/computerUseRuntime';
 import {ComputerUseRecovery} from './src/computerUseRecovery';
 import {handleComputerUse} from './src/computerUseApi';
 import {computerCallerOrigin,createComputerCallerHostResolver} from './src/computerUseCallerHost';
+import {createRemoteHumanInputReader} from './src/computerUseRemoteHumanInput';
 import {COMPUTER_USE_PATH,COMPUTER_USE_AGENT_PATH} from './src/computerUseProtocol';
+import {COMPUTER_USE_INSTANCE_HEADER} from './src/computerUseConnectionProtocol';
+import {COMPUTER_USE_REMOTE_AGENT_PATH} from './src/computerUseRemoteClient';
+import {computerUseRemoteCallerHosts,computerUseRemotePanelLink,computerUseRemoteReceives,createComputerUseRemoteSidecar,refuseCommunityControlComputerUse} from './src/computerUseRemoteSidecar';
 import { BrowserContextHost } from './src/browserContextHost';
 import { WorkroomBrowserHost } from './src/workroomBrowserHost';
+import {CommunityAdapterAuthorization} from './src/communityAdapterAuthorization';
+import {communityWorkroomEffortPolicy} from './src/communityWorkroomEffort';
+import {NativeCommunityComponentIdentity} from './src/communityComponentIdentity';
+import {NativeCommunityMobileIdentity} from './src/communityMobileNativeIdentity';
+import {CommunityMobileControlHost} from './src/communityMobileControlHost';
+import {CommunityMobileControlLedger} from './src/communityMobileControlLedger';
+import {prepareCommunityMobileDataKey} from './src/communityMobileDataKey';
+import {CommunityMobileRuntime} from './src/communityMobileRuntime';
+import {createCommunityMobileConsumers} from './src/communityMobileConsumers';
+import {createCommunityMobileAgent,communityMobileOpsMemberActive,communityMobileOpsEffortPolicy,communityMobileOpsTaskFence,type CommunityMobileOpsTarget} from './src/communityMobileAgent';
 import {assertMacosBrowserUpgrade} from './src/macosBrowserUpgrade';
 import { WorkroomBrowserRecovery } from './src/workroomBrowserRecovery';
 import { WORKROOM_BROWSER_PATH, WORKROOM_BROWSER_AGENT_PATH } from './src/workroomBrowserProtocol';
@@ -49,7 +64,7 @@ import {recallProjectMemoryWithCommon} from './project-memory-server';
 import {referenceExcerpt} from './src/agentstozMention';
 import {OpsRequestHost,callerOpsRequestDispatch,opsRequestScope,opsRequestsAllowed} from './src/opsRequestHost';
 import {OpsRequestError} from './src/opsRequestProtocol';
-import {OpsRequestStore} from './src/opsRequestStore';
+import {OpsRequestStore,type OpsRequestOrigin} from './src/opsRequestStore';
 import {communityControlRouteFailure,createOpsRequestDispatch,handleOpsRequestMcpHttp} from './src/opsRequestDispatch';
 import {opsWorkroomAgentFrom} from './src/opsWorkroomAgent';
 import {workroomScreenAwaitsAnswer} from './src/workroomRouteDelivery';
@@ -175,7 +190,7 @@ import {
 import {createAiTerminalRemoteGateway} from './src/aiTerminalRemoteGateway';
 import {remoteTerminalOwners} from './src/remoteTerminalOwners';
 import {AgentRuntimeQuickLabels} from './packages/runtime-sdk';
-import { AiTerminalService, bindAiTerminalTarget, aiTerminalRegistrationEvidence } from './src/aiTerminalService';
+import { AiTerminalService, bindAiTerminalTarget, aiTerminalRegistrationEvidence,type AiTerminalEffortPolicy } from './src/aiTerminalService';
 import {isInternalContextSessionSource} from './src/contextSessionVisibility';
 import {CONTEXT_SESSION_COMMAND_PATH,isContextOrcaRequest,normalizeContextCommandRequest} from './src/contextSessionCommand';
 import {performContextOrcaCommand,type ContextOrcaHost} from './src/contextOrcaCommand';
@@ -184,7 +199,7 @@ import {WeeklyUsageHost,readWeeklyUsageRequest} from './src/weeklyUsageHost';
 import {WeeklyUsagePushHost} from './src/weeklyUsagePushHost';
 import { isWorkroomActivityOperation } from './src/aiTerminalActivity';
 import { isWorkroomEffortOperation,projectEffortAdviceContext } from './src/workroomEffortSetting';
-import {createProjectAgentTerminal} from './src/projectAgentTerminal';
+import {createProjectAgentTerminal,createProjectAgentEffortSetting} from './src/projectAgentTerminal';
 import { createWorkroomTranscriptSignals } from './src/aiTerminalActivityTranscript';
 import { processGroupOpenFiles } from './src/aiTerminalResume';
 import {CliAccountStore} from './src/cliAccountStore';
@@ -259,6 +274,7 @@ import { readFile as readFileAsync, realpath as realpathAsync, stat as statAsync
 import { homedir, hostname, networkInterfaces, tmpdir } from "node:os";
 import { createClient } from "@supabase/supabase-js";
 import {AGENT_DIALOGUE_CONTROL_MOBILE_TIMEOUT_MS,AgentDialogueHost,AgentDialogueHostError} from './src/agentDialogueHost';
+import {createViewerCommunityPublisher} from './src/viewerCommunityDirectory';
 import {AGENT_DIALOGUE_HEARTBEAT_MS} from './src/communityDeviceLiveness';
 import {createCommunityControlExecutor,communityControlPollDelay} from './src/agentDialogueControl';
 import {workroomProjectsFromPorts} from './src/workroomProjects';
@@ -902,6 +918,10 @@ import {createTeamOrcaRecoveryInspect} from './src/teamOrcaRecoveryRead';
 import {createTeamProjectLauncher} from './src/teamProjectLauncher';
 import {createTeamCmuxManualLauncher} from './src/teamCmuxManualLauncher';
 import {runTeamMemberOperation} from './src/workroomTeamMemberOperation';
+import {REMOTE_TEAMS_PATH} from './src/remoteTeamProtocol';
+import {RemoteTeamHost,RemoteTeamStore,RemoteTeamError,remoteTeamDeviceChoices,type RemoteTeamFrom,type RemoteTeamScope} from './src/remoteTeamHost';
+import {RemoteTeamClient} from './src/remoteTeamClient';
+import {AuthenticatedCommunityTransport,createBunCommunityRelaySockets} from './src/authenticatedCommunityTransport';
 import {createTeamOrcaCheckout,createTeamOrcaCheckoutJournal,type TeamOrcaCheckoutGit} from './src/teamOrcaCheckout';
 import {
   RemoteControlLanServer,
@@ -4902,8 +4922,14 @@ const controlProfileHost = createControlProfileHost({
   deviceRecall:query=>deviceOperatingMemoryHost?.store.recall(query)??[],
 });
 
+const communityComponentIdentity=inheritedComputerUseMainLink?new NativeCommunityComponentIdentity(inheritedComputerUseMainLink):undefined;
+const communityAdapterAuthorization=inheritedComputerUseMainLink?new CommunityAdapterAuthorization(inheritedComputerUseMainLink):undefined;
+let activeCommunityMobileIdentity:NativeCommunityMobileIdentity|undefined;
+const communityControlTransport=communityComponentIdentity?new AuthenticatedCommunityTransport(APP_DATA_DIR,communityComponentIdentity,createBunCommunityRelaySockets(),true):undefined;
 const agentDialogueHost = new AgentDialogueHost({
   appDataDir:APP_DATA_DIR,
+  ...(communityControlTransport?{controlTransport:communityControlTransport,trustedTeamsDispatcher:(request,from,controlId)=>remoteTeams().dispatch(request,from,controlId)}:{}),
+  communityDirectory:process.platform==='darwin'?createViewerCommunityPublisher(APP_DATA_DIR):undefined,
   identity:()=>{
     // Called on every control/community poll tick: the light check only (no memory snapshot, see sharedProfileId).
     const profileId=controlProfileHost.store.sharedProfileId();
@@ -9375,6 +9401,10 @@ const contextOrcaHost:ContextOrcaHost={
   lock:withOrcaLock,
 };
 const aiTerminalService: AiTerminalService = createProjectAgentTerminal({appDataDir: APP_DATA_DIR, dependencies: {
+  communityEffortPolicy:async(owner,setting)=>{
+    if(!communityAdapterAuthorization||!communityComponentIdentity)throw Error('네이티브 공통 설정 조정이 지원되지 않습니다.');
+    return communityWorkroomEffortPolicy({adapter:communityAdapterAuthorization,identity:communityComponentIdentity,devices:()=>agentDialogueHost.controlDevices()},owner,setting);
+  },
   history: workroomConversationService,
   // A project's own CLI account inside its Workrooms: shims and git's helper ask at each call, never a token in env.
   cliAccountEnvironment:({cwd,env})=>platformCliWorkroomEnvironment({shimDirectory:join(platformCliHost.store.root,'shims'),launcher:agentsToZUseMcpLauncherPath(homedir()),cwd,env,git:GIT_PATH,executable:provider=>platformCliHost.deps.executable(provider)}),
@@ -9481,7 +9511,7 @@ process.once('exit',()=>desktopEffortHost.dispose());
 // Other devices' OPS tasks run only in the installed app's sidecar (or with AGENTSTOZ_OPS_REQUESTS=1):
 // a source or worktree server shares the real app data and must not recover or start that work.
 const OPS_REQUESTS_ENABLED=opsRequestsAllowed({bundledSidecar:IS_BUNDLED_API_SIDECAR,env:process.env});
-const opsRequestHost=new OpsRequestHost({
+const opsRequestHost:OpsRequestHost=new OpsRequestHost({
   store:new OpsRequestStore(APP_DATA_DIR),
   revision:(sessionId,targetId)=>{try{return aiTerminalService.inspectSession(sessionId,targetId).inputRevision;}catch{return null;}},
   close:async(sessionId,options)=>{await aiTerminalService.perform({operation:'close',requestId:crypto.randomUUID(),sessionId,memoryPolicy:options.memoryPolicy});},
@@ -9492,10 +9522,19 @@ const opsRequestHost=new OpsRequestHost({
     return {scope:opsRequestScope(binding,deviceId),
       targetId:binding.projectId,agent:opsWorkroomAgentFrom(readOpsLaunchPreference(APP_DATA_DIR))};
   },
-  peerActive:origin=>agentDialogueHost.controlPeerActive(origin.endpointId,origin.deviceId),
+  peerActive:origin=>origin.kind==='mobile'?activeCommunityMobileIdentity&&!activeCommunityMobileIdentity.ended?communityMobileOpsMemberActive(origin,activeCommunityMobileIdentity):Promise.resolve(false):agentDialogueHost.controlPeerActive(origin.endpointId,origin.deviceId),
   start:async input=>{
+    const {origin,...launch}=input;
+    const effortPolicy=opsRequestEffortPolicy(origin);
+    const mobileTaskFence=async()=>{
+      if(origin?.kind!=='mobile'||!activeCommunityMobileIdentity)throw Error('모바일 OPS 실행 권한을 확인하지 못했습니다.');
+      const t=await communityMobileOpsTarget(),binding=opsRequestHost.mobileBinding();
+      if(!t||binding.targetId!==launch.targetId||binding.agent!==launch.agent)throw Error('모바일 OPS 실행 대상이 변경되었습니다.');
+      return communityMobileOpsTaskFence(origin,activeCommunityMobileIdentity,t.isCurrent);
+    };
     // No bypass. Only the AgentsToZ tools a handover needs skip the CLI's per-tool approval (opsWorkerToolApproval.ts).
-    const result=await aiTerminalService.perform({operation:'start',...input,cols:100,rows:28,bypassPermissions:false},undefined,{opsWorker:true});
+    const result=await aiTerminalService.perform({operation:'start',...launch,cols:100,rows:28,bypassPermissions:false},undefined,{opsWorker:true,...(effortPolicy?{effortPolicy}:{}),
+      ...(origin?.kind==='mobile'?{admittedEffortFallback:mobileTaskFence,startGuard:async()=>{const fence=await mobileTaskFence();if(!fence())throw Error('모바일 OPS 실행 권한이 해제되었습니다.');return()=>{if(!fence())throw Error('모바일 OPS 실행 권한이 해제되었습니다.');};}}:{})});
     if(!result.session)throw Error('OPS 워크룸 시작 영수증이 없습니다.');return result.session;
   },
   inspect:async(sessionId,targetId)=>{
@@ -9504,6 +9543,28 @@ const opsRequestHost=new OpsRequestHost({
     return {state:s.state,awaitingAnswer:s.state==='running'&&(!screen||workroomScreenAwaitsAnswer(screen.rows)),lastOutputAt:s.lastOutputAt};
   },
 });
+function opsRequestEffortPolicy(origin?:OpsRequestOrigin):AiTerminalEffortPolicy|undefined{
+  if(!origin||origin.kind!=='mobile'&&origin.deviceId===readPortalJson(PORTAL_DATA_FILE)?.deviceId)return undefined;
+  const off:AiTerminalEffortPolicy=async()=>({mode:'off',isAuthorized:()=>false,beforeEffect:async()=>false});
+  if(!communityAdapterAuthorization)return off;
+  if(origin.kind==='mobile')return activeCommunityMobileIdentity&&!activeCommunityMobileIdentity.ended?communityMobileOpsEffortPolicy(origin,activeCommunityMobileIdentity,communityAdapterAuthorization):off;
+  return async setting=>communityComponentIdentity?communityWorkroomEffortPolicy({adapter:communityAdapterAuthorization,identity:communityComponentIdentity,devices:()=>agentDialogueHost.controlDevices()},`community:${origin.endpointId}`,setting):off(setting);
+}
+async function communityMobileOpsTarget():Promise<CommunityMobileOpsTarget|null>{
+  if(!OPS_REQUESTS_ENABLED||remoteControlApiShutdown||!activeCommunityMobileIdentity||activeCommunityMobileIdentity.ended)return null;
+  try{
+    const nativeIdentity=activeCommunityMobileIdentity,native=await nativeIdentity.context(),binding=opsRequestHost.mobileBinding(),rows=agentDialogueHost.status().enabled.filter(row=>row.kind==='ops');
+    if(rows.length!==1||native.profileId!==controlProfileHost.store.sharedProfileId()||native.agentDeviceId!==readPortalJson(PORTAL_DATA_FILE)?.deviceId)return null;
+    const endpoint=rows[0]!.endpointId,target=await resolveAiTerminalRegisteredTarget(binding.targetId),cwd=realpathSync(target.cwd),root=projectLaunchDirectoryIdentity(cwd),authority=agentRuntimeRegistrationAuthoritySignature();
+    const isCurrent=()=>{try{const current=opsRequestHost.mobileBinding(),enabled=agentDialogueHost.status().enabled.filter(row=>row.kind==='ops');return !remoteControlApiShutdown&&activeCommunityMobileIdentity===nativeIdentity&&!nativeIdentity.ended
+      &&native.profileId===controlProfileHost.store.sharedProfileId()&&native.agentDeviceId===readPortalJson(PORTAL_DATA_FILE)?.deviceId
+      &&current.scope===binding.scope&&current.targetId===binding.targetId&&current.agent===binding.agent&&enabled.length===1&&enabled[0]!.endpointId===endpoint
+      &&agentRuntimeRegistrationAuthoritySignature()===authority&&projectLaunchDirectoryIdentity(cwd)===root;}catch{return false;}};
+    if(!isCurrent())return null;
+    const name=Array.from(rows[0]!.displayName).slice(0,60).join('');
+    return {scope:binding.scope,identity:createHash('sha256').update(JSON.stringify([binding.scope,binding.targetId,binding.agent,endpoint,cwd,root])).digest('hex'),name,isCurrent};
+  }catch{return null;}
+}
 const opsRequestDispatchDeps={devices:()=>agentDialogueHost.controlDevices(),
   call:(endpointId:string,request:Record<string,unknown>,timeoutMs:number)=>agentDialogueHost.controlCall(endpointId,request,timeoutMs)};
 const dispatchOpsRequest=createOpsRequestDispatch({host:opsRequestHost,...opsRequestDispatchDeps});
@@ -9524,15 +9585,42 @@ const workroomSharedShell = new WorkroomSharedShell({
 });
 let computerUseRuntime:ComputerUseRuntime|null=null;
 let computerUseRecovery:ComputerUseRecovery|null=null;
+/**
+ * RC-12 (DESIGN remote-computer-use): AIs of other community Macs are received only by the bundled sidecar on macOS.
+ * The legacy bundled flag is not proof: the installed executable path and a live audit-token-verified Main are also
+ * required. A dev server answers each computer-use row unsupported and never creates the runtime for it.
+ */
+const COMPUTER_USE_REMOTE_RECEIVES=()=>computerUseRemoteReceives({bundled:IS_BUNDLED_API_SIDECAR,platform:process.platform,verifiedMain:inheritedComputerUseMainLink?.verifiedMain===true,executablePath:process.execPath});
 function currentComputerUseRuntime(){
   // callerHost: a connection's own host app (process ancestry of its loopback socket) is never a computer use target.
+  // remoteHumanInput: no AI input while a person controls this Mac from another device through AgentsToZ Screen (SR-34).
+  // remoteSettings: the person's 「다른 Mac의 AI 받기」 and blocks (§8.6), changed only by the management route.
   return computerUseRuntime??=new ComputerUseRuntime(inheritedComputerUseMainLink??{available:false,request:async()=>({success:false,code:'signed-main-link-required',notDispatched:true}),dispose(){}},computerUseRecovery??=new ComputerUseRecovery(join(APP_DATA_DIR,'computer-use-recovery.sqlite')),
-    {callerHost:createComputerCallerHostResolver()});
+    {...(inheritedComputerUseMainLink?{receiveAuthorization:new CommunityReceiveAuthorization(inheritedComputerUseMainLink,Date.now,async()=>{if(!communityComponentIdentity)throw Error('공통 등록을 확인하세요.');await communityComponentIdentity.currentAuthorization('agent');})}:{}),callerHost:createComputerCallerHostResolver(),remoteHumanInput:createRemoteHumanInputReader(),
+      acceptRemote:COMPUTER_USE_REMOTE_RECEIVES,remoteSettings:computerUseRemoteSettingsFile(join(APP_DATA_DIR,'computer-use-remote.json')),
+      remoteLink:()=>computerUseRemotePanelLink(computerUseRemote.client,controlProfileHost.store)});
 }
 const computerUseReaper=setInterval(()=>computerUseRuntime?.reap(),10000);computerUseReaper.unref();
 process.once('exit',()=>{clearInterval(computerUseReaper);computerUseRuntime?.dispose();computerUseRecovery?.close();});
+/**
+ * Computer use between community Macs (src/computerUseRemoteSidecar.ts). Receiving: the community executor's
+ * `computerUse` branch and the poll's `detach` (below, executeCommunityControl). Sending: COMPUTER_USE_REMOTE_AGENT_PATH.
+ * `selfDeviceId` is the community identity deviceId the control inbox reads rows by (agentDialogueHost's identity).
+ */
+const computerUseRemote=createComputerUseRemoteSidecar({
+  identity:communityComponentIdentity,
+  dialogue:agentDialogueHost,
+  runtime:currentComputerUseRuntime,
+  existingRuntime:()=>computerUseRuntime,
+  selfDeviceId:()=>{const deviceId=readPortalJson(PORTAL_DATA_FILE).deviceId;return typeof deviceId==='string'&&RUNTIME_UUID_RE.test(deviceId)?deviceId:null;},
+  deviceName:()=>deviceHostName(readPortalJson(PORTAL_DATA_FILE)),
+  bundled:COMPUTER_USE_REMOTE_RECEIVES,
+  platform:process.platform,
+});
+/** The host app B shows in its grant label, read once per MCP instance from its loopback socket. Display only. */
+const computerUseRemoteCallerHost=computerUseRemoteCallerHosts(createComputerCallerHostResolver());
 const workroomBrowserRecovery=new WorkroomBrowserRecovery(join(APP_DATA_DIR,'workroom-browser-recovery.sqlite'));
-const workroomBrowserHost=new WorkroomBrowserHost({runningSession:id=>aiTerminalService.runningSession(id),recovery:workroomBrowserRecovery});
+const workroomBrowserHost=new WorkroomBrowserHost({runningSession:id=>aiTerminalService.runningSession(id),recovery:workroomBrowserRecovery,community:communityAdapterAuthorization});
 const workroomBrowserReaper=setInterval(()=>workroomBrowserHost.reap(),60000);workroomBrowserReaper.unref();
 process.once('exit',()=>{clearInterval(workroomBrowserReaper);workroomBrowserHost.dispose();workroomBrowserRecovery.close();});
 /** One screen read for an orchestrating AI; a wide 300×150 screen of CJK text would be larger. */
@@ -9721,6 +9809,77 @@ async function openTerminalWithCmd(shellCmd: string, folderPath: string | null, 
 
 let workroomTeamService: WorkroomTeamService | null = null;
 let workroomTeamBridge: ReturnType<typeof createTeamRuntimeBridge> | null = null;
+let remoteTeamStore:RemoteTeamStore|null=null;
+let remoteTeamHost:RemoteTeamHost|null=null;
+let remoteTeamClient:RemoteTeamClient|null=null;
+function remoteTeamsStore(){return remoteTeamStore??=new RemoteTeamStore(join(APP_DATA_DIR,'remote-teams.v1.sqlite'));}
+async function remoteTeamsScope(from?:RemoteTeamFrom):Promise<RemoteTeamScope>{
+  if(!communityComponentIdentity)throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','네이티브 Teams 공통 인증 연결을 확인하세요.');
+  const own=await communityComponentIdentity.currentAuthorization('teams'),source=await agentDialogueHost.controlSource();
+  if(!source||source.deviceId!==own.body.agentDeviceId||controlProfileHost.store.sharedProfileId()!==own.body.profileId)throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','이 Main의 커뮤니티 기기 결속을 확인하세요.');
+  let peer=own;
+  if(from){
+    const devices=await agentDialogueHost.controlDevices();
+    if(!devices.inside||!devices.devices.some(d=>d.deviceId===from.deviceId&&d.endpointId===from.endpointId))throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','현재 커뮤니티 발신 끝점을 확인하지 못했습니다.');
+    const directory=await communityComponentIdentity.directory('teams'),found=directory.filter(a=>a.body.agentDeviceId===from.deviceId&&a.permits('teams',Date.now()));
+    if(found.length!==1||found[0]!.body.deviceId===own.body.deviceId)throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','발신 Mac의 서명된 Teams 등록을 확인하지 못했습니다.');
+    peer=found[0]!;
+  }
+  const grantScope=createHash('sha256').update(JSON.stringify([own.body.communityId,own.body.enrollmentId,own.body.controlKey])).digest('hex');
+  return{subject:createHash('sha256').update(JSON.stringify([own.body.communityId,peer.body.enrollmentId,peer.body.controlKey,from?.endpointId??source.endpointId])).digest('hex'),grantScope,deviceId:source.deviceId,endpointId:source.endpointId,
+    active:()=>own.permits('teams',Date.now())&&peer.permits('teams',Date.now())&&controlProfileHost.store.sharedProfileId()===own.body.profileId};
+}
+async function communityTeamProjects(){
+  const authority=agentRuntimeRegistrationAuthoritySignature(),rows=await readPortsFileStrict() as Array<PortRecord&{folderPath?:string;name?:string}>;
+  if(rows.length>200)throw new RemoteTeamError('REMOTE_TEAMS_PROJECT_CHANGED','원격 Teams 프로젝트는 한 번에 200개까지 검토합니다.');
+  return rows.flatMap(row=>{
+    if(typeof row.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(row.id)||typeof row.folderPath!=='string'||row.id===boundOpsProjectId())return[];
+    try{const path=realpathSync(row.folderPath);if(!statSync(path).isDirectory())return[];const root=projectLaunchDirectoryIdentity(path),identity=createHash('sha256').update(JSON.stringify([row.id,path,root])).digest('hex');
+      return[{projectId:row.id,name:String(row.name?.trim()||row.id).slice(0,60),identity,isCurrent:()=>agentRuntimeRegistrationAuthoritySignature()===authority&&projectLaunchDirectoryIdentity(path)===root}];
+    }catch{return[];}
+  });
+}
+function remoteTeams():RemoteTeamHost{return remoteTeamHost??=new RemoteTeamHost({store:remoteTeamsStore(),service:workroomTeams,authorize:remoteTeamsScope,effortPolicy:async(from,setting)=>{
+  if(!communityAdapterAuthorization||!communityComponentIdentity||!from.endpointId)throw Error('네이티브 공통 설정 조정이 지원되지 않습니다.');
+  return communityWorkroomEffortPolicy({adapter:communityAdapterAuthorization,identity:communityComponentIdentity,devices:()=>agentDialogueHost.controlDevices()},`community:${from.endpointId}`,setting);
+},projects:communityTeamProjects});}
+function remoteTeamsClient(){return remoteTeamClient??=new RemoteTeamClient(remoteTeamsStore(),agentDialogueHost);}
+async function remoteTeamsDevices(){
+  await remoteTeamsScope();if(!communityComponentIdentity)throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','네이티브 Teams 연결을 확인하세요.');
+  const own=await communityComponentIdentity.currentAuthorization('teams'),peers=await communityComponentIdentity.directory('teams'),devices=await agentDialogueHost.controlDevices();
+  if(!devices.inside||devices.deviceId!==own.body.agentDeviceId)throw new RemoteTeamError('REMOTE_TEAMS_CONSENT_REQUIRED','현재 Main의 커뮤니티 연결을 확인하세요.');
+  return remoteTeamDeviceChoices(own,peers,devices.devices);
+}
+async function communityMobileWorkrooms(){
+  if(remoteControlApiShutdown)return[];
+  const rows=[];
+  for(const context of aiTerminalService.historySessions()){
+    const s=context.summary;if(s.state!=='running'||!aiTerminalService.runningSession(s.id))continue;
+    try{let projectTargetId:string|undefined;const target=await resolveAgentRuntimeRegisteredTarget(s.targetId,resolved=>{projectTargetId=resolved.projectTargetId;});
+      if(!projectTargetId||realpathSync(target.cwd)!==realpathSync(context.cwd))continue;
+      const parentId=projectTargetId,profileId=controlProfileHost.store.sharedProfileId(),cwd=realpathSync(target.cwd),root=projectLaunchDirectoryIdentity(cwd),authority=agentRuntimeRegistrationAuthoritySignature();
+      const endpoints=()=>agentDialogueHost.status().enabled.filter(row=>row.kind==='project'?row.portId===parentId:row.kind==='ops'&&parentId===boundOpsProjectId()).map(row=>row.endpointId).sort();
+      const selected=endpoints();if(selected.length!==1)continue;
+      const isCurrent=()=>{try{return !remoteControlApiShutdown&&profileId===controlProfileHost.store.sharedProfileId()&&aiTerminalService.runningSession(s.id)?.targetId===s.targetId
+        &&agentRuntimeRegistrationAuthoritySignature()===authority&&projectLaunchDirectoryIdentity(cwd)===root&&JSON.stringify(endpoints())===JSON.stringify(selected);}catch{return false;}};
+      if(isCurrent())rows.push({sessionId:s.id,targetId:s.targetId,label:Array.from(target.projectLabel).slice(0,60).join(''),isCurrent});
+    }catch{/* A stale or unregistered Workroom is absent from the mobile scope. */}
+  }return rows;
+}
+const communityMobileMainLink=IS_BUNDLED_API_SIDECAR?inheritedComputerUseMainLink:null;
+const communityMobileRuntime=communityMobileMainLink&&communityAdapterAuthorization?new CommunityMobileRuntime(()=>{
+  const identity=new NativeCommunityMobileIdentity(communityMobileMainLink);activeCommunityMobileIdentity=identity;
+  const consumers=createCommunityMobileConsumers({agent:createCommunityMobileAgent({host:opsRequestHost,target:communityMobileOpsTarget}),
+    teams:{store:remoteTeamsStore(),service:workroomTeams,projects:communityTeamProjects,authorizeOwn:async()=>{
+      const own=await identity.authorization('mobile-teams');if(own.body.profileId!==controlProfileHost.store.sharedProfileId()||own.body.agentDeviceId!==readPortalJson(PORTAL_DATA_FILE)?.deviceId)throw Error('모바일 Teams의 실제 Main 결속을 확인하세요.');
+      return {grantScope:createHash('sha256').update(JSON.stringify([own.body.communityId,own.body.enrollmentId,own.body.controlKey])).digest('hex'),active:()=>!remoteControlApiShutdown&&!identity.ended&&own.permits('mobile-teams',Date.now())&&own.body.profileId===controlProfileHost.store.sharedProfileId()&&own.body.agentDeviceId===readPortalJson(PORTAL_DATA_FILE)?.deviceId};
+    }},terminal:aiTerminalService,workrooms:communityMobileWorkrooms,browser:workroomBrowserHost,adapter:communityAdapterAuthorization,effortSetting:createProjectAgentEffortSetting(APP_DATA_DIR)});
+  const host=new CommunityMobileControlHost(identity,consumers,createBunCommunityRelaySockets(),async(receiver,purpose)=>{
+    const key=await prepareCommunityMobileDataKey({appDataDir:APP_DATA_DIR,receiver,purpose});
+    try{return new CommunityMobileControlLedger(APP_DATA_DIR,{profileId:receiver.body.profileId,communityId:receiver.body.communityId,deviceId:receiver.body.deviceId},key);}finally{key.fill(0);}
+  });return {identity,host};
+}):undefined;
+process.once('exit',()=>communityMobileRuntime?.close());
 // A sidecar restart keeps old receipts and worktrees; it never silently claims another process's live ownership.
 const teamHostInstanceId=crypto.randomUUID();
 async function inspectTeamOrcaGit(primary:string,checkout:string):Promise<TeamOrcaCheckoutGit>{
@@ -9811,6 +9970,7 @@ function workroomTeams(): WorkroomTeamService {
     ensureExclude: ensureLocalWorktreeExclude, seedConfig: seedWorktreeLocalConfig,
     withLease: (path, label, work) => withManagedWorkspaceLease(path, label, () => work()),
     externalRuntime:workroomTeamBridge,
+    remoteRuntime:{projects:target=>remoteTeamsClient().projects(target),start:input=>remoteTeamsClient().start(input),observe:ref=>remoteTeamsClient().observe(ref),send:(ref,text,id)=>remoteTeamsClient().send(ref,text,id),close:ref=>remoteTeamsClient().close(ref)},
     createExternalWorktree,
     // The same read as 「AI별 MCP 사용 설정」: only a known not-configured AI is told to write its result for the leader.
     teamTool: async agent => {
@@ -11015,6 +11175,7 @@ process.once('exit',()=>{void browserContextHost.dispose();});
 const AGENT_RUNTIME_TASK_ID_PATH_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
 function isAllowedAgentRuntimeManagementRoute(method: string, url: URL): boolean {
+  if(url.pathname===REMOTE_TEAMS_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===DESKTOP_EFFORT_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===WORKROOM_SCHEDULE_PATH)return method==='POST'&&url.search===''&&!url.href.includes('?');
   if(url.pathname===WEEKLY_USAGE_PATH)return method==='POST'&&url.search==='';
@@ -15479,9 +15640,12 @@ function shutdownRemoteControlApi(exitCode: number): Promise<void> {
     metaCommonMemoryRemoteHost.dispose();
     const shutdownStartedAt = Date.now();
     closeManagedWorkspaceLeaseAdmission();
+    remoteTeamHost?.close();communityControlTransport?.close();communityMobileRuntime?.close();
     const outcome = await settleLocalApiShutdown([
       remoteClaudeConversationManager.shutdown(),
       Promise.all([
+        // Before the mailbox goes: inputs another Mac queued here are answered as not run (receiver-off).
+        computerUseRemote.dispose(),
         browserContextHost.dispose(),
         testerAgentHost?.shutdown() ?? Promise.resolve(),
         csDuty?.shutdown() ?? Promise.resolve(),
@@ -16988,6 +17152,14 @@ const server = Bun.serve({
 
     if(url.pathname===COMPUTER_USE_AGENT_PATH)return handleComputerUse(req,currentComputerUseRuntime,{agent:true,authorized:requestOrigin===null&&controlProfileHost.store.authorize(req.headers.get(CONTROL_PROFILE_HEADER)),
       origin:computerCallerOrigin(bunServer.requestIP(req))});
+    // Another community Mac (DESIGN remote-computer-use §6): the same gate as the agent route above. The Workroom caller
+    // hint feeds the OPS worker guard (RC-13) and is read only when a request needs it; neither it nor the host label
+    // authorizes anything.
+    if(url.pathname===COMPUTER_USE_REMOTE_AGENT_PATH)return computerUseRemote.route(req,{
+      authorized:requestOrigin===null&&controlProfileHost.store.authorize(req.headers.get(CONTROL_PROFILE_HEADER)),
+      opsWorker:async()=>{const sessionId=agentsToZUseCallerSession(parseWorkroomCallerHint(req.headers))?.id;return !!sessionId&&await opsRequestHost.workerSession(sessionId);},
+      host:()=>computerUseRemoteCallerHost(req.headers.get(COMPUTER_USE_INSTANCE_HEADER),computerCallerOrigin(bunServer.requestIP(req))),
+    });
 
     if(url.pathname===WORKROOM_BROWSER_AGENT_PATH){
       // A separate high-entropy, session/page/epoch-bound grant. No UI management capability is accepted here.
@@ -17158,6 +17330,11 @@ const server = Bun.serve({
       }catch(error){return Response.json({error:error instanceof SyntaxError?'지원 기록 형식을 확인하지 못했습니다. 기존 기록을 보존했습니다.':error instanceof Error?error.message:'지원 요청을 확인하지 못했습니다.'},{status:409,headers:{...headers,'Cache-Control':'no-store'}});}
     }
 
+    if(url.pathname===REMOTE_TEAMS_PATH){
+      const noStore={...headers,'Cache-Control':'no-store'};
+      try{return Response.json(await remoteTeams().manage(await req.json()),{headers:noStore});}
+      catch(error){return Response.json({error:error instanceof Error?error.message:'원격 Teams 설정을 확인하지 못했습니다.',code:error instanceof RemoteTeamError?error.code:'REMOTE_TEAMS_INVALID'},{status:409,headers:noStore});}
+    }
     // This Mac's capability-protected team strip: path-free reads and explicit human confirmations/reports.
     if (url.pathname === WORKROOM_TEAM_PANEL_PATH) {
       const noStore={...headers,'Cache-Control':'no-store'};
@@ -19494,6 +19671,8 @@ const server = Bun.serve({
         if(body.operation==='ops-action')return Response.json({success:true,...await dispatchOpsRequest(body.request)},{headers:responseHeaders});
         if(body.operation!=='call'||!body.request||typeof body.request!=='object'||Array.isArray(body.request))
           throw new AgentDialogueHostError('AGENT_DIALOGUE_INPUT_INVALID','기기 제어 요청을 확인하세요.',400);
+        // RC-14: computer use goes only through its own sealed route, never as a plain row from this screen.
+        refuseCommunityControlComputerUse(body.request as Record<string,unknown>);
         const response=await agentDialogueHost.controlCall(body.targetEndpointId,body.request as Record<string,unknown>);
         return Response.json({success:true,response},{headers:responseHeaders});
       }catch(error){
@@ -19569,14 +19748,20 @@ const server = Bun.serve({
           if (!profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED', '기억 참고에는 AgentsToZ 프로필 연결이 필요합니다.', 403);
           const input = request.reference!;
           let reference;
-          if (input.role === 'ops') reference = {role: 'ops', ...controlProfileHost.recall(input.query)};
+          if (input.role === 'ops') reference = {role: 'ops', ...controlProfileHost.recall(input.query, input.includeRelations)};
           else if (input.role === 'use') {
             const project = await resolveRegisteredUseProject(input.portId);
             reference = await serviceUseHost.recallReference(project.projectId, input.serviceKey, input.query);
           } else {
             const project = await resolveRegisteredUseProject(input.portId);
-            const result = await recallProjectMemoryWithCommon({folderPath: project.canonicalPath, query: input.query, limit: 5, appDataDir: APP_DATA_DIR, includeCommon: false});
+            const result = await recallProjectMemoryWithCommon({folderPath: project.canonicalPath, query: input.query, limit: 5, appDataDir: APP_DATA_DIR, includeCommon: false, includeRelations: input.includeRelations});
+            if(input.includeRelations){
+              const current=await resolveRegisteredUseProject(input.portId);
+              if(current.canonicalPath!==project.canonicalPath||current.memoryId!==project.memoryId||result.memoryId!==current.memoryId)
+                throw new AgentsToZUseControlError('기억 참고 대상의 등록이나 정체성이 바뀌었습니다. 현재 대상으로 다시 확인하세요.','REFERENCE_SCOPE_CHANGED',409);
+            }
             reference = {role: 'dev', memoryId: result.memoryId, journalIncluded: false,
+              ...(input.includeRelations ? {relations: result.relations} : {}),
               hits: result.hits.map(hit => ({entryId: hit.entryId, contentVersionHash: hit.contentVersionHash, title: referenceExcerpt(hit.title, 240), body: referenceExcerpt(hit.body), caution: true})),
               correctionSearch: result.correctionSearch,
               corrections: result.corrections.slice(0, 5).map(hit => ({entryKey: hit.entryKey, contentVersionHash: hit.contentVersionHash, title: referenceExcerpt(hit.title, 240), status: hit.status,
@@ -19592,7 +19777,7 @@ const server = Bun.serve({
           const teamCaller = callerSession ? {sessionId: callerSession.id, agent: callerSession.agent, targetId: callerSession.targetId} : null;
           const team = request.team!;
           try {
-            const result = team.op === 'create' ? await workroomTeams().create(team, teamCaller)
+            const result = team.op==='remote-devices'?{devices:await remoteTeamsDevices()}:team.op==='remote-projects'?{projects:await remoteTeamsClient().projects({deviceId:team.deviceId,endpointId:team.endpointId})}:team.op === 'create' ? await workroomTeams().create(team, teamCaller)
               : team.op === 'read' ? await workroomTeams().read(team)
               : team.op === 'wait' ? await workroomTeams().wait(team)
               : team.op === 'report' ? await workroomTeams().report(team, teamCaller)
@@ -19602,7 +19787,7 @@ const server = Bun.serve({
               : await workroomTeams().close(team, teamCaller);
             const created = team.op === 'create' && !(result as {replayed?: boolean}).replayed;
             return Response.json({success: true, performed: true, action: request.action, op: team.op,
-              effect: team.op === 'read' || team.op === 'wait' || team.op === 'member'&&team.operation==='read' ? 'read-only' : `team-${team.op}`, ...result},
+              effect: team.op==='remote-devices'||team.op === 'remote-projects'||team.op === 'read' || team.op === 'wait' || team.op === 'member'&&team.operation==='read' ? 'read-only' : `team-${team.op}`, ...result},
               {status: created ? 201 : 200, headers: {...headers, 'Cache-Control': 'no-store'}});
           } catch (error) {
             if (error instanceof WorkroomTeamError) throw new AgentsToZUseControlError(error.message, error.code, error.status, error.details ?? {});
@@ -19666,7 +19851,7 @@ const server = Bun.serve({
         }
         if (request.action === 'recall-user-profile') {
           try {
-            const userProfile = await userProfileHost.recallForProject(request.portId!, request.controlQuery);
+            const userProfile = await userProfileHost.recallForProject(request.portId!, request.controlQuery, request.includeExplanation);
             return Response.json({ success: true, performed: true, action: request.action, effect: 'read-only', userProfile, userProfilePolicy: USER_PROFILE_POLICY }, { headers: { ...headers, 'Cache-Control': 'private, no-store' } });
           } catch (error) {
             const detail = userProfilePublicError(error);
@@ -19695,7 +19880,7 @@ const server = Bun.serve({
           if (!profileAuthorized) throw new ControlProfileError('CONTROL_PROFILE_UNAUTHORIZED','AgentsToZ 프로필을 준비한 뒤 MCP 연결을 새로고침하세요.',403);
           if(request.action==='get-control-profile')await controlProfileHost.store.synchronize();
           const payload = request.action === 'get-control-profile' ? controlProfileHost.profile()
-            : request.action === 'recall-control-context' ? controlProfileHost.recall(request.controlQuery!)
+            : request.action === 'recall-control-context' ? controlProfileHost.recall(request.controlQuery!, request.includeRelations)
             : request.action === 'list-control-memory-candidates' ? {profile:controlProfileHost.store.status(),proposals:controlProfileHost.store.pending()}
             : {proposal:await controlProfileHost.store.propose(request.controlProposal!)};
           const proposal = 'proposal' in payload ? payload.proposal : null;
@@ -22062,6 +22247,7 @@ const server = Bun.serve({
     if (url.pathname === "/api/project-memory/recall" && req.method === "POST") {
       try {
         const body = await readMemoryParams(req, url);
+        if (Object.hasOwn(body,'includeRelations') && typeof body.includeRelations !== 'boolean') throw new Error('includeRelations must be a boolean.');
         if (typeof body.query !== "string") throw new Error("회상 query가 필요합니다.");
         const recallLimit = typeof body.limit === "number"
           ? body.limit
@@ -22073,6 +22259,7 @@ const server = Bun.serve({
           query: body.query,
           limit: recallLimit,
           appDataDir: APP_DATA_DIR,
+          ...(body.includeRelations === true ? {includeRelations:true} : {}),
         });
         return new Response(JSON.stringify(body.includeEffortAdvice === true
           ? {...result,effortAdvice:projectEffortAdviceContext(APP_DATA_DIR)} : result), { headers });
@@ -29086,6 +29273,8 @@ Analyze this project and reply with JSON only (no markdown, no explanation):
 
 // 시작 배너는 항상 출력 (devLog 게이트 무관)
 console.log(`🚀 API Server running at http://localhost:${server.port}`);
+// Native verification is mandatory; an unbundled server never opens this receiver or recovers its ledger.
+if(communityMobileRuntime)queueMicrotask(()=>{void communityMobileRuntime.start().catch(()=>{});});
 
 // Register only after startup's top-level awaits and all queue dependencies
 // (including the shutdown flag and auto-remember coordinator) are initialized.
@@ -29117,6 +29306,8 @@ const executeCommunityControl=createCommunityControlExecutor({
     return opsRequestHost.receive(request,{endpointId:from.endpointId!,deviceId:from.deviceId,name:from.name});},
   // `receiptOwner` keeps another device's submission receipts apart from this Mac's own; it never travels on the wire.
   terminal:(body,options)=>aiTerminalService.perform(body,undefined,options),
+  // An AI of another community Mac using this one (src/computerUseRemoteHost.ts): sealed rows, its own execution lane.
+  computerUse:computerUseRemote.computerUse,
   workspace:async(body,options)=>{
     const request=normalizeMobileWorkspaceRequest(body);
     if(!request.workspace.action.startsWith('workroom.'))throw new Error('다른 기기에서는 워크룸 동작만 실행할 수 있습니다.');
@@ -29136,10 +29327,11 @@ function scheduleCommunityControlPoll(delay:number){
   const timer=setTimeout(async()=>{
     if(remoteControlApiShutdown)return;
     try{
-      const {handled}=await agentDialogueHost.controlPoll((request,from)=>{
+      // A computer-use call row may be detached: it is answered from its lane, so a slow Control never holds this poll.
+      const {handled}=await agentDialogueHost.controlPoll((request,from,controlId)=>{
         devLog(`[AgentDialogue] control from ${from.name||from.deviceId}: ${String((request.body as any)?.operation??request.kind)}`);
-        return executeCommunityControl(request,from);
-      });
+        return executeCommunityControl(request,from,controlId);
+      },computerUseRemote.pollOptions);
       if(handled>0)communityControlLastHandledAt=Date.now();
     }catch(error){
       // A Mac outside the community or without a shared profile simply has nothing to take.

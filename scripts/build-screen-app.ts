@@ -13,6 +13,7 @@ import {homedir, tmpdir} from 'node:os';
 import {basename, isAbsolute, join, resolve} from 'node:path';
 // Notifications and remote stop: off unless AGENTSTOZ_SCREEN_PUSH_URL is set (DESIGN 「알림·원격 차단」).
 import {screenPushPlistEntry} from './screenPushEndpoint';
+import {communityBuildConfigPlistEntry,readCommunityBuildConfig} from './communityBuildConfig';
 
 const packagePath = resolve(import.meta.dir, '..', 'native', 'screen-control');
 const teamID = 'DA8QKAQ2C9';
@@ -22,6 +23,7 @@ const installedPath = '/Applications/AgentsToZ Screen.app';
 const profilePath = join(packagePath, 'App', 'AgentsToZ_Screen_Developer_ID.provisionprofile');
 const args = process.argv.slice(2);
 let bundleVersion = '0.2';
+let communityConfigPath: string | undefined;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--bundle-version') {
     bundleVersion = args[++i] ?? '';
@@ -29,7 +31,10 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === '--output') {
     appPath = args[++i] ?? '';
     if (!isAbsolute(appPath) || basename(appPath) !== 'AgentsToZ Screen.app') throw Error('Invalid Screen app output');
-  } else if (!['--notarize', '--install', '--timestamp'].includes(args[i]!)) {
+  } else if (args[i] === '--community-config') {
+    if (communityConfigPath !== undefined || !args[i+1] || args[i+1]!.startsWith('--')) throw Error('Choose one explicit public community config file');
+    communityConfigPath = resolve(args[++i]!);
+  } else if (!['--notarize', '--install', '--timestamp', '--community-qa'].includes(args[i]!)) {
     throw Error(`Unsupported Screen build option: ${args[i]}`);
   }
 }
@@ -49,9 +54,13 @@ function signingIdentity(): string {
   return hash;
 }
 
+if (args.includes('--community-qa') && args.includes('--install')) throw Error('Community QA helpers cannot be installed by the production installer');
+if (args.includes('--community-qa') && communityConfigPath !== undefined) throw Error('Community QA and public configuration cannot be combined');
+const communityConfig = communityConfigPath === undefined ? undefined : readCommunityBuildConfig(communityConfigPath);
 // Checked before building, so a mistyped endpoint fails at once instead of building an app with it off.
 const pushEntry = screenPushPlistEntry(process.env.AGENTSTOZ_SCREEN_PUSH_URL);
-run(['swift', 'build', '-c', 'release', '--package-path', packagePath, '--product', 'AgentsToZScreen']);
+run(['swift', 'build', '-c', 'release', '--package-path', packagePath, '--product', 'AgentsToZScreen',
+  ...(args.includes('--community-qa') ? ['-Xswiftc', '-DSCREEN_COMMUNITY_QA'] : [])]);
 const binPath = run(['swift', 'build', '-c', 'release', '--package-path', packagePath, '--show-bin-path']);
 
 rmSync(appPath, {recursive: true, force: true});
@@ -69,6 +78,8 @@ writeFileSync(join(appPath, 'Contents', 'Info.plist'), `<?xml version="1.0" enco
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${bundleVersion}</string>
   <key>CFBundleVersion</key><string>${bundleVersion === '0.2' ? '2' : bundleVersion}</string>
+  ${args.includes('--community-qa') ? '<key>AgentsToZScreenCommunityQA</key><true/>' : ''}
+  ${communityBuildConfigPlistEntry(communityConfig)}
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>Your registered iPhone or iPad connects to this Mac using nearby Wi‑Fi to view and control the screen.</string>

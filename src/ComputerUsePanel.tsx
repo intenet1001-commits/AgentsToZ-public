@@ -3,7 +3,7 @@ import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {computerUseApprovalLabel,requestComputerUse,requestComputerUseNative,type ComputerUseManagementRequester,type ComputerUseNativeRequester} from './computerUseClient';
 import {controlAdvertisesScreen,type ComputerTarget} from './computerUseProtocol';
 import {isDialogDismissKey} from './dialogEscape';
-import {ComputerUseModeSelector,ComputerUseScopeForm,ComputerUseScopeGrants,supportsComputerScopes,type ComputerUseMode,type ComputerUseAppChoice} from './ComputerUseScopeControls';
+import {ComputerUseModeSelector,ComputerUseOutgoing,ComputerUseRemoteNotice,ComputerUseRemoteReceive,ComputerUseScopeForm,ComputerUseScopeGrants,computerUseRemoteView,supportsComputerScopes,type ComputerUseMode,type ComputerUseAppChoice} from './ComputerUseScopeControls';
 
 type WindowChoice=ComputerTarget&{title:string;appName:string};
 const button='min-h-11 rounded-xl border border-[var(--line)] px-4 py-2 text-sm disabled:opacity-50';
@@ -73,14 +73,21 @@ export function ComputerUsePanel({onClose,request=requestComputerUse,native=requ
   const listed=[...(state?.pending??[]),...(state?.scoped?.pending??[])],pending=liveComputerUsePending(listed,clock);
   // Re-read the clock while anything is listed, so an expired request leaves even when no new status arrives.
   useEffect(()=>{if(!listed.length)return;setClock(Date.now());const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[listed.length>0,state]);
-  // While switched on, an AI's request can arrive at any time: keep the waiting list current.
-  const hasPending=pending.length>0,watching=hasPending||state?.access?.enabled===true||!!state?.grants?.some((g:any)=>!g.halted)||!!state?.scoped?.grants?.some((g:any)=>!g.halted);
+  // While switched on, an AI's request can arrive at any time: keep the waiting list current. So do rows of another Mac's
+  // AI here and of this Mac's AI on another Mac: what the person may cut must not be an old picture.
+  const remoteRows=computerUseRemoteView(state)?.rows.length??0;
+  // An empty outgoing list can become nonempty while this panel is open. Its presence means the sidecar supports
+  // outgoing status; keep observing it even when this Mac has no local grant or existing remote session.
+  const hasPending=pending.length>0,watching=hasPending||state?.access?.enabled===true||!!state?.grants?.some((g:any)=>!g.halted)||!!state?.scoped?.grants?.some((g:any)=>!g.halted)||remoteRows>0||Array.isArray(state?.outgoing);
   useEffect(()=>{if(!hasPending)setReviewProblem('');},[hasPending]);
   useEffect(()=>{if(!watching)return;const timer=setInterval(()=>{void refresh();},2000);return()=>clearInterval(timer);},[watching,refresh]);
   const run=async(action:()=>Promise<void>)=>{if(busy)return;setBusy(true);setProblem('');try{await action();}catch(error){if(alive.current)setProblem(message(error));}finally{if(alive.current)setBusy(false);}};
   const selected=windows.find(w=>`${w.pid}/${w.processStart}/${w.windowId}`===windowId);
   const ready=state?.restartRequired!==true&&helperReady(state?.native);
   const permissionsMissing=computerUsePermissionsMissing(state);
+  // Another Mac's AI has its own row (「끊기」·「이 기기의 AI 막기」): it is never a connection to pick for one window or to end here.
+  const localConnections=(state?.connections??[]).filter((c:any)=>c?.scope!=='remote-connection');
+  const remoteProps={busy,run,request,refresh:()=>refresh(),onNotice:setNotice};
   return <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[var(--scrim)] p-3" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
     <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="computer-use-title" tabIndex={-1} data-testid="computer-use-panel" className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 text-[var(--ink)] shadow-2xl" onKeyDown={event=>{
       if(isDialogDismissKey(event.nativeEvent)){event.preventDefault();event.stopPropagation();onClose();}
@@ -102,12 +109,15 @@ export function ComputerUsePanel({onClose,request=requestComputerUse,native=requ
         <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={button} disabled={busy} onClick={()=>void run(async()=>{const result=await native('open');if(result.success!==true)throw Error(nativeMessage(result.code));setNotice(permissionsMissing?'시스템 설정에서 AgentsToZ Control 스위치를 켠 뒤 상태 다시 확인을 누르세요.':'Control 앱에서 연결 준비 또는 대기 중인 승인을 확인하세요.');})}>{permissionsMissing?'권한 켜기':'도우미 열기'}</button><button type="button" className={button} disabled={busy} onClick={()=>void run(()=>refresh(true,modeRef.current))}>상태 다시 확인</button></div>
       </section>
       {problem&&<p role="alert" className="mt-3 text-sm">{problem}</p>}{notice&&<p role="status" className="mt-3 text-sm">{notice}</p>}
+      <ComputerUseRemoteNotice state={state} {...remoteProps}/>
+      <ComputerUseOutgoing state={state} {...remoteProps}/>
       <ComputerUseModeSelector mode={mode} available={supportsComputerScopes(state)} locked={state?.access?.enabled===true} reason={state?.scoped?.native?.code} onChange={next=>{initialMode.current=false;modeRef.current=next;setMode(next);if(next==='window')setWindows([]);if(next==='application')setApplications([]);void refresh(true,next);}}/>
       {mode!=='window'&&<ComputerUseScopeForm mode={mode} state={state} applications={applications} request={request} refresh={()=>refresh()} busy={busy} run={run} onNotice={setNotice}/>}
+      <ComputerUseRemoteReceive state={state} {...remoteProps}/>
       {mode==='window'&&<section className="mt-5" aria-labelledby="computer-use-grant-title"><h3 id="computer-use-grant-title" className="font-semibold">이 창만 AI에 맡기기</h3>
         <ol className="mt-2 list-inside list-decimal space-y-1 text-sm text-[var(--text-muted)]"><li>AI에 “컴퓨터 유즈를 연결해 줘”라고 요청합니다.</li><li>아래에서 AI 연결과 맡길 창을 선택합니다.</li><li>Control 앱에서 대상을 확인하고 승인합니다.</li></ol>
         <p className="mt-2 text-xs text-[var(--text-muted)]">AI 앱에 따라 여러 대화가 한 연결을 함께 사용할 수 있습니다. 허용은 이 연결에 적용되며 최대 10분 뒤 끝납니다. AI가 알려 준 연결 코드와 아래 코드를 확인하세요.</p>
-        <div className="mt-3 grid gap-3"><label className="text-sm">AI 연결<select aria-label="AI 연결" className={field} value={connection} onChange={e=>setConnection(e.target.value)}><option value="">연결 선택</option>{(state?.connections??[]).map((c:any)=><option key={c.id} value={c.id}>{c.code} · {c.label}</option>)}</select></label>
+        <div className="mt-3 grid gap-3"><label className="text-sm">AI 연결<select aria-label="AI 연결" className={field} value={connection} onChange={e=>setConnection(e.target.value)}><option value="">연결 선택</option>{localConnections.map((c:any)=><option key={c.id} value={c.id}>{c.code} · {c.label}</option>)}</select></label>
           {!!connection&&<p className="text-xs text-[var(--text-muted)]">선택한 연결 코드 <code data-testid="computer-use-selected-code" className="break-all">{state?.connections?.find((c:any)=>c.id===connection)?.code}</code></p>}
           <label className="text-sm">맡길 창<select aria-label="맡길 창" className={field} value={windowId} onChange={e=>setWindowId(e.target.value)}><option value="">창 선택</option>{windows.map(w=><option key={`${w.pid}/${w.processStart}/${w.windowId}`} value={`${w.pid}/${w.processStart}/${w.windowId}`}>{w.appName} · {w.title||`창 ${w.windowId}`}</option>)}</select></label>
           <button type="button" className={button} disabled={busy||!ready||!connection||!selected} onClick={()=>void run(async()=>{
@@ -120,7 +130,7 @@ export function ComputerUsePanel({onClose,request=requestComputerUse,native=requ
       {!!state?.grants?.length&&<section className="mt-5" aria-label="현재 제어 허용"><h3 className="font-semibold">현재 허용</h3>{state.grants.map((g:any)=><div key={g.id} className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] p-3"><div className="min-w-0"><p className="break-words text-sm">{g.label}</p><p className="text-xs text-[var(--text-muted)]">{g.halted?'중지됨':'사용 시 대상과 권한 재확인'} · {g.target.bundleId}</p></div><button type="button" className={button} disabled={busy} onClick={()=>void run(async()=>{await request({operation:'revoke',id:g.id});await refresh();})}>허용 종료</button></div>)}</section>}
       {!!state?.recovery?.length&&<section className="mt-5" aria-label="결과 확인 필요"><h3 className="font-semibold">결과를 확인할 작업</h3><p className="mt-1 text-sm text-[var(--text-muted)]">자동으로 다시 실행하지 않습니다. 해당 앱의 현재 상태를 직접 확인해 주세요.</p>{state.recovery.map((r:any)=><div key={r.id} className="mt-2 rounded-xl border border-[var(--line)] p-3"><p className="break-words text-sm">{r.bundleId} · {r.operation}</p><label className="mt-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={reviewed[r.id]===true} onChange={e=>setReviewed(old=>({...old,[r.id]:e.target.checked}))}/>앱의 현재 상태를 직접 확인했습니다</label><button type="button" className={button} disabled={busy||reviewed[r.id]!==true} onClick={()=>void run(async()=>{await request({operation:'review-recovery',id:r.id,confirmed:true});await refresh();})}>검토 완료</button></div>)}</section>}
       <ComputerUseScopeGrants state={state} busy={busy} run={run} request={request} refresh={()=>refresh()}/>
-      <details className="mt-5 border-t border-[var(--line)] pt-3"><summary className="min-h-11 cursor-pointer text-sm">사용 범위와 연결 종료</summary><p className="text-sm text-[var(--text-muted)]">접근성 조작을 지원하지 않는 화면은 사람이 이어서 처리합니다. 보안 입력·사람의 화면 사용·대상 변경·결과 불명에서는 AI 제어가 중지되거나 거부됩니다. 외부 AI 앱의 모델·에포트 자동 변경은 별도의 연결 검증이 필요합니다.</p>{(state?.connections??[]).map((c:any)=><div key={c.id} className="mt-2 flex items-center justify-between gap-3 text-sm"><span className="min-w-0"><code className="block break-all">{c.code}</code><span className="block break-words">표시 이름: {c.label}</span></span><button type="button" className={button} disabled={busy} onClick={()=>void run(async()=>{await request({operation:'disconnect',connectionId:c.id});await refresh();})}>연결 종료</button></div>)}</details>
+      <details className="mt-5 border-t border-[var(--line)] pt-3"><summary className="min-h-11 cursor-pointer text-sm">사용 범위와 연결 종료</summary><p className="text-sm text-[var(--text-muted)]">접근성 조작을 지원하지 않는 화면은 사람이 이어서 처리합니다. 보안 입력·사람의 화면 사용·대상 변경·결과 불명에서는 AI 제어가 중지되거나 거부됩니다. 외부 AI 앱의 모델·에포트 자동 변경은 별도의 연결 검증이 필요합니다.</p>{localConnections.map((c:any)=><div key={c.id} className="mt-2 flex items-center justify-between gap-3 text-sm"><span className="min-w-0"><code className="block break-all">{c.code}</code><span className="block break-words">표시 이름: {c.label}</span></span><button type="button" className={button} disabled={busy} onClick={()=>void run(async()=>{await request({operation:'disconnect',connectionId:c.id});await refresh();})}>연결 종료</button></div>)}</details>
     </div>
   </div>;
 }

@@ -2,6 +2,8 @@ import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { screenPushEndpoint } from './scripts/screenPushEndpoint';
+import type {CommunityBuildConfig} from './scripts/communityBuildConfig';
+import {assertSealedCommunityBuildConfig,writeCommunityBuildSnapshot} from './scripts/mainCommunityBuildConfig';
 
 export const SCREEN_HELPER_BUNDLE_PATH = 'Contents/Helpers/AgentsToZ Screen.app';
 export const SCREEN_HELPER_IDENTIFIER = 'com.intenet.agentstozbycs.screen';
@@ -17,6 +19,7 @@ export interface ScreenControlBundleOptions {
   version: string;
   signingIdentity?: string;
   timestamp?: boolean;
+  communityConfig?: CommunityBuildConfig;
   /**
    * The screen-push relay for this Screen's notifications, remote stop and weekly allowance alerts. Only an explicit option:
    * never inherited from the environment, so a public package cannot pick up a private endpoint. The main app installs
@@ -74,6 +77,8 @@ export async function stageScreenControlBundle(options: ScreenControlBundleOptio
   const built = join(scratch, 'AgentsToZ Screen.app');
   try {
     const args = [process.execPath, '--env-file=/dev/null', join(root, 'scripts/build-screen-app.ts'), '--bundle-version', options.version, '--output', built];
+    const communitySnapshot=writeCommunityBuildSnapshot(join(scratch,'community-public.json'),options.communityConfig);
+    if(communitySnapshot)args.push('--community-config',communitySnapshot);
     if (options.timestamp !== false) args.push('--timestamp');
     const child = Bun.spawn(args, {
       cwd: scratch,
@@ -94,6 +99,7 @@ export async function stageScreenControlBundle(options: ScreenControlBundleOptio
     if (verified.exitCode !== 0) throw Error(`Bundled Screen signature rejected: ${verified.stderr.toString()}`);
     const version = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleVersion', 'raw', '-o', '-', join(helperAppPath, 'Contents/Info.plist')], { stdout: 'pipe', stderr: 'pipe' });
     if (version.exitCode !== 0 || version.stdout.toString().trim() !== options.version) throw Error('Bundled Screen version differs from main app');
+    assertSealedCommunityBuildConfig(join(helperAppPath,'Contents/Info.plist'),options.communityConfig);
     const push = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'AgentsToZScreenPushURL', 'raw', '-o', '-', join(helperAppPath, 'Contents/Info.plist')], { stdout: 'pipe', stderr: 'pipe' });
     const builtEndpoint = push.exitCode === 0 ? push.stdout.toString().trim() : null;
     if (builtEndpoint !== (env.AGENTSTOZ_SCREEN_PUSH_URL ?? null)) throw Error('Bundled Screen push endpoint differs from the one requested');

@@ -1,5 +1,18 @@
 # 프로젝트 장기기억 · 공통기억 · Hermes 명령
 
+## 관련 근거 회상 — 명시적 opt-in (2026-11-02)
+
+- `/api/project-memory/recall`의 JSON `includeRelations:true`에서만 `relations`를 추가한다. 기본 응답 키·기존 hits·교정·일지·공통기억 조회는 그대로다.
+- `src/projectMemoryRelations.ts`는 현재 정본 문서의 직접 검색 결과를 씨앗으로 `[[개념]]`, 구체적인 인라인 코드, `memory-entry:<24자리 항목 ID>` 참조를 한 단계만 따른다.
+  예: `[[socket epoch]]`, `` `remoteControlLanServer.ts` ``, `[근거](memory-entry:aaaaaaaaaaaaaaaaaaaaaaaa)`. 코드 블록·주석·일반적인 ID 이름은 연결에 쓰지 않는다.
+  파일·URL·다른 기억을 읽거나 자동으로 기억 본문에 주석을 추가하지 않는다. 관계는 `association-only`, 반환 항목은 항상 `caution:true`다.
+- 현재 contentVersionHash의 교정·반박은 **씨앗·결과·연결 고리 모두**에서 제외한다. 교정 이력을 읽지 못하면 관계도 unavailable이며 빈 결과를 지식 부재로 해석하지 않는다.
+- 문서 SHA256·항목 본문 버전·씨앗 항목 ID·연결 종류/개념을 함께 반환한다. 중복 항목 ID·상한 초과는 `complete:false`로 표시한다.
+  두 직접 검색 결과 사이에 명시적 연결이 없을 때 내는 질문(최대3개)은 검토 제안이지 미완료 업무나 지식 부족의 확정이 아니다.
+- 예산: 문서2MB·항목512개·항목당 개념/참조16개·개념당 연결16개, 결과8개·본문 미리보기1,200 UTF-8 bytes·관계 JSON8,000 bytes.
+  관계의 추가 예산이며 기존 회상 응답 예산과 구분한다. 별도 저장소·타이머·AI 호출·전역 그래프 캐시가 없다.
+- 회귀: `tests/project-memory-relations.test.ts`, `tests/project-memory-api-integration.test.ts`, `tests/control-profile-surface-api.test.ts`.
+
 ## 저장 실패 알림의 진단 동선 (2026-10-29)
 
 - Codex stderr는 CLI 헤더·작업 경로·입력 프롬프트까지 담을 수 있다. `runProjectMemoryAgent`는 실패 출력을
@@ -85,7 +98,8 @@
 - **이번 릴리스에는 마이그레이션이 없다.** 표·행·파일도 지우지 않았다.
 - **주제 발견은 같은 교훈 묶음이 먼저다**(`src/commonMemoryLessonClusters.ts`, 2026-11-01). 다른 장기기억에 비슷하게 적힌 항목을 n-gram Jaccard로 묶고,
   예전 키워드 주제 7개는 그 조회에 같은 교훈이 없을 때만 나온다. 라틴 문자 5-gram을 3-gram으로 되돌리지 말 것 — 실측에서 무관한 영어 항목이 실제
-  공유 교훈과 같은 유사도로 섞였다. 후보에 키를 더하지 않는다. 문턱의 근거와 한계(한 쪽 안에서만 비교)는 `docs/meta-common-memory.md` 「주제 발견」.
+  공유 교훈과 같은 유사도로 섞였다. 후보에 키를 더하지 않는다. 페이지 간 비교는 scope를 분리한 10분·전체 2,048항목의 임시 색인으로 관련 원본을 찾고 현재 본문을 다시 검증한다.
+  직접 고른 범위는 확장하지 않는다. 문턱·예산·남은 한계는 `docs/meta-common-memory.md` 「주제 발견」.
 - `hostCapabilities`는 `list` **결과 안쪽**에 실린다(옛 휴대폰의 엄격한 정규화기가 바깥 키를 거절한다). JSON 포함 조건은 `.filter(…,'cs',JSON)`으로만 —
   supabase-js `.contains()`는 객체 배열을 `cs.{[object Object]}`로 보낸다. 카테고리를 `.or()`로 섞지 말 것.
 

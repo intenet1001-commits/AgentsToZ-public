@@ -30,6 +30,7 @@ extension ScreenViewerLifecycle.Phase {
 struct ScreenViewerView: View {
     let mac: SavedScreenMac
     var route: ScreenConnectionRoute = .automatic
+    var communityTarget: CommunityAuthorization? = nil
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -139,7 +140,7 @@ struct ScreenViewerView: View {
             }
             guard !Task.isCancelled, lifecycle.hasStarted else { return }
             model.hideMacCursor(inputMode == .trackpad)
-            await model.run(mac: mac, route: route)
+            await model.run(mac: mac, route: route, communityTarget: communityTarget)
         }
         .task(id: graceToken) {
             // A scene that is not active yet is tolerated for this long and no longer. Cancelled with the view, and
@@ -170,6 +171,7 @@ struct ScreenViewerView: View {
         }) {
             controlsGuide
         }
+        .simultaneousGesture(TapGesture().onEnded { model.recordHumanActivity(.action, observedAt: Date()) })
         .onChange(of: inputMode) { _, mode in model.hideMacCursor(mode == .trackpad) }
         .onChange(of: model.macState.currentDisplay) { _, current in
             if model.macState.choosesDisplay { hint = "지금 보는 디스플레이: \(current + 1)/\(model.macState.displayCount)" }
@@ -227,7 +229,7 @@ struct ScreenViewerView: View {
             }
             if model.macState.locked == true {
                 MacSignalRow(text: "Mac이 잠겨 있습니다. 보안 입력 중에는 원격 조작이 제한될 수 있습니다.", symbol: "lock.fill", tint: .blue)
-            } else {
+            } else if model.sessionControls != nil {
                 MacSignalRow(text: model.macState.locked == false ? "Mac은 잠겨 있지 않습니다." : "Mac 잠김 상태를 확인하지 못했습니다.",
                              symbol: "display", tint: .gray)
             }
@@ -677,6 +679,7 @@ final class ScreenViewerModel {
     let layer = AVSampleBufferDisplayLayer()
     private(set) var status: String? = "기기 인증으로 이번 연결을 승인해 주세요."
     private(set) var connectionPath: String?
+    private(set) var connectionPhase = ScreenConnectionPhase.approval
     private(set) var ended = false
     private(set) var needsBiometricRecovery = false
     private var recoveryAttempt: UUID?
@@ -721,31 +724,61 @@ final class ScreenViewerModel {
     private var hidesMacCursor = false
     /// Requests to the Mac go one after another, so a quick toggle cannot reach it out of order.
     private var requests: Task<Void, Never>?
+    private var commonUse: MobileCommunityUseSession?
+    private var humanActivityTask: Task<Void, Never>?
+    private var lastHumanActivitySent: ContinuousClock.Instant?
 
     init() { layer.videoGravity = .resizeAspect }
 
-    func run(mac: SavedScreenMac, route: ScreenConnectionRoute = .automatic) async {
+    func run(mac: SavedScreenMac, route: ScreenConnectionRoute = .automatic, communityTarget: CommunityAuthorization? = nil) async {
         guard let pinned = mac.pinned else { return finish("등록 정보가 손상되었습니다. 다시 등록해 주세요.") }
-        if route == .internet, mac.relay?.matches(fingerprint: pinned.fingerprint) != true {
+        if communityTarget == nil, route == .internet, mac.relay?.matches(fingerprint: pinned.fingerprint) != true {
             return finish("이 Mac에는 자체 중계 경로가 없습니다. 밖에서는 ‘사설망 · Cloudflare’, 가까이에서는 근거리 경로를 선택하세요.")
         }
-        if route == .privateNetwork, mac.privateNetwork == nil {
+        if communityTarget == nil, route == .privateNetwork, mac.privateNetwork == nil {
             return finish("이 Mac의 사설망 경로가 없습니다. Mac 목록에서 길게 눌러 ‘사설망 연결 설정’을 열고, Cloudflare One Agent에 등록한 뒤 연결하세요.")
         }
         // This attempt's generation: `end()` abandons it, so neither Face ID nor the key exchange can come back and
         // hand a live Mac session to a view that is already gone.
         let attempt = gate.start()
         do {
-            let signer = try await withBiometrics(.connection) {
-                try await FaceIDApprovedSigner.approve(dataRepresentation: mac.deviceKey, reason: "\(mac.macName) 화면에 연결합니다", authentication: mac.authentication)
+            let viewer: ScreenViewer, internet: Bool
+            if let communityTarget {
+                let center = MobileScreenCommunity.shared
+                let credentials: (CommunityAuthorization, CommunityUseSession)
+                if center.unified.useSession.isUsable { credentials = try await center.requireUnifiedUse() }
+                else { credentials = try await withBiometrics(.connection) { try await center.requireUnifiedUse() } }
+                guard gate.owns(attempt), !Task.isCancelled, let authority = ScreenCommunityAuthority.configured else { return }
+                let fresh = try await center.unified.screenTarget(deviceID: communityTarget.body.deviceId)
+                guard fresh.peer.body.enrollmentId == communityTarget.body.enrollmentId,
+                      fresh.peer.body.hostPublicKey == communityTarget.body.hostPublicKey else { throw ScreenCommunityError.wrongCommunity }
+                connectionPhase = .community; status = connectionPhase.progressMessage
+                let signer = try center.unified.useSession.signer(for: .screenView)
+                let connected = try await CommunityScreenConnector.connect(authority: authority, own: credentials.0, session: credentials.1,
+                    target: fresh.peer, signer: signer, ticketProvider: { try await center.screenTicket(connectionId: $0) },
+                    signerProvider: {
+                        _ = try await center.unified.useSession.currentSession(for: .screenView)
+                        return try await MainActor.run { try center.unified.useSession.signer(for: .screenView) }
+                    })
+                viewer = connected.viewer; internet = true; commonUse = center.unified.useSession
+                commonUse?.inputSuspended = { [weak self] in
+                    self?.finish("입력을 중단하고 화면 연결을 닫았습니다. 잠금·만료 전에는 Mac을 다시 골라도 추가 인증하지 않습니다.")
+                }
+            } else {
+                let signer = try await withBiometrics(.connection) {
+                    try await FaceIDApprovedSigner.approve(dataRepresentation: mac.deviceKey, reason: "\(mac.macName) 화면에 연결합니다", authentication: mac.authentication)
+                }
+                guard gate.owns(attempt), !Task.isCancelled else { return }
+                let connected = try await Self.connect(mac: mac, pinned: pinned, signer: signer, route: route) { phase in
+                    guard self.gate.owns(attempt), !Task.isCancelled else { throw CancellationError() }
+                    self.connectionPhase = phase; self.status = phase.progressMessage
+                }
+                viewer = connected.0; internet = connected.1
             }
-            guard gate.owns(attempt), !Task.isCancelled else { return }
-            status = "Mac에 연결하는 중…"
-            let (viewer, internet) = try await Self.connect(mac: mac, pinned: pinned, signer: signer, route: route)
             // The session arrived for an attempt nobody owns any more: close the Mac's session instead of keeping it.
             guard gate.accepts(attempt), !Task.isCancelled else { return await viewer.close() }
             self.viewer = viewer
-            connectionPath = route == .privateNetwork ? "사설망 · Cloudflare" : internet ? "자체 중계" : "근거리"
+            connectionPath = communityTarget != nil ? "커뮤니티 · Cloudflare" : route == .privateNetwork ? "사설망 · Cloudflare" : internet ? "자체 중계" : "근거리"
             sessionControls = viewer.macHasSessionControls
             desktopControls = viewer.protocolVersion >= 3
             if desktopControls, internet { try viewer.desktopControl(.setVideoQuality(.balanced)) }
@@ -758,7 +791,8 @@ final class ScreenViewerModel {
                 }
             }
             defer { notices.cancel() }
-            status = "첫 화면을 기다리는 중…"
+            connectionPhase = .firstFrame
+            status = connectionPhase.progressMessage
             for try await picture in viewer.pictures() {
                 // The view went away mid-stream: stop rendering into a layer nobody shows and let `end()` close it.
                 guard gate.owns(attempt), !Task.isCancelled else { return }
@@ -774,6 +808,7 @@ final class ScreenViewerModel {
                     guard gate.owns(attempt), !Task.isCancelled else { return }
                 }
                 renderer.enqueue(picture.sample)
+                connectionPhase = .displaying
                 status = nil
             }
             guard gate.owns(attempt) else { return }
@@ -781,7 +816,7 @@ final class ScreenViewerModel {
         } catch {
             guard gate.owns(attempt) else { return }
             needsBiometricRecovery = (error as? LAError)?.code == .biometryLockout
-            finish(Self.message(for: error))
+            finish(connectionPhase.transportFailure(error) ?? Self.message(for: error))
         }
     }
 
@@ -818,15 +853,18 @@ final class ScreenViewerModel {
     /// The address from registration first; the Bonjour host name when the Mac's address has changed. A second try
     /// only follows a failure before the key exchange, where the one-time Face ID approval is still unused.
     private static func connect(mac: SavedScreenMac, pinned: PinnedMac, signer: FaceIDApprovedSigner,
-                                route: ScreenConnectionRoute) async throws -> (ScreenViewer, Bool) {
+                                route: ScreenConnectionRoute,
+                                progress: (ScreenConnectionPhase) throws -> Void) async throws -> (ScreenViewer, Bool) {
         let transport: any ScreenFrameTransport
         var internet = false
         if route == .privateNetwork {
             guard let privateNetwork = mac.privateNetwork else { throw RegistrationError.malformed }
+            try progress(.privateNetwork)
             transport = try await ScreenClient.open(privateNetwork: privateNetwork, maxFrame: 1024)
             internet = true
         } else if route == .internet {
             guard let relay = mac.relay, relay.matches(fingerprint: pinned.fingerprint) else { throw ScreenRelayError.offline }
+            try progress(.relay)
             transport = try await ScreenRelayTransport.open(route: relay, purpose: .screen)
             internet = true
         } else {
@@ -839,20 +877,25 @@ final class ScreenViewerModel {
                     return try await ScreenClient.open(to: .hostPort(host: .init(mac.hostName), port: port), maxFrame: 1024)
                 }
             }
+            try progress(.nearby)
             do { transport = try await openNearby() }
             catch {
                 try Task.checkCancellation()
                 guard route == .automatic, let relay = mac.relay, relay.matches(fingerprint: pinned.fingerprint) else { throw error }
+                try progress(.relay)
                 transport = try await ScreenRelayTransport.open(route: relay, purpose: .screen)
                 internet = true
             }
         }
         guard !Task.isCancelled else { transport.cancel(); throw CancellationError() }
+        do { try progress(.authenticatingMac) }
+        catch { transport.cancel(); throw error }
         // From this point the one-use biometric signer is committed to this transport. Never fall back on auth failure.
         return (try await ScreenViewer.connect(over: transport, mac: pinned, signer: signer), internet)
     }
 
     func send(_ event: InputEvent) {
+        guard commonUse == nil || commonUse?.isUsable == true else { return }
         guard macState.canSendInput else { return }
         guard let events = keyboardFence.submit(event) else { finish("한영 전환 중 입력이 너무 많이 쌓여 연결을 끝냈습니다. 새로 연결해 주세요."); return }
         for event in events { viewer?.input(event) }
@@ -910,6 +953,7 @@ final class ScreenViewerModel {
     }
 
     func hardwareKey(_ code: UInt16, isDown: Bool, modifiers: KeyModifiers, cancelled: Bool = false) {
+        if !cancelled { recordHumanActivity(.key, observedAt: Date()) }
         guard macState.canSendInput else { capsPress.cancel(); return }
         if desktopControls, code == 0x39, macState.keyboard == nil {
             desktopNotice = "Mac의 한영 상태를 확인하는 중입니다. 확인 뒤 Caps Lock을 다시 눌러 주세요."
@@ -928,6 +972,7 @@ final class ScreenViewerModel {
     }
 
     func navigateSpace(_ action: ScreenSpaceAction) {
+        recordHumanActivity(.action, observedAt: Date())
         guard let viewer, canSwitchSpaces else { return }
         try? viewer.desktopControl(.navigateSpace(action))
     }
@@ -941,11 +986,13 @@ final class ScreenViewerModel {
     }
 
     func setVideoQuality(_ quality: ScreenVideoQuality) {
+        recordHumanActivity(.action, observedAt: Date())
         guard let viewer, desktopControls else { return }
         try? viewer.desktopControl(.setVideoQuality(quality))
     }
 
     func press(_ code: UInt16, modifiers: KeyModifiers = []) {
+        recordHumanActivity(.key, observedAt: Date())
         send(.key(code: code, isDown: true, modifiers: modifiers))
         send(.key(code: code, isDown: false, modifiers: modifiers))
     }
@@ -959,6 +1006,7 @@ final class ScreenViewerModel {
     /// `.waiting` means the request was handed to the local input queue, not that the target app applied it. Queue
     /// overflow or a lost response is uncertain and must not be replayed automatically.
     func submitTextAndReturn(_ text: String) -> ScreenTextReturnSubmission {
+        recordHumanActivity(.action, observedAt: Date())
         guard let viewer, macState.canSendInput, !keyboardPending, textReturnPending == nil, !textReturnUncertain else {
             desktopNotice = "Mac 입력 상태를 확인한 뒤 다시 시도하세요."
             return .refused
@@ -993,6 +1041,7 @@ final class ScreenViewerModel {
     /// Composed text in pieces the Mac accepts (256 bytes each, split between characters, no control characters —
     /// the Mac ends the session on a malformed piece).
     func type(_ text: String) {
+        recordHumanActivity(.key, observedAt: Date())
         for piece in ScreenTextPieces.pieces(of: text, maxBytes: InputCodec.maxTextBytes) { send(.text(piece)) }
     }
 
@@ -1007,11 +1056,13 @@ final class ScreenViewerModel {
 
     /// The Mac's next display (version 2); `macState` names the one shown once the Mac has switched.
     func nextDisplay() {
+        recordHumanActivity(.action, observedAt: Date())
         guard let viewer, sessionControls == true else { return }
         request { try await viewer.nextDisplay() }
     }
 
     func selectDisplay(_ index: Int) {
+        recordHumanActivity(.action, observedAt: Date())
         guard let viewer, sessionControls == true, index != macState.currentDisplay else { return }
         request { try await viewer.selectDisplay(index) }
     }
@@ -1020,6 +1071,7 @@ final class ScreenViewerModel {
     /// passcode). The Mac then ends the session with its reason, which `run` shows. Returns what to tell the person
     /// when nothing was turned off.
     func turnOffScreenControl(macName: String, authentication: ScreenDeviceAuthentication) async -> String? {
+        if commonUse != nil { return "공통 화면 연결에서는 이 Mac의 화면 제어를 끄지 않습니다. Mac에서 직접 끄세요." }
         guard let viewer, viewer.macHasSessionControls else { return "이 Mac은 휴대폰에서 끌 수 없습니다. Mac 앞에서 꺼 주세요." }
         let approval: BiometricApproval
         do {
@@ -1042,6 +1094,8 @@ final class ScreenViewerModel {
     /// stops at its next gate check and closes whatever it receives — `viewer` being nil is not 「nothing to stop」.
     func end() {
         gate.invalidate()
+        humanActivityTask?.cancel(); humanActivityTask = nil; lastHumanActivitySent = nil
+        commonUse?.inputSuspended = {}; commonUse = nil // Keep the common mobile episode for a deliberate Mac switch.
         keyboardDeadline?.cancel(); keyboardDeadline = nil
         if let id = textReturnPending { textReturnCompletion = .uncertain(id); textReturnUncertain = true }
         textReturnDeadline?.cancel(); textReturnDeadline = nil; textReturnPending = nil
@@ -1063,6 +1117,27 @@ final class ScreenViewerModel {
         sessionControls = nil
         desktopControls = false
         status = textReturnWasUncertain ? message + " 글자와 Enter의 전달 결과는 Mac 화면에서 확인하세요." : message
+    }
+    /// Only UIKit touch/key callbacks and explicit local UI actions call this. Inertial scrolling, display ticks,
+    /// video frames, socket keepalives and AI work never renew the shared idle deadline.
+    func recordHumanActivity(_ kind: MobileCommunityUseSession.HumanActivity, observedAt: Date, observedTick: ContinuousClock.Instant? = nil) {
+        // Capture before the asynchronous lease refresh. Never reconstruct an event's tick after networking.
+        let tickNow = ContinuousClock.now, wallNow = Date()
+        guard let eventTick = observedTick ?? CommunityUseIdleDeadline.observedTick(observedAt: observedAt, wallNow: wallNow, tickNow: tickNow),
+              eventTick <= tickNow, eventTick.duration(to: tickNow) <= .seconds(55) else { return }
+        guard let commonUse, commonUse.isUsable, humanActivityTask == nil,
+              lastHumanActivitySent.map({ $0.duration(to: eventTick) >= .seconds(15) }) ?? true else { return }
+        lastHumanActivitySent = eventTick
+        humanActivityTask = Task { [weak self] in
+            defer { self?.humanActivityTask = nil }
+            do {
+                _ = try await commonUse.currentSession(for: .screenView)
+                try Task.checkCancellation()
+                try await commonUse.recordHumanActivity(kind, observedAt: observedAt, observedTick: eventTick)
+            } catch ScreenCommunityError.service(let code) where ["BUSY", "INVALID_ACTIVITY"].contains(code) { }
+            catch is CancellationError { }
+            catch { self?.finish("공통 사용 권한을 확인하지 못했습니다. Mac 목록에서 사용 상태를 확인해 주세요.") }
+        }
     }
 
     /// Runs one Face ID approval and records its outcome before `authenticating` turns off, so the view's decision
@@ -1106,7 +1181,8 @@ final class ScreenViewerModel {
         case .turnedOffFromDevice?: "이 기기에서 Mac 화면 제어를 껐습니다. 다시 켜려면 Mac 앞에서 켜 주세요."
         case .revoked?: "Mac에서 이 기기의 등록을 해지했습니다. 다시 쓰려면 Mac 앞에서 다시 등록해 주세요."
         case .replaced?: "이 기기의 새 연결이 이어받아 이 연결은 끝났습니다."
-        case .endedAtMac?, nil: "Mac이 연결을 끝냈습니다."
+        // A phone session stays at version 4 (SR-36) and never reads the version-5 reasons; the Mac sends their older form.
+        case .endedAtMac?, .takenOver?, .busy?, .captureUnavailable?, nil: "Mac이 연결을 끝냈습니다."
         }
     }
 
@@ -1158,6 +1234,7 @@ struct ScreenSurface: UIViewRepresentable {
             guard view?.remoteInputEnabled == true else { return }; model?.send(event)
         }
         view.hardwareKey = { [weak model] in model?.hardwareKey($0, isDown: $1, modifiers: $2, cancelled: $3) }
+        view.humanActivity = { [weak model] in model?.recordHumanActivity($0, observedAt: $1, observedTick: $2) }
         view.videoSize = { [weak model] in model?.videoSize ?? .zero }
         return view
     }
@@ -1176,6 +1253,7 @@ struct ScreenSurface: UIViewRepresentable {
         private let cursorLayer = CAShapeLayer()
         var send: @MainActor (InputEvent) -> Void = { _ in }
         var hardwareKey: @MainActor (UInt16, Bool, KeyModifiers, Bool) -> Void = { _, _, _, _ in }
+        var humanActivity: @MainActor (MobileCommunityUseSession.HumanActivity, Date, ContinuousClock.Instant) -> Void = { _, _, _ in }
         var videoSize: @MainActor () -> CGSize = { .zero }
         var zoomChanged: @MainActor (Bool) -> Void = { _ in }
         var keepsTextFocus = false
@@ -1393,7 +1471,14 @@ struct ScreenSurface: UIViewRepresentable {
 
         // MARK: Gestures
 
+        private func recordGestureActivity() {
+            let observedAt = Date(), observedTick = ContinuousClock.now
+            humanActivity(.touch, observedAt, observedTick)
+        }
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            let wallNow = Date(), tickNow = ContinuousClock.now
+            let age = ProcessInfo.processInfo.systemUptime - touch.timestamp
+            if age >= 0, age <= 55 { humanActivity(.touch, wallNow.addingTimeInterval(-age), tickNow.advanced(by: .seconds(-age))) }
             // Touching the glass stops a glide, as on the phone's own lists.
             momentum = nil
             if !remoteInputEnabled && [tap, secondaryClick, twoFingerTap, hold, oneFinger].contains(recognizer) { return false }
@@ -1411,6 +1496,7 @@ struct ScreenSurface: UIViewRepresentable {
         }
 
         @objc private func tapped(_ gesture: UITapGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             // Back to the hardware keyboard, unless a bar is open for typing.
             if !keepsTextFocus { becomeFirstResponder() }
             syncViewport()
@@ -1423,12 +1509,14 @@ struct ScreenSurface: UIViewRepresentable {
 
         /// The secondary button of an iPad mouse or trackpad: a right click where the pointer is.
         @objc private func secondaryClicked(_ gesture: UITapGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             syncViewport()
             guard let mac = viewport.macPoint(at: gesture.location(in: self)) else { return }
             click(.right, at: mac)
         }
 
         @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             syncViewport()
             if mode == .trackpad { return click(.right, at: cursor) }
             guard let mac = viewport.macPoint(at: gesture.location(in: self)) else { return }
@@ -1436,12 +1524,14 @@ struct ScreenSurface: UIViewRepresentable {
         }
 
         @objc private func twoFingerDoubleTapped(_ gesture: UITapGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             viewport.reset()
             applyViewport()
         }
 
         /// Hold, then drag: the left button stays down until the finger lifts.
         @objc private func held(_ gesture: UILongPressGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             let location = gesture.location(in: self)
             let now = CACurrentMediaTime()
             switch gesture.state {
@@ -1484,6 +1574,7 @@ struct ScreenSurface: UIViewRepresentable {
         /// Touch mode: moves the zoomed picture. Trackpad mode: pushes the cursor. An iPad mouse drags with the button
         /// down, as a mouse does.
         @objc private func oneFingerPanned(_ gesture: UIPanGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             let translation = gesture.translation(in: self)
             let delta = CGPoint(x: translation.x - lastPan.x, y: translation.y - lastPan.y)
             lastPan = translation
@@ -1526,6 +1617,7 @@ struct ScreenSurface: UIViewRepresentable {
 
         /// Two fingers either zoom or scroll, decided once per gesture (`TwoFingerIntent`).
         @objc private func twoFingerPanned(_ gesture: UIPanGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             switch gesture.state {
             case .began:
                 if !isActive(pinch) { twoFinger = .undecided }
@@ -1552,6 +1644,7 @@ struct ScreenSurface: UIViewRepresentable {
         }
 
         @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             switch gesture.state {
             case .began:
                 if !isActive(twoFingerPan) { twoFinger = .undecided }
@@ -1621,6 +1714,7 @@ struct ScreenSurface: UIViewRepresentable {
 
         /// An iPad mouse or trackpad pointer moves the Mac's pointer to where it is.
         @objc private func hovered(_ gesture: UIHoverGestureRecognizer) {
+            if gesture.state != .cancelled && gesture.state != .failed { recordGestureActivity() }
             guard gesture.state == .began || gesture.state == .changed else { return }
             syncViewport()
             if let mac = viewport.macPoint(at: gesture.location(in: self)) {
@@ -1921,6 +2015,8 @@ private extension ScreenInputAvailability {
         case .secureInput: "Mac의 보안 입력 중이라 조작을 멈췄습니다. Mac에서 보안 입력을 마친 뒤 다시 연결하세요."
         case .monitorUnavailable: "Mac 입력 우선 보호가 중단되어 화면만 보여줍니다. Mac의 권한을 확인하고 다시 연결하세요."
         case .localActivity: "Mac에서 입력 중이거나 입력 상태를 확인하고 있습니다. 잠시 뒤 조작이 다시 가능합니다."
+        // Version 5 only; a phone session never reads them (SR-36).
+        case .viewOnly, .notificationsUnconfirmed, .controlNotInThisBuild: "화면 보기만 가능합니다."
         }
     }
 }

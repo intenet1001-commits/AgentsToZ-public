@@ -152,8 +152,10 @@ describe('smaller shell fixes', () => {
     const project = read('mobile/ios/AgentsToZMobile.xcodeproj/project.pbxproj');
     expect(project).toContain('path = "WorkroomStoreWipe.swift"');
     expect(project).toMatch(/PBXSourcesBuildPhase;[^}]*D40000000000000000000002/);
+    // The fixtures share one compile list (mobile/ios/scripts/workroomFixtureCompile.ts, tests/ios-workroom-fixture-compile.test.ts).
+    expect(read('mobile/ios/scripts/workroomFixtureCompile.ts')).toContain("'mobile/ios/App/WorkroomStoreWipe.swift'");
     for (const script of ['mobile/ios/scripts/check-workroom.ts', 'mobile/ios/scripts/check-common-memory-device.ts']) {
-      expect(read(script)).toContain("mobile/ios/App/WorkroomStoreWipe.swift");
+      expect(read(script)).toContain("from './workroomFixtureCompile'");
     }
   });
 });

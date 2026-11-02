@@ -1,6 +1,9 @@
 import {createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import type {AiTerminalAgent,AiTerminalSummary} from './aiTerminalProtocol';
-import {OpsRequestStore,opsRequestSameText,type OpsRequestOrigin,type OpsRequestRecord} from './opsRequestStore';
+import {OpsRequestStore,opsRequestSameText,type OpsRequestOrigin,type OpsRequestCommunityOrigin,type OpsRequestMobileOrigin,type OpsRequestRecord} from './opsRequestStore';
+import {CommunityDeviceAuthorization,CommunityMobileUseSession} from './communityMobilePrincipal';
+import {mobileControlOperationTime} from './communityMobileControlProtocol';
+import type {CommunityMobilePrincipal,CommunityMobileEffectGuard} from './communityMobileControlTypes';
 import {OPS_REQUEST_VERSION,OPS_REQUEST_MAX_RESULT_BYTES,OpsRequestError,opsRequestId,opsRequestText,parseOpsRequest,type OpsRequestReceipt} from './opsRequestProtocol';
 import {createOpsRequestDispatch,type OpsRequestDispatchDependencies} from './opsRequestDispatch';
 
@@ -9,7 +12,7 @@ export interface OpsRequestHostDependencies {
   store:OpsRequestStore;
   binding():OpsRequestBinding;
   peerActive(origin:OpsRequestOrigin):Promise<boolean>;
-  start(input:{requestId:string;targetId:string;agent:AiTerminalAgent;prompt:string}):Promise<AiTerminalSummary>;
+  start(input:{requestId:string;targetId:string;agent:AiTerminalAgent;prompt:string;origin?:OpsRequestOrigin}):Promise<AiTerminalSummary>;
   /** `lastOutputAt` (epoch ms, null before any output) lets the host notice a worker that stopped without a result. */
   inspect(sessionId:string,targetId:string):Promise<{state:'running'|'exited';awaitingAnswer:boolean;lastOutputAt?:number|null}>;
   revision?(sessionId:string,targetId:string):number|null;
@@ -58,26 +61,53 @@ export class OpsRequestHost {
   // so the receiver's inbox (receive/status) is never queued behind a slow AI.
   private exclusive<T>(run:()=>Promise<T>):Promise<T>{const next=this.serial.catch(()=>{}).then(run);this.serial=next;return next;}
   // The authenticated device owns the task. Changing its AI or community endpoint must not lose a result.
-  private id(scope:string,origin:OpsRequestOrigin,requestId:string){return createHash('sha256').update(JSON.stringify([scope,origin.deviceId,requestId])).digest('hex');}
-  async receive(value:unknown,origin:OpsRequestOrigin):Promise<OpsRequestReceipt>{
+  private id(scope:string,origin:OpsRequestOrigin,requestId:string){return createHash('sha256').update(JSON.stringify(origin.kind==='mobile'?[scope,'mobile',origin.receiptOwner,requestId]:[scope,origin.deviceId,requestId])).digest('hex');}
+  /** Read-only local binding for the trusted mobile adapter, never a mobile-selected project path. */
+  mobileBinding():Readonly<OpsRequestBinding>{return Object.freeze({...this.deps.binding()});}
+  async receive(value:unknown,origin:OpsRequestCommunityOrigin):Promise<OpsRequestReceipt>{
+    if((origin as OpsRequestOrigin).kind==='mobile'||!origin.endpointId||!origin.deviceId)throw new OpsRequestError('OPS_REQUEST_ORIGIN','호출한 기기를 확인하지 못했습니다.');
+    return this.receiveOrigin(value,{...origin});
+  }
+  /** Called only after the mobile-v2 host has authenticated this principal. No endpoint or agent is synthesized. */
+  async receiveMobile(value:unknown,principal:CommunityMobilePrincipal,guard:CommunityMobileEffectGuard,expectedScope:string):Promise<OpsRequestReceipt>{
+    const active=()=>CommunityDeviceAuthorization.isVerified(principal.receiver)&&CommunityDeviceAuthorization.isVerified(principal.mobile)&&CommunityMobileUseSession.isVerified(principal.use)
+      &&principal.receiver.body.deviceKind==='desktop'&&principal.mobile.body.deviceKind==='mobile'&&principal.use.authorization===principal.mobile
+      &&principal.receiver.body.profileId===principal.mobile.body.profileId&&principal.receiver.body.communityId===principal.mobile.body.communityId
+      &&principal.receiver.authority.origin===principal.mobile.authority.origin&&principal.receiver.authority.issuerPublicKey===principal.mobile.authority.issuerPublicKey
+      &&principal.receiver.permits('mobile-agent',this.now())&&principal.mobile.permits('mobile-agent',this.now())&&principal.use.permits('mobile-agent',this.now())&&guard.active();
+    if(!active())throw new OpsRequestError('OPS_REQUEST_PERMISSION','현재 모바일 사용 인증을 확인하세요.');
+    const request=parseOpsRequest(value),b=principal.mobile.body;
+    if(request.operation==='submit'&&(guard.operationId!==request.requestId||guard.createdAt!==mobileControlOperationTime(request.requestId)))throw new OpsRequestError('OPS_REQUEST_ORIGIN','원래 모바일 작업 요청을 확인하세요.');
+    const origin:OpsRequestMobileOrigin=Object.freeze({kind:'mobile',profileId:b.profileId,communityId:b.communityId,enrollmentId:b.enrollmentId,deviceId:b.deviceId,keyEpoch:b.keyEpoch,operationPublicKey:b.publicKey,initialUseId:principal.use.body.sessionId,receiptOwner:principal.mobile.receiptOwnerHash,name:b.name});
+    await guard.beforeEffect();if(!active()||this.deps.binding().scope!==expectedScope)throw new OpsRequestError('OPS_REQUEST_PERMISSION','모바일 대상 권한이 바뀌었습니다.');
+    return this.receiveOrigin(request,origin,{active,expectedScope,beforeEffect:()=>guard.beforeEffect()});
+  }
+  private async receiveOrigin(value:unknown,origin:OpsRequestOrigin,admission?:{active():boolean;expectedScope:string;beforeEffect():Promise<void>}):Promise<OpsRequestReceipt>{
     const request=parseOpsRequest(value);
-    if(!origin.endpointId||!origin.deviceId)throw new OpsRequestError('OPS_REQUEST_ORIGIN','호출한 기기를 확인하지 못했습니다.');
     const binding=this.deps.binding();
     if(!await this.deps.peerActive(origin))throw new OpsRequestError('OPS_REQUEST_PERMISSION','현재 커뮤니티에 참여한 기기만 OPS에 작업을 맡길 수 있습니다.');
     return this.exclusive(async()=>{
-      if(this.deps.binding().scope!==binding.scope)throw Error('OPS 연결이 변경되었습니다.');
+      if(this.deps.binding().scope!==binding.scope||admission&&(!admission.active()||admission.expectedScope!==binding.scope))throw Error('OPS 연결이 변경되었습니다.');
       const id=this.id(binding.scope,origin,request.requestId);
       const conflict=()=>new OpsRequestError('OPS_REQUEST_CONFLICT','같은 요청 ID에 다른 작업을 보낼 수 없습니다.');
       const previous=await this.deps.store.get(id);
       if(previous){
+        if(admission){await admission.beforeEffect();const current=this.deps.binding();if(!admission.active()||current.scope!==binding.scope||current.targetId!==binding.targetId||current.agent!==binding.agent)throw new OpsRequestError('OPS_REQUEST_PERMISSION','모바일 대상 권한이 변경되었습니다.');}
         if(request.operation==='submit'&&!opsRequestSameText(previous,request.text))throw conflict();
         return previous.receipt;
       }
       if(request.operation==='status')throw new OpsRequestError('OPS_REQUEST_NOT_FOUND','이 기기에서 접수한 작업을 찾지 못했습니다.');
+      if(origin.kind==='mobile'){
+        const issuedAt=mobileControlOperationTime(request.requestId);
+        if(issuedAt===null||issuedAt<this.now()-30_000||issuedAt>this.now()+5000)throw new OpsRequestError('OPS_REQUEST_EXPIRED','원래 모바일 요청의 접수 시간이 지났습니다. 자동으로 다시 실행하지 않습니다.');
+      }
       // Finished work past retention keeps only its identity, so the ledger never fills up for good.
       await this.deps.store.prune(this.now());
+      if(admission)await admission.beforeEffect();
       const row=await this.deps.store.update(id,prior=>{
         if(prior){if(request.operation==='submit'&&!opsRequestSameText(prior,request.text))throw conflict();return prior;}
+        const current=this.deps.binding();
+        if(admission&&(!admission.active()||current.scope!==binding.scope||current.targetId!==binding.targetId||current.agent!==binding.agent))throw new OpsRequestError('OPS_REQUEST_PERMISSION','모바일 사용 인증이나 OPS 대상이 바뀌었습니다.');
         const now=this.now();return {id,scope:binding.scope,origin,text:request.text,token:randomBytes(32).toString('hex'),
           receipt:{version:OPS_REQUEST_VERSION,requestId:request.requestId,state:'queued',createdAt:now,updatedAt:now,windowOpened:false}};
       });
@@ -183,7 +213,7 @@ export class OpsRequestHost {
     if(!claimed||!starting||!binding)return;
     const {targetId,agent}=binding as OpsRequestBinding;
     try{
-      const session=await this.deps.start({requestId:'ops_'+starting.id,targetId,agent,prompt:opsRequestPrompt(starting)});
+      const session=await this.deps.start({requestId:'ops_'+starting.id,targetId,agent,prompt:opsRequestPrompt(starting),origin:starting.origin});
       if(session.targetId!==targetId||session.agent!==agent)throw Error('OPS 세션 연결이 일치하지 않습니다.');
       await this.exclusive(()=>this.change(starting,r=>{r.receipt.sessionId=session.id;r.receipt.targetId=session.targetId;r.receipt.agent=session.agent;
         const revision=this.deps.revision?.(session.id,session.targetId);if(revision!==null&&revision!==undefined)r.initialInputRevision=revision;

@@ -330,6 +330,8 @@ extension ScreenControlChecks {
         // Only input counts. A phone that just watches still asks for keyframes; that is no one at the phone (DESIGN 3).
         clock.advance(by: .seconds(1800))
         try await idle.handled()
+        // The Mac's session bar counts down to this deadline (VideoPump.deadline): keyframe requests do not move it.
+        try check(idle.pump.deadline == (clock.start + .seconds(3600), .idle), "the bar reads the idle deadline")
         clock.advance(by: .seconds(1799))
         try await idle.handled()
         try await Task.sleep(for: .milliseconds(100))
@@ -351,6 +353,7 @@ extension ScreenControlChecks {
             busyClock.advance(by: .seconds(500))
         }
         try await busy.send([.key(code: 0x37, isDown: true, modifiers: [.command])], untilInjected: 8)
+        try check(busy.pump.deadline == (busyClock.start + .seconds(7100), .idle), "the bar's countdown restarts with input")
         busyClock.advance(by: .seconds(99))
         try await Task.sleep(for: .milliseconds(100))
         try check(busy.pump.endReason == nil, "alive at 59:59")

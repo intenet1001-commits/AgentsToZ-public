@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {basename, join} from 'node:path';
 import {CONTROL_AGENT_LABEL, CONTROL_AGENT_PLIST, CONTROL_BUNDLE_ID, CONTROL_EXECUTABLE, CONTROL_HELPER_REQUIREMENT, CONTROL_MACH_SERVICE,
   CONTROL_PRODUCT, CONTROL_TEAM_ID, controlEntitlements, controlInfoPlist, controlLaunchAgentPlist} from '../scripts/computerUseControlBundle';
-import {controlBuildSummary, controlCodesignArguments, controlNotaryPaths, notarizeControlApp, parseControlBuildArgs, readControlSignature}
+import {controlBuildSummary, controlCodesignArguments, controlNotaryPaths, notarizeControlApp, parseControlBuildArgs, readControlSignature,controlSwiftBuildArguments,controlBuildInfoPlist}
   from '../scripts/build-computer-use-control-app';
 import type {CheckProcessResult, CheckRunner} from '../src/macOSNotaryPreflight';
 
@@ -89,6 +89,16 @@ describe('AgentsToZ Control signing timestamp and opt-in notarization', () => {
     expect(parseControlBuildArgs([...signedArgs, '--timestamp'], defaultApp).timestamp).toBe('secure');
     expect(controlBuildSummary({appPath: defaultApp, configuration: 'release', signed: true, timestamp: 'secure', secureTimestamp: 'Oct 28, 2026 at 10:07:50'}))
       .toMatchObject({signed: true, secureTimestamp: true, notarizable: true, notarized: false});
+  });
+  test('community trust is an explicit separate QA build, public default stays closed and no install flag exists',()=>{
+    expect(parseControlBuildArgs(signedArgs,defaultApp).communityQA).toBeUndefined();
+    expect(()=>parseControlBuildArgs([...signedArgs,'--community-qa'],defaultApp)).toThrow('explicit separate QA');
+    const qa=parseControlBuildArgs([...signedArgs,'--community-qa','--output',defaultApp],defaultApp);expect(qa.communityQA).toBe(true);
+    expect(controlSwiftBuildArguments('release')).not.toContain('-DCONTROL_COMMUNITY_QA');
+    expect(controlSwiftBuildArguments('release',true)).toContain('-DCONTROL_COMMUNITY_QA');
+    expect(controlBuildInfoPlist('0.1')).not.toContain('AgentsToZCommunityQA');
+    expect(controlBuildInfoPlist('0.1',true)).toContain('AgentsToZCommunityQA');expect(controlBuildInfoPlist('0.1',true)).toContain('Community QA');
+    expect(()=>parseControlBuildArgs([...signedArgs,'--community-qa','--output',defaultApp,'--install'],defaultApp)).toThrow('Unsupported');
   });
 
   test('--timestamp=none is an explicit local-only opt-out that says it is not notarizable', () => {

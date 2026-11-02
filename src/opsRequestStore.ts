@@ -5,7 +5,10 @@ import {join} from 'node:path';
 import {createProductionPromptGuideKeyProvider,promptGuideDirectory,type PromptGuideKeyProvider} from './promptGuideKeyProvider';
 import {OpsRequestError,type OpsRequestReceipt} from './opsRequestProtocol';
 
-export interface OpsRequestOrigin {endpointId:string;deviceId:string;name:string}
+export interface OpsRequestCommunityOrigin {kind?:'community';endpointId:string;deviceId:string;name:string}
+/** Real CF mobile subjects, never a fabricated desktop/community endpoint. */
+export interface OpsRequestMobileOrigin {kind:'mobile';endpointId?:never;profileId:string;communityId:string;enrollmentId:string;deviceId:string;keyEpoch:number;operationPublicKey:string;initialUseId:string;receiptOwner:string;name:string}
+export type OpsRequestOrigin=OpsRequestCommunityOrigin|OpsRequestMobileOrigin;
 export interface OpsRequestRecord {
   id:string;scope:string;origin:OpsRequestOrigin;text:string;token:string;receipt:OpsRequestReceipt;
   windowClaim?:{id:string;at:number};
@@ -37,7 +40,8 @@ function tombstoneOf(r:OpsRequestRecord):OpsRequestRecord{
   const receipt=r.receipt.state==='completed'
     ?{version:r.receipt.version,requestId:r.receipt.requestId,state:r.receipt.state,createdAt:r.receipt.createdAt,updatedAt:r.receipt.updatedAt,windowOpened:true,result:note,evidence:'수신 OPS가 완료 결과를 제출했던 작업입니다.'}
     :{version:r.receipt.version,requestId:r.receipt.requestId,state:r.receipt.state,createdAt:r.receipt.createdAt,updatedAt:r.receipt.updatedAt,windowOpened:true,message:note};
-  return {id:r.id,scope:r.scope,origin:{endpointId:'',deviceId:r.origin.deviceId,name:''},text:'',token:'',receipt,tombstone:true,textHash:opsRequestTextHash(r.text)};
+  const origin:OpsRequestOrigin=r.origin.kind==='mobile'?{...r.origin,name:''}:{endpointId:'',deviceId:r.origin.deviceId,name:''};
+  return {id:r.id,scope:r.scope,origin,text:'',token:'',receipt,tombstone:true,textHash:opsRequestTextHash(r.text)};
 }
 type Row={id:string;nonce:Uint8Array;body:Uint8Array;tag:Uint8Array};
 /**

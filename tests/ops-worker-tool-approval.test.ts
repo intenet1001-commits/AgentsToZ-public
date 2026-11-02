@@ -71,7 +71,9 @@ describe('only this Mac’s OPS host can ask for it',()=>{
   });
   test('the OPS host starts its worker with it and without the bypass',()=>{
     const source=readFileSync(join(import.meta.dir,'..','api-server.ts'),'utf8');
-    expect(source).toContain("aiTerminalService.perform({operation:'start',...input,cols:100,rows:28,bypassPermissions:false},undefined,{opsWorker:true})");
+    const host=source.slice(source.indexOf('const opsRequestHost:'),source.indexOf('const opsRequestDispatchDeps='));
+    expect(host.includes('const {origin,...launch}=input;')).toBe(true);
+    expect(host.includes("aiTerminalService.perform({operation:'start',...launch,cols:100,rows:28,bypassPermissions:false},undefined,{opsWorker:true")).toBe(true);
     expect(source.match(/opsWorker:true/g)?.length).toBe(1);
   });
   test('a remote caller or a bypass launch cannot ask for it',async()=>{

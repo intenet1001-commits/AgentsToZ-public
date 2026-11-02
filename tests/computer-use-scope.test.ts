@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ComputerCallerRegistry} from '../src/computerUseCaller';
 import {ComputerScopeApprovalVerifier,computerScopeApprovalBytes} from '../src/computerUseScopeApproval';
-import {COMPUTER_USE_SCOPE_LIMITS,COMPUTER_USE_SCOPE_OPERATIONS,COMPUTER_USE_SCOPE_PERMISSIONS,COMPUTER_USE_SCOPE_PROTECTED_BUNDLES,COMPUTER_USE_SCOPE_PROTECTED_PREFIXES,COMPUTER_USE_SCOPE_SECURITY_SURFACES,parseComputerUseScope,parseComputerScopeAgentRequest,protectedScopeBundle} from '../src/computerUseScopeProtocol';
+import {COMPUTER_USE_REMOTE_CALLER_REFUSED,COMPUTER_USE_REMOTE_DESKTOP_CLIENTS,COMPUTER_USE_REMOTE_REFUSALS,COMPUTER_USE_SCOPE_LIMITS,COMPUTER_USE_SCOPE_OPERATIONS,COMPUTER_USE_SCOPE_PERMISSIONS,COMPUTER_USE_SCOPE_PROTECTED_BUNDLES,COMPUTER_USE_SCOPE_PROTECTED_PREFIXES,COMPUTER_USE_SCOPE_SECURITY_SURFACES,computerUseRemoteRefusal,parseComputerUseScope,parseComputerScopeAgentRequest,protectedScopeBundle,remoteDesktopClientBundle} from '../src/computerUseScopeProtocol';
 import {COMPUTER_USE_LIMITS,COMPUTER_USE_REFUSED_BUNDLE_PREFIXES,COMPUTER_USE_REFUSED_BUNDLES,COMPUTER_USE_REFUSED_TEAMS,isRefusedComputerTarget} from '../src/computerUseProtocol';
 import {ComputerUseRecovery} from '../src/computerUseRecovery';
 import {ComputerUseRuntime} from '../src/computerUseRuntime';
@@ -13,7 +13,8 @@ import {ComputerUseScopeHost,scopeGuardSamples} from '../src/computerUseScopeHos
 import {handleComputerUse} from '../src/computerUseApi';
 import {COMPUTER_USE_INSTANCE_HEADER,COMPUTER_USE_CLIENT_HEADER} from '../src/computerUseConnectionProtocol';
 import {Database} from 'bun:sqlite';
-import {callerAppPaths,callerHostOwns,computerCallerOrigin,createComputerCallerHostResolver,lsofPeerPids,outermostAppPath,psProcessTable,type ComputerCallerHost,type ComputerCallerOrigin} from '../src/computerUseCallerHost';
+import {ANTIGRAVITY_BUNDLE_ID} from '../src/antigravityAppLaunch';
+import {callerAppPaths,callerHostOwns,computerCallerOrigin,createComputerCallerHostResolver,lsofPeerPids,outermostAppPath,psProcessTable,remoteCallerHost,type ComputerCallerHost,type ComputerCallerOrigin} from '../src/computerUseCallerHost';
 
 const app={bundleId:'com.stablyai.orca',teamId:'',codeHash:'ab'.repeat(20),pid:435,processStart:'123456'};
 const appScope={kind:'application' as const,application:app},desktop={kind:'desktop' as const};
@@ -66,12 +67,15 @@ describe('scoped v2 closed parsing and signed consent',()=>{
     const exactly=(actual:readonly string[],expected:string[])=>{expect(lower(actual).length).toBe(actual.length);expect(lower(expected).length).toBe(expected.length);expect(lower(actual)).toEqual(lower(expected));};
     exactly(COMPUTER_USE_SCOPE_PROTECTED_BUNDLES,golden.scope.bundles);exactly(COMPUTER_USE_SCOPE_SECURITY_SURFACES,golden.scope.securitySurfaces);
     exactly(COMPUTER_USE_SCOPE_PROTECTED_PREFIXES,golden.scope.prefixes);
+    exactly(COMPUTER_USE_REMOTE_DESKTOP_CLIENTS,golden.scope.remoteDesktopClients);
     exactly(COMPUTER_USE_REFUSED_BUNDLES,golden.window.bundles);exactly(COMPUTER_USE_REFUSED_BUNDLE_PREFIXES,golden.window.prefixes);
     expect([...COMPUTER_USE_REFUSED_TEAMS].sort()).toEqual([...golden.window.teams].sort());
     for(const id of [...COMPUTER_USE_SCOPE_PROTECTED_BUNDLES,...COMPUTER_USE_SCOPE_SECURITY_SURFACES,...COMPUTER_USE_SCOPE_PROTECTED_PREFIXES])expect(id).toBe(id.toLowerCase());
     // The Swift sources hold the same literals; the Swift checks compare their parsed sets with the same file.
     const swift=(file:string)=>readFileSync(new URL(`../native/computer-use/Sources/ComputerUseControlCore/${file}`,import.meta.url),'utf8');
     const scopeSwift=swift('ScopedProtectedTargets.swift'),windowSwift=swift('ControlProtocol.swift');
+    for(const id of golden.scope.remoteDesktopClients)expect(scopeSwift).toContain(`"${id}"`);
+    for(const id of golden.scope.remoteDesktopClients)expect(isRefusedComputerTarget({bundleId:id.toUpperCase(),teamId:''})).toBe(true);
     for(const id of [...golden.scope.bundles,...golden.scope.securitySurfaces,...golden.scope.prefixes])expect(scopeSwift).toContain(`"${id}"`);
     for(const id of [...COMPUTER_USE_REFUSED_BUNDLES,...COMPUTER_USE_REFUSED_BUNDLE_PREFIXES,...COMPUTER_USE_REFUSED_TEAMS])expect(windowSwift).toContain(`"${id}"`);
     // Window mode refuses everything the scope protects, and the scope applies all of its lists, case-insensitively.
@@ -550,17 +554,18 @@ describe('caller host: a connection never drives the app its own AI runs in',()=
     expect(callerHostOwns({state:'unknown',reason:'x'},'com.stablyai.orca')).toBe(false);
   });
   const codexApp={...app,bundleId:'com.openai.codex',pid:777,processStart:'777001'};
-  function scoped(k:ReturnType<typeof keys>,scope:any){
-    const state={pending:undefined as any,approved:false,sent:[] as string[],foreground:null as any};
-    const channel={available:true,dispose(){},retire(_body:any){},async request(body:any):Promise<any>{state.sent.push(body.operation);
+  /** `extra`: more apps the desktop observation lists (a remote desktop client, a terminal). */
+  function scoped(k:ReturnType<typeof keys>,scope:any,extra:{id:string;name:string;bundleId:string}[]=[]){
+    const state={pending:undefined as any,approved:false,sent:[] as string[],bodies:[] as any[],foreground:null as any,captureData:"AAAA",oldControl:false};
+    const channel={available:true,dispose(){},retire(_body:any){},async request(body:any):Promise<any>{state.sent.push(body.operation);state.bodies.push(body);
       if(body.operation==='scope-status')return {success:true,scopeProtocolVersion:2,operations:[...COMPUTER_USE_SCOPE_OPERATIONS],accessibility:true,screenRecording:true,secureInput:false,owner};
       if(body.operation==='scope-request-approval'){state.pending={...body,owner};return {success:true,state:'pending'};}
       if(body.operation==='scope-approval-status')return state.approved?{success:true,state:'approved',approval:signed(state.pending,k),helperPublicKey:k.point.toString('base64')}:{success:true,state:'pending'};
       if(body.operation==='scope-open-grant')return {success:true,bound:true,grant:'b'.repeat(32),expiresAt:Date.now()+590000,scopeProtocolVersion:2,operations:[...COMPUTER_USE_SCOPE_OPERATIONS],scope:body.scope,permissions:[...COMPUTER_USE_SCOPE_PERMISSIONS]};
       if(body.operation==='scope-observe')return {success:true,snapshotId:'snap_1',scope,displays:[{id:'display_1',originX:0,originY:0,width:100,height:100,scale:2,rotation:0}],foreground:state.foreground,
-        applications:scope.kind==='application'?[{id:'app_1',name:'Orca',bundleId:app.bundleId}]:[{id:'app_1',name:'Orca',bundleId:app.bundleId},{id:'app_2',name:'Codex',bundleId:codexApp.bundleId}]};
-      if(body.operation==='scope-capture')return {success:true,displayId:body.displayId,mediaType:'image/jpeg',data:'AAAA',width:200,height:200,displayWidth:100,displayHeight:100,originX:0,originY:0};
-      if(['scope-click','scope-type-text','scope-key','scope-focus-app'].includes(body.operation))return {success:true,receipt:{requestId:body.requestId,state:'confirmed'}};
+        applications:scope.kind==='application'?[{id:'app_1',name:'Orca',bundleId:app.bundleId}]:[{id:'app_1',name:'Orca',bundleId:app.bundleId},{id:'app_2',name:'Codex',bundleId:codexApp.bundleId},...extra]};
+      if(body.operation==='scope-capture')return state.oldControl&&'maxBytes'in body?{success:false,notDispatched:true,code:'invalid-request'}:{success:true,displayId:body.displayId,mediaType:'image/jpeg',data:state.captureData,width:200,height:200,displayWidth:100,displayHeight:100,originX:0,originY:0};
+      if(['scope-click','scope-type-text','scope-key','scope-focus-app','scope-scroll','scope-drag'].includes(body.operation))return state.oldControl&&body.axOnly?{success:false,notDispatched:true,code:'invalid-request'}:{success:true,receipt:{requestId:body.requestId,state:'confirmed'}};
       return {success:true};
     }};
     return {state,channel};
@@ -620,6 +625,137 @@ describe('caller host: a connection never drives the app its own AI runs in',()=
       await expect(unknown.agent(other,'Codex',{operation:'scope-key',grant,epoch,observationId:obs.observationId,requestId:'request_blind_key',key:'Enter',modifiers:[]})).rejects.toThrow('확인하지 못해');
       expect(blind.state.sent).not.toContain('scope-key');
     }finally{unknown.dispose();blindRecovery.close();}
+  });
+  // ---- AIs of other Macs (docs/design/remote-computer-use-2026-11-01/DESIGN.md RC-3, RC-4, RC-17, §7.4) ----
+  const screenSharing={id:'app_3',name:'Screen Sharing',bundleId:'com.apple.ScreenSharing'},terminal={id:'app_4',name:'Terminal',bundleId:'com.apple.Terminal'};
+  const calculator={id:'app_5',name:'Calculator',bundleId:'com.apple.calculator'};
+  const remoteHost=remoteCallerHost('3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a','1호');
+  /** A whole-Mac grant straight on the scope host for a caller whose host is `host` (this Mac's AI, or another Mac's). */
+  async function desktopGrant(host:ComputerCallerHost,extra:{id:string;name:string;bundleId:string}[]){
+    const k=keys(),recovery=new ComputerUseRecovery(':memory:'),{state,channel}=scoped(k,desktop,extra),{identity}=caller();
+    const scope=new ComputerUseScopeHost(channel as any,recovery,Date.now,async()=>host);
+    await scope.requestApproval(identity,'conn_test',desktop,'test');state.approved=true;
+    const {grant,epoch}=(await scope.agentStatus(identity)).grants[0]!;
+    const fg=(a:{id:string;bundleId:string})=>({applicationId:a.id,bundleId:a.bundleId,pid:500,processStart:'500001'});
+    /** Observe with `front` in front and capture the display, so pointer input may follow. */
+    const look=async(front:{id:string;bundleId:string})=>{state.foreground=fg(front);const obs=await scope.agent(identity,{operation:'scope-observe',grant,epoch,capture:true});return {grant,epoch,observationId:obs.observationId};};
+    const sentInput=()=>state.sent.filter(op=>['scope-click','scope-type-text','scope-key','scope-focus-app','scope-scroll','scope-drag'].includes(op));
+    return {scope,state,identity,look,sentInput,close(){scope.dispose();recovery.close();}};
+  }
+  test('native Control and TypeScript agree on remote desktop clients; caller-specific restrictions remain TypeScript-only',()=>{
+    for(const id of COMPUTER_USE_REMOTE_DESKTOP_CLIENTS){expect(id).toBe(id.toLowerCase());expect(protectedScopeBundle(id)).toBe(false);expect(COMPUTER_USE_SCOPE_PROTECTED_BUNDLES as readonly string[]).not.toContain(id);}
+    for(const id of COMPUTER_USE_REMOTE_CALLER_REFUSED){expect(id).toBe(id.toLowerCase());expect(protectedScopeBundle(id)).toBe(false);}
+    // Compared without case. Only com.apple.ScreenSharing was read from an installed app (plutil CFBundleIdentifier, 3호
+    // 2026-11-01). The other remote desktop client IDs (TeamViewer below among them) are the vendors' published
+    // identifiers: confirming them on 1호 and 3호 is still open (RC-4); here they only check case-insensitive matching.
+    expect(remoteDesktopClientBundle('com.apple.ScreenSharing')).toBe(true);expect(remoteDesktopClientBundle('com.teamviewer.TeamViewer')).toBe(true);
+    expect(remoteDesktopClientBundle('com.apple.calculator')).toBe(false);expect(remoteDesktopClientBundle(null)).toBe(false);
+    // D2 includes the agent apps AgentsToZ itself drives: Hermes as read on 3호 (plutil), Antigravity as AgentsToZ launches it.
+    for(const id of ['com.apple.Terminal','com.googlecode.iterm2','com.openai.codex','com.anthropic.claudefordesktop','com.nousresearch.hermes','com.google.antigravity','com.openai.atlas','com.cmuxterm.app',
+      'com.apple.ScriptEditor2','com.apple.Automator','com.apple.shortcuts','com.apple.dt.Xcode','com.microsoft.VSCode','com.todesktop.230313mzl4w4u92'])
+      expect(callerHostOwns(remoteHost,id)).toBe(true);
+    expect(COMPUTER_USE_REMOTE_CALLER_REFUSED).toContain(ANTIGRAVITY_BUNDLE_ID);
+    expect(callerHostOwns(remoteHost,'com.apple.calculator')).toBe(false);
+    expect(remoteHost).toEqual({state:'remote',deviceId:'3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a',deviceName:'1호',bundleIds:COMPUTER_USE_REMOTE_CALLER_REFUSED});
+    const refusal=computerUseRemoteRefusal('REMOTE_PEER_NOT_READY','그 Mac의 Control 화면 기록 권한이 꺼져 있습니다.');
+    expect(refusal.code).toBe('REMOTE_PEER_NOT_READY');expect(refusal.message).toBe(`${COMPUTER_USE_REMOTE_REFUSALS.REMOTE_PEER_NOT_READY} 그 Mac의 Control 화면 기록 권한이 꺼져 있습니다.`);
+    expect(Object.keys(COMPUTER_USE_REMOTE_REFUSALS)).not.toContain('REMOTE_POINTER_DISABLED');
+  });
+  test('no AI types, keys, clicks or focuses into a remote desktop client; a local AI may still click another app beside one',async()=>{
+    const f=await desktopGrant({state:'known',bundleIds:[codexApp.bundleId]},[screenSharing,calculator]);try{
+      let from=await f.look(screenSharing);
+      await expect(f.scope.agent(f.identity,{operation:'scope-type-text',...from,requestId:'request_rd_text',text:'hello'})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_DESKTOP_CLIENT);
+      await expect(f.scope.agent(f.identity,{operation:'scope-key',...from,requestId:'request_rd_key1',key:'Enter',modifiers:[]})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_DESKTOP_CLIENT);
+      await expect(f.scope.agent(f.identity,{operation:'scope-click',...from,displayId:'display_1',requestId:'request_rd_click',x:10,y:10,button:'left',clickCount:1})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_DESKTOP_CLIENT);
+      from=await f.look(calculator);
+      await expect(f.scope.agent(f.identity,{operation:'scope-focus-app',...from,requestId:'request_rd_focus',applicationId:screenSharing.id})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_DESKTOP_CLIENT);
+      expect(f.sentInput()).toHaveLength(0);
+      // This Mac's AI clicking another app with a client open behind is left to Control's own hit test (WP10).
+      expect((await f.scope.agent(f.identity,{operation:'scope-click',...from,displayId:'display_1',requestId:'request_local_click',x:10,y:10,button:'left',clickCount:1})).receipt.state).toBe('confirmed');
+      expect(f.sentInput()).toEqual(['scope-click']);
+    }finally{f.close();}
+  });
+  test('another Mac\'s AI never types into this Mac\'s terminals, AI apps or tools, and sends no pointer input while a remote desktop client runs',async()=>{
+    const f=await desktopGrant(remoteHost,[terminal,calculator]);try{
+      let from=await f.look(terminal);
+      await expect(f.scope.agent(f.identity,{operation:'scope-type-text',...from,requestId:'request_loop_text',text:'rm -rf ~'})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_LOOP_TARGET);
+      await expect(f.scope.agent(f.identity,{operation:'scope-click',...from,displayId:'display_1',requestId:'request_loop_click',x:5,y:5,button:'left',clickCount:1})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_LOOP_TARGET);
+      from=await f.look(calculator);
+      for(const target of [terminal.id,'app_1','app_2'])// Terminal, Orca, Codex
+        await expect(f.scope.agent(f.identity,{operation:'scope-focus-app',...from,requestId:`request_loop_focus_${target}`,applicationId:target})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_LOOP_TARGET);
+      expect(f.sentInput()).toHaveLength(0);
+      // D11 (2026-11-01): right and double click, scroll and drag are taken from another Mac by the same rules as here.
+      const pointer=[
+        {operation:'scope-click',displayId:'display_1',x:10,y:10,button:'right',clickCount:1},
+        {operation:'scope-click',displayId:'display_1',x:10,y:10,button:'left',clickCount:2},
+        {operation:'scope-scroll',displayId:'display_1',x:10,y:10,deltaX:0,deltaY:-120},
+        {operation:'scope-drag',displayId:'display_1',x:10,y:10,endX:40,endY:40},
+      ];
+      for(const [i,body] of pointer.entries())expect((await f.scope.agent(f.identity,{...body,...(await f.look(calculator)),requestId:`request_remote_pointer_${i}`})).receipt.state).toBe('confirmed');
+      expect(f.sentInput()).toEqual(['scope-click','scope-click','scope-scroll','scope-drag']);
+    }finally{f.close();}
+    const g=await desktopGrant(remoteHost,[calculator,screenSharing]);try{
+      // A client is running (not in front): a click could bring its window forward and land in it as a person's.
+      const pointer=[
+        {operation:'scope-click',displayId:'display_1',x:10,y:10,button:'left',clickCount:1},
+        {operation:'scope-scroll',displayId:'display_1',x:10,y:10,deltaX:0,deltaY:120},
+        {operation:'scope-drag',displayId:'display_1',x:1,y:1,endX:9,endY:9},
+      ];
+      for(const [i,body] of pointer.entries())
+        await expect(g.scope.agent(g.identity,{...body,...(await g.look(calculator)),requestId:`request_remote_rd_${i}`})).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_DESKTOP_CLIENT);
+      expect(g.sentInput()).toHaveLength(0);
+      // Typing and keys go to the app in front only, so they still go.
+      expect((await g.scope.agent(g.identity,{operation:'scope-type-text',...(await g.look(calculator)),requestId:'request_remote_text',text:'12+3'})).receipt.state).toBe('confirmed');
+      expect((await g.scope.agent(g.identity,{operation:'scope-key',...(await g.look(calculator)),requestId:'request_remote_key',key:'Enter',modifiers:[]})).receipt.state).toBe('confirmed');
+      expect(g.sentInput()).toEqual(['scope-type-text','scope-key']);
+    }finally{g.close();}
+  });
+  test('another Mac\'s AI has the whole Mac only: no application scope ever reaches Control for it',async()=>{
+    const k=keys(),recovery=new ComputerUseRecovery(':memory:'),{state,channel}=scoped(k,appScope),{identity}=caller();
+    const scope=new ComputerUseScopeHost(channel as any,recovery,Date.now,async()=>remoteHost);
+    try{
+      await expect(scope.requestApproval(identity,'conn_test',{kind:'application',application:{...app,bundleId:'com.apple.calculator'}},'test')).rejects.toThrow(COMPUTER_USE_REMOTE_REFUSALS.REMOTE_OPERATION_REFUSED);
+      expect(state.sent).not.toContain('scope-request-approval');
+    }finally{scope.dispose();recovery.close();}
+  });
+  test('AX-only keeps its receipt and never retries on an older Control; capture budget is enforced at both ends',async()=>{
+    const f=await desktopGrant({state:'known',bundleIds:[codexApp.bundleId]},[calculator]);try{
+      const grant=(await f.scope.agentStatus(f.identity)).grants[0]!;
+      f.state.foreground={applicationId:calculator.id,bundleId:calculator.bundleId,pid:500,processStart:'500001'};
+      const both=await f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true,maxBytes:1024});
+      expect(f.state.bodies.at(-1).maxBytes).toBe(1024);
+      f.state.oldControl=true;
+      const click={operation:'scope-click',grant:grant.grant,epoch:grant.epoch,observationId:both.observationId,displayId:'display_1',requestId:'request_ax_only_1',x:10,y:10,button:'left',clickCount:1,axOnly:true};
+      const result=await f.scope.agent(f.identity,click);expect(result.receipt.state).toBe('refused');
+      expect(f.state.bodies.at(-1).axOnly).toBe(true);
+      expect((await f.scope.agent(f.identity,click)).receipt.state).toBe('refused');
+      expect(f.sentInput()).toEqual(['scope-click']);
+      await expect(f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true,maxBytes:1024})).rejects.toThrow('invalid-request');
+      expect(f.state.bodies.at(-1).maxBytes).toBe(1024);
+      f.state.oldControl=false;f.state.captureData=Buffer.alloc(1025).toString('base64');
+      await expect(f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true,maxBytes:1024})).rejects.toThrow('화면 결과를 확인하지 못했습니다');
+    }finally{f.close();}
+  });
+  test('observe with capture:true captures that same observation in one call, on the main display or the one named',async()=>{
+    const f=await desktopGrant({state:'known',bundleIds:[codexApp.bundleId]},[calculator]);try{
+      const grant=(await f.scope.agentStatus(f.identity)).grants[0]!;
+      expect(parseComputerScopeAgentRequest({operation:'scope-observe',grant:grant.grant,epoch:1,capture:true,displayId:'display_1'})).toEqual({operation:'scope-observe',grant:grant.grant,epoch:1,capture:true,displayId:'display_1'});
+      expect(parseComputerScopeAgentRequest({operation:'scope-observe',grant:grant.grant,epoch:1,capture:false})).toEqual({operation:'scope-observe',grant:grant.grant,epoch:1});
+      expect(()=>parseComputerScopeAgentRequest({operation:'scope-observe',grant:grant.grant,epoch:1,displayId:'display_1'})).toThrow('capture:true와 함께만');
+      expect(()=>parseComputerScopeAgentRequest({operation:'scope-observe',grant:grant.grant,epoch:1,capture:'yes'})).toThrow('올바르지 않습니다');
+      f.state.foreground={applicationId:calculator.id,bundleId:calculator.bundleId,pid:500,processStart:'500001'};
+      const plain=await f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch});
+      expect(plain.image).toBeUndefined();expect(f.state.sent.at(-1)).toBe('scope-observe');
+      const both=await f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true});
+      expect(f.state.sent.slice(-2)).toEqual(['scope-observe','scope-capture']);
+      expect(both.observation.foreground.bundleId).toBe(calculator.bundleId);
+      expect(both.image).toEqual({mediaType:'image/jpeg',data:'AAAA',width:200,height:200,displayWidth:100,displayHeight:100,displayId:'display_1',originX:0,originY:0});
+      // The capture belongs to that observation: a click on it needs no second capture.
+      expect((await f.scope.agent(f.identity,{operation:'scope-click',grant:grant.grant,epoch:grant.epoch,observationId:both.observationId,displayId:'display_1',requestId:'request_after_capture',x:10,y:10,button:'left',clickCount:1})).receipt.state).toBe('confirmed');
+      const named=await f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true,displayId:'display_1'});
+      expect(named.image.displayId).toBe('display_1');
+      await expect(f.scope.agent(f.identity,{operation:'scope-observe',grant:grant.grant,epoch:grant.epoch,capture:true,displayId:'display_9'})).rejects.toThrow('화면을 새로 관찰하세요');
+    }finally{f.close();}
   });
   test('the HTTP handler passes only the server-side socket origin to the runtime',async()=>{
     const recovery=new ComputerUseRecovery(':memory:'),origins:(ComputerCallerOrigin|null)[]=[];

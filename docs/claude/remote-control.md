@@ -286,7 +286,7 @@ push** 다.
 - **macOS만이다.** AgentsToZ Screen이 없는 Windows(2호)는 스위치를 거절·숨긴다(예전 메모의 「2호는 Codex만」은 이 경로로는 없다).
 - ⚠️ **Claude/agy 숫자는 statusline 캡처에서 온다** — 그 CLI가 돌 때만 갱신되므로 쉬는 동안은 알림이 늦거나 오래된 값이라 침묵한다. Codex만 능동 읽기다.
 - ⚠️ **Mac을 다시 켠 뒤 Touch ID로 화면 제어를 켜기 전에는 보내지 않는다.** 그동안의 알림은 대기 파일로 남았다가 2시간이 지나면 보내지 않고 버린다.
-- ⚠️ **메인 앱은 자기 안의 Screen을 서명이 다르면 덮어 설치한다**(`src-tauri/src/screen_helper.rs`). 그래서 `scripts/build-screen-app.ts`로 따로 만든 알림용 Screen은
+- ⚠️ **메인 앱은 동봉 Screen과 설치본의 서명·버전·실행 상태를 확인한 뒤 안전한 경우에만 교체한다**(`src-tauri/src/screen_helper.rs`). 그래서 `scripts/build-screen-app.ts`로 따로 만든 알림용 Screen은
   다음 실행에 지워진다 — 설치본은 `AGENTSTOZ_SCREEN_PUSH_URL=… bun build-macos.ts …`로 만들어야 한다. `stageScreenControlBundle.ts`의 `pushEndpoint`는
   명시 옵션만 받고(환경을 물려받지 않는다), 공개 base 파이프라인은 넘기지 않으며, 만든 뒤 Info.plist의 `AgentsToZScreenPushURL`이 요청과 같은지 확인한다.
 - 검증: `tests/screen-push-weekly-usage.test.ts`(계약 벡터·엄격 해석·문구·처리기 거절과 kind 1·2 예산), `tests/screen-push-protocol.test.ts`(e2e에 주간 알림 1건),
@@ -295,3 +295,46 @@ push** 다.
 - **배포 순서**(사람이 승인 뒤): ① `supabase/migrations/20261025010000_screen_push.sql`을 `yfbivsatsorbidfutkvb`에 적용 — ⚠️ `create table if not exists`라 **예전 파일로 이미 적용한 DB에는
   `usage`가 들어가지 않는다.** 그런 DB는 `portmgr_screen_push_requests_kind_check`를 지우고 `usage`를 더해 다시 만든다(안 하면 주간 알림 admit이 check 위반 → 500) ② APNs 비밀 ③ 함수 `screen-push` 배포 ④ 주소를 넣은 메인 앱(동봉 Screen) ⑤ 주소·push entitlement를 넣은
   iOS 빌드 ⑥ 폰 「알림 받기」 ⑦ 그 Mac 도크에서 「휴대폰 알림」. 함수를 먼저 배포해야 Screen의 `weekly-usage` 전송이 `malformed`가 되지 않는다.
+
+## AgentsToZ Screen 세션 막대 — 보이고 조작되는 Mac의 플로팅 막대 (2026-11-01)
+
+사람의 요청: 「맥제어기능도 컴퓨터유즈처럼 플로팅바 기능있어야함 맥끼리 또는 모바일의 맥제어기능 모두」. 설계는
+`docs/design/mac-to-mac-2026-11-01/DESIGN.md` 「부록 A」.
+- **어디에**: `native/screen-control/Sources/AgentsToZScreen/ScreenSessionBar.swift`(패널·시계·동작)·`ScreenSessionBarView.swift`(모양, Control 막대와 같은
+  어두운 유리 캡슐 660×52), 문구·버튼·클릭 판정·자리는 순수 모델 `ScreenHost/ScreenSessionBarModel.swift`(Foundation만). `ScreenApp.swift`에는
+  `ScreenSessionBar.shared.start()` 한 줄뿐이고, 막대가 `service.session`을 스스로 관찰해 세션 동안만 매 초 갱신한다.
+- **폰과 Mac 세션**: `ScreenService.accept`가 등록된 폰과 Mac 컨트롤러를 받아 같은 `ScreenMacHold`를 쓴다. Mac 컨트롤러는 등록 모델이 없어도 Mac으로 표시한다. `canControl`은 등록 grant와 출시·입력 보호 관문을 함께 반영한다. 남은 한도는 `VideoPump.deadline`을 센다. 「보기만」은 그 세션만 낮추고 저장된 grant는 바꾸지 않는다.
+- **권한을 줄이는 동작은 새 길이 없다**: `ScreenSessionInputHold`가 로컬 입력 모니터와 세션의 `InputReceiver` 사이에 끼어
+  「직접 하기」는 사람이 이 Mac 입력을 쥔 것(`held` → `.localActivity`)으로, 「보기만」은 입력 보호가 그 세션 끝까지 사라진 것(`available:false` →
+  `.monitorUnavailable`)으로 보인다. 그래서 다음 원격 이벤트부터 주입 전에 거절되고, 원격이 쥔 키·버튼을 놓고, 폰은 **이미 아는 메시지**
+  (`remoteInputPaused`·`inputAvailability`)로 듣는다 — 폰 프로토콜·`ScreenInputAvailability`는 그대로다.
+  ⚠️ 그 대가로 「보기만」 뒤 폰 문구는 `.monitorUnavailable`의 「Mac 입력 우선 보호가 중단되어 화면만 보여줍니다… 다시 연결하세요」다. 전용 문구는
+  새 이유 값(프로토콜 변경)이 필요하다 — 옛 폰은 모르는 값을 거절한다. 「직접 하기」는 「Mac에서 입력 중… 잠시 뒤 다시 가능」으로 보인다.
+- **줄인 권한은 세션보다 오래 간다(`ScreenMacHold`, 검토 F1)**: 등록된 폰은 이 Mac에 아무도 없어도 Face ID만으로 다시 붙고(같은 기기는 `.replaced`),
+  다른 등록 기기도 이어 붙을 수 있다. 예전에는 새 세션의 홀드가 `.remote`로 새로 시작해 「직접 하기」·「보기만」이 하드웨어 「다시 넘기기」 없이
+  풀렸다(SR-29 우회, 막대의 「다시 넘기기는 이 Mac에서만」이 거짓). 지금은 둘 중 하나를 누르면 **이 Mac 전체**가 「쥔 상태」가 되고, 그 뒤 **어느 기기의
+  새 세션이든** `.paused`로 시작해 막대에 「원격 입력 멈춤 · 다시 넘기기」가 뜬다. 지우는 길은 받아들여진 「다시 넘기기」와 **이 Mac에서 다시 켜기**
+  (Touch ID·암호 뒤 `macHold.reset()`)뿐이다 — 메모리에만 있어 앱을 다시 열어도 지워지지만, 앱은 꺼진 채 열리고 켜기는 이 Mac에서 묻는다.
+  `ScreenService`의 모든 세션 홀드는 `macHold.begin()`에서만 나온다(소스 계약). 기기별이 아니라 Mac 전체인 이유: 같은 사람의 두 번째 등록 기기로도
+  풀 수 있었기 때문이다. 「보기만」은 여전히 **그 세션만** 보기로 낮추고(부록 A), 이어지는 것은 그보다 약한 일시 정지다 — 다음 세션이 보기 전용으로
+  남아야 하는지는 **사람이 정할 일**(열린 질문). ⚠️ 폰은 그 세션에서 「잠시 뒤 다시 가능」(`remoteInputPaused`)을 듣는다 — 실제로는 이 Mac의 사람이
+  넘겨야 풀린다. 전용 문구는 위와 같은 프로토콜 변경이다.
+- **「다시 넘기기」만 하드웨어 클릭**(`ScreenSessionBarClick.handBackRefusal`): 막대 창의 1초 안 mouse-up이 **그 버튼 안**에 있고, 그 버튼이 **스스로
+  mouseDown을 추적한** 클릭이며(`PillButton.tracksOwnMouseDown`), 한 번 클릭(`clickCount == 1`)이고, Screen 주입 표식
+  (`LocalInputMonitor.injectedEventMarker`) 아님, 보낸 pid 0. **Control 막대와 달리 원격 데스크톱도 거절한다**(SR-29) — 서명 확인은 거절 문구만 고른다.
+  「다시 넘기기」의 접근성 누르기(osascript `click button`·AI의 AXPress)는 `accessibilityPerformPress`에서 동작 전에 거절하고 막대가 이유를 보인다.
+  검토 F2: 예전에는 막대 창·1초만 봐서, 사람이 「직접 하기」를 실제로 누른 뒤 1초 안의 AX 누르기가 그 mouse-up을 `NSApp.currentEvent`로 읽고
+  통과했고, 「직접 하기」 더블클릭의 두 번째 클릭이 같은 자리의 「다시 넘기기」를 눌렀다. ⚠️ **Control 막대(`native/computer-use` `ControlBar`)에도 같은
+  틈이 있다**(막대 창·1초만 본다) — 이번 변경 범위 밖, 열린 항목.
+  「끊기」·「보기만」·「직접 하기」는 어떤 클릭이든 받는다(원격 쪽 사람이 스트림 속 막대를 눌러도). 서비스도 `resumeRemoteInput(refusal:)`에서 한 번 더 막는다.
+- **클릭 판정은 공통 규칙을 쓴다**: `ScreenSessionBarClick.handBackRefusal`은 버튼 추적·주입 표식·단일 클릭을 확인하고 `ScreenInputOrigin.humanClick`으로 하드웨어 출처를 판정한다. `scripts/check-screen-control.ts`가 공통 규칙과 Control 막대 상수의 동기 및 실제 호출을 확인한다.
+- **캡처에서 빼지 않는다**: `sharingType`을 건드리지 않고, 캡처는 Viewer 번들만 뺀다. 기본 자리는 메뉴 막대 화면 아래 가운데, Control 막대 자리(18pt) **한 칸 위**
+  (+62pt) — 다른 Mac의 AI가 움직일 때 두 막대가 함께 보인다. 사람이 끌어 둔 자리는 `UserDefaults` `ScreenSessionBarOrigin`에 남고, 그 자리가 화면 안에 통째로 있을 때만 쓴다.
+- 검증: `bun run test:screen-control` — `ScreenSessionBarTests`(상태 → 문구·버튼, 클릭 출처(버튼 안·추적·한 번 클릭), 홀드 → 실제 `InputReceiver`,
+  `ScreenMacHold` 이월(같은 기기 재접속·다른 기기·보기만·다시 넘기기·켜기), 자리, 캡처 유지),
+  오프스크린 렌더(`Tests/SessionBarRender/main.swift`를 뷰·모델과 한 모듈로 컴파일, 창 없이 `cacheDisplay` → `tests/results/screen-session-bar/*.png`,
+  고정 문구가 잘리거나 버튼이 틀리거나 「다시 넘기기」가 접근성 누르기로 동작하거나 창이 생기면 실패), 패널 소스 계약(레벨 순서·Spaces·캡처·「다시 넘기기」가
+  판정을 거침·버튼의 mouseDown 추적·AX 거절·홀드는 `macHold`에서만·`reset`은 켜기 인증 뒤에만·클릭 상수 동기), 코어 `VideoPump.deadline`.
+  패널을 실제로 띄워 보는 것(레벨·앞으로 올리기·끌기·실제 더블클릭·osascript 누르기)은 실기에서 본다.
+- **열린 항목**: ① 부록 A의 「에뮬레이터 하네스 J2 레인에서 픽스처 호스트의 세션 상태 전이 단언」은 **아직 없다** — 그 하네스가 저장소에 없다(검토 F5).
+  하네스가 생기면 막대 상태(조작 중 → 직접 하기 → 재접속해도 멈춤 → 다시 넘기기)를 그 레인에 넣는다. ② Control 막대의 같은 클릭 틈. ③ 「보기만」 이월을 보기 전용으로 할지(사람). ④ 폰 쪽 전용 문구(프로토콜 변경).

@@ -17,7 +17,25 @@
 - **연결 = MCP 프로세스.** 연결은 instance 헤더 해시로 묶이고, host가 발급한 code를 앱·Control 검토에 보인다. 한 연결을 앱 안 여러 대화가 함께 쓸 수 있으며
   대화별 격리를 주장하지 않는다. MCP 도구 목록은 CLI 세션 시작 때 고정되므로 1.66.0 이전에 뜬 세션에는 `_session` 도구가 없다.
 
+### 다른 Mac AI 수신의 설치 신원
+
+RC-12는 `PORTMGR_BUNDLED_SIDECAR` 하나를 신원으로 쓰지 않는다. 설치된 sidecar의 고정 실행 경로와 private socket peer의 audit token으로 Main의 설치 경로와 Developer ID 요구사항을 검증한다. sidecar가 상속 FD를 준비하는 순간 처음 검증에 성공한 token 전체를 고정하고, 매 원격 수신·런타임 admission에서 같은 token과 서명을 다시 확인한다. 최초 검증이 실패하면 재고정하지 않으며, 로컬 채널의 사용 가능 여부와 원격 수신 신원은 별도다. `LOCAL_PEERTOKEN`은 불변 소켓 소유자가 아니라 반대편 소켓의 최근 접근자에 관한 조회다. 이 고정만으로 첫 조회 전에 일어난 FD 전달·fork나 소켓 보유자의 배타성을 증명하지 못한다. 첫 조회의 신뢰성과 부모 종료 후 중복 FD 보유를 포함한 설계 검토가 여전히 필요하다. 격리 socketpair 회귀의 양성 token은 Security 서명 검증을 대체하는 fixture이며 설치 앱 증명이 아니다. **서명된 실제 설치 앱의 양성 경로는 별도 실기 확인 전이다.**
+
+Control의 수신 설정 인증이 구현되기 전까지 관리 경로는 수신 켜기와 기기·연결 차단 해제를 거절한다. 끄기·차단은 계속 가능하지만 이 버전에서는 되돌릴 수 없다. 기존에 켜진 수신과 파일이 없을 때의 기본 허용, 30분 연결 차단의 자동 만료는 그대로다. 구버전에는 이 가드가 없으므로 전체 인증 경계라고 보지 않는다. Control 소유 CAS·단회 승인과 이전 계획은 `docs/design/remote-computer-use-2026-11-01/RECEIVE-SETTINGS-AUTH.md`에 있고 아직 구현되지 않았다.
+
 ## 동의 모델
+
+2026-11-01 후속 인증 설계는 [커뮤니티 가입 인증 재사용](../design/community-auth-oss-benchmark-2026-11-01/DESIGN.md)을 따른다.
+정상 가입·연결에 별도 fingerprint/기기 쌍 승인·생체 인증을 더하지 않고 가입 때 기기 키를 결속한다는 요구다.
+현재는 분석·설계만 했으며 신원 발급·상호 인증·수신 설정 가드는 아직 구현 변경되지 않았다.
+
+팀 작전의 리더는 요청한 다른 Mac을 `devices`로 확인하고 같은 Mac에 한 팀원씩 배정한다.
+결과 불명 입력은 원래 담당자의 원래 연결에서 같은 device/requestId의 receipt로 확인하며,
+다른 팀원이나 새 연결로 재전송하지 않는다. 이는 팀 지침이며 기기 전체를 강제로 잠그지는 않는다.
+커뮤니티에 입장했지만 다른 기기 목록이 비면 대상의 커뮤니티 입장과 재조회를 안내한다.
+다른 연결의 Control 막대가 「직접 하기」인 경우에는 2분 유휴 인계가 가능하다고 말하지 않고
+`person-has-control`을 안내한다. 승인 요청을 Control에 보내기 전의 단순 사용 중 거절만
+유휴 뒤 한 번 다시 요청할 수 있으며 사람의 거절·결과 불명은 반복하지 않는다(MCP 1.78.0).
 
 - **범위는 사람이 켜고, 요청은 켜진 동안 AI가 만든다(v2, 2026-10-30, 계약 1.72.0).** 패널의 「컴퓨터 유즈」 스위치가 관리 경로
   `scope-access-set {enabled:true, scope}`로 범위(전체 Mac 또는 한 앱)를 켠다 — **연결 선택은 없다.** 켜진 동안 AI는 `request-access`(필드 없음)로
@@ -125,11 +143,22 @@ Control의 중지, 사람 개입·결과 불명 중지뿐이다. 자동 갱신�
   거절한다(notDispatched — 중지·복구 행 없음). 관찰은 무효가 되고, 넘겨받으면 새 관찰부터다. 중지된 grant는 이 길로 돌아오지 않는다.
   `scope-status`의 `control`(`agent`/`person`/`halted`)로 호스트가 알고, MCP status의 grant `owner`와 `guidance`가 「request-access·재전송 말고
   30초마다 status」를 말한다. 사람이 쥔 동안의 동작은 `refused`(reason `person-has-control`) 영수증이고 그 requestId는 다시 쓰지 않는다.
-- **「AI에게 넘기기」는 사람의 클릭만**(`ControlBarClick.handBackRefusal`): 버튼을 실행한 이벤트가 막대 창의 1초 이내 mouse-up이고,
-  엔진의 합성 표식(`ScopedSyntheticEvents.tag`)이 아니며, 보낸 프로세스가 없거나(하드웨어) 원격 데스크톱 서명(Apple 화면 공유·ARD,
-  Jump Desktop Connect 팀 `2HCKV38EEC`)일 때만. 그 밖의 보낸 쪽(AI 앱·스크립트·이 프로세스)은 거절하고 4초 안내를 띄운다.
+- **「AI에게 넘기기」는 이 버튼 자체의 하드웨어 단일 클릭만**(`ControlBarClick.handBackRefusal`): 이 버튼이 직접 받은 mouse-down을 추적하는 동안,
+  버튼 안의 1초 이내 mouse-up이어야 하고 합성 표식이 없어야 한다. 접근성 누르기·두 번 클릭·원격 데스크톱이 넣은 클릭도 거절한다.
+  이 때문에 원격 데스크톱의 사람도 이 버튼으로 넘길 수 없으며, 이 Mac에서 직접 눌러야 한다. 「직접 하기」와 「중단」은 계속 접근성 누르기가 가능하다.
   ⚠️ 실기 보정 전이다 — 거절·수락마다 `control-bar` 로그에 보낸 pid와 서명 이름만 남긴다. 「직접 하기」·「중단」은 사람에게서 아무것도
   가져가지 않아 이 검사가 없다.
+- 원격 grant는 막대에 `원격 · <기기명> (<기기 코드>)`를 표시한다. 이름은 커뮤니티 표시값이며 기기 신원 키로 인증된 이름이 아니다.
+  상시 허용 설정·인증 문구에는 같은 커뮤니티의 다른 Mac AI와 이 Mac의 별도 받기 설정을 명시한다.
+- 원격 데스크톱 뷰어 식별자 목록은 native의 대상 히트 테스트와 캡처 제외에도 적용한다. Screen Sharing 외 식별자는 해당 기기의
+  설치본 확인이 남았으며, 합성 테스트는 실제 macOS 입력·캡처를 증명하지 않는다. 받기 켜기·기기 차단 해제의 Control 인증과
+  Secure Enclave 기기 키·상호 인증은 아직 구현되지 않아 별도 설계·보안 검토와 Control 릴리스가 필요하다.
+- **선택형 AX 전용 클릭**: `click`에 `axOnly: true`를 넣으면 단일 왼쪽 클릭만 받는다. 대상의 AX 동작을 찾지 못하면 포인터 이벤트로 대체하지 않고 거절 영수증을 남긴다. AX 호출이 시작된 뒤 결과를 알 수 없으면
+  unknown으로 중지하고 자동 재실행하지 않는다. 동일 requestId를 다시 보내면 기존 영수증을 반환한다.
+  옵션을 생략하거나 `false`이면 기존 클릭 규칙 그대로다. 구형 Control은 새 필드가 든 요청을 거절하며 자동 재시도하지 않는다.
+- **선택형 캡처 상한**: `capture` 또는 `observe {capture:true}`의 `maxBytes`는 JPEG 바이트의 정수 상한 1,024~240,000이다.
+  지정하지 않으면 기존 240,000이다. 각 품질의 JPEG가 모두 초과하면 `screen-image-too-large`이고 다른 이미지로 대체하지 않는다.
+  호스트도 디코딩한 바이트 수를 검사하며, 옵션을 모르는 구형 Control의 거절은 그대로 반환한다. 더 작은 상한은 성공을 보장하지 않는다.
 - **엔진 예외는 이 창 하나**: `ScopedOwnStatusWindows.ids`에 등록된, Control 자신 pid의 status-bar(25)·floating(3) 층 창만 `noProtectedOverlays`가
   건너뛴다(`ScopedOSGuard.ownStatusWindow`). 같은 번호라도 다른 프로세스 창은 막는다. 막대 위의 점은 여전히 Control의 것이라
   `protected-target`, 캡처 필터도 Control을 뺀다.
@@ -219,6 +248,7 @@ Gatekeeper/Touch ID·AgentsToZ/Control 승인·리더 자신의 호스트 앱은
   거절 문구는 원인별로 나뉜다(`ControlConsentText.scopeApprovalRefused`). 코드만 `log show --predicate 'subsystem == "com.intenet.agentstozbycs.control"'`에 남긴다.
   호스트도 `scope-open-grant`가 `secure-state-unavailable`(notDispatched)이면 승인을 버리지 않고 다음 읽기에서 다시 연다(`native-busy`와 같은 취급).
   ⚠️ 한 창(v1) 승인은 인증 뒤 이 검사를 하지 않아 같은 문제가 없다. v2에 검사를 더 넣을 때는 인증 직후의 보안 입력을 함께 생각할 것.
+- **공통 인증의 공유 Main 통로 (2026-11-02).** `ComputerUseMainLink`는 기능별 서명·브라우저 인증·기존 Control 요청이 공유하는 최하단 통로다. 1개 전송 + FIFO 대기 최대 16개/128KiB이며, 요청마다 16KiB 제한과 enqueue 시점의 불변 JSON snapshot을 적용한다. 대기 제한시간·AbortSignal 취소는 전송 전 거절(`notDispatched:true`), 전송 뒤 취소·timeout은 결과 미확정으로 통로를 닫는다. 대기열을 새 통로로 재전송하지 않는다. 현재 설치 Main 검증 실패는 영구 종료로 고정해 이후 같은 verifier가 true여도 되살리지 않는다. `RevokingComputerUseChannel`의 기능별 입력·취소·상태 읽기 정책은 그대로이고, 이 공유 통로의 직렬화가 그 아래에서 기능 간 충돌만 조정한다. 실제 서명·입력 직전 Native 정책은 계속 검사한다. 대기·전송 제한시간은 기본 10초, host-only 옵션 상한 120초다.
 - **패널과 AI가 동시에 상태를 물으면 채널이 '사용 중'으로 거절했다 (2026-10-31, 1호).** Control 채널은 한 번에 하나만 보낸다. 패널은 2초마다,
   AI는 제 주기로 `status`·`scope-status`를 묻는데, 겹치면 즉시 `busy`로 거절돼 `scope-status-unavailable`(「범위 제어 도우미 상태를 확인하지 못했습니다」)로 보였다.
   지금은 Control을 바꾸지 않는 상태 읽기 4종(`status`·`scope-status`·`approval-status`·`scope-approval-status`)만 최대 10×150ms 기다린다

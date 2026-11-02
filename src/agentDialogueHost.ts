@@ -8,6 +8,7 @@ import {communityDeviceRef,communityDeviceRows} from './communityDeviceRef';
 import {withAgentDialoguePairingStates} from './agentDialoguePairingRows';
 import {COMMUNITY_CONTROL_ACTIVE_WINDOW_MS} from './agentDialogueControl';
 import {COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE,COMMUNITY_CONTROL_RESPONSE_TOO_LARGE_MESSAGE} from './opsRequestProtocol';
+import type {AgentDialogueControlTransport,CommunityControlOperation} from './authenticatedCommunityTransport';
 
 export interface AgentDialogueLocalTarget {kind:'ops'|'project';portId?:string;displayName:string;memoryId?:string|null}
 export interface AgentDialogueHostDependencies {
@@ -24,6 +25,14 @@ export interface AgentDialogueHostDependencies {
    */
   registeredProjectIds?():Promise<ReadonlySet<string>>;
   now?:()=>number;
+  /** Best-effort, read-only Viewer discovery. This never authorizes enrollment or a screen session. */
+  communityDirectory?:(snapshot:{inside:boolean;devices:AgentDialogueControlDevice[]})=>void;
+  /** Tests only: a shorter safety net for detached control rows (production: CONTROL_DETACHED_DEADLINE_MS). */
+  controlDetachedDeadlineMs?:number;
+  /** Explicit transport selection. A failed authenticated Cloudflare request never falls back to the database mailbox. */
+  controlTransport?:AgentDialogueControlTransport;
+  /** Trusted local Teams receiver. The generic OPS/workroom executor never handles a Teams transport packet. */
+  trustedTeamsDispatcher?:AgentDialogueControlExecutor;
 }
 interface EnabledEndpoint {kind:'ops'|'project';portId?:string;incarnationId:string;endpointId:string;displayName:string}
 /** Another community device this Mac can drive. Display only; every request is re-checked by the database. */
@@ -45,6 +54,45 @@ export const SECRET_CACHE_MS=30_000;
 export const CONTROL_EXECUTE_DEADLINE_MS=25_000;
 /** 한 번의 우편함 폴이 쓸 수 있는 전체 시간. 남은 건은 다음 폴로 넘긴다. */
 export const CONTROL_POLL_BUDGET_MS=60_000;
+/**
+ * A detached control row (see `controlPoll`) that its executor has not answered by then is answered with the execution
+ * deadline sentence, so the row stops counting against its sender's 64 open rows. The executor's own deadline is shorter
+ * (computer use answers within 15 s), so this is only a safety net.
+ */
+export const CONTROL_DETACHED_DEADLINE_MS=CONTROL_EXECUTE_DEADLINE_MS;
+/**
+ * When an executor's `controlRespond` could not write its answer and no safety net is armed for the row any more (it was
+ * answered before the poll marked it detached, or the net already fired), the net is armed again this soon.
+ */
+export const CONTROL_DETACHED_RETRY_MS=1_000;
+/**
+ * What an executor returns from `controlPoll` for a row it took over: the poll neither waits for it nor answers it, and
+ * the executor answers later with `controlRespond`. Only rows the poll's `detach` predicate accepts may be detached.
+ */
+export const AGENT_DIALOGUE_CONTROL_DETACHED:unique symbol=Symbol('agent-dialogue-control-detached');
+export type AgentDialogueControlExecutor=(request:Record<string,unknown>,from:{deviceId:string;name:string;endpointId?:string},controlId:string)
+  =>Promise<Record<string,unknown>|typeof AGENT_DIALOGUE_CONTROL_DETACHED>;
+/** The row the database confirmed for a `controlCall`: which local endpoint sent it, and the device it was addressed to. */
+export interface AgentDialogueControlSent {controlId:string;sourceEndpointId:string;targetDeviceId:string|null}
+export interface AgentDialogueControlCallOptions {
+  /** Host-only route selection by an existing trusted Teams caller. Never inferred from a remote request body. */
+  transportPurpose?:'agent'|'teams';
+  /**
+   * Called once, as soon as the database confirmed the row and before waiting for its answer. From then on any failure
+   * leaves the outcome open: the other Mac may take and run the row.
+   */
+  onSent?(sent:AgentDialogueControlSent):void;
+  /**
+   * Send only from this local endpoint. When this Mac's community endpoint is another one now, nothing is sent:
+   * AGENT_DIALOGUE_CONTROL_SOURCE_CHANGED. A sender that pinned an endpoint collects late answers only through it.
+   */
+  sourceEndpointId?:string;
+}
+/** One `control-result` read for rows sent from a pinned endpoint: answers (each read once — the database deletes it), and rows not answered yet. */
+export interface AgentDialogueControlResults {results:{controlId:string;response:Record<string,unknown>|null}[];waiting:string[]}
+/** A community notice (`observation`) is posted once per requestId; the memo is bounded. */
+const COMMUNITY_NOTICE_MEMO=512;
+const COMMUNITY_NOTICE_ID=/^[A-Za-z0-9_-]{8,160}$/;
 /** Display-only facts about the MCP connection asking; never used for authorization. */
 export interface AgentDialogueRequester {client?:string|null}
 interface PendingGrant {id:string;instanceId:string;endpointId:string;roomId?:string;requestHash:string;summary:string;expiresAt:number;request:AgentDialogueRequest;
@@ -141,7 +189,41 @@ export class AgentDialogueHost {
   private secrets=new Map<string,{value:string;expiresAt:number}>();
   /** 상대 기기가 마지막으로 답한 시각 — 되묻기 간격을 물러나게 할지 판단한다. */
   private controlAnsweredAt:number|null=null;
-  constructor(deps:AgentDialogueHostDependencies){this.deps=deps;this.clock=deps.now??Date.now;this.file=join(deps.appDataDir,FILE_NAME);}
+  /** Detached rows still waiting for their executor's `controlRespond`, each with its safety-net timer. */
+  private detachedControls=new Map<string,ReturnType<typeof setTimeout>>();
+  /** Rows an executor answered before the poll had marked them detached: no safety net is armed for them afterwards. */
+  private answeredBeforeDetach=new Set<string>();
+  /** requestId → the one post of that community notice (in flight or done). A failed post is forgotten so it can be retried. */
+  private notices=new Map<string,Promise<{seq:number|null}>>();
+  constructor(deps:AgentDialogueHostDependencies){
+    this.deps=deps;this.clock=deps.now??Date.now;this.file=join(deps.appDataDir,FILE_NAME);
+    deps.controlTransport?.bindMembership(async()=>{
+      const self=await this.communityEndpoint();if(!self)return null;
+      const result=await this.rpc('community-status',self.profileId,self.deviceId,self.secret,{sourceEndpointId:self.endpoint.endpointId});
+      if(result.inside!==true||!Array.isArray(result.members))return null;
+      const members=result.members.flatMap((value:unknown)=>{const row=value as Record<string,unknown>|null;
+        return row&&typeof row.endpointId==='string'&&uuidPattern.test(row.endpointId)&&typeof row.deviceId==='string'
+          ?[{endpointId:row.endpointId,deviceId:row.deviceId,name:typeof row.displayName==='string'?row.displayName:''}]:[];});
+      return {profileId:self.profileId,deviceId:self.deviceId,sourceEndpointId:self.endpoint.endpointId,
+        localEndpointIds:[...this.enabled.values()].map(value=>value.endpointId),members};
+    });
+  }
+  private async controlRpc(operation:CommunityControlOperation,profileId:string,deviceId:string,secret:string,args:Record<string,unknown>,purpose:'agent'|'teams'='agent'){
+    if(this.deps.controlTransport){
+      try{return await this.deps.controlTransport.rpc(operation,profileId,deviceId,secret,args,purpose);}
+      catch(error){
+        const value=error as {code?:unknown;outcome?:unknown},code=typeof value?.code==='string'&&/^COMMUNITY_[A-Z_]+$/.test(value.code)?value.code:'COMMUNITY_CONTROL_UNAVAILABLE';
+        const message=code.includes('STORE_')?'기존 제어 영수증을 읽거나 저장하지 못했습니다. 같은 요청을 다시 보내지 말고 저장소 상태를 확인하세요.'
+          :code.includes('IDENTITY_')?'이 기기의 커뮤니티 등록과 AgentsToZ 프로필을 확인하세요.'
+          :code.includes('PEER_')||code.includes('TARGET_')?'상대 기기의 커뮤니티 등록과 연결 상태를 확인하세요.'
+          :code==='COMMUNITY_TEAMS_ROUTE_UNAVAILABLE'?'대상 기기의 Teams 수신 설정을 준비해 주세요.'
+          :code.includes('BUSY')?'대기 중인 원격 요청이 많습니다. 기존 요청의 결과를 먼저 확인하세요.'
+          :'커뮤니티 간편 등록 상태와 Cloudflare 연결을 확인하세요.';
+        throw new AgentDialogueHostError(code,message,value?.outcome==='unknown'?504:409);
+      }
+    }
+    return this.rpc(operation,profileId,deviceId,secret,args);
+  }
   private identity(){
     const value=this.deps.identity();
     if(!value.profileId||!value.deviceId)throw new AgentDialogueHostError('AGENT_DIALOGUE_PROFILE_REQUIRED','공유 AgentsToZ 총괄 프로필과 기기를 연결하세요.');
@@ -153,6 +235,7 @@ export class AgentDialogueHost {
     const priorEndpoints=[...this.enabled.values()],priorRevocations=[...this.revocations];
     this.loadedProfile=profileId;this.loadedDeviceId=deviceId;this.registered=false;
     this.enabled.clear();this.pending.clear();this.approved.clear();this.grants.clear();this.revocations=[];this.pairedPeers.clear();this.devicePairings=null;this.invalidateCommunityMembership();this.preferredCommunityEndpointId=null;this.devicesCache=null;this.secrets.clear();this.forwardTargets=null;
+    this.notices.clear();
     if(priorProfile&&priorDevice){
       this.revocations=[...priorRevocations,...priorEndpoints.map(item=>({
         endpointId:item.endpointId,profileId:priorProfile,deviceId:priorDevice}))];
@@ -369,6 +452,7 @@ export class AgentDialogueHost {
    * stale cache can only cost one extra approval, never grant access.
    */
   private invalidateCommunityMembership(endpointId?:string){
+    this.publishCommunityDirectory(false,[]);
     if(endpointId){
       this.community.delete(endpointId);
       this.communityInFlight.delete(endpointId);
@@ -378,6 +462,9 @@ export class AgentDialogueHost {
       this.community.clear();
       this.communityInFlight.clear();
     }
+  }
+  private publishCommunityDirectory(inside:boolean,devices:AgentDialogueControlDevice[]){
+    try{this.deps.communityDirectory?.({inside,devices});}catch{/* Discovery failure cannot break the mailbox. */}
   }
   private async communityMembership(profileId:string,deviceId:string,secret:string,endpointId:string,fresh=false){
     const existing=this.communityInFlight.get(endpointId);
@@ -404,6 +491,9 @@ export class AgentDialogueHost {
       const value={roomId:typeof result.roomId==='string'?result.roomId:null,inside:result.inside===true,
         expiresAt:this.clock()+PAIRED_PEERS_TTL};
       this.community.set(endpointId,value);
+      if(value.inside)this.publishCommunityDirectory(true,communityDeviceRows(result.members,deviceId));
+      else if(![...this.community.values()].some(member=>member.inside&&member.expiresAt>this.clock()))
+        this.publishCommunityDirectory(false,[]);
       return value;
     })();
     flight={promise:pending,fresh};
@@ -532,6 +622,8 @@ export class AgentDialogueHost {
       if(action==='join')this.preferredCommunityEndpointId=endpoint.endpointId;
       else if(this.preferredCommunityEndpointId===endpoint.endpointId)this.preferredCommunityEndpointId=null;
     }
+    if(this.loadedProfile===profileId&&this.loadedDeviceId===deviceId&&result.inside===true)
+      this.publishCommunityDirectory(true,communityDeviceRows(result.members,deviceId));
     return result;
   }
   /**
@@ -707,6 +799,8 @@ export class AgentDialogueHost {
     if(!self)return {inside:false,deviceId,devices:[],unread:0,lastMessageAt:null};
     const result=await this.rpc('community-status',self.profileId,self.deviceId,self.secret,{sourceEndpointId:self.endpoint.endpointId});
     // 기기 한 대에 한 줄 — 판정은 `communityDeviceRows` 한 곳이다(휴대폰 목록도 같은 것을 쓴다).
+    if(this.loadedProfile===self.profileId&&this.loadedDeviceId===self.deviceId)
+      this.publishCommunityDirectory(result.inside===true,result.inside===true?communityDeviceRows(result.members,self.deviceId):[]);
     return {inside:true,deviceId,devices:communityDeviceRows(result.members,self.deviceId),
       unread:Number.isSafeInteger(result.unread)&&Number(result.unread)>0?Number(result.unread):0,
       lastMessageAt:typeof result.lastMessageAt==='string'?result.lastMessageAt:null};
@@ -717,24 +811,30 @@ export class AgentDialogueHost {
    * deadline here is the whole round trip. A timeout is an unknown outcome, not a refusal: the
    * other Mac may still execute a request it took just before the deadline.
    */
-  async controlCall(targetEndpointId:unknown,request:Record<string,unknown>,timeoutMs=AGENT_DIALOGUE_CONTROL_TIMEOUT_MS):Promise<Record<string,unknown>>{
+  async controlCall(targetEndpointId:unknown,request:Record<string,unknown>,timeoutMs=AGENT_DIALOGUE_CONTROL_TIMEOUT_MS,
+    options:AgentDialogueControlCallOptions={}):Promise<Record<string,unknown>>{
     if(typeof targetEndpointId!=='string'||!uuidPattern.test(targetEndpointId))
       throw new AgentDialogueHostError('AGENT_DIALOGUE_CONTROL_TARGET_INVALID','제어할 기기를 다시 선택하세요.',400);
     const self=await this.communityEndpoint();
     if(!self)throw new AgentDialogueHostError('AGENT_DIALOGUE_CONTROL_NOT_IN_COMMUNITY','이 기기가 커뮤니티에 입장해야 다른 기기를 제어할 수 있습니다.');
-    const sent=await this.rpc('control-send',self.profileId,self.deviceId,self.secret,
-      {sourceEndpointId:self.endpoint.endpointId,targetEndpointId,request}).catch(error=>{
+    if(options.sourceEndpointId!==undefined&&options.sourceEndpointId!==self.endpoint.endpointId)
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_CONTROL_SOURCE_CHANGED','이 기기의 커뮤니티 끝점이 바뀌어 보내지 않았습니다.');
+    const sent=await this.controlRpc('control-send',self.profileId,self.deviceId,self.secret,
+      {sourceEndpointId:self.endpoint.endpointId,targetEndpointId,request},options.transportPurpose??'agent').catch(error=>{
         // The target left the community: the shared device list must not keep offering it.
         if(`${(error as {code?:unknown})?.code} ${(error as Error)?.message}`.includes('TARGET_UNAVAILABLE'))this.devicesCache=null;
         throw error;
       });
     if(typeof sent.controlId!=='string')throw new AgentDialogueHostError('AGENT_DIALOGUE_BAD_RECEIPT','제어 요청 영수증을 확인하지 못했습니다.');
+    // A callback bug must not turn a sent row into a failure that looks unsent.
+    try{options.onSent?.({controlId:sent.controlId,sourceEndpointId:self.endpoint.endpointId,
+      targetDeviceId:typeof sent.targetDeviceId==='string'?sent.targetDeviceId:null});}catch{}
     const deadline=this.clock()+timeoutMs;
     // 되묻기는 150ms에서 시작해 400ms까지 물러났다. 상대가 **방금 답한 적 있으면**(활성) 그 물러남이
     // 왕복마다 최대 0.25초를 그냥 보태므로 150ms로 고정한다 — 쓰기가 아니라 `control-result` 읽기다.
     const activePeer=this.controlAnsweredAt!==null&&this.clock()-this.controlAnsweredAt<COMMUNITY_CONTROL_ACTIVE_WINDOW_MS;
     for(let delay=150;;delay=activePeer?150:Math.min(delay+100,400)){
-      const result=await this.rpc('control-result',self.profileId,self.deviceId,self.secret,
+      const result=await this.controlRpc('control-result',self.profileId,self.deviceId,self.secret,
         {sourceEndpointId:self.endpoint.endpointId,controlIds:[sent.controlId]});
       const answer=(Array.isArray(result.results)?result.results:[]).find((row:any)=>row?.controlId===sent.controlId) as {response?:unknown}|undefined;
       if(answer){
@@ -772,13 +872,127 @@ export class AgentDialogueHost {
     const result=await this.rpc('community-status',self.profileId,self.deviceId,self.secret,{sourceEndpointId:self.endpoint.endpointId});
     return result.inside===true&&Array.isArray(result.members)&&result.members.some((m:any)=>m.endpointId===endpointId&&m.deviceId===deviceId);
   }
-  async controlPoll(execute:(request:Record<string,unknown>,from:{deviceId:string;name:string;endpointId?:string})=>Promise<Record<string,unknown>>):Promise<{handled:number}>{
+  /** The local endpoint `controlCall` sends from right now, with this device — or null outside the community. */
+  async controlSource():Promise<{deviceId:string;endpointId:string}|null>{
+    const self=await this.communityEndpoint();
+    return self?{deviceId:self.deviceId,endpointId:self.endpoint.endpointId}:null;
+  }
+  /**
+   * One read of answers to rows this device sent from `sourceEndpointId` — the endpoint pinned when they were sent,
+   * which may no longer be the community endpoint (the database returns a row only to the endpoint that sent it). An
+   * answer is returned once: the database deletes it as it reads it. `waiting` names the rows still unanswered; a row in
+   * neither list is gone (answered and read already, or dropped after ten minutes). An endpoint this device no longer
+   * publishes is refused before any read: AGENT_DIALOGUE_SOURCE_UNAVAILABLE, as the database itself says for an inactive one.
+   */
+  async controlResult(controlIds:readonly string[],sourceEndpointId:string):Promise<AgentDialogueControlResults>{
+    if(!Array.isArray(controlIds)||controlIds.length<1||controlIds.length>16||new Set(controlIds).size!==controlIds.length
+      ||controlIds.some(id=>typeof id!=='string'||!uuidPattern.test(id))||typeof sourceEndpointId!=='string'||!uuidPattern.test(sourceEndpointId))
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_CONTROL_INVALID','확인할 제어 요청을 다시 지정하세요.',400);
+    const {profileId,deviceId}=this.identity();
+    if(![...this.enabled.values()].some(item=>item.endpointId===sourceEndpointId))
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_SOURCE_UNAVAILABLE','그 요청을 보낸 끝점은 이 기기에서 더 이상 쓰지 않습니다.');
+    const secret=await this.secret(profileId,deviceId);
+    const result=await this.controlRpc('control-result',profileId,deviceId,secret,{sourceEndpointId,controlIds:[...controlIds]});
+    const asked=new Set(controlIds);
+    const results=(Array.isArray(result.results)?result.results:[]).flatMap((row:unknown)=>{
+      const value=row as {controlId?:unknown;response?:unknown}|null;
+      if(!value||typeof value.controlId!=='string'||!asked.has(value.controlId))return [];
+      const response=value.response&&typeof value.response==='object'&&!Array.isArray(value.response)?value.response as Record<string,unknown>:null;
+      return [{controlId:value.controlId,response}];
+    });
+    const waiting=(Array.isArray(result.waiting)?result.waiting:[]).filter((id:unknown):id is string=>typeof id==='string'&&asked.has(id));
+    if(results.length)this.controlAnsweredAt=this.clock();
+    return {results,waiting};
+  }
+  /**
+   * The executor's answer to a row it detached from `controlPoll`. The database takes one answer per row (a second, or one
+   * after the safety net answered, reports `responded:false`). An answer the database refuses — most likely over its size
+   * limit — is replaced by the response-too-large sentence as the poll does, so the sender is not left waiting, and the
+   * original error is thrown.
+   * The row's safety net is dropped only once an answer was written. When nothing could be written, the net stays armed —
+   * or is armed again shortly when none is left — so the row does not stay taken and unanswered, holding the sender's
+   * open-row quota for ten minutes.
+   */
+  async controlRespond(controlId:string,response:Record<string,unknown>):Promise<{responded:boolean}>{
+    if(typeof controlId!=='string'||!uuidPattern.test(controlId)||!response||typeof response!=='object'||Array.isArray(response))
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_CONTROL_INVALID','답할 제어 요청을 다시 지정하세요.',400);
+    if(!this.detachedControls.has(controlId)){
+      // Answered before the poll marked the row detached: the poll must not arm a net for it afterwards.
+      this.answeredBeforeDetach.add(controlId);
+      for(const id of this.answeredBeforeDetach){if(this.answeredBeforeDetach.size<=64)break;this.answeredBeforeDetach.delete(id);}
+    }
+    try{
+      const result=await this.sendControlResponse(controlId,response);
+      this.disarmDetached(controlId);
+      return result;
+    }catch(error){
+      this.answeredBeforeDetach.delete(controlId);
+      if(!this.detachedControls.has(controlId))this.armDetached(controlId,Math.min(CONTROL_DETACHED_RETRY_MS,this.detachedDeadlineMs()));
+      throw error;
+    }
+  }
+  private async sendControlResponse(controlId:string,response:Record<string,unknown>):Promise<{responded:boolean}>{
+    const {profileId,deviceId}=this.identity();
+    const secret=await this.secret(profileId,deviceId);
+    try{
+      const result=await this.controlRpc('control-respond',profileId,deviceId,secret,{controlId,response});
+      return {responded:result.responded===true};
+    }catch(error){
+      await this.controlRpc('control-respond',profileId,deviceId,secret,{controlId,
+        response:{ok:false,error:COMMUNITY_CONTROL_RESPONSE_TOO_LARGE_MESSAGE}}).catch(()=>undefined);
+      throw error;
+    }
+  }
+  /**
+   * A content-free notice in the community room, posted by this Mac's community endpoint as an `observation` (the phone's
+   * community screen shows it; it is not a push). One post per `requestId`: a repeat — concurrent or later — returns the
+   * first post's result with `duplicate:true` and sends nothing, and the database's request ledger makes a retried send
+   * of the same id idempotent too. A post that failed is forgotten, so the caller may try again with the same id.
+   */
+  async communityNotice(text:string,requestId:string):Promise<{posted:boolean;duplicate:boolean;seq:number|null}>{
+    if(typeof requestId!=='string'||!COMMUNITY_NOTICE_ID.test(requestId))
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_REQUEST_ID_REQUIRED','알림 요청 ID를 확인하세요.',400);
+    if(typeof text!=='string'||!text.trim()||text.includes('\0')||Buffer.byteLength(text,'utf8')>4000)
+      throw new AgentDialogueHostError('AGENT_DIALOGUE_MESSAGE_INVALID','알림 글을 확인하세요(4,000바이트 이하).',400);
+    const prior=this.notices.get(requestId);
+    if(prior)return {posted:true,duplicate:true,seq:(await prior).seq};
+    const post=(async()=>{
+      const self=await this.communityEndpoint();
+      if(!self)throw new AgentDialogueHostError('AGENT_DIALOGUE_COMMUNITY_OUTSIDE','이 기기가 커뮤니티에 들어가 있지 않아 알림을 올리지 못했습니다.');
+      const status=await this.rpc('community-status',self.profileId,self.deviceId,self.secret,{sourceEndpointId:self.endpoint.endpointId});
+      const participantId=typeof status.participantId==='string'?status.participantId:null;
+      if(status.inside!==true||!participantId)throw new AgentDialogueHostError('AGENT_DIALOGUE_COMMUNITY_OUTSIDE','이 기기가 커뮤니티에서 나가 알림을 올리지 못했습니다.');
+      const sent=await this.rpc('send',self.profileId,self.deviceId,self.secret,{sourceEndpointId:self.endpoint.endpointId,roomId:self.roomId,
+        participantId,requestId:stableRequestUuid(`community-notice:${requestId}`),kind:'observation',text},'community-send');
+      return {seq:Number.isSafeInteger(sent.seq)?Number(sent.seq):null};
+    })();
+    this.notices.set(requestId,post);
+    try{
+      const {seq}=await post;
+      for(const id of this.notices.keys()){if(this.notices.size<=COMMUNITY_NOTICE_MEMO)break;if(id!==requestId)this.notices.delete(id);}
+      return {posted:true,duplicate:false,seq};
+    }catch(error){if(this.notices.get(requestId)===post)this.notices.delete(requestId);throw error;}
+  }
+  /**
+   * Take the rows other devices addressed to this Mac and run them one at a time, in the order they were sent.
+   * - `execute` gets the row's controlId too. For a row the `detach` predicate accepts, it may return
+   *   AGENT_DIALOGUE_CONTROL_DETACHED once it has admitted the row: the poll moves on without answering, and the executor
+   *   answers later with `controlRespond` (computer use runs Control work on its own lane, so a slow Control does not hold
+   *   the poll — DESIGN remote-computer-use §7.6). A detached row unanswered after CONTROL_DETACHED_DEADLINE_MS is
+   *   answered with the execution deadline sentence. Any other row returning it is a bug and is answered as a failure.
+   * - `handled` counts the rows taken, except background rows (`bg:1`, a connection's heartbeat or disconnect): they must
+   *   not keep this Mac in fast polling (RC-9).
+   */
+  async controlPoll(execute:AgentDialogueControlExecutor,options:{detach?:(request:Record<string,unknown>)=>boolean}={}):Promise<{handled:number}>{
     if(this.controlPolling)return {handled:0};
     this.controlPolling=true;
     try{
       const self=await this.communityEndpoint();
       if(!self)return {handled:0};
-      const inbox=await this.rpc('control-inbox',self.profileId,self.deviceId,self.secret,{});
+      const purposes:('agent'|'teams')[]=this.deps.controlTransport&&this.deps.trustedTeamsDispatcher?['agent','teams']:['agent'];
+      const inboxes=await Promise.allSettled(purposes.map(purpose=>this.controlRpc('control-inbox',self.profileId,self.deviceId,self.secret,{},purpose)));
+      if(inboxes.every(value=>value.status==='rejected'))throw (inboxes[0] as PromiseRejectedResult).reason;
+      const inbox={controls:inboxes.flatMap(value=>value.status==='fulfilled'&&Array.isArray(value.value.controls)?value.value.controls:[])};
       let handled=0;
       // 한 폴이 쓸 수 있는 전체 시간도 묶는다. 우편함은 한 번에 16건까지 오고, 각자 마감을 다 쓰면
       // 합산 침묵이 남는다. ⚠️ 받은 행은 SQL이 이미 `taken`으로 바꿨으므로 다음 폴에 다시 오지 않는다 —
@@ -790,30 +1004,68 @@ export class AgentDialogueHost {
         if(typeof control.controlId!=='string')continue;
         let response:Record<string,unknown>;
         if(this.clock()>pollUntil){
-          await this.deps.rpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,
+            await this.controlRpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,
             response:{ok:false,error:'상대 기기가 바빠 이 요청을 실행하지 않았습니다. 다시 시도하세요.'}}).catch(()=>undefined);
           continue;
         }
+        const request=control.request&&typeof control.request==='object'&&!Array.isArray(control.request)?control.request as Record<string,unknown>:null;
+        // A heartbeat or disconnect of another Mac's connection is taken and answered, but is not activity (RC-9).
+        const background=request?.bg===1;
+        let detachable=false;
+        try{detachable=!!request&&options.detach?.(request)===true;}catch{detachable=false;}
         try{
-          if(!control.request||typeof control.request!=='object'||Array.isArray(control.request))throw new Error('제어 요청 형식이 올바르지 않습니다.');
+          if(!request)throw new Error('제어 요청 형식이 올바르지 않습니다.');
           // ⚠️ **요청별 마감이 필요하다.** 예전에는 `execute`를 그냥 await해서, 끝나지 않는 요청 하나가
           // 이 폴을 영구히 붙잡고(`controlPolling`이 풀리지 않아) **그 Mac을 커뮤니티 전체에 침묵**시켰다
           // (2026-10-05 감사). 릴레이 쪽에 이미 같은 모양이 있다(`#withinDeadline`). 작업은 취소되지
           // 않으므로(늦은 결과는 버린다) 보내는 쪽에는 「알 수 없음」으로 답한다 — controlCall의 마감
           // 문구와 같은 성질이다.
-          response={ok:true,body:await this.withControlDeadline(execute(control.request as Record<string,unknown>,
-            {deviceId:String(control.fromDeviceId??''),name:String(control.fromName??''),endpointId:typeof control.fromEndpointId==='string'?control.fromEndpointId:undefined}))};
+            const executor=this.deps.controlTransport&&control.transportPurpose==='teams'?this.deps.trustedTeamsDispatcher:execute;
+            if(!executor)throw new Error('이 기기의 Teams 수신 기능을 준비하지 않았습니다.');
+            const body=await this.withControlDeadline(executor(request,
+            {deviceId:String(control.fromDeviceId??''),name:String(control.fromName??''),endpointId:typeof control.fromEndpointId==='string'?control.fromEndpointId:undefined},
+            control.controlId));
+          if(body===AGENT_DIALOGUE_CONTROL_DETACHED){
+            if(!detachable)throw new Error('제어 요청을 처리하지 못했습니다.');
+            this.detachControl(control.controlId);
+            if(!background)handled+=1;
+            continue;
+          }
+          response={ok:true,body};
         }catch(error){response={ok:false,error:error instanceof Error?error.message.slice(0,500):'제어 요청을 처리하지 못했습니다.'};}
-        try{await this.deps.rpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,response});}
+          try{await this.controlRpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,response});}
         catch{
           // Most likely the answer is over the size limit; tell the sender instead of leaving it waiting.
-          await this.deps.rpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,
+            await this.controlRpc('control-respond',self.profileId,self.deviceId,self.secret,{controlId:control.controlId,
             response:{ok:false,error:COMMUNITY_CONTROL_RESPONSE_TOO_LARGE_MESSAGE}}).catch(()=>undefined);
         }
-        handled+=1;
+        if(!background)handled+=1;
       }
       return {handled};
     }finally{this.controlPolling=false;}
+  }
+  /** The safety net of a detached row: its executor did not answer in time, so the sender hears the deadline sentence. */
+  private detachControl(controlId:string){
+    if(this.answeredBeforeDetach.delete(controlId))return;
+    this.armDetached(controlId,this.detachedDeadlineMs());
+  }
+  private detachedDeadlineMs(){
+    const value=this.deps.controlDetachedDeadlineMs;
+    return typeof value==='number'&&Number.isFinite(value)&&value>0?value:CONTROL_DETACHED_DEADLINE_MS;
+  }
+  private armDetached(controlId:string,delayMs:number){
+    this.disarmDetached(controlId);
+    const timer=setTimeout(()=>{
+      if(this.detachedControls.get(controlId)!==timer)return;
+      this.detachedControls.delete(controlId);
+      void this.sendControlResponse(controlId,{ok:false,error:COMMUNITY_CONTROL_EXECUTE_TIMEOUT_MESSAGE}).catch(()=>undefined);
+    },delayMs);
+    (timer as unknown as {unref?:()=>void}).unref?.();
+    this.detachedControls.set(controlId,timer);
+  }
+  private disarmDetached(controlId:string){
+    const timer=this.detachedControls.get(controlId);
+    if(timer!==undefined){clearTimeout(timer);this.detachedControls.delete(controlId);}
   }
   async disable(target:AgentDialogueTarget){
     const {profileId,deviceId}=this.identity();const item=this.enabled.get(key(target));if(!item)return {disabled:true};

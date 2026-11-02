@@ -45,6 +45,11 @@ fn main() {
       .file("native/computer-use/ClientBridge/ComputerUseClientBridge.m")
       .flag("-fobjc-arc").flag("-fmodules").warnings(true).warnings_into_errors(true)
       .compile("agentstoz_computer_use_client_bridge");
+    cc::Build::new()
+      .file("native/community-enrollment/CommunityEnrollmentBridge.m")
+      .flag("-fobjc-arc").flag("-fmodules").warnings(true).warnings_into_errors(true)
+      .compile("agentstoz_community_enrollment_bridge");
+    println!("cargo:rerun-if-changed=native/community-enrollment/CommunityEnrollmentBridge.m");
     println!("cargo:rerun-if-changed=native/computer-use/ClientBridge/ComputerUseClientBridge.m");
     println!("cargo:rerun-if-changed=native/computer-use/ClientBridge/ComputerUseClientBridge.h");
     println!("cargo:rustc-link-lib=framework=Foundation");

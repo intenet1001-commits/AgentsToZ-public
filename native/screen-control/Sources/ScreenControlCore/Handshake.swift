@@ -18,6 +18,63 @@ import Foundation
 
 public enum HandshakeError: Error, Equatable, Sendable {
     case malformed, unknownDevice, replayedNonce, badSignature, badConfirmation, alreadyUsed, fingerprintMismatch
+    /// The Mac knows this key, but as a kind of peer this listener does not take (SR-33): a Mac controller on the relay.
+    case peerClassRefused
+    /// The version the two ends settled on is below what this end allows: a Viewer reaching a Mac older than version 5,
+    /// or a Mac refusing a controller below it. The Viewer stops after checking the Mac's signature, so a changed version
+    /// stamp reads as `badSignature`, and before making its own.
+    case versionBelowMinimum
+    /// A version-5 Mac's unauthenticated reason for not answering (DESIGN 7.7). For wording only: it may come from anyone
+    /// on the path, so it never changes what this end stores, deletes or retries.
+    case preAuthNotice(PreAuthNotice)
+}
+
+/// Which registry the Mac found a peer's key in (DESIGN 7.2, SR-22). A version-5 transcript binds it, so a key the Mac
+/// holds as one kind never opens a session as the other.
+public enum ScreenPeerClass: UInt8, Sendable, CaseIterable, Hashable {
+    case phone = 1, controller = 2
+}
+
+/// A key the Mac's registries know, and the registry it is in.
+public struct RegisteredPeerKey: Sendable {
+    public let key: P256.Signing.PublicKey
+    public let peerClass: ScreenPeerClass
+
+    public init(key: P256.Signing.PublicKey, peerClass: ScreenPeerClass) {
+        self.key = key
+        self.peerClass = peerClass
+    }
+}
+
+/// Why a version-5 Mac closed before answering (DESIGN 7.7). One unauthenticated frame in place of message 2, sent only to
+/// a peer whose hello offered version 5 or more, so a phone (which offers 4) never receives one. `notAccepted` covers
+/// every refusal of the key itself (no registration, expired, switch off, the release gate) without telling them apart.
+public enum PreAuthNotice: UInt8, Sendable, CaseIterable, Equatable {
+    case notAccepted = 1, rateLimited, blocked, busy
+
+    /// The first version that may receive one.
+    public static let minimumVersion: UInt16 = 5
+
+    var message: Data { encodeMessage(.preAuthNotice, [Data([rawValue])]) }
+
+    /// Exactly a notice frame, or nil.
+    init?(message: Data) {
+        guard let fields = try? LengthPrefixed.decode(message, count: 2), fields[0] == Data([MessageTag.preAuthNotice.rawValue]),
+              fields[1].count == 1, let notice = PreAuthNotice(rawValue: fields[1][fields[1].startIndex]) else { return nil }
+        self = notice
+    }
+
+    /// The notice a refusal before message 2 may name, nil for one it must not (anything malformed or replayed).
+    init?(refusal error: Error) {
+        switch error {
+        case HandshakeError.unknownDevice, HandshakeError.peerClassRefused, HandshakeError.versionBelowMinimum: self = .notAccepted
+        case PreAuthRefusal.tooFast: self = .rateLimited
+        case PreAuthRefusal.blocked: self = .blocked
+        case PreAuthRefusal.busy: self = .busy
+        case let refused as PreAuthAccountRefusal: self.init(refusal: refused.refusal)
+        default: return nil
+        }
+    }
 }
 
 enum HandshakeSize {
@@ -26,6 +83,23 @@ enum HandshakeSize {
 
 enum MessageTag: UInt8 {
     case deviceHello = 1, macHello = 2, deviceFinish = 3
+    /// Version 5, Mac → peer before authentication (`PreAuthNotice`).
+    case preAuthNotice = 4
+}
+
+/// What a listener may read from message 1 before the key exchange: whose key it names and the newest version it offers.
+/// Read before any signature, so a connector attempt can be counted under its device (SR-25) and a refusal named to a
+/// version-5 peer (DESIGN 7.7).
+struct DeviceHelloSummary: Sendable {
+    let deviceID: Data
+    /// The version the nonce offers, 1 for a plain one.
+    let offeredVersion: UInt16
+
+    init(_ hello: Data) throws {
+        let fields = try decodeMessage(hello, .deviceHello, sizes: [HandshakeSize.id, HandshakeSize.nonce, HandshakeSize.ephemeral])
+        deviceID = fields[0]
+        offeredVersion = VersionStamp.version(in: fields[1]) ?? 1
+    }
 }
 
 /// Version negotiation without a new message or field (DESIGN 「버전 협상」). A phone that speaks a version above 1 ends
@@ -66,7 +140,12 @@ enum VersionPolicy: Sendable, Equatable {
     /// Any version from 1 up to this one, settled with the peer through `VersionStamp`.
     case upTo(UInt16)
 
+    /// What a Mac answers in: every version this build speaks. Never a phone's offer (SR-36); `phone` is.
     static let current = VersionPolicy.upTo(ScreenControlProtocol.version)
+    /// What a phone offers: up to 4, whatever this build's newest is (SR-36).
+    static let phone = VersionPolicy.upTo(ScreenControlProtocol.phoneVersion)
+    /// What a Mac controller (Viewer) offers, with `ScreenControlProtocol.controllerMinimumVersion` as its floor.
+    static let controller = VersionPolicy.upTo(ScreenControlProtocol.version)
 }
 
 struct HandshakeLabels {
@@ -95,10 +174,14 @@ struct SessionKeys {
     }
 }
 
+/// From version 5 on, T ends with one more field: the peer class, the Mac's from its registry and the peer's its own, so
+/// two ends that disagree on it never agree on a signature. Versions 1–4 hash exactly the fields they always did.
 func transcriptHash(version: UInt16, macFingerprint: Data, deviceID: Data, deviceNonce: Data,
-                    deviceEphemeral: Data, macNonce: Data, macEphemeral: Data) -> Data {
-    sha256(LengthPrefixed.encode([Data(ScreenControlProtocol.name.utf8), version.bigEndianData, macFingerprint,
-                                  deviceID, deviceNonce, deviceEphemeral, macNonce, macEphemeral]))
+                    deviceEphemeral: Data, macNonce: Data, macEphemeral: Data, peerClass: ScreenPeerClass = .phone) -> Data {
+    var fields = [Data(ScreenControlProtocol.name.utf8), version.bigEndianData, macFingerprint,
+                  deviceID, deviceNonce, deviceEphemeral, macNonce, macEphemeral]
+    if version >= 5 { fields.append(Data([peerClass.rawValue])) }
+    return sha256(LengthPrefixed.encode(fields))
 }
 
 func encodeMessage(_ tag: MessageTag, _ fields: [Data]) -> Data { LengthPrefixed.encode([Data([tag.rawValue])] + fields) }
@@ -142,14 +225,25 @@ public actor DeviceHandshake {
     let nonce: Data
     let ephemeral: P256.KeyAgreement.PrivateKey
     let versions: VersionPolicy
+    /// The oldest version this end goes on with; below it, it stops before checking or making a signature.
+    let minimum: UInt16
+    /// What this end is: bound into a version-5 transcript, never sent.
+    let peerClass: ScreenPeerClass
     private var used = false
     /// Message 1, to send to the Mac.
     public nonisolated let hello: Data
 
-    /// `mac` is the Mac identity key saved at registration, pinned to the fingerprint from the QR. Offers every version
-    /// this build speaks; the session uses the newest one the Mac speaks too.
-    public init(mac: PinnedMac, devicePublicKey: P256.Signing.PublicKey) {
-        self.init(mac: mac, devicePublicKey: devicePublicKey, versions: .current)
+    /// `mac` is the Mac identity key saved at registration, pinned to the fingerprint from the QR. A phone (the default)
+    /// offers up to version 4 and takes any version the Mac settles on (SR-36). A Mac controller offers up to this
+    /// build's newest and goes on only at version 5 or more (DESIGN 6.4).
+    public init(mac: PinnedMac, devicePublicKey: P256.Signing.PublicKey, peerClass: ScreenPeerClass = .phone) {
+        switch peerClass {
+        case .phone:
+            self.init(mac: mac, devicePublicKey: devicePublicKey, versions: .phone)
+        case .controller:
+            self.init(mac: mac, devicePublicKey: devicePublicKey, versions: .controller,
+                      minimum: ScreenControlProtocol.controllerMinimumVersion, peerClass: .controller)
+        }
     }
 
     /// A phone that speaks exactly `version` and offers nothing (checks: a version-1 build, or a peer of another version).
@@ -159,10 +253,13 @@ public actor DeviceHandshake {
     }
 
     /// Checks may fix the nonce and ephemeral key to pin the key schedule; nothing else should.
-    init(mac: PinnedMac, devicePublicKey: P256.Signing.PublicKey, versions: VersionPolicy,
+    init(mac: PinnedMac, devicePublicKey: P256.Signing.PublicKey, versions: VersionPolicy, minimum: UInt16 = 1,
+         peerClass: ScreenPeerClass = .phone,
          nonce: Data = randomBytes(HandshakeSize.nonce), ephemeral: P256.KeyAgreement.PrivateKey = .init()) {
         self.mac = mac
         self.versions = versions
+        self.minimum = minimum
+        self.peerClass = peerClass
         if case .upTo(let newest) = versions, newest >= 2 {
             self.nonce = VersionStamp.stamped(nonce, version: newest)
         } else {
@@ -186,11 +283,21 @@ public actor DeviceHandshake {
         }
     }
 
+    /// Whether this end offered a version that may hear a `PreAuthNotice`. A phone never does.
+    var readsNotices: Bool {
+        if case .upTo(let newest) = versions { return newest >= PreAuthNotice.minimumVersion }
+        return false
+    }
+
     /// Verifies the Mac first, so a fake Mac never triggers Face ID, then signs and returns message 3 and the channel.
-    /// One call per handshake, whatever its outcome.
+    /// One call per handshake, whatever its outcome. A Mac that settled below `minimum` is refused once its signature and
+    /// confirmation check out, before anything is signed: a version stamp changed on the path fails that signature, so
+    /// only a real Mac's version ever reads as `versionBelowMinimum` (DESIGN 6.4). A version-5 Mac's pre-authentication
+    /// notice ends it before anything is checked, as `preAuthNotice`.
     public func finish(macHello: Data, signer: TranscriptSigner) async throws -> (message: Data, channel: SecureChannel) {
         guard !used else { throw HandshakeError.alreadyUsed }
         used = true
+        if readsNotices, let notice = PreAuthNotice(message: macHello) { throw HandshakeError.preAuthNotice(notice) }
         let fields = try decodeMessage(macHello, .macHello, sizes: [HandshakeSize.nonce, HandshakeSize.ephemeral,
                                                                      HandshakeSize.signature, HandshakeSize.confirmation])
         let macEphemeral = try ephemeralKey(fields[1])
@@ -199,13 +306,15 @@ public actor DeviceHandshake {
         let hash = transcriptHash(version: version, macFingerprint: mac.fingerprint,
                                   deviceID: deviceID, deviceNonce: nonce,
                                   deviceEphemeral: ephemeral.publicKey.x963Representation,
-                                  macNonce: fields[0], macEphemeral: fields[1])
+                                  macNonce: fields[0], macEphemeral: fields[1], peerClass: peerClass)
         guard mac.publicKey.isValidSignature(try signature(fields[2]), for: labels.macSignature + hash) else {
             throw HandshakeError.badSignature
         }
         let keys = SessionKeys(secret: try ephemeral.sharedSecretFromKeyAgreement(with: macEphemeral),
                                transcriptHash: hash, labels: labels)
         guard confirmationIsValid(fields[3], keys.macConfirm, hash, fields[2]) else { throw HandshakeError.badConfirmation }
+        // The Mac is proven: an old version is its build's, and the person is never asked to sign for it.
+        guard version >= minimum else { throw HandshakeError.versionBelowMinimum }
         guard ScreenControlIdentity.fingerprint(of: signer.publicKey) == deviceID else { throw HandshakeError.badSignature }
         let deviceSignature = try await signer.signature(for: labels.deviceSignature + hash).rawRepresentation
         let message = encodeMessage(.deviceFinish, [deviceSignature,
@@ -235,18 +344,27 @@ public actor NonceReplayCache {
     }
 }
 
-/// The Mac's half. `registeredKey` answers only from the screen host's protected registry.
+/// The Mac's half. Its lookup answers only from the screen host's protected registries: the phones' and, from version 5,
+/// the Mac controllers' (SR-22), each key with the registry it is in.
 public struct MacHandshake: Sendable {
     let signer: TranscriptSigner
-    let registeredKey: @Sendable (Data) async -> P256.Signing.PublicKey?
+    let lookup: @Sendable (Data) async -> RegisteredPeerKey?
     let replay: NonceReplayCache
     let versions: VersionPolicy
     let fresh: @Sendable () -> (nonce: Data, ephemeral: P256.KeyAgreement.PrivateKey)
 
-    /// Answers a phone of any version this build speaks, in the newest version both speak.
+    /// Answers a phone of any version this build speaks, in the newest version both speak, capped at the phone's 4. Every
+    /// key `registeredKey` names is a phone's.
     public init(signer: TranscriptSigner, replay: NonceReplayCache,
                 registeredKey: @escaping @Sendable (Data) async -> P256.Signing.PublicKey?) {
         self.init(signer: signer, replay: replay, versions: .current, registeredKey: registeredKey)
+    }
+
+    /// Answers phones and Mac controllers (DESIGN 6.4): `registeredPeer` names the registry each key is in, phones first.
+    /// A controller settles on version 5 or is refused; a phone never above 4.
+    public init(signer: TranscriptSigner, replay: NonceReplayCache,
+                registeredPeer: @escaping @Sendable (Data) async -> RegisteredPeerKey?) {
+        self.init(signer: signer, replay: replay, versions: .current, registeredPeer: registeredPeer)
     }
 
     /// A Mac that speaks exactly `version` and reads no offer (checks: a version-1 build, or a peer of another version).
@@ -260,19 +378,38 @@ public struct MacHandshake: Sendable {
     init(signer: TranscriptSigner, replay: NonceReplayCache, versions: VersionPolicy,
          fresh: @escaping @Sendable () -> (nonce: Data, ephemeral: P256.KeyAgreement.PrivateKey) = { (randomBytes(HandshakeSize.nonce), .init()) },
          registeredKey: @escaping @Sendable (Data) async -> P256.Signing.PublicKey?) {
+        self.init(signer: signer, replay: replay, versions: versions, fresh: fresh, registeredPeer: { id in
+            await registeredKey(id).map { RegisteredPeerKey(key: $0, peerClass: .phone) }
+        })
+    }
+
+    init(signer: TranscriptSigner, replay: NonceReplayCache, versions: VersionPolicy,
+         fresh: @escaping @Sendable () -> (nonce: Data, ephemeral: P256.KeyAgreement.PrivateKey) = { (randomBytes(HandshakeSize.nonce), .init()) },
+         registeredPeer: @escaping @Sendable (Data) async -> RegisteredPeerKey?) {
         self.signer = signer
         self.replay = replay
         self.versions = versions
         self.fresh = fresh
-        self.registeredKey = registeredKey
+        lookup = registeredPeer
     }
 
-    /// The version to answer `deviceNonce` in, and the Mac's nonce for that answer.
-    func settle(deviceNonce: Data, freshNonce: Data) -> (version: UInt16, nonce: Data) {
+    /// The registered key with this ID, when its own fingerprint is the ID.
+    func registered(_ deviceID: Data) async -> RegisteredPeerKey? {
+        guard let peer = await lookup(deviceID), ScreenControlIdentity.fingerprint(of: peer.key) == deviceID else { return nil }
+        return peer
+    }
+
+    /// Whether either registry knows this ID: a connector attempt is counted under its own device only then, and every
+    /// unknown ID shares one account (SR-25).
+    public func knows(_ deviceID: Data) async -> Bool { await registered(deviceID) != nil }
+
+    /// The version to answer `deviceNonce` in, and the Mac's nonce for that answer. A phone is never answered above
+    /// `ScreenControlProtocol.phoneVersion` (SR-36): a phone that offered more still settles on 4.
+    func settle(deviceNonce: Data, freshNonce: Data, peerClass: ScreenPeerClass = .phone) -> (version: UInt16, nonce: Data) {
         let newest: UInt16
         switch versions {
         case .only(let version): return (version, freshNonce)
-        case .upTo(let version): newest = version
+        case .upTo(let version): newest = peerClass == .phone ? min(version, ScreenControlProtocol.phoneVersion) : version
         }
         let version = min(VersionStamp.version(in: deviceNonce) ?? 1, newest)
         if version >= 2 { return (version, VersionStamp.stamped(freshNonce, version: version)) }
@@ -283,33 +420,46 @@ public struct MacHandshake: Sendable {
         return (1, nonce)
     }
 
-    /// Answers message 1 with message 2. Nothing is captured until `PendingMacSession.confirm` succeeds.
+    /// Answers message 1 with message 2. Nothing is captured until `PendingMacSession.confirm` succeeds. Phones only, as
+    /// a listener and `ScreenTransportHandshake.accept` take by default (SR-33): a path that serves Mac controllers names
+    /// them in `respond(to:accepting:)`.
     public func respond(to hello: Data) async throws -> (message: Data, pending: PendingMacSession) {
+        try await respond(to: hello, accepting: [.phone])
+    }
+
+    /// `accepting` is what this listener serves (SR-33): a key the registries hold as another class is refused before
+    /// anything is signed, and so is a Mac controller that would settle below version 5.
+    public func respond(to hello: Data, accepting: Set<ScreenPeerClass>) async throws -> (message: Data, pending: PendingMacSession) {
         let fields = try decodeMessage(hello, .deviceHello, sizes: [HandshakeSize.id, HandshakeSize.nonce,
                                                                     HandshakeSize.ephemeral])
-        guard let deviceKey = await registeredKey(fields[0]),
-              ScreenControlIdentity.fingerprint(of: deviceKey) == fields[0] else { throw HandshakeError.unknownDevice }
+        guard let peer = await registered(fields[0]) else { throw HandshakeError.unknownDevice }
+        guard accepting.contains(peer.peerClass) else { throw HandshakeError.peerClassRefused }
         let deviceEphemeral = try ephemeralKey(fields[2])
         guard await replay.insert(fields[1]) else { throw HandshakeError.replayedNonce }
         let (freshNonce, ephemeral) = fresh()
-        let (version, nonce) = settle(deviceNonce: fields[1], freshNonce: freshNonce)
+        let (version, nonce) = settle(deviceNonce: fields[1], freshNonce: freshNonce, peerClass: peer.peerClass)
+        if peer.peerClass == .controller, version < ScreenControlProtocol.controllerMinimumVersion {
+            throw HandshakeError.versionBelowMinimum
+        }
         let labels = HandshakeLabels(version: version)
         let hash = transcriptHash(version: version, macFingerprint: ScreenControlIdentity.fingerprint(of: signer.publicKey),
                                   deviceID: fields[0], deviceNonce: fields[1], deviceEphemeral: fields[2],
-                                  macNonce: nonce, macEphemeral: ephemeral.publicKey.x963Representation)
+                                  macNonce: nonce, macEphemeral: ephemeral.publicKey.x963Representation, peerClass: peer.peerClass)
         let keys = SessionKeys(secret: try ephemeral.sharedSecretFromKeyAgreement(with: deviceEphemeral),
                                transcriptHash: hash, labels: labels)
         let macSignature = try await signer.signature(for: labels.macSignature + hash).rawRepresentation
         let message = encodeMessage(.macHello, [nonce, ephemeral.publicKey.x963Representation, macSignature,
                                                 confirmation(keys.macConfirm, hash, macSignature)])
-        return (message, PendingMacSession(deviceID: fields[0], deviceKey: deviceKey, transcriptHash: hash,
-                                           keys: keys, labels: labels, version: version))
+        return (message, PendingMacSession(deviceID: fields[0], deviceKey: peer.key, peerClass: peer.peerClass,
+                                           transcriptHash: hash, keys: keys, labels: labels, version: version))
     }
 }
 
 /// A Mac-side session waiting for the device's signature. One confirm per session, whatever its outcome.
 public actor PendingMacSession {
     public nonisolated let deviceID: Data
+    /// The registry the key was found in; the transcript of a version-5 session binds it.
+    public nonisolated let peerClass: ScreenPeerClass
     let deviceKey: P256.Signing.PublicKey
     let transcriptHash: Data
     let keys: SessionKeys
@@ -317,10 +467,11 @@ public actor PendingMacSession {
     let version: UInt16
     private var used = false
 
-    init(deviceID: Data, deviceKey: P256.Signing.PublicKey, transcriptHash: Data, keys: SessionKeys,
-         labels: HandshakeLabels, version: UInt16) {
+    init(deviceID: Data, deviceKey: P256.Signing.PublicKey, peerClass: ScreenPeerClass = .phone, transcriptHash: Data,
+         keys: SessionKeys, labels: HandshakeLabels, version: UInt16) {
         self.deviceID = deviceID
         self.deviceKey = deviceKey
+        self.peerClass = peerClass
         self.transcriptHash = transcriptHash
         self.keys = keys
         self.labels = labels

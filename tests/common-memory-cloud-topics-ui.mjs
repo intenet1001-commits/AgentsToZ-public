@@ -19,3 +19,6 @@ for(const [name,engine] of [['chromium',chromium],['webkit',webkit]]){
  }finally{await browser.close();fixture.stop();}
 }
 console.log(JSON.stringify({fixture:true,physicalDevice:false,report},null,2));
+
+// Exercise the cross-page discovery journey through the same real panel.
+await import('./common-memory-cross-page-ui.mjs');

@@ -1,0 +1,1943 @@
+diff --git a/docs/claude/remote-control.md b/docs/claude/remote-control.md
+index f18c36d6..41a6b5f4 100644
+--- a/docs/claude/remote-control.md
++++ b/docs/claude/remote-control.md
+@@ -295,3 +295,56 @@ push** 다.
+ - **배포 순서**(사람이 승인 뒤): ① `supabase/migrations/20261025010000_screen_push.sql`을 `yfbivsatsorbidfutkvb`에 적용 — ⚠️ `create table if not exists`라 **예전 파일로 이미 적용한 DB에는
+   `usage`가 들어가지 않는다.** 그런 DB는 `portmgr_screen_push_requests_kind_check`를 지우고 `usage`를 더해 다시 만든다(안 하면 주간 알림 admit이 check 위반 → 500) ② APNs 비밀 ③ 함수 `screen-push` 배포 ④ 주소를 넣은 메인 앱(동봉 Screen) ⑤ 주소·push entitlement를 넣은
+   iOS 빌드 ⑥ 폰 「알림 받기」 ⑦ 그 Mac 도크에서 「휴대폰 알림」. 함수를 먼저 배포해야 Screen의 `weekly-usage` 전송이 `malformed`가 되지 않는다.
++
++## AgentsToZ Screen 세션 막대 — 보이고 조작되는 Mac의 플로팅 막대 (2026-11-01)
++
++사람의 요청: 「맥제어기능도 컴퓨터유즈처럼 플로팅바 기능있어야함 맥끼리 또는 모바일의 맥제어기능 모두」. 설계는
++`docs/design/mac-to-mac-2026-11-01/DESIGN.md` 「부록 A」.
++- **어디에**: `native/screen-control/Sources/AgentsToZScreen/ScreenSessionBar.swift`(패널·시계·동작)·`ScreenSessionBarView.swift`(모양, Control 막대와 같은
++  어두운 유리 캡슐 660×52), 문구·버튼·클릭 판정·자리는 순수 모델 `ScreenHost/ScreenSessionBarModel.swift`(Foundation만). `ScreenApp.swift`에는
++  `ScreenSessionBar.shared.start()` 한 줄뿐이고, 막대가 `service.session`을 스스로 관찰해 세션 동안만 매 초 갱신한다.
++- **어떤 세션이든**: 기기 종류는 세션의 `deviceModel`(등록 모델 「iPhone16,2」「Mac14,2」)에서 `ScreenDeviceKind`로 읽는다. 남은 한도는
++  `VideoPump.deadline`(→ `HostStreamer`·`ScreenService.sessionDeadline`)을 센다.
++  ⚠️ **「맥끼리」는 아직 막대가 뜨지 않는다(2026-11-01 검토 F3).** 지금 `ScreenService.accept`에 오는 것은 등록된 폰·패드뿐이고,
++  `ScreenHost/ScreenControllers.swift`는 컨트롤러를 저장만 한다 — Mac 컨트롤러 세션 경로가 없다. 막대의 모델·렌더는 Mac을 그리지만, 실제로 뜨는
++  것은 그 경로가 생긴 뒤다. **wp-screen-host·wp-viewer-app의 요구**: 컨트롤러 세션도 ① `Session(…, deviceModel: controller.model)`을 넣고
++  ② 홀드를 같은 `macHold.begin()`에서 받고(폰과 한 `ScreenMacHold`) ③ `canControl`을 `RegisteredController.grant == .control`(과 6.5절 관문)과
++  맞춘다 — grant가 `view`면 `canControl:false`. 「보기만」은 그 세션만 보기로 낮추고 grant는 바꾸지 않는다(grant는 이 Mac의 사람이 정한다).
++- **권한을 줄이는 동작은 새 길이 없다**: `ScreenSessionInputHold`가 로컬 입력 모니터와 세션의 `InputReceiver` 사이에 끼어
++  「직접 하기」는 사람이 이 Mac 입력을 쥔 것(`held` → `.localActivity`)으로, 「보기만」은 입력 보호가 그 세션 끝까지 사라진 것(`available:false` →
++  `.monitorUnavailable`)으로 보인다. 그래서 다음 원격 이벤트부터 주입 전에 거절되고, 원격이 쥔 키·버튼을 놓고, 폰은 **이미 아는 메시지**
++  (`remoteInputPaused`·`inputAvailability`)로 듣는다 — 폰 프로토콜·`ScreenInputAvailability`는 그대로다.
++  ⚠️ 그 대가로 「보기만」 뒤 폰 문구는 `.monitorUnavailable`의 「Mac 입력 우선 보호가 중단되어 화면만 보여줍니다… 다시 연결하세요」다. 전용 문구는
++  새 이유 값(프로토콜 변경)이 필요하다 — 옛 폰은 모르는 값을 거절한다. 「직접 하기」는 「Mac에서 입력 중… 잠시 뒤 다시 가능」으로 보인다.
++- **줄인 권한은 세션보다 오래 간다(`ScreenMacHold`, 검토 F1)**: 등록된 폰은 이 Mac에 아무도 없어도 Face ID만으로 다시 붙고(같은 기기는 `.replaced`),
++  다른 등록 기기도 이어 붙을 수 있다. 예전에는 새 세션의 홀드가 `.remote`로 새로 시작해 「직접 하기」·「보기만」이 하드웨어 「다시 넘기기」 없이
++  풀렸다(SR-29 우회, 막대의 「다시 넘기기는 이 Mac에서만」이 거짓). 지금은 둘 중 하나를 누르면 **이 Mac 전체**가 「쥔 상태」가 되고, 그 뒤 **어느 기기의
++  새 세션이든** `.paused`로 시작해 막대에 「원격 입력 멈춤 · 다시 넘기기」가 뜬다. 지우는 길은 받아들여진 「다시 넘기기」와 **이 Mac에서 다시 켜기**
++  (Touch ID·암호 뒤 `macHold.reset()`)뿐이다 — 메모리에만 있어 앱을 다시 열어도 지워지지만, 앱은 꺼진 채 열리고 켜기는 이 Mac에서 묻는다.
++  `ScreenService`의 모든 세션 홀드는 `macHold.begin()`에서만 나온다(소스 계약). 기기별이 아니라 Mac 전체인 이유: 같은 사람의 두 번째 등록 기기로도
++  풀 수 있었기 때문이다. 「보기만」은 여전히 **그 세션만** 보기로 낮추고(부록 A), 이어지는 것은 그보다 약한 일시 정지다 — 다음 세션이 보기 전용으로
++  남아야 하는지는 **사람이 정할 일**(열린 질문). ⚠️ 폰은 그 세션에서 「잠시 뒤 다시 가능」(`remoteInputPaused`)을 듣는다 — 실제로는 이 Mac의 사람이
++  넘겨야 풀린다. 전용 문구는 위와 같은 프로토콜 변경이다.
++- **「다시 넘기기」만 하드웨어 클릭**(`ScreenSessionBarClick.handBackRefusal`): 막대 창의 1초 안 mouse-up이 **그 버튼 안**에 있고, 그 버튼이 **스스로
++  mouseDown을 추적한** 클릭이며(`PillButton.tracksOwnMouseDown`), 한 번 클릭(`clickCount == 1`)이고, Screen 주입 표식
++  (`LocalInputMonitor.injectedEventMarker`) 아님, 보낸 pid 0. **Control 막대와 달리 원격 데스크톱도 거절한다**(SR-29) — 서명 확인은 거절 문구만 고른다.
++  「다시 넘기기」의 접근성 누르기(osascript `click button`·AI의 AXPress)는 `accessibilityPerformPress`에서 동작 전에 거절하고 막대가 이유를 보인다.
++  검토 F2: 예전에는 막대 창·1초만 봐서, 사람이 「직접 하기」를 실제로 누른 뒤 1초 안의 AX 누르기가 그 mouse-up을 `NSApp.currentEvent`로 읽고
++  통과했고, 「직접 하기」 더블클릭의 두 번째 클릭이 같은 자리의 「다시 넘기기」를 눌렀다. ⚠️ **Control 막대(`native/computer-use` `ControlBar`)에도 같은
++  틈이 있다**(막대 창·1초만 본다) — 이번 변경 범위 밖, 열린 항목.
++  「끊기」·「보기만」·「직접 하기」는 어떤 클릭이든 받는다(원격 쪽 사람이 스트림 속 막대를 눌러도). 서비스도 `resumeRemoteInput(refusal:)`에서 한 번 더 막는다.
++- **클릭 판정은 두 번째 사본이다(검토 F4)**: 설계가 SR-29에 정한 것은 `ScreenInputOrigin.humanClick`(wp-input-origin)이다. 그것이 들어오면
++  `ScreenSessionBarClick.handBackRefusal`을 `humanClick(event, inControl:, ownPid:, screenPid: ownPid)` + 막대의 한 번 클릭 규칙으로 바꾸고 벡터를
++  `Tests/InputOriginContract/vectors.json`으로 옮긴다. 그때까지 `scripts/check-screen-control.ts`가 상수(pid 0·1초·원격 데스크톱 목록)를 Control 막대의
++  `ControlBarRules.swift`와 같게, `ScreenInputOrigin.swift`가 패키지에 있으면 그것과도 같게 묶는다(어긋나면 실패).
++- **캡처에서 빼지 않는다**: `sharingType`을 건드리지 않고, 캡처는 Viewer 번들만 뺀다. 기본 자리는 메뉴 막대 화면 아래 가운데, Control 막대 자리(18pt) **한 칸 위**
++  (+62pt) — 다른 Mac의 AI가 움직일 때 두 막대가 함께 보인다. 사람이 끌어 둔 자리는 `UserDefaults` `ScreenSessionBarOrigin`에 남고, 그 자리가 화면 안에 통째로 있을 때만 쓴다.
++- 검증: `bun run test:screen-control` — `ScreenSessionBarTests`(상태 → 문구·버튼, 클릭 출처(버튼 안·추적·한 번 클릭), 홀드 → 실제 `InputReceiver`,
++  `ScreenMacHold` 이월(같은 기기 재접속·다른 기기·보기만·다시 넘기기·켜기), 자리, 캡처 유지),
++  오프스크린 렌더(`Tests/SessionBarRender/main.swift`를 뷰·모델과 한 모듈로 컴파일, 창 없이 `cacheDisplay` → `tests/results/screen-session-bar/*.png`,
++  고정 문구가 잘리거나 버튼이 틀리거나 「다시 넘기기」가 접근성 누르기로 동작하거나 창이 생기면 실패), 패널 소스 계약(레벨 순서·Spaces·캡처·「다시 넘기기」가
++  판정을 거침·버튼의 mouseDown 추적·AX 거절·홀드는 `macHold`에서만·`reset`은 켜기 인증 뒤에만·클릭 상수 동기), 코어 `VideoPump.deadline`.
++  패널을 실제로 띄워 보는 것(레벨·앞으로 올리기·끌기·실제 더블클릭·osascript 누르기)은 실기에서 본다.
++- **열린 항목**: ① 부록 A의 「에뮬레이터 하네스 J2 레인에서 픽스처 호스트의 세션 상태 전이 단언」은 **아직 없다** — 그 하네스가 저장소에 없다(검토 F5).
++  하네스가 생기면 막대 상태(조작 중 → 직접 하기 → 재접속해도 멈춤 → 다시 넘기기)를 그 레인에 넣는다. ② 「맥끼리」 막대는 Mac 컨트롤러 세션 경로 뒤(위).
++  ③ Control 막대의 같은 클릭 틈. ④ 「보기만」 이월을 보기 전용으로 할지(사람). ⑤ 폰 쪽 전용 문구(프로토콜 변경).
+diff --git a/docs/design/mac-to-mac-2026-11-01/DESIGN.md b/docs/design/mac-to-mac-2026-11-01/DESIGN.md
+index 8be75b26..56fb73e3 100644
+--- a/docs/design/mac-to-mac-2026-11-01/DESIGN.md
++++ b/docs/design/mac-to-mac-2026-11-01/DESIGN.md
+@@ -875,3 +875,9 @@
+ - **캡처**: 막대는 스트림에서 빼지 않는다. 원격 쪽 사람도 같은 막대를 보고, 「끊기」·「보기만」을 직접 누를 수 있다.
+ - **AI 원격 컴퓨터 유즈(기능 1)**: 같은 Mac에서 다른 Mac의 AI가 움직일 때는 Control 막대가 이미 뜬다. 그 막대의 「원격 · <기기>」 표시는 기능 1의 WP10(Control 릴리스)에서 넣고, 이 Screen 막대와 같은 회차에 낸다(D7).
+ - **시험**: 막대 모델(상태 → 문구·버튼) 순수 시험, 클릭 출처 판정 시험, 화면에 창을 띄우지 않는 오프스크린 렌더 PNG(증거), 에뮬레이터 하네스 J2 레인에서 픽스처 호스트의 세션 상태 전이 단언.
++- **구현 뒤 검토 반영 (2026-11-01, 막대 브랜치)**:
++  - 「직접 하기」·「보기만」은 세션보다 오래 간다. 둘 중 하나를 누르면 그 뒤 **어느 기기의 새 세션이든** 원격 입력이 멈춘 채 시작한다. 이 Mac의 사람이 하드웨어 클릭으로 「다시 넘기기」를 누르거나 이 Mac에서 다시 켤 때(Touch ID·암호)만 풀린다(`ScreenMacHold`). 재접속이나 다른 등록 기기로 하드웨어 클릭 없이 입력이 돌아오는 길을 막는다(SR-29). 「보기만」은 여전히 이번 세션만 보기로 낮춘다. 다음 세션도 보기 전용으로 둘지는 사람이 정한다.
++  - 「다시 넘기기」의 mouse-up은 **그 버튼 안**이어야 하고, 그 버튼이 스스로 추적한 한 번 클릭이어야 한다. 접근성 누르기는 거절한다.
++  - **wp-screen-host·wp-viewer-app의 요구**: Mac 컨트롤러 세션도 `Session.deviceModel`에 그 Mac의 모델을 넣고, 같은 `ScreenMacHold`에서 홀드를 받는다. `canControl`은 `RegisteredController.grant == .control`(과 6.5절 관문)과 맞춘다. 그 경로가 생기기 전에는 「맥끼리」 세션에 막대가 뜨지 않는다.
++  - **wp-input-origin의 몫**: 막대의 `ScreenSessionBarClick`은 `ScreenInputOrigin.humanClick`이 들어올 때까지의 사본이다. 들어오면 그것으로 바꾸고, 막대에만 있는 한 번 클릭 규칙을 그 뒤에 둔다. 그때까지 `scripts/check-screen-control.ts`가 두 규칙의 상수를 같게 묶는다.
++  - 열린 항목: J2 레인 단언은 에뮬레이터 하네스가 생긴 뒤에 넣는다. Control 막대에도 같은 클릭 틈(막대 창·1초만 본다)이 있다.
+diff --git a/native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift b/native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift
+index da1402ec..a558e552 100644
+--- a/native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift
++++ b/native/screen-control/Sources/AgentsToZScreen/ScreenApp.swift
+@@ -77,6 +77,7 @@ final class ScreenAppDelegate: NSObject, NSApplicationDelegate {
+     func applicationDidFinishLaunching(_ notification: Notification) {
+         watchSession()
+         ControllerSectionActions.connect(ScreenShared.service)
++        ScreenSessionBar.shared.start() // the floating session bar follows the session by itself (ScreenSessionBar.swift)
+         // A login item opens quietly in the menu bar; the main app, Finder or `open` show where things are.
+         if ScreenLaunch.showWindow || !Self.launchedAsLoginItem { PanelWindows.showStatus() }
+         // Permissions change in System Settings without telling this app. The status is written only when it changed.
+diff --git a/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBar.swift b/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBar.swift
+new file mode 100644
+index 00000000..c458bd54
+--- /dev/null
++++ b/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBar.swift
+@@ -0,0 +1,199 @@
++#if os(macOS)
++import AppKit
++import os
++import ScreenControlCore
++import ScreenHost
++import Security
++
++/// The floating session bar (docs/design/mac-to-mac-2026-11-01/DESIGN.md 「부록 A」): while a device or another Mac
++/// watches or controls this Mac, a bar like the Control bar says who, whether it only watches or controls, for how
++/// long and until when, when this Mac's own input has paused remote input, and the end-session key; and gives the
++/// person 「끊기」, 「보기만」, 「직접 하기」 and 「다시 넘기기」. It shows for any session and finds the device's kind in the
++/// session's model. Today only phones and iPads reach `ScreenService.accept`; a Mac controller session will need
++/// nothing here once that path exists, provided it sets `Session.deviceModel` and takes its hold from the service's
++/// `ScreenMacHold` (DESIGN 부록 A, wp-screen-host).
++///
++/// A borderless panel that never becomes key or main: no key reaches it and AgentsToZ Screen never comes to the front
++/// from it. It stays in the picture the other side sees (no `sharingType` change, and capture leaves out only the
++/// viewer app), so the person there can press 「끊기」 or 「보기만」 on it too. Its look is ScreenSessionBarView; its words
++/// and buttons are ScreenSessionBarText; this type owns the panel, the clock and the actions.
++@MainActor
++final class ScreenSessionBar: NSObject, NSWindowDelegate {
++    private final class Panel: NSPanel {
++        override var canBecomeKey: Bool { false }
++        override var canBecomeMain: Bool { false }
++    }
++
++    static let shared = ScreenSessionBar(service: ScreenShared.service)
++    static let size = ScreenSessionBarView.size
++    private static let originKey = "ScreenSessionBarOrigin"
++    private static let log = Logger(subsystem: "com.intenet.agentstozbycs.screen", category: "session-bar")
++
++    private let service: ScreenService
++    private var panel: Panel?
++    private let view = ScreenSessionBarView(frame: NSRect(origin: .zero, size: ScreenSessionBarView.size))
++    private var notice: (notice: ScreenSessionBarNotice, until: Date)?
++    private var tick: Timer?
++    /// Set while the bar moves itself, so only the person's drag is remembered.
++    private var placing = false
++
++    init(service: ScreenService) { self.service = service }
++
++    /// Once, when the app starts: from then on the bar follows the session by itself.
++    func start() { follow() }
++
++    /// Shows and ticks while a session exists, hides otherwise; called again whenever the session changes.
++    private func follow() {
++        let connected = withObservationTracking { service.session != nil } onChange: {
++            Task { @MainActor [weak self] in self?.follow() }
++        }
++        if connected, tick == nil {
++            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.update() } }
++            // Common modes: it keeps ticking while the menu bar menu is open.
++            RunLoop.main.add(timer, forMode: .common)
++            tick = timer
++        } else if !connected {
++            tick?.invalidate()
++            tick = nil
++            notice = nil
++        }
++        update()
++    }
++
++    /// Once a second while a session exists, and right after each press.
++    func update() {
++        guard let session = service.session else { return hide() }
++        let panel = self.panel ?? make()
++        let hold = service.sessionInput
++        let access = ScreenSessionAccess.of(canControl: session.canControl, hold: hold?.mode, availability: hold?.availability)
++        let state = ScreenSessionBarState(
++            kind: ScreenDeviceKind(model: session.deviceModel), name: session.deviceName, access: access,
++            elapsed: Date().timeIntervalSince(session.since),
++            limit: service.sessionDeadline.map { ScreenSessionLimit(deadline: $0, now: .now) }, hotKey: EndSessionHotKey.label)
++        if let current = notice, current.until <= Date() { notice = nil }
++        view.show(ScreenSessionBarText.present(state, notice: notice?.notice))
++        // `isFloatingPanel` resets the level, and other apps' panels at the same level ordered later cover it: both are
++        // put right every tick, as the Control bar does (docs/claude/computer-use.md 「제어 막대」).
++        if panel.level != .statusBar { panel.level = .statusBar }
++        if !panel.isVisible { appear(panel) }
++        panel.orderFrontRegardless()
++    }
++
++    private func hide() {
++        panel?.orderOut(nil)
++    }
++
++    private func make() -> Panel {
++        let panel = Panel(contentRect: NSRect(origin: .zero, size: Self.size),
++                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
++        // The level comes after `isFloatingPanel`, which sets it back to floating.
++        panel.isFloatingPanel = true
++        panel.level = .statusBar
++        panel.hidesOnDeactivate = false
++        panel.isMovableByWindowBackground = true
++        panel.isReleasedWhenClosed = false
++        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
++        panel.backgroundColor = .clear
++        panel.isOpaque = false
++        panel.hasShadow = true
++        panel.appearance = NSAppearance(named: .darkAqua)
++        panel.delegate = self
++        for pill in view.pills.values {
++            pill.target = self
++            pill.action = #selector(pressed(_:))
++            pill.refusedAccessibilityPress = { [weak self] in self?.refuse(.notABarClick, how: "accessibility press") }
++        }
++        panel.contentView = view
++        panel.setAccessibilityLabel("AgentsToZ Screen 세션 막대")
++        self.panel = panel
++        return panel
++    }
++
++    /// Where the person last left it if that is still on a screen, else bottom centre above the Dock, fading in.
++    private func appear(_ panel: NSPanel) {
++        let saved = UserDefaults.standard.string(forKey: Self.originKey).map(NSPointFromString)
++        guard let origin = ScreenSessionBarPlacement.origin(saved: saved, size: Self.size,
++                                                            visibleFrames: NSScreen.screens.map(\.visibleFrame)) else { return }
++        placing = true
++        panel.setFrameOrigin(origin)
++        placing = false
++        panel.alphaValue = 0
++        panel.orderFrontRegardless()
++        panel.invalidateShadow()
++        NSAnimationContext.runAnimationGroup { context in
++            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.2
++            panel.animator().alphaValue = 1
++        } completionHandler: { [weak panel] in
++            MainActor.assumeIsolated { panel?.invalidateShadow() }
++        }
++    }
++
++    /// The person dragged it: it opens there next time while that spot is on a screen.
++    func windowDidMove(_ notification: Notification) {
++        guard !placing, let panel else { return }
++        UserDefaults.standard.set(NSStringFromPoint(panel.frame.origin), forKey: Self.originKey)
++    }
++
++    @objc private func pressed(_ sender: ScreenSessionBarView.PillButton) {
++        guard let action = sender.barAction else { return }
++        // One line per press, so a report that the bar did nothing can be told apart from a click that never reached it.
++        Self.log.notice("session bar: \(action.rawValue, privacy: .public) pressed")
++        switch action {
++        case .end: service.disconnect()
++        case .viewOnly: service.lowerSessionToView()
++        case .takeOver: service.pauseRemoteInput()
++        case .handBack:
++            let refusal = Self.handBackRefusal(NSApp.currentEvent, bar: panel, pill: sender)
++            if !service.resumeRemoteInput(refusal: refusal), let refusal {
++                notice = (.handBackRefused(refusal), Date().addingTimeInterval(4))
++            }
++        }
++        update()
++    }
++
++    /// An accessibility press on 「다시 넘기기」, refused by the pill before any action ran: the bar says why.
++    private func refuse(_ refusal: ScreenSessionBarClick.Refusal, how: String) {
++        Self.log.notice("session bar: hand-back refused \(how, privacy: .public)")
++        notice = (.handBackRefused(refusal), Date().addingTimeInterval(4))
++        update()
++    }
++
++    /// What the bar can read about the click that ran 「다시 넘기기」 (ScreenSessionBarClick decides): the event, and
++    /// whether the pill tracked that click itself with the mouse-up inside it.
++    static func handBackRefusal(_ event: NSEvent?, bar: NSWindow?, pill: ScreenSessionBarView.PillButton) -> ScreenSessionBarClick.Refusal? {
++        guard let event, let bar, let cg = event.cgEvent else { return .notABarClick }
++        let source = cg.getIntegerValueField(.eventSourceUnixProcessID)
++        let own = Int64(ProcessInfo.processInfo.processIdentifier)
++        let poster = source > 0 && source != own && source <= Int64(Int32.max) ? poster(pid: pid_t(source)) : nil
++        // `clickCount` raises on an event that is not a mouse event, so it and the location are read for a mouse-up only.
++        let mouseUp = event.type == .leftMouseUp
++        let inControl = mouseUp && pill.tracksOwnMouseDown && pill.window === bar &&
++            pill.bounds.contains(pill.convert(event.locationInWindow, from: nil))
++        let refusal = ScreenSessionBarClick.handBackRefusal(
++            isMouseUp: mouseUp, inBar: event.window === bar, inControl: inControl, clickCount: mouseUp ? event.clickCount : 0,
++            ageSeconds: ProcessInfo.processInfo.systemUptime - event.timestamp,
++            sourcePid: source, userData: cg.getIntegerValueField(.eventSourceUserData),
++            ownPid: own, injectionMarker: LocalInputMonitor.injectedEventMarker, poster: poster)
++        // Calibration on real devices (hardware, remote desktop): the posting process and its signing name only.
++        log.notice("session bar: hand-back source=\(source, privacy: .public) poster=\(poster?.identifier ?? "-", privacy: .public) inControl=\(inControl, privacy: .public) refusal=\(refusal?.rawValue ?? "none", privacy: .public)")
++        return refusal
++    }
++
++    /// The posting process's signing identity, strictly validated; nil when it cannot be read or proven. Only chooses
++    /// what a refusal says: every posting process is refused.
++    static func poster(pid: pid_t) -> ScreenSessionBarPoster? {
++        var code: SecCode?
++        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: pid] as CFDictionary, [], &code) == errSecSuccess,
++              let code, SecCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate), nil) == errSecSuccess else { return nil }
++        var staticCode: SecStaticCode?
++        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
++        var info: CFDictionary?
++        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
++              let fields = info as? [String: Any], let identifier = fields[kSecCodeInfoIdentifier as String] as? String else { return nil }
++        var requirement: SecRequirement?
++        let apple = SecRequirementCreateWithString("anchor apple" as CFString, [], &requirement) == errSecSuccess && requirement != nil &&
++            SecCodeCheckValidity(code, [], requirement) == errSecSuccess
++        return ScreenSessionBarPoster(identifier: identifier, team: fields[kSecCodeInfoTeamIdentifier as String] as? String, apple: apple)
++    }
++}
++#endif
+diff --git a/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBarView.swift b/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBarView.swift
+new file mode 100644
+index 00000000..e6ffbcc2
+--- /dev/null
++++ b/native/screen-control/Sources/AgentsToZScreen/ScreenSessionBarView.swift
+@@ -0,0 +1,402 @@
++import AppKit
++import QuartzCore
++// The offscreen render check (scripts/check-screen-control.ts) compiles this file with ScreenSessionBarModel.swift alone,
++// as one module; inside the app the model comes from ScreenHost.
++#if canImport(ScreenHost)
++import ScreenHost
++#endif
++
++/// The session bar's look, the Control bar's family (AgentsToZControl/ControlBarView.swift): a dark glass capsule with a
++/// status light, the device's glyph, two lines of text and pill buttons. While the other side moves this Mac a light
++/// runs around the rim and the status light breathes; while it only watches the light rests blue, while the person here
++/// holds the Mac green, and amber when something needs a look. ScreenSessionBar decides every word and action through
++/// `ScreenSessionBarText.present`; this view only draws a presentation. It imports AppKit and the pure model alone.
++@MainActor
++final class ScreenSessionBarView: NSView {
++    static let size = NSSize(width: 660, height: 52)
++
++    enum Palette {
++        static let violet = NSColor(srgbRed: 0.62, green: 0.48, blue: 1.0, alpha: 1)
++        static let blue = NSColor(srgbRed: 0.36, green: 0.62, blue: 1.0, alpha: 1)
++        static let pink = NSColor(srgbRed: 1.0, green: 0.45, blue: 0.82, alpha: 1)
++        static let green = NSColor(srgbRed: 0.24, green: 0.86, blue: 0.58, alpha: 1)
++        static let amber = NSColor(srgbRed: 1.0, green: 0.72, blue: 0.3, alpha: 1)
++        static let stopRed = NSColor(srgbRed: 1.0, green: 0.33, blue: 0.33, alpha: 1)
++    }
++
++    /// A borderless pill. Its first click runs even though the bar's panel never becomes key, and it stays an NSButton, so
++    /// the event that runs its action is the bar's own mouse-up (ScreenSessionBar.handBackRefusal reads that event).
++    final class PillButton: NSButton {
++        enum Style { case light, accent, quiet, stop }
++        var style: Style = .quiet { didSet { refresh() } }
++        var label = "" { didSet { refresh() } }
++        /// Lighter text after the label: the end-session key.
++        var hint = "" { didSet { refresh() } }
++        var symbol = "" { didSet { refresh() } }
++        var barAction: ScreenSessionBarAction?
++        /// True only while this pill tracks a mouse-down it received itself. AppKit sends the action from the mouse-up
++        /// before `mouseDown` returns, so an action run any other way (an accessibility press, `performClick`) reads false
++        /// even when the person's real click on another pill is still `NSApp.currentEvent` (SR-29: the mouse-up must be
++        /// inside the control that ran).
++        private(set) var tracksOwnMouseDown = false
++        /// Called, instead of the action, when an accessibility press reaches a pill that needs a person at this Mac.
++        var refusedAccessibilityPress: (() -> Void)?
++        private var hovering = false
++        private var pressed = false
++        private var hoverArea: NSTrackingArea?
++
++        override init(frame: NSRect) {
++            super.init(frame: frame)
++            isBordered = false
++            wantsLayer = true
++            layer?.cornerCurve = .continuous
++            imagePosition = .imageLeading
++            imageHugsTitle = true
++            focusRingType = .none
++            keyEquivalent = ""
++            translatesAutoresizingMaskIntoConstraints = false
++            setContentHuggingPriority(.required, for: .horizontal)
++            setContentCompressionResistancePriority(.required, for: .horizontal)
++            refresh()
++        }
++        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
++
++        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
++        override func mouseDown(with event: NSEvent) {
++            tracksOwnMouseDown = true
++            defer { tracksOwnMouseDown = false }
++            super.mouseDown(with: event)
++        }
++        /// 「다시 넘기기」 gives input back, and an accessibility press (osascript `click button`, an AI's AXPress) carries no
++        /// hardware click of its own: refused here, before any action runs (SR-29). The other pills only take input away
++        /// and accept it.
++        override func accessibilityPerformPress() -> Bool {
++            guard barAction?.needsPersonAtMac != true else {
++                refusedAccessibilityPress?()
++                return false
++            }
++            return super.accessibilityPerformPress()
++        }
++        override var intrinsicContentSize: NSSize {
++            let content = super.intrinsicContentSize
++            return NSSize(width: ceil(content.width) + 24, height: 30)
++        }
++        override func layout() {
++            super.layout()
++            layer?.cornerRadius = bounds.height / 2
++        }
++        override func highlight(_ flag: Bool) {
++            super.highlight(flag)
++            pressed = flag
++            refresh()
++        }
++        override func updateTrackingAreas() {
++            super.updateTrackingAreas()
++            if let hoverArea { removeTrackingArea(hoverArea) }
++            // The panel is never key, so the area has to be active whatever the key window is.
++            let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
++                                      owner: self, userInfo: nil)
++            addTrackingArea(area)
++            hoverArea = area
++        }
++        override func mouseEntered(with event: NSEvent) { hovering = true; refresh() }
++        override func mouseExited(with event: NSEvent) { hovering = false; pressed = false; refresh() }
++
++        private func refresh() {
++            let fill: NSColor
++            let ink: NSColor
++            switch style {
++            case .light:
++                fill = NSColor.white.withAlphaComponent(pressed ? 0.72 : hovering ? 1.0 : 0.9)
++                ink = NSColor.black.withAlphaComponent(0.86)
++            case .accent:
++                fill = Palette.green.blended(withFraction: pressed ? 0.3 : hovering ? 0.15 : 0.05, of: .black) ?? Palette.green
++                ink = NSColor.black.withAlphaComponent(0.86)
++            case .quiet:
++                fill = NSColor.white.withAlphaComponent(pressed ? 0.24 : hovering ? 0.18 : 0.1)
++                ink = NSColor.white.withAlphaComponent(0.92)
++            case .stop:
++                fill = hovering ? Palette.stopRed.withAlphaComponent(pressed ? 0.62 : 0.42)
++                                : NSColor.white.withAlphaComponent(pressed ? 0.2 : 0.1)
++                ink = NSColor.white.withAlphaComponent(0.92)
++            }
++            layer?.backgroundColor = fill.cgColor
++            contentTintColor = ink
++            let title = NSMutableAttributedString(string: label, attributes: [
++                .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: ink])
++            if !hint.isEmpty {
++                title.append(NSAttributedString(string: "  " + hint, attributes: [
++                    .font: NSFont.systemFont(ofSize: 11, weight: .regular), .foregroundColor: ink.withAlphaComponent(0.55)]))
++            }
++            attributedTitle = title
++            image = symbol.isEmpty ? nil : NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
++                .withSymbolConfiguration(.init(pointSize: 10.5, weight: .bold))
++            setAccessibilityLabel(label)
++            invalidateIntrinsicContentSize()
++        }
++    }
++
++    /// The round light at the left: a glowing dot, plus a ring that breathes out of it while the other side moves this Mac.
++    private final class StatusLight: NSView {
++        private let core = CALayer()
++        private let ring = CALayer()
++        private static let dot: CGFloat = 10
++
++        override init(frame: NSRect) {
++            super.init(frame: frame)
++            wantsLayer = true
++            layer?.masksToBounds = false
++            for part in [ring, core] {
++                part.cornerRadius = Self.dot / 2
++                layer?.addSublayer(part)
++            }
++            core.shadowOffset = .zero
++            core.shadowRadius = 5
++            core.shadowOpacity = 0.95
++            ring.opacity = 0
++            translatesAutoresizingMaskIntoConstraints = false
++            setAccessibilityElement(false)
++        }
++        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
++
++        override func layout() {
++            super.layout()
++            let square = CGRect(x: bounds.midX - Self.dot / 2, y: bounds.midY - Self.dot / 2, width: Self.dot, height: Self.dot)
++            CATransaction.begin()
++            CATransaction.setDisableActions(true)
++            core.frame = square
++            ring.frame = square
++            CATransaction.commit()
++        }
++
++        func show(_ color: NSColor, breathing: Bool) {
++            core.backgroundColor = color.cgColor
++            core.shadowColor = color.cgColor
++            ring.backgroundColor = color.withAlphaComponent(0.55).cgColor
++            if breathing {
++                guard ring.animation(forKey: "breathe") == nil else { return }
++                let grow = CABasicAnimation(keyPath: "transform.scale")
++                grow.fromValue = 1
++                grow.toValue = 2.6
++                let fade = CABasicAnimation(keyPath: "opacity")
++                fade.fromValue = 0.7
++                fade.toValue = 0
++                let breathe = CAAnimationGroup()
++                breathe.animations = [grow, fade]
++                breathe.duration = 1.8
++                breathe.timingFunction = CAMediaTimingFunction(name: .easeOut)
++                breathe.repeatCount = .infinity
++                breathe.isRemovedOnCompletion = false
++                ring.add(breathe, forKey: "breathe")
++            } else {
++                ring.removeAnimation(forKey: "breathe")
++            }
++        }
++    }
++
++    /// The tint, the glass rim and the light that runs around it. No subviews, so it may own its layers; it never takes a
++    /// click (the background under it moves the panel).
++    private final class Rim: NSView {
++        private let tint = CAShapeLayer()
++        private let edge = CAShapeLayer()
++        private let runner = CALayer()
++        private let runnerMask = CAShapeLayer()
++        private let sweep = CAGradientLayer()
++
++        override init(frame: NSRect) {
++            super.init(frame: frame)
++            wantsLayer = true
++            tint.fillColor = NSColor.black.withAlphaComponent(0.5).cgColor
++            edge.fillColor = nil
++            edge.strokeColor = NSColor.white.withAlphaComponent(0.16).cgColor
++            edge.lineWidth = 1
++            runnerMask.fillColor = nil
++            runnerMask.strokeColor = NSColor.black.cgColor
++            runnerMask.lineWidth = 1.6
++            runner.mask = runnerMask
++            sweep.type = .conic
++            sweep.startPoint = CGPoint(x: 0.5, y: 0.5)
++            sweep.endPoint = CGPoint(x: 0.5, y: 0)
++            let clear = Palette.violet.withAlphaComponent(0).cgColor
++            sweep.colors = [clear, Palette.violet.cgColor, Palette.pink.cgColor, clear, clear,
++                            Palette.blue.cgColor, Palette.violet.cgColor, clear]
++            sweep.locations = [0, 0.16, 0.3, 0.42, 0.5, 0.66, 0.8, 0.92]
++            runner.addSublayer(sweep)
++            for part in [tint, edge, runner] { layer?.addSublayer(part) }
++            translatesAutoresizingMaskIntoConstraints = false
++            setAccessibilityElement(false)
++        }
++        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
++
++        override func hitTest(_ point: NSPoint) -> NSView? { nil }
++
++        override func layout() {
++            super.layout()
++            let radius = bounds.height / 2
++            let outline = CGPath(roundedRect: bounds.insetBy(dx: 0.8, dy: 0.8), cornerWidth: radius - 0.8,
++                                 cornerHeight: radius - 0.8, transform: nil)
++            let side = hypot(bounds.width, bounds.height)
++            CATransaction.begin()
++            CATransaction.setDisableActions(true)
++            tint.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
++            edge.path = outline
++            runner.frame = bounds
++            runnerMask.frame = bounds
++            runnerMask.path = outline
++            sweep.bounds = CGRect(x: 0, y: 0, width: side, height: side)
++            sweep.position = CGPoint(x: bounds.midX, y: bounds.midY)
++            CATransaction.commit()
++        }
++
++        func show(running: Bool, motion: Bool, edgeColor: NSColor?) {
++            runner.isHidden = !running
++            edge.strokeColor = (edgeColor?.withAlphaComponent(0.42) ?? NSColor.white.withAlphaComponent(running ? 0.1 : 0.16)).cgColor
++            if running && motion {
++                guard sweep.animation(forKey: "run") == nil else { return }
++                let turn = CABasicAnimation(keyPath: "transform.rotation.z")
++                turn.fromValue = 0
++                turn.toValue = -2 * Double.pi
++                turn.duration = 3.6
++                turn.repeatCount = .infinity
++                turn.isRemovedOnCompletion = false
++                sweep.add(turn, forKey: "run")
++            } else {
++                sweep.removeAnimation(forKey: "run")
++            }
++        }
++    }
++
++    /// One pill per action, shown or left out as the presentation says, in this order.
++    let pills: [ScreenSessionBarAction: PillButton]
++    private let glass = NSVisualEffectView()
++    private let rim = Rim(frame: .zero)
++    private let light = StatusLight(frame: .zero)
++    private let glyph = NSImageView()
++    private let title = NSTextField(labelWithString: "")
++    private let detail = NSTextField(labelWithString: "")
++    private(set) var shown: ScreenSessionBarPresentation?
++
++    override init(frame: NSRect) {
++        var pills: [ScreenSessionBarAction: PillButton] = [:]
++        for action in ScreenSessionBarAction.allCases {
++            let pill = PillButton(frame: .zero)
++            pill.barAction = action
++            pill.label = action.label
++            switch action {
++            case .takeOver: pill.style = .light; pill.symbol = "hand.raised.fill"
++            case .handBack: pill.style = .accent; pill.symbol = "arrow.uturn.backward"
++                pill.toolTip = "이 Mac의 마우스나 트랙패드로 눌러야 다시 넘어갑니다"
++            case .viewOnly: pill.style = .quiet; pill.symbol = "eye"
++            case .end: pill.style = .stop; pill.symbol = "xmark"
++            }
++            pills[action] = pill
++        }
++        self.pills = pills
++        super.init(frame: frame)
++        appearance = NSAppearance(named: .darkAqua)
++
++        glass.material = .hudWindow
++        glass.blendingMode = .behindWindow
++        glass.state = .active
++        glass.maskImage = Self.capsuleMask(height: Self.size.height)
++        glass.translatesAutoresizingMaskIntoConstraints = false
++
++        glyph.imageScaling = .scaleProportionallyDown
++        glyph.contentTintColor = NSColor.white.withAlphaComponent(0.82)
++        glyph.translatesAutoresizingMaskIntoConstraints = false
++        glyph.setAccessibilityElement(false)
++
++        title.font = .systemFont(ofSize: 13, weight: .semibold)
++        title.textColor = NSColor.white.withAlphaComponent(0.96)
++        title.lineBreakMode = .byTruncatingTail
++        detail.font = .systemFont(ofSize: 11.5)
++        detail.lineBreakMode = .byTruncatingTail
++        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
++        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
++        let words = NSStackView(views: [title, detail])
++        words.orientation = .vertical
++        words.alignment = .leading
++        words.spacing = 1
++
++        let ordered = ScreenSessionBarAction.allCases.compactMap { pills[$0] }
++        let row = NSStackView(views: [light, glyph, words, NSView()] + ordered)
++        row.orientation = .horizontal
++        row.alignment = .centerY
++        row.spacing = 8
++        row.setCustomSpacing(6, after: light)
++        row.setCustomSpacing(9, after: glyph)
++        row.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 11)
++        row.translatesAutoresizingMaskIntoConstraints = false
++
++        for view in [glass, rim, row] as [NSView] { addSubview(view) }
++        var pinned: [NSLayoutConstraint] = [
++            light.widthAnchor.constraint(equalToConstant: 22), light.heightAnchor.constraint(equalToConstant: 22),
++            glyph.widthAnchor.constraint(equalToConstant: 18), glyph.heightAnchor.constraint(equalToConstant: 20)]
++        for view in [glass, rim, row] as [NSView] {
++            pinned += [view.leadingAnchor.constraint(equalTo: leadingAnchor), view.trailingAnchor.constraint(equalTo: trailingAnchor),
++                       view.topAnchor.constraint(equalTo: topAnchor), view.bottomAnchor.constraint(equalTo: bottomAnchor)]
++        }
++        NSLayoutConstraint.activate(pinned)
++        setAccessibilityElement(true)
++        setAccessibilityRole(.group)
++        setAccessibilityLabel("AgentsToZ Screen 세션 막대")
++    }
++    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
++
++    /// Draws one presentation.
++    func show(_ presentation: ScreenSessionBarPresentation) {
++        guard presentation != shown else { return }
++        shown = presentation
++        let motion = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
++        title.stringValue = presentation.title
++        detail.stringValue = presentation.detail
++        detail.toolTip = presentation.detail
++        detail.textColor = presentation.notice ? Palette.amber : NSColor.white.withAlphaComponent(0.6)
++        glyph.image = NSImage(systemSymbolName: presentation.symbol, accessibilityDescription: nil)?
++            .withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
++        let color: NSColor
++        switch presentation.tone {
++        case .controlling: color = Palette.violet
++        case .watching: color = Palette.blue
++        case .holding: color = Palette.green
++        case .warning: color = Palette.amber
++        }
++        light.show(color, breathing: presentation.tone == .controlling && motion)
++        rim.show(running: presentation.tone == .controlling, motion: motion,
++                 edgeColor: presentation.tone == .warning ? Palette.amber : nil)
++        for (action, pill) in pills {
++            pill.isHidden = !presentation.actions.contains(action)
++        }
++        let end = pills[.end]
++        if end?.hint != presentation.hotKey {
++            end?.hint = presentation.hotKey
++            end?.toolTip = "이 Mac에서 \(presentation.hotKey) 를 눌러도 끊깁니다"
++        }
++        setAccessibilityValue("\(presentation.title), \(presentation.detail)")
++        needsLayout = true
++    }
++
++    /// The lines whose text does not fit where the bar laid them out (the render check fails on any).
++    func overflowingText() -> [String] {
++        layoutSubtreeIfNeeded()
++        return [title, detail].compactMap { field in
++            guard !field.stringValue.isEmpty, let cell = field.cell else { return nil }
++            let needed = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude,
++                                                         height: field.bounds.height)).width
++            return needed > field.bounds.width + 0.5 ? field.stringValue : nil
++        }
++    }
++
++    /// A stretchable capsule for the glass, so the blur itself has round ends (a layer corner radius does not clip it).
++    private static func capsuleMask(height: CGFloat) -> NSImage {
++        let radius = height / 2
++        let image = NSImage(size: NSSize(width: height + 1, height: height), flipped: false) { rect in
++            NSColor.black.setFill()
++            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
++            return true
++        }
++        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
++        image.resizingMode = .stretch
++        return image
++    }
++}
+diff --git a/native/screen-control/Sources/ScreenControlCore/VideoPump.swift b/native/screen-control/Sources/ScreenControlCore/VideoPump.swift
+index 750ede97..84b0e942 100644
+--- a/native/screen-control/Sources/ScreenControlCore/VideoPump.swift
++++ b/native/screen-control/Sources/ScreenControlCore/VideoPump.swift
+@@ -184,6 +184,9 @@ public final class VideoPump: @unchecked Sendable {
+     /// Why the Mac ended the session, once it has.
+     public var endReason: SessionEndReason? { ending.withLock { $0.reason } }
+ 
++    /// When the next session limit runs out on the session's clock, and which: what the Mac's session bar counts down.
++    public var deadline: (at: ContinuousClock.Instant, reason: SessionEndReason) { ending.withLock { $0.timer.deadline } }
++
+     /// Replaces the encoder, for a new display or size, and returns its generation for `offer`. The new encoder's first
+     /// frame is a keyframe with its own parameter sets; nothing the old one still emits reaches the phone.
+     @discardableResult
+diff --git a/native/screen-control/Sources/ScreenHost/HostStreamer.swift b/native/screen-control/Sources/ScreenHost/HostStreamer.swift
+index c77f9fb6..a74c7a91 100644
+--- a/native/screen-control/Sources/ScreenHost/HostStreamer.swift
++++ b/native/screen-control/Sources/ScreenHost/HostStreamer.swift
+@@ -38,6 +38,9 @@ public final class HostStreamer: Sendable {
+     /// Why the Mac ended the session, once it has.
+     public var endReason: SessionEndReason? { pump.endReason }
+ 
++    /// When the next session limit runs out, and which (VideoPump.deadline).
++    public var deadline: (at: ContinuousClock.Instant, reason: SessionEndReason) { pump.deadline }
++
+     /// Ends the session from the Mac: held keys and buttons are let go before this returns; the phone hears the
+     /// reason in the returned task (VideoPump.end).
+     @discardableResult
+diff --git a/native/screen-control/Sources/ScreenHost/ScreenService.swift b/native/screen-control/Sources/ScreenHost/ScreenService.swift
+index 10c0d8ae..c3bd5722 100644
+--- a/native/screen-control/Sources/ScreenHost/ScreenService.swift
++++ b/native/screen-control/Sources/ScreenHost/ScreenService.swift
+@@ -68,6 +68,9 @@ public final class ScreenService {
+         /// Why a controller granted control only watches: this build, the push gate or this Mac's input protection
+         /// (DESIGN 6.5, 9절, 12절); nil for a phone, a view grant and a controller that may control.
+         public var viewOnlyCause: ControllerViewOnlyCause? = nil
++        /// The model it registered with ("iPhone16,2", "Mac16,7"; a controller's only when this Mac may show it): the
++        /// session bar shows a phone's kind from it, and a Mac controller always as a Mac (ScreenDeviceKind).
++        public var deviceModel = ""
+     }
+ 
+     public enum Registration {
+@@ -101,6 +104,8 @@ public final class ScreenService {
+         let route: ControllerLogEntry.Route
+         /// Remote input on this Mac, for the main app's sidecar (DESIGN 6.7); removed when the session ends.
+         let marker: RemoteInputMarker
++        /// The session bar's hold on this session's remote input, from `macHold` for a phone and a Mac controller alike.
++        let hold: ScreenSessionInputHold
+         var peerClass: ScreenPeerClass { session.peerClass }
+     }
+ 
+@@ -165,6 +170,8 @@ public final class ScreenService {
+     private var monitor: NWPathMonitor?
+     private var gate = PreAuthGate()
+     private var active: Active?
++    /// 「직접 하기」·「보기만」 across sessions: every session's hold comes from here (ScreenSessionInputHold.swift).
++    @ObservationIgnored private var macHold = ScreenMacHold()
+     private var registrationListener: RegistrationListener?
+     private var registrationTask: Task<Void, Never>?
+     private var pending: PendingRegistration?
+@@ -350,6 +357,8 @@ public final class ScreenService {
+             guard try await authenticate("근거리에서 등록한 기기로 Mac 화면 제어를 켭니다", policy: ScreenAuthentication.turningOn)
+             else { return power = .off(reason: nil) }
+             guard epoch == powerEpoch, case .starting = power else { return }
++            // Proven at this Mac: input a person here took back from the session bar is not held into the next turning on.
++            macHold.reset()
+             let identity = try self.identity ?? environment.identity(store)
+             self.identity = identity
+             // The person turned it on here: what keeping on held back may go (SR-27), once the store says it is off.
+@@ -873,10 +882,16 @@ public final class ScreenService {
+         } else {
+             problem = nil
+         }
++        // Paused from the first event while a person at this Mac holds its input (「직접 하기」·「보기만」 earlier): reconnecting,
++        // or connecting from another registered phone or Mac, never hands input back (SR-29). One hold for both kinds.
++        let hold = macHold.begin()
++        let physicalInput: PhysicalInputProbe? = plan.canControl ? probe.map { probe in { hold.apply(probe()) } } : nil
+         let marker = RemoteInputMarker(url: environment.remoteInputURL, session: incoming.peerClass, now: environment.now)
+-        let streamer = environment.sessions.streamer(incoming, plan, plan.canControl ? probe : nil, marker)
++        let streamer = environment.sessions.streamer(incoming, plan, physicalInput, marker)
++        hold.attach(streamer.input)
++        let model = controller.map { $0.showableModel ?? "" } ?? devices.first(where: { $0.id == id })?.model ?? ""
+         session = Session(deviceID: id, deviceName: name, since: now, canControl: plan.canControl, peerClass: incoming.peerClass,
+-                          grant: controller?.grant, viewOnlyCause: plan.viewOnlyCause)
++                          grant: controller?.grant, viewOnlyCause: plan.viewOnlyCause, deviceModel: model)
+         lastEnded = nil
+         // Only the phone path may turn this Mac's screen control off; a controller may remove only its own row (6.5, 6.6).
+         var turnOff: (@Sendable () -> Void)?
+@@ -904,7 +919,7 @@ public final class ScreenService {
+             }
+             self?.sessionEnded(incoming, reason: reason)
+         }
+-        active = Active(session: incoming, task: task, streamer: streamer, name: name, route: route, marker: marker)
++        active = Active(session: incoming, task: task, streamer: streamer, name: name, route: route, marker: marker, hold: hold)
+         if let controller {
+             touchController(id)
+             record(.connected, controller, route: route)
+@@ -959,6 +974,38 @@ public final class ScreenService {
+     /// Ends the current session from the Mac.
+     public func disconnect() { endSession(.endedAtMac) }
+ 
++    // MARK: The session bar (AgentsToZScreen/ScreenSessionBar.swift, DESIGN mac-to-mac 「부록 A」)
++
++    /// The bar's hold on the current session's remote input.
++    public var sessionInput: ScreenSessionInputHold? { active?.hold }
++    /// When a session limit ends the current session, and which; nil until its stream runs.
++    public var sessionDeadline: (at: ContinuousClock.Instant, reason: SessionEndReason)? { active?.streamer?.deadline }
++
++    /// 「직접 하기」: remote input waits until a person at this Mac hands it back, in this session or a later one from any
++    /// device (ScreenMacHold). Any click may take input away.
++    public func pauseRemoteInput() {
++        guard let active else { return }
++        macHold.pause(active.hold)
++    }
++
++    /// 「다시 넘기기」: only with no `refusal` (ScreenSessionBarClick: a hardware click at this Mac). False when refused
++    /// or when there was nothing to hand back.
++    @discardableResult
++    public func resumeRemoteInput(refusal: ScreenSessionBarClick.Refusal?) -> Bool {
++        guard refusal == nil, let active else { return false }
++        return macHold.resume(active.hold)
++    }
++
++    /// 「보기만」: the rest of this session only shows the picture, and the next session starts paused until a person at
++    /// this Mac hands input back (ScreenMacHold).
++    public func lowerSessionToView() {
++        guard let active, let current = session else { return }
++        macHold.lowerToView(active.hold)
++        guard current.canControl else { return }
++        session = Session(deviceID: current.deviceID, deviceName: current.deviceName, since: current.since,
++                          canControl: false, deviceModel: current.deviceModel)
++    }
++
+     /// The phone of the current session turned screen control off over the session (version 2), after Face ID on it.
+     /// The session already ended with `turnedOffFromDevice`; this does what the menu's 끄기 does and says who did it.
+     private func turnOffFromDevice(named name: String) {
+@@ -993,7 +1040,7 @@ public final class ScreenService {
+             if let current = session, current.deviceID == device.id, current.peerClass == .phone,
+                let renamed = next.first(where: { $0.id == device.id }) {
+                 session = Session(deviceID: current.deviceID, deviceName: renamed.displayName, since: current.since,
+-                                  canControl: current.canControl)
++                                  canControl: current.canControl, deviceModel: current.deviceModel)
+             }
+             return nil
+         } catch {
+diff --git a/native/screen-control/Sources/ScreenHost/ScreenSessionBarModel.swift b/native/screen-control/Sources/ScreenHost/ScreenSessionBarModel.swift
+new file mode 100644
+index 00000000..69ae0f11
+--- /dev/null
++++ b/native/screen-control/Sources/ScreenHost/ScreenSessionBarModel.swift
+@@ -0,0 +1,304 @@
++import Foundation
++
++// The floating session bar on the Mac being watched (docs/design/mac-to-mac-2026-11-01/DESIGN.md 「부록 A」): who is
++// looking at or controlling this Mac, for how long, and the person's four verbs. It is pure and imports Foundation
++// alone, so the offscreen render check (scripts/check-screen-control.ts) compiles it with ScreenSessionBarView and
++// nothing else. ScreenSessionBar in the app reads the service once a second, builds a `ScreenSessionBarState`
++// (ScreenSessionInputHold.swift maps the service into it) and draws what `ScreenSessionBarText.present` returns.
++
++/// The kind of device a session comes from, read from the model it registered with: "iPhone16,2", "iPad14,1", or a
++/// Mac's "Mac14,2", "MacBookPro18,3", "iMac21,1". A Mac controller session (mac-to-mac) will show as a Mac with no change
++/// to the bar once ScreenService accepts one with its Mac's model in `Session.deviceModel` (not yet: DESIGN 부록 A).
++public enum ScreenDeviceKind: String, CaseIterable, Sendable {
++    case iPhone, iPad, mac, other
++
++    public init(model: String) {
++        let model = model.lowercased()
++        if model.hasPrefix("ipad") { self = .iPad }
++        else if model.hasPrefix("iphone") || model.hasPrefix("ipod") { self = .iPhone }
++        // Mac…, MacBook…, Macmini…, MacPro…, iMac…, and a virtual Mac.
++        else if model.hasPrefix("mac") || model.hasPrefix("imac") || model.hasPrefix("virtualmac") { self = .mac }
++        else { self = .other }
++    }
++
++    public var label: String {
++        switch self {
++        case .iPhone: "iPhone"
++        case .iPad: "iPad"
++        case .mac: "Mac"
++        case .other: "기기"
++        }
++    }
++
++    /// The SF Symbol drawn before the device's name.
++    public var symbol: String {
++        switch self {
++        case .iPhone: "iphone"
++        case .iPad: "ipad"
++        case .mac: "desktopcomputer"
++        case .other: "display"
++        }
++    }
++}
++
++/// Where a control session's remote input stands.
++public enum ScreenSessionInput: Equatable, Sendable {
++    /// Remote input reaches this Mac.
++    case flowing
++    /// 「직접 하기」: paused from the bar until a person at this Mac hands it back; also a session that began while this Mac
++    /// still held its input from an earlier 「직접 하기」 or 「보기만」 (ScreenMacHold).
++    case heldAtMac
++    /// The person at this Mac is using its own mouse or keyboard, so remote input waits (local input wins).
++    case localActivity
++    /// Secure Event Input is on (a password field), so remote input waits.
++    case secureInput
++}
++
++/// Why a session only shows the picture.
++public enum ScreenSessionViewReason: Equatable, Sendable {
++    /// It began that way: the device or controller may only view, or this Mac could not watch its own input.
++    case session
++    /// 「보기만」 was pressed during this session. The next session, from any device, starts with remote input held at
++    /// this Mac until a person here hands it back (ScreenMacHold).
++    case lowered
++    /// This Mac stopped being able to watch its own input mid-session, so remote input stays off until it reconnects.
++    case protectionLost
++}
++
++public enum ScreenSessionAccess: Equatable, Sendable {
++    case control(ScreenSessionInput)
++    case view(ScreenSessionViewReason)
++}
++
++/// The next session limit: an idle limit restarts with each input from the other side; a maximum does not.
++public struct ScreenSessionLimit: Equatable, Sendable {
++    public enum Kind: Equatable, Sendable { case idle, maximum }
++    public var kind: Kind
++    /// Seconds until it ends the session.
++    public var remaining: TimeInterval
++    public init(kind: Kind, remaining: TimeInterval) { self.kind = kind; self.remaining = remaining }
++}
++
++/// What the bar knows about the current session.
++public struct ScreenSessionBarState: Equatable, Sendable {
++    public var kind: ScreenDeviceKind
++    public var name: String
++    public var access: ScreenSessionAccess
++    /// Seconds since the session began.
++    public var elapsed: TimeInterval
++    /// Nil until the stream runs.
++    public var limit: ScreenSessionLimit?
++    /// The key that ends the session at this Mac (EndSessionHotKey).
++    public var hotKey: String
++
++    public init(kind: ScreenDeviceKind, name: String, access: ScreenSessionAccess, elapsed: TimeInterval,
++                limit: ScreenSessionLimit?, hotKey: String) {
++        self.kind = kind; self.name = name; self.access = access; self.elapsed = elapsed; self.limit = limit
++        self.hotKey = hotKey
++    }
++}
++
++/// The bar's buttons. 「끊기」, 「보기만」 and 「직접 하기」 take something away from the other side, so any click may press
++/// them, the other side's own included (they see the bar in the picture). 「다시 넘기기」 gives input back, so only a
++/// person's click at this Mac counts (SR-29, `ScreenSessionBarClick`).
++public enum ScreenSessionBarAction: String, CaseIterable, Sendable {
++    case takeOver, handBack, viewOnly, end
++
++    public var needsPersonAtMac: Bool { self == .handBack }
++
++    public var label: String {
++        switch self {
++        case .takeOver: "직접 하기"
++        case .handBack: "다시 넘기기"
++        case .viewOnly: "보기만"
++        case .end: "끊기"
++        }
++    }
++}
++
++/// How the status light and rim read: someone else moving this Mac, someone only watching, the person here holding
++/// it, or something to look at.
++public enum ScreenSessionBarTone: Equatable, Sendable { case controlling, watching, holding, warning }
++
++/// A short message that replaces the bar's words for a few seconds.
++public enum ScreenSessionBarNotice: Equatable, Sendable {
++    case handBackRefused(ScreenSessionBarClick.Refusal)
++}
++
++/// One drawn state of the bar.
++public struct ScreenSessionBarPresentation: Equatable, Sendable {
++    public var tone: ScreenSessionBarTone
++    public var symbol: String
++    public var title: String
++    public var detail: String
++    /// The second line is a warning (amber).
++    public var notice: Bool
++    public var actions: [ScreenSessionBarAction]
++    public var hotKey: String
++}
++
++public enum ScreenSessionBarText {
++    public static let localActivity = "이 Mac에서 조작 중 — 원격 입력 멈춤"
++    public static let secureInput = "보안 입력 중 — 원격 입력 멈춤"
++    public static let heldAtMac = "직접 하는 중 · 다시 넘기기는 이 Mac에서만"
++    public static let lowered = "보기만으로 바꿈"
++    public static let protectionLost = "입력 보호가 멈춰 보기만 · 다시 연결하면 조작"
++    public static let refusedTitle = "사람의 클릭으로 확인되지 않았습니다"
++    public static let refused = "넘기지 않았습니다 · 이 Mac 앞에서 직접 눌러 주세요"
++    public static let remoteDesktopTitle = "이 Mac 앞에서 눌러야 합니다"
++    public static let remoteDesktop = "원격 데스크톱으로는 다시 넘길 수 없습니다"
++    public static let repeatedClickTitle = "다시 넘기지 않았습니다"
++    public static let repeatedClick = "두 번 누름은 받지 않습니다 · 한 번만 눌러 주세요"
++
++    /// 「iPhone ‘민수 폰’」, without repeating the kind when the name already says it (「‘민수의 iPhone’」).
++    public static func device(_ kind: ScreenDeviceKind, _ name: String) -> String {
++        name.localizedCaseInsensitiveContains(kind.label) ? "‘\(name)’" : "\(kind.label) ‘\(name)’"
++    }
++
++    /// 「방금 연결」, 「12분째」, 「1시간 5분째」.
++    public static func elapsed(_ seconds: TimeInterval) -> String {
++        let whole = max(0, Int(seconds))
++        guard whole >= 60 else { return "방금 연결" }
++        return "\(duration(minutes: whole / 60))째"
++    }
++
++    /// 「입력이 없으면 48분 뒤 끝남」 for an idle limit, 「7시간 12분 뒤 끝남」 for a maximum. Minutes round up, so the bar
++    /// never says less time than there is; the last minute counts down in seconds.
++    public static func limit(_ limit: ScreenSessionLimit) -> String {
++        let seconds = max(0, limit.remaining)
++        let left = seconds < 60 ? "\(Int(seconds.rounded(.up)))초" : duration(minutes: Int((seconds / 60).rounded(.up)))
++        return limit.kind == .idle ? "입력이 없으면 \(left) 뒤 끝남" : "\(left) 뒤 끝남"
++    }
++
++    private static func duration(minutes: Int) -> String {
++        guard minutes >= 60 else { return "\(minutes)분" }
++        let hours = minutes / 60, rest = minutes % 60
++        return rest == 0 ? "\(hours)시간" : "\(hours)시간 \(rest)분"
++    }
++
++    /// The bar for `state`, with `notice` over its words while it lasts.
++    public static func present(_ state: ScreenSessionBarState, notice: ScreenSessionBarNotice? = nil) -> ScreenSessionBarPresentation {
++        let who = device(state.kind, state.name)
++        let time = [elapsed(state.elapsed), state.limit.map(limit)].compactMap { $0 }.joined(separator: " · ")
++        let tone: ScreenSessionBarTone
++        let title: String
++        var detail: String
++        var warning = false
++        let actions: [ScreenSessionBarAction]
++        switch state.access {
++        case .control(let input):
++            title = "\(who) · \(input == .heldAtMac ? "원격 입력 멈춤" : "조작 중")"
++            actions = [input == .heldAtMac ? .handBack : .takeOver, .viewOnly, .end]
++            switch input {
++            case .flowing: tone = .controlling; detail = time
++            case .heldAtMac: tone = .holding; detail = "\(heldAtMac) · \(elapsed(state.elapsed))"
++            case .localActivity: tone = .holding; detail = "\(localActivity) · \(elapsed(state.elapsed))"; warning = true
++            case .secureInput: tone = .warning; detail = "\(secureInput) · \(elapsed(state.elapsed))"; warning = true
++            }
++        case .view(let reason):
++            title = "\(who) · 보는 중"
++            actions = [.end]
++            switch reason {
++            case .session: tone = .watching; detail = time
++            case .lowered: tone = .watching; detail = "\(lowered) · \(time)"
++            case .protectionLost: tone = .warning; detail = protectionLost; warning = true
++            }
++        }
++        var shown = ScreenSessionBarPresentation(tone: tone, symbol: state.kind.symbol, title: title, detail: detail,
++                                                 notice: warning, actions: actions, hotKey: state.hotKey)
++        if case .handBackRefused(let refusal)? = notice {
++            switch refusal {
++            case .remoteDesktop: (shown.title, shown.detail) = (remoteDesktopTitle, remoteDesktop)
++            case .repeatedClick: (shown.title, shown.detail) = (repeatedClickTitle, repeatedClick)
++            default: (shown.title, shown.detail) = (refusedTitle, refused)
++            }
++            shown.notice = true
++        }
++        return shown
++    }
++}
++
++/// The verified signing identity of the process that posted an event (Security framework, strict validation).
++public struct ScreenSessionBarPoster: Equatable, Sendable {
++    public let identifier: String
++    public let team: String?
++    public let apple: Bool
++    public init(identifier: String, team: String?, apple: Bool) { self.identifier = identifier; self.team = team; self.apple = apple }
++}
++
++/// 「다시 넘기기」 accepts a hardware click at this Mac only (SR-29), the Control bar's pid 0 rule without its remote
++/// desktop exception: the event that ran the button must be a fresh mouse-up on the bar, inside the pill that tracked
++/// its own mouse-down, carry no posting process, not be one this app injected for the other side, and be a single
++/// click. Remote input the app injected, another program, an AI, a script, an accessibility press and a remote desktop
++/// are all refused; the poster's identity only chooses what the bar says. Pure: the bar passes in what it read from the
++/// event.
++///
++/// ⚠️ This is a second copy of the hardware click rule until wp-input-origin lands (DESIGN mac-to-mac 15절,
++/// `ScreenInputOrigin.humanClick`, which this design names for SR-29). Then `handBackRefusal` becomes
++/// `ScreenInputOrigin.humanClick(event, inControl:, ownPid:, screenPid: ownPid)` followed by the bar's own single-click
++/// rule (the last line below), and the vectors of ScreenSessionBarTests move to Tests/InputOriginContract/vectors.json.
++/// Until then scripts/check-screen-control.ts holds the constants here equal to the Control bar's (ControlBarRules.swift)
++/// and, once ScreenInputOrigin.swift is in the package, to its constants as well, so the copies cannot drift apart.
++public enum ScreenSessionBarClick {
++    public enum Refusal: String, Sendable, CaseIterable {
++        /// Not a mouse-up on the bar inside the pill that tracked it: an accessibility press, `performClick`, a keyboard
++        /// activation, another window's event.
++        case notABarClick = "not-a-bar-click"
++        case stale = "stale-event"
++        /// Input this app injected for the other side.
++        case screenInjected = "screen-injected"
++        case ownProcess = "own-process"
++        case remoteDesktop = "remote-desktop"
++        case otherProcess = "other-process"
++        /// A person's click, but not a single one: the second click of a double-click on 「직접 하기」 lands on
++        /// 「다시 넘기기」, which takes the same place, and must not hand input straight back.
++        case repeatedClick = "repeated-click"
++    }
++
++    /// `eventSourceUnixProcessID` of an event the HID system produced (the Control bar's rule).
++    public static let hardwareSourcePid: Int64 = 0
++    /// Older than this and the event is not the click that ran the button's action.
++    public static let freshSeconds = 1.0
++    public static let appleRemoteDesktop: Set<String> = ["com.apple.screensharing.agent", "com.apple.screensharing.daemon",
++                                                         "com.apple.AppleVNCServer", "com.apple.RemoteDesktopAgent"]
++    /// Team ID → identifiers (Jump Desktop Connect, as the Control bar reads it).
++    public static let teamRemoteDesktop: [String: Set<String>] = ["2HCKV38EEC": ["com.p5sys.jump.connect"]]
++
++    /// Nil accepts. `inControl`: the mouse-up lies inside the pressed pill, and that pill was tracking a mouse-down it
++    /// received itself (an accessibility press or `performClick` runs the action with no tracking). `clickCount` is the
++    /// mouse-up's own count.
++    public static func handBackRefusal(isMouseUp: Bool, inBar: Bool, inControl: Bool, clickCount: Int, ageSeconds: Double,
++                                       sourcePid: Int64, userData: Int64, ownPid: Int64, injectionMarker: Int64,
++                                       poster: ScreenSessionBarPoster?) -> Refusal? {
++        guard isMouseUp, inBar, inControl else { return .notABarClick }
++        guard ageSeconds >= 0, ageSeconds <= freshSeconds else { return .stale }
++        guard userData != injectionMarker else { return .screenInjected }
++        if sourcePid != hardwareSourcePid {
++            guard sourcePid != ownPid else { return .ownProcess }
++            return poster.map(isRemoteDesktop) == true ? .remoteDesktop : .otherProcess
++        }
++        return clickCount == 1 ? nil : .repeatedClick
++    }
++
++    public static func isRemoteDesktop(_ poster: ScreenSessionBarPoster) -> Bool {
++        if poster.apple { return appleRemoteDesktop.contains(poster.identifier) }
++        guard let team = poster.team else { return false }
++        return teamRemoteDesktop[team]?.contains(poster.identifier) == true
++    }
++}
++
++/// Where the bar opens.
++public enum ScreenSessionBarPlacement {
++    public static let margin: CGFloat = 18
++    /// The Control bar opens `margin` above the Dock; this one sits a bar's height above it, so both show when an AI
++    /// from another Mac moves this Mac during a session (부록 A).
++    public static let controlBarSlot: CGFloat = 52 + 10
++
++    /// Where the person last left it while that spot is still wholly on a screen; otherwise bottom centre of the first
++    /// (menu bar) screen, above the Dock and the Control bar's spot. Nil without a screen.
++    public static func origin(saved: CGPoint?, size: CGSize, visibleFrames: [CGRect]) -> CGPoint? {
++        if let saved, visibleFrames.contains(where: { $0.contains(CGRect(origin: saved, size: size)) }) { return saved }
++        guard let main = visibleFrames.first else { return nil }
++        return CGPoint(x: (main.midX - size.width / 2).rounded(), y: main.minY + margin + controlBarSlot)
++    }
++}
+diff --git a/native/screen-control/Sources/ScreenHost/ScreenSessionInputHold.swift b/native/screen-control/Sources/ScreenHost/ScreenSessionInputHold.swift
+new file mode 100644
+index 00000000..6730416a
+--- /dev/null
++++ b/native/screen-control/Sources/ScreenHost/ScreenSessionInputHold.swift
+@@ -0,0 +1,141 @@
++#if os(macOS)
++import Foundation
++import os
++import ScreenControlCore
++
++/// The session bar's hold on one session's remote input (DESIGN 「부록 A」). It sits between the local input monitor
++/// and the session's InputReceiver, so the bar needs no new path into the stream: 「직접 하기」 reads to the receiver as
++/// the person at this Mac holding its input (`.localActivity`), 「보기만」 as input protection gone for the rest of the
++/// session (`.monitorUnavailable`). The receiver then refuses remote input before injecting anything, lets go of what
++/// the other side held, and tells it with the messages it already knows (remoteInputPaused and inputAvailability), so
++/// the phone protocol is unchanged. 「다시 넘기기」 lifts only the pause; nothing lifts 「보기만」 before the session ends.
++/// A hold lives as long as its session; what outlasts the session is `ScreenMacHold`, which gives each new session its
++/// hold.
++public final class ScreenSessionInputHold: Sendable {
++    public enum Mode: Equatable, Sendable {
++        case remote, paused, viewOnly
++    }
++
++    private struct State {
++        var mode = Mode.remote
++        var input: InputReceiver?
++    }
++    private let state: OSAllocatedUnfairLock<State>
++
++    /// `.paused` for a session that begins while a person at this Mac still holds its input (`ScreenMacHold.begin`).
++    public init(mode: Mode = .remote) { state = OSAllocatedUnfairLock(initialState: State(mode: mode)) }
++
++    public var mode: Mode { state.withLock { $0.mode } }
++
++    /// 「직접 하기」. Never undoes 「보기만」.
++    public func pause() { state.withLock { if $0.mode == .remote { $0.mode = .paused } } }
++
++    /// 「보기만」, for the rest of this session.
++    public func lowerToView() { state.withLock { $0.mode = .viewOnly } }
++
++    /// 「다시 넘기기」: false unless it was paused. The caller has already checked the click (ScreenSessionBarClick).
++    @discardableResult
++    public func resume() -> Bool {
++        state.withLock {
++            guard $0.mode == .paused else { return false }
++            $0.mode = .remote
++            return true
++        }
++    }
++
++    /// What the session's receiver reads as this Mac's own input. Called under the receiver's lock, on any thread.
++    public func apply(_ physical: PhysicalInputSnapshot) -> PhysicalInputSnapshot {
++        var shown = physical
++        switch mode {
++        case .remote: break
++        case .paused: shown.held = true
++        case .viewOnly: shown.available = false
++        }
++        return shown
++    }
++
++    /// The session's receiver, once its stream runs, so the bar can say why remote input waits.
++    func attach(_ input: InputReceiver?) { state.withLock { $0.input = input } }
++
++    /// Nil before the stream runs and for a session without input. Read outside this hold's lock: the receiver takes
++    /// its own lock and calls `apply` under it.
++    public var availability: ScreenInputAvailability? { state.withLock { $0.input }?.availability }
++}
++
++/// 「직접 하기」 and 「보기만」 outlast the session they were pressed in. The other side can reconnect without anyone at this
++/// Mac (a registered phone needs only Face ID on itself), and another registered device can connect after it; had either
++/// begun with input flowing, the person here would have handed input back without the hardware click 「다시 넘기기」
++/// asks for (SR-29). So after either press every new session, from any device, starts `.paused` (the bar shows
++/// 「원격 입력 멈춤」 with 「다시 넘기기」) until a person at this Mac hands input back with a hardware click.
++/// 「보기만」 still lowers only its own session to view (부록 A); what carries over is the pause, which the next session's
++/// own 「다시 넘기기」 lifts. Only this Mac clears it: an accepted 「다시 넘기기」, or turning screen control on again, which
++/// takes Touch ID or the password here (`reset`). It is kept in memory only, so quitting the app clears it as well: the
++/// app starts off, and turning on asks at this Mac. Nothing a remote device sends reaches it. ScreenService keeps one
++/// for the Mac and takes every session's hold from `begin()`; a Mac controller session must take the same one.
++public struct ScreenMacHold: Equatable, Sendable {
++    /// A person at this Mac took remote input back and has not handed it back.
++    public private(set) var held = false
++
++    public init() {}
++
++    /// The hold a new session starts with.
++    public func begin() -> ScreenSessionInputHold { ScreenSessionInputHold(mode: held ? .paused : .remote) }
++
++    /// 「직접 하기」 on the current session's hold.
++    public mutating func pause(_ hold: ScreenSessionInputHold) {
++        hold.pause()
++        held = true
++    }
++
++    /// 「보기만」: the current session only shows the picture, and the next one starts paused.
++    public mutating func lowerToView(_ hold: ScreenSessionInputHold) {
++        hold.lowerToView()
++        held = true
++    }
++
++    /// 「다시 넘기기」, its click already accepted (ScreenSessionBarClick): false unless the session was paused.
++    @discardableResult
++    public mutating func resume(_ hold: ScreenSessionInputHold) -> Bool {
++        guard hold.resume() else { return false }
++        held = false
++        return true
++    }
++
++    /// Screen control was turned on again at this Mac, after Touch ID or the password.
++    public mutating func reset() { held = false }
++}
++
++extension ScreenSessionAccess {
++    /// The bar's reading of a session: `canControl` as the service records it, the bar's hold, and the receiver's
++    /// latest reason for pausing remote input.
++    public static func of(canControl: Bool, hold: ScreenSessionInputHold.Mode?, availability: ScreenInputAvailability?) -> ScreenSessionAccess {
++        if hold == .viewOnly { return .view(.lowered) }
++        guard canControl else { return .view(.session) }
++        switch availability {
++        case .monitorUnavailable?, .permissionsRequired?: return .view(.protectionLost)
++        default: break
++        }
++        if hold == .paused { return .control(.heldAtMac) }
++        switch availability {
++        case .secureInput?: return .control(.secureInput)
++        case .localActivity?: return .control(.localActivity)
++        default: return .control(.flowing)
++        }
++    }
++}
++
++extension ScreenSessionLimit {
++    /// The pump's next deadline as the bar shows it.
++    public init(deadline: (at: ContinuousClock.Instant, reason: SessionEndReason), now: ContinuousClock.Instant) {
++        let left = deadline.at - now
++        self.init(kind: deadline.reason == .timeLimit ? .maximum : .idle,
++                  remaining: max(0, Double(left.components.seconds) + Double(left.components.attoseconds) / 1e18))
++    }
++}
++
++extension LocalInputMonitor {
++    /// The marker every event this app injects for the other side carries. The bar refuses a 「다시 넘기기」 click with
++    /// it: that click came from the other side, not a person at this Mac.
++    public static var injectedEventMarker: Int64 { injectionMarker }
++}
++#endif
+diff --git a/native/screen-control/Tests/ScreenControlCoreTests/SessionChecks.swift b/native/screen-control/Tests/ScreenControlCoreTests/SessionChecks.swift
+index c3ac7aae..c2a088ad 100644
+--- a/native/screen-control/Tests/ScreenControlCoreTests/SessionChecks.swift
++++ b/native/screen-control/Tests/ScreenControlCoreTests/SessionChecks.swift
+@@ -330,6 +330,8 @@ extension ScreenControlChecks {
+         // Only input counts. A phone that just watches still asks for keyframes; that is no one at the phone (DESIGN 3).
+         clock.advance(by: .seconds(1800))
+         try await idle.handled()
++        // The Mac's session bar counts down to this deadline (VideoPump.deadline): keyframe requests do not move it.
++        try check(idle.pump.deadline == (clock.start + .seconds(3600), .idle), "the bar reads the idle deadline")
+         clock.advance(by: .seconds(1799))
+         try await idle.handled()
+         try await Task.sleep(for: .milliseconds(100))
+@@ -351,6 +353,7 @@ extension ScreenControlChecks {
+             busyClock.advance(by: .seconds(500))
+         }
+         try await busy.send([.key(code: 0x37, isDown: true, modifiers: [.command])], untilInjected: 8)
++        try check(busy.pump.deadline == (busyClock.start + .seconds(7100), .idle), "the bar's countdown restarts with input")
+         busyClock.advance(by: .seconds(99))
+         try await Task.sleep(for: .milliseconds(100))
+         try check(busy.pump.endReason == nil, "alive at 59:59")
+diff --git a/native/screen-control/Tests/ScreenHostTests/ScreenSessionBarTests.swift b/native/screen-control/Tests/ScreenHostTests/ScreenSessionBarTests.swift
+new file mode 100644
+index 00000000..e487c723
+--- /dev/null
++++ b/native/screen-control/Tests/ScreenHostTests/ScreenSessionBarTests.swift
+@@ -0,0 +1,324 @@
++#if os(macOS)
++import CoreGraphics
++import Foundation
++import os
++import ScreenControlCore
++@testable import ScreenHost
++import XCTest
++
++// The floating session bar (DESIGN mac-to-mac 「부록 A」): its words and buttons for every session state, whose click may
++// hand remote input back, how its hold reaches the session's input receiver, and where it opens. Nothing here opens a
++// window, reads the keychain, captures the screen, posts an event or listens on a port: the view's offscreen render is
++// a separate step of scripts/check-screen-control.ts.
++final class ScreenSessionBarTests: XCTestCase {
++    private func state(_ access: ScreenSessionAccess, model: String = "iPhone16,2", name: String = "민수 폰",
++                       elapsed: TimeInterval = 12 * 60 + 30,
++                       limit: ScreenSessionLimit? = ScreenSessionLimit(kind: .idle, remaining: 48 * 60)) -> ScreenSessionBarState {
++        ScreenSessionBarState(kind: ScreenDeviceKind(model: model), name: name, access: access, elapsed: elapsed, limit: limit,
++                              hotKey: "⌃⌥⌘.")
++    }
++
++    func testDeviceKindComesFromTheRegisteredModel() {
++        for model in ["iPhone16,2", "iPhone", "iPod9,1"] { XCTAssertEqual(ScreenDeviceKind(model: model), .iPhone, model) }
++        for model in ["iPad14,1", "iPad"] { XCTAssertEqual(ScreenDeviceKind(model: model), .iPad, model) }
++        // Once a Mac controller session reaches the service with its Mac's model (not yet), the bar shows a Mac unchanged.
++        for model in ["Mac14,2", "MacBookPro18,3", "MacBookAir10,1", "Macmini9,1", "MacPro7,1", "iMac21,1", "VirtualMac2,1"] {
++            XCTAssertEqual(ScreenDeviceKind(model: model), .mac, model)
++        }
++        for model in ["", "Watch7,1", "RealityDevice14,1"] { XCTAssertEqual(ScreenDeviceKind(model: model), .other, model) }
++        XCTAssertEqual(ScreenDeviceKind.allCases.map(\.label), ["iPhone", "iPad", "Mac", "기기"])
++        XCTAssertEqual(ScreenDeviceKind.allCases.map(\.symbol), ["iphone", "ipad", "desktopcomputer", "display"])
++    }
++
++    func testEachSessionStateHasItsWordsAndButtons() {
++        let flowing = ScreenSessionBarText.present(state(.control(.flowing)))
++        XCTAssertEqual(flowing.title, "iPhone ‘민수 폰’ · 조작 중")
++        XCTAssertEqual(flowing.detail, "12분째 · 입력이 없으면 48분 뒤 끝남")
++        XCTAssertEqual(flowing.actions, [.takeOver, .viewOnly, .end])
++        XCTAssertEqual(flowing.tone, .controlling)
++        XCTAssertFalse(flowing.notice)
++        XCTAssertEqual(flowing.symbol, "iphone")
++        XCTAssertEqual(flowing.hotKey, "⌃⌥⌘.")
++
++        // Local input wins: the person at this Mac is using it, and the bar says so in those words.
++        let local = ScreenSessionBarText.present(state(.control(.localActivity)))
++        XCTAssertEqual(local.title, "iPhone ‘민수 폰’ · 조작 중")
++        XCTAssertEqual(local.detail, "이 Mac에서 조작 중 — 원격 입력 멈춤 · 12분째")
++        XCTAssertTrue(local.notice)
++        XCTAssertEqual(local.tone, .holding)
++        XCTAssertEqual(local.actions, [.takeOver, .viewOnly, .end])
++
++        let held = ScreenSessionBarText.present(state(.control(.heldAtMac)))
++        XCTAssertEqual(held.title, "iPhone ‘민수 폰’ · 원격 입력 멈춤")
++        XCTAssertEqual(held.detail, "직접 하는 중 · 다시 넘기기는 이 Mac에서만 · 12분째")
++        XCTAssertEqual(held.actions, [.handBack, .viewOnly, .end])
++        XCTAssertEqual(held.tone, .holding)
++
++        let secure = ScreenSessionBarText.present(state(.control(.secureInput)))
++        XCTAssertEqual(secure.detail, "보안 입력 중 — 원격 입력 멈춤 · 12분째")
++        XCTAssertEqual(secure.tone, .warning)
++        XCTAssertTrue(secure.notice)
++
++        let watching = ScreenSessionBarText.present(state(.view(.session), model: "iPad14,1", name: "거실 패드"))
++        XCTAssertEqual(watching.title, "iPad ‘거실 패드’ · 보는 중")
++        XCTAssertEqual(watching.detail, "12분째 · 입력이 없으면 48분 뒤 끝남")
++        XCTAssertEqual(watching.actions, [.end], "nothing to lower or take over while it only watches")
++        XCTAssertEqual(watching.tone, .watching)
++        XCTAssertEqual(watching.symbol, "ipad")
++
++        let lowered = ScreenSessionBarText.present(state(.view(.lowered)))
++        XCTAssertEqual(lowered.title, "iPhone ‘민수 폰’ · 보는 중")
++        XCTAssertEqual(lowered.detail, "보기만으로 바꿈 · 12분째 · 입력이 없으면 48분 뒤 끝남")
++        XCTAssertEqual(lowered.actions, [.end])
++
++        let lost = ScreenSessionBarText.present(state(.view(.protectionLost)))
++        XCTAssertEqual(lost.detail, "입력 보호가 멈춰 보기만 · 다시 연결하면 조작")
++        XCTAssertEqual(lost.tone, .warning)
++        XCTAssertTrue(lost.notice)
++        XCTAssertEqual(lost.actions, [.end])
++
++        // A Mac controller session: its kind from its model, its name not repeated, and its 8-hour maximum.
++        let mac = ScreenSessionBarText.present(state(.control(.flowing), model: "Mac14,2", name: "사무실 Mac", elapsed: 48 * 60,
++                                                     limit: ScreenSessionLimit(kind: .maximum, remaining: 7 * 3600 + 12 * 60)))
++        XCTAssertEqual(mac.title, "‘사무실 Mac’ · 조작 중")
++        XCTAssertEqual(mac.detail, "48분째 · 7시간 12분 뒤 끝남")
++        XCTAssertEqual(mac.symbol, "desktopcomputer")
++
++        // Before the stream runs there is no limit to show yet.
++        XCTAssertEqual(ScreenSessionBarText.present(state(.control(.flowing), elapsed: 5, limit: nil)).detail, "방금 연결")
++    }
++
++    func testARefusedHandBackSaysWhyAndKeepsTheButtons() {
++        let held = state(.control(.heldAtMac))
++        let refused = ScreenSessionBarText.present(held, notice: .handBackRefused(.otherProcess))
++        XCTAssertEqual(refused.title, "사람의 클릭으로 확인되지 않았습니다")
++        XCTAssertEqual(refused.detail, "넘기지 않았습니다 · 이 Mac 앞에서 직접 눌러 주세요")
++        XCTAssertTrue(refused.notice)
++        XCTAssertEqual(refused.actions, [.handBack, .viewOnly, .end])
++        let remote = ScreenSessionBarText.present(held, notice: .handBackRefused(.remoteDesktop))
++        XCTAssertEqual(remote.title, "이 Mac 앞에서 눌러야 합니다")
++        XCTAssertEqual(remote.detail, "원격 데스크톱으로는 다시 넘길 수 없습니다")
++        let double = ScreenSessionBarText.present(held, notice: .handBackRefused(.repeatedClick))
++        XCTAssertEqual(double.title, "다시 넘기지 않았습니다")
++        XCTAssertEqual(double.detail, "두 번 누름은 받지 않습니다 · 한 번만 눌러 주세요")
++        XCTAssertTrue(double.notice)
++        for refusal in ScreenSessionBarClick.Refusal.allCases where refusal != .remoteDesktop && refusal != .repeatedClick {
++            XCTAssertEqual(ScreenSessionBarText.present(held, notice: .handBackRefused(refusal)).title, "사람의 클릭으로 확인되지 않았습니다",
++                           refusal.rawValue)
++        }
++    }
++
++    func testTimesRoundTowardTheSafeSide() {
++        XCTAssertEqual(ScreenSessionBarText.elapsed(0), "방금 연결")
++        XCTAssertEqual(ScreenSessionBarText.elapsed(59), "방금 연결")
++        XCTAssertEqual(ScreenSessionBarText.elapsed(60), "1분째")
++        XCTAssertEqual(ScreenSessionBarText.elapsed(3600), "1시간째")
++        XCTAssertEqual(ScreenSessionBarText.elapsed(3900), "1시간 5분째")
++        XCTAssertEqual(ScreenSessionBarText.elapsed(-5), "방금 연결")
++        // Never less time than there is: minutes round up, the last minute counts seconds.
++        XCTAssertEqual(ScreenSessionBarText.limit(.init(kind: .idle, remaining: 47 * 60 + 1)), "입력이 없으면 48분 뒤 끝남")
++        XCTAssertEqual(ScreenSessionBarText.limit(.init(kind: .idle, remaining: 3600)), "입력이 없으면 1시간 뒤 끝남")
++        XCTAssertEqual(ScreenSessionBarText.limit(.init(kind: .idle, remaining: 29.2)), "입력이 없으면 30초 뒤 끝남")
++        XCTAssertEqual(ScreenSessionBarText.limit(.init(kind: .maximum, remaining: 8 * 3600)), "8시간 뒤 끝남")
++        XCTAssertEqual(ScreenSessionBarText.limit(.init(kind: .maximum, remaining: -3)), "0초 뒤 끝남")
++
++        let now = ContinuousClock.now
++        XCTAssertEqual(ScreenSessionLimit(deadline: (now + .seconds(2880), .idle), now: now), .init(kind: .idle, remaining: 2880))
++        XCTAssertEqual(ScreenSessionLimit(deadline: (now + .seconds(60), .timeLimit), now: now), .init(kind: .maximum, remaining: 60))
++        XCTAssertEqual(ScreenSessionLimit(deadline: (now - .seconds(5), .idle), now: now).remaining, 0)
++    }
++
++    func testOnlyHandingBackNeedsAPersonAtThisMac() {
++        // 끊기, 보기만 and 직접 하기 only take input away, so any click counts, the other side's own included.
++        XCTAssertEqual(ScreenSessionBarAction.allCases.filter(\.needsPersonAtMac), [.handBack])
++        XCTAssertEqual(ScreenSessionBarAction.allCases.map(\.label), ["직접 하기", "다시 넘기기", "보기만", "끊기"])
++    }
++
++    func testHandBackTakesOnlyAHardwareClickOnTheBar() {
++        let marker = LocalInputMonitor.injectedEventMarker
++        let own: Int64 = 7001
++        func refusal(mouseUp: Bool = true, inBar: Bool = true, inControl: Bool = true, clicks: Int = 1, age: Double = 0.05,
++                     pid: Int64 = 0, userData: Int64 = 0, poster: ScreenSessionBarPoster? = nil) -> ScreenSessionBarClick.Refusal? {
++            ScreenSessionBarClick.handBackRefusal(isMouseUp: mouseUp, inBar: inBar, inControl: inControl, clickCount: clicks, ageSeconds: age,
++                                                  sourcePid: pid, userData: userData, ownPid: own, injectionMarker: marker, poster: poster)
++        }
++        XCTAssertNotEqual(marker, 0, "a hardware event's user data can never pass for this app's marker")
++        XCTAssertEqual(ScreenSessionBarClick.hardwareSourcePid, 0)
++        XCTAssertNil(refusal(), "a single fresh mouse-up inside the pill that tracked it, with no posting process: a person's hand on this Mac")
++
++        // The mouse-up must be inside the pill that ran, and that pill must have tracked the mouse-down itself. A person's
++        // real click on 「직접 하기」 is still the current event for a moment, on the bar and fresh: an accessibility press on
++        // 「다시 넘기기」 in that moment (osascript `click button`) reads it, but no pill tracked it, so it is refused.
++        XCTAssertEqual(refusal(inControl: false), .notABarClick)
++        XCTAssertEqual(refusal(inControl: false, age: 0.2), .notABarClick, "a fresh hardware mouse-up on the bar is not enough")
++        // A double-click on 「직접 하기」: its second click lands on 「다시 넘기기」 in the same place and must not hand back.
++        XCTAssertEqual(refusal(clicks: 2), .repeatedClick)
++        XCTAssertEqual(refusal(clicks: 3), .repeatedClick)
++        XCTAssertEqual(refusal(clicks: 0), .repeatedClick)
++        XCTAssertEqual(refusal(clicks: 2, pid: 4242), .otherProcess, "a posted click is refused as a program first, whatever its count")
++        XCTAssertEqual(refusal(clicks: 2, userData: marker), .screenInjected)
++
++        // Remote input this app injected for the other side, whatever process it reads as.
++        XCTAssertEqual(refusal(userData: marker), .screenInjected)
++        XCTAssertEqual(refusal(pid: own, userData: marker), .screenInjected)
++        XCTAssertEqual(refusal(pid: own), .ownProcess)
++        // An AI, a script, a test tool: any posting process.
++        XCTAssertEqual(refusal(pid: 4242), .otherProcess)
++        XCTAssertEqual(refusal(pid: 4242, poster: .init(identifier: "com.openai.chat", team: "2DC432GLL2", apple: false)), .otherProcess)
++        XCTAssertEqual(refusal(pid: 4242, poster: .init(identifier: "com.apple.osascript", team: nil, apple: true)), .otherProcess)
++        // A remote desktop is refused too (SR-29), unlike the Control bar; the poster only chooses the words.
++        XCTAssertEqual(refusal(pid: 311, poster: .init(identifier: "com.apple.screensharing.agent", team: nil, apple: true)), .remoteDesktop)
++        XCTAssertEqual(refusal(pid: 311, poster: .init(identifier: "com.p5sys.jump.connect", team: "2HCKV38EEC", apple: false)), .remoteDesktop)
++        XCTAssertEqual(refusal(pid: 311, poster: .init(identifier: "com.apple.screensharing.agent", team: "ABCDE12345", apple: false)),
++                       .otherProcess, "an identifier claimed without Apple's anchor is only another process")
++        // An accessibility press or a keyboard activation has no mouse-up on the bar.
++        XCTAssertEqual(refusal(mouseUp: false), .notABarClick)
++        XCTAssertEqual(refusal(inBar: false), .notABarClick)
++        XCTAssertEqual(refusal(age: 1.5), .stale)
++        XCTAssertEqual(refusal(age: -0.1), .stale)
++    }
++
++    func testTheHoldPausesAndLowersThroughTheSessionsOwnInputReceiver() throws {
++        let hold = ScreenSessionInputHold()
++        let injected = OSAllocatedUnfairLock(initialState: [InputEvent]())
++        let receiver = InputReceiver(physicalInput: { hold.apply(PhysicalInputSnapshot(available: true)) },
++                                     inject: { event in injected.withLock { $0.append(event) } })
++        func access() -> ScreenSessionAccess { .of(canControl: true, hold: hold.mode, availability: hold.availability) }
++        XCTAssertNil(hold.availability, "nothing to read before the stream runs")
++        hold.attach(receiver)
++        let start = ContinuousClock.now
++        func at(_ ms: Int) -> ContinuousClock.Instant { start + .milliseconds(ms) }
++
++        try receiver.receive(InputCodec.encode(.button(.left, isDown: true)), at: at(0))
++        XCTAssertEqual(injected.withLock { $0 }, [.button(.left, isDown: true)])
++        XCTAssertNil(receiver.checkLocalInput(at: at(10)))
++        XCTAssertEqual(access(), .control(.flowing))
++
++        // 직접 하기: the very next remote event is refused, what the other side held is let go, and the session's poll
++        // tells the phone with the message it already knows (VideoPump sends remoteInputPaused for `.paused`).
++        hold.pause()
++        try receiver.receive(InputCodec.encode(.pointerMove(x: 0.5, y: 0.5)), at: at(100))
++        XCTAssertEqual(injected.withLock { $0 }, [.button(.left, isDown: true), .button(.left, isDown: false)])
++        XCTAssertEqual(receiver.checkLocalInput(at: at(200)), .paused)
++        XCTAssertEqual(hold.availability, .localActivity)
++        XCTAssertEqual(access(), .control(.heldAtMac))
++        hold.pause()
++        XCTAssertEqual(hold.mode, .paused)
++
++        // 다시 넘기기 (its click already checked): remote input flows again at once.
++        XCTAssertTrue(hold.resume())
++        XCTAssertFalse(hold.resume(), "nothing left to hand back")
++        XCTAssertEqual(receiver.checkLocalInput(at: at(300)), .resumed)
++        try receiver.receive(InputCodec.encode(.pointerMove(x: 0.25, y: 0.75)), at: at(400))
++        XCTAssertEqual(injected.withLock { $0.last }, .pointerMove(x: 0.25, y: 0.75))
++        XCTAssertEqual(access(), .control(.flowing))
++
++        // 보기만: for the rest of this session; neither 다시 넘기기 nor 직접 하기 undoes it.
++        hold.lowerToView()
++        XCTAssertFalse(hold.resume())
++        hold.pause()
++        XCTAssertEqual(hold.mode, .viewOnly)
++        let count = injected.withLock { $0.count }
++        try receiver.receive(InputCodec.encode(.key(code: 0, isDown: true, modifiers: [])), at: at(500))
++        XCTAssertEqual(injected.withLock { $0.count }, count, "nothing injected once lowered to view")
++        XCTAssertEqual(receiver.checkLocalInput(at: at(600)), .paused)
++        XCTAssertEqual(hold.availability, .monitorUnavailable)
++        XCTAssertEqual(access(), .view(.lowered))
++        XCTAssertFalse(receiver.performControlInput(at: at(700)) { XCTFail("no keyboard or Spaces operation once lowered") })
++    }
++
++    /// Review F1: the other side reconnected (Face ID on the phone, nothing at this Mac) or connected from its other
++    /// registered device, and the fresh session's hold started `.remote`, so 「직접 하기」 and 「보기만」 were undone without
++    /// a hardware 「다시 넘기기」. ScreenService takes every session's hold from one `ScreenMacHold` (`begin()` in accept).
++    func testTakingInputBackOutlastsTheSessionUntilAPersonHereHandsItBack() throws {
++        var mac = ScreenMacHold()
++        XCTAssertEqual(mac.begin().mode, .remote, "nothing held: a session starts with input flowing")
++
++        // 직접 하기, then the same phone reconnects (`.replaced`) and another registered device connects after it.
++        let first = mac.begin()
++        mac.pause(first)
++        XCTAssertEqual(first.mode, .paused)
++        let reconnected = mac.begin()
++        XCTAssertEqual(reconnected.mode, .paused, "reconnecting does not hand input back")
++        XCTAssertEqual(mac.begin().mode, .paused, "nor does another registered device")
++
++        // The reconnected session's receiver refuses the first remote event before injecting anything, and its poll tells
++        // the phone with the message it already knows; the bar offers 다시 넘기기.
++        let injected = OSAllocatedUnfairLock(initialState: [InputEvent]())
++        let receiver = InputReceiver(physicalInput: { reconnected.apply(PhysicalInputSnapshot(available: true)) },
++                                     inject: { event in injected.withLock { $0.append(event) } })
++        reconnected.attach(receiver)
++        let start = ContinuousClock.now
++        try receiver.receive(InputCodec.encode(.button(.left, isDown: true)), at: start)
++        try receiver.receive(InputCodec.encode(.text("rm -rf ~")), at: start + .milliseconds(10))
++        XCTAssertEqual(injected.withLock { $0 }, [], "nothing reaches this Mac in a session that began held")
++        XCTAssertEqual(receiver.checkLocalInput(at: start + .milliseconds(20)), .paused)
++        XCTAssertEqual(ScreenSessionAccess.of(canControl: true, hold: reconnected.mode, availability: reconnected.availability),
++                       .control(.heldAtMac))
++        XCTAssertEqual(ScreenSessionBarText.present(state(.control(.heldAtMac))).actions.first, .handBack)
++
++        // 다시 넘기기 with an accepted hardware click in that session: input flows, and later sessions start flowing.
++        XCTAssertTrue(mac.resume(reconnected))
++        XCTAssertEqual(reconnected.mode, .remote)
++        XCTAssertEqual(mac.begin().mode, .remote)
++        XCTAssertEqual(receiver.checkLocalInput(at: start + .milliseconds(30)), .resumed)
++
++        // 보기만 lowers its own session to view, and the next session from any device starts paused, not flowing.
++        let lowered = mac.begin()
++        mac.lowerToView(lowered)
++        XCTAssertEqual(lowered.mode, .viewOnly)
++        XCTAssertFalse(mac.resume(lowered), "nothing hands a lowered session back")
++        XCTAssertTrue(mac.held, "a refused hand-back keeps this Mac holding its input")
++        let next = mac.begin()
++        XCTAssertEqual(next.mode, .paused)
++        XCTAssertTrue(mac.resume(next))
++        XCTAssertFalse(mac.held)
++
++        // Turning screen control on again at this Mac (Touch ID or the password) starts over; turning on asks at this Mac.
++        mac.pause(mac.begin())
++        XCTAssertTrue(mac.held)
++        mac.reset()
++        XCTAssertEqual(mac.begin().mode, .remote)
++    }
++
++    func testTheBarReadsEverySessionState() {
++        typealias Mode = ScreenSessionInputHold.Mode
++        func of(_ canControl: Bool, _ hold: Mode?, _ availability: ScreenInputAvailability?) -> ScreenSessionAccess {
++            .of(canControl: canControl, hold: hold, availability: availability)
++        }
++        XCTAssertEqual(of(false, .remote, nil), .view(.session))
++        XCTAssertEqual(of(false, nil, nil), .view(.session))
++        XCTAssertEqual(of(false, .viewOnly, .monitorUnavailable), .view(.lowered))
++        XCTAssertEqual(of(true, .viewOnly, .monitorUnavailable), .view(.lowered))
++        XCTAssertEqual(of(true, .remote, nil), .control(.flowing))
++        XCTAssertEqual(of(true, .remote, .ready), .control(.flowing))
++        XCTAssertEqual(of(true, .remote, .localActivity), .control(.localActivity))
++        XCTAssertEqual(of(true, .remote, .secureInput), .control(.secureInput))
++        XCTAssertEqual(of(true, .remote, .monitorUnavailable), .view(.protectionLost))
++        XCTAssertEqual(of(true, .remote, .permissionsRequired), .view(.protectionLost))
++        XCTAssertEqual(of(true, .paused, .localActivity), .control(.heldAtMac))
++        XCTAssertEqual(of(true, .paused, .secureInput), .control(.heldAtMac))
++        XCTAssertEqual(of(true, .paused, .monitorUnavailable), .view(.protectionLost), "protection lost outlasts a pause")
++    }
++
++    func testTheBarOpensWhereItWasLeftWhileThatIsOnAScreen() {
++        let size = CGSize(width: 660, height: 52)
++        let main = CGRect(x: 0, y: 80, width: 1512, height: 862)
++        let side = CGRect(x: 1512, y: 0, width: 1920, height: 1055)
++        XCTAssertEqual(ScreenSessionBarPlacement.origin(saved: nil, size: size, visibleFrames: [main, side]),
++                       CGPoint(x: 426, y: 80 + 18 + 62), "bottom centre of the menu bar screen, above the Control bar's spot")
++        XCTAssertEqual(ScreenSessionBarPlacement.origin(saved: CGPoint(x: 2000, y: 400), size: size, visibleFrames: [main, side]),
++                       CGPoint(x: 2000, y: 400))
++        XCTAssertEqual(ScreenSessionBarPlacement.origin(saved: CGPoint(x: 2000, y: 400), size: size, visibleFrames: [main]),
++                       CGPoint(x: 426, y: 160), "a display that went away does not keep the bar off screen")
++        XCTAssertEqual(ScreenSessionBarPlacement.origin(saved: CGPoint(x: 1400, y: 300), size: size, visibleFrames: [main, side]),
++                       CGPoint(x: 426, y: 160), "half across two screens is not wholly on one")
++        XCTAssertNil(ScreenSessionBarPlacement.origin(saved: nil, size: size, visibleFrames: []))
++    }
++
++    func testTheBarStaysInThePictureTheOtherSideSees() {
++        // Capture leaves out only the viewer app, so AgentsToZ Screen's own bar is in the stream (부록 A 「캡처」).
++        XCTAssertFalse(CaptureExclusion.excludes(bundleIdentifier: "com.intenet.agentstozbycs.screen"))
++    }
++}
++#endif
+diff --git a/native/screen-control/Tests/SessionBarRender/main.swift b/native/screen-control/Tests/SessionBarRender/main.swift
+new file mode 100644
+index 00000000..b0cb6274
+--- /dev/null
++++ b/native/screen-control/Tests/SessionBarRender/main.swift
+@@ -0,0 +1,148 @@
++import AppKit
++
++// Renders the session bar offscreen for every state, as evidence and as a check (scripts/check-screen-control.ts).
++// Compiled as one module with Sources/AgentsToZScreen/ScreenSessionBarView.swift and
++// Sources/ScreenHost/ScreenSessionBarModel.swift, so it draws what the app draws: `ScreenSessionBarText.present` →
++// `ScreenSessionBarView.show`. It never orders a window in (NSView.cacheDisplay draws the view where it is), never
++// becomes a Dock app, and reads nothing of the Mac's sessions, keychain, screen or input.
++// `render <output dir>` writes one PNG per state and `all.png`, and exits non-zero when a fixed line is cut off, a
++// pill shows that the state does not offer (or hides one it does), an accessibility press runs 「다시 넘기기」, or a
++// window exists.
++
++let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
++
++struct Case {
++    let name: String
++    let state: ScreenSessionBarState
++    var notice: ScreenSessionBarNotice? = nil
++    /// A 32-character name may be cut short in the first line; every fixed line must fit.
++    var titleMayTruncate = false
++}
++
++func bar(_ access: ScreenSessionAccess, model: String = "iPhone16,2", name: String = "민수 폰", elapsed: TimeInterval = 12 * 60 + 30,
++         limit: ScreenSessionLimit? = .init(kind: .idle, remaining: 48 * 60)) -> ScreenSessionBarState {
++    ScreenSessionBarState(kind: ScreenDeviceKind(model: model), name: name, access: access, elapsed: elapsed, limit: limit, hotKey: "⌃⌥⌘.")
++}
++
++let cases: [Case] = [
++    Case(name: "01-control-iphone", state: bar(.control(.flowing))),
++    Case(name: "02-local-input-priority", state: bar(.control(.localActivity))),
++    Case(name: "03-held-at-mac", state: bar(.control(.heldAtMac))),
++    Case(name: "04-hand-back-refused", state: bar(.control(.heldAtMac)), notice: .handBackRefused(.otherProcess)),
++    Case(name: "05-hand-back-remote-desktop", state: bar(.control(.heldAtMac)), notice: .handBackRefused(.remoteDesktop)),
++    Case(name: "06-secure-input", state: bar(.control(.secureInput))),
++    Case(name: "07-view-ipad", state: bar(.view(.session), model: "iPad14,1", name: "거실 패드")),
++    Case(name: "08-view-lowered", state: bar(.view(.lowered), elapsed: 3 * 3600 + 5 * 60)),
++    Case(name: "09-protection-lost", state: bar(.view(.protectionLost))),
++    Case(name: "10-mac-controller", state: bar(.control(.flowing), model: "MacBookPro18,3", name: "사무실 MacBook Pro", elapsed: 48 * 60,
++                                               limit: .init(kind: .maximum, remaining: 7 * 3600 + 12 * 60))),
++    Case(name: "11-mac-controller-view", state: bar(.view(.session), model: "Mac14,2", name: "회의실", elapsed: 59 * 60,
++                                                    limit: .init(kind: .maximum, remaining: 30))),
++    Case(name: "12-long-name", state: bar(.control(.heldAtMac), name: String(repeating: "가", count: 32)), titleMayTruncate: true),
++    Case(name: "13-hand-back-double-click", state: bar(.control(.heldAtMac)), notice: .handBackRefused(.repeatedClick)),
++    Case(name: "14-reconnected-held", state: bar(.control(.heldAtMac), elapsed: 5)),
++]
++
++/// Records what a pill's action receives, as ScreenSessionBar's `pressed(_:)` would.
++@MainActor final class Presses: NSObject {
++    var actions: [(ScreenSessionBarAction?, Bool)] = []
++    var refused = 0
++    @objc func pressed(_ sender: ScreenSessionBarView.PillButton) { actions.append((sender.barAction, sender.tracksOwnMouseDown)) }
++}
++
++/// An accessibility press (osascript `click button`, an AI's AXPress) never runs 「다시 넘기기」: the pill refuses it before
++/// any action and reports it, while the pills that only take input away still run (SR-29, review F2). No window: the
++/// press goes to the pill object.
++@MainActor func accessibilityPressFailures() -> [String] {
++    var failures: [String] = []
++    let view = ScreenSessionBarView(frame: NSRect(origin: .zero, size: ScreenSessionBarView.size))
++    let presses = Presses()
++    for pill in view.pills.values {
++        pill.target = presses
++        pill.action = #selector(Presses.pressed(_:))
++        pill.refusedAccessibilityPress = { presses.refused += 1 }
++    }
++    view.show(ScreenSessionBarText.present(bar(.control(.heldAtMac))))
++    if view.pills[.handBack]?.accessibilityPerformPress() != false { failures.append("accessibility press: 다시 넘기기 accepted it") }
++    if !presses.actions.isEmpty { failures.append("accessibility press: 다시 넘기기 ran its action") }
++    if presses.refused != 1 { failures.append("accessibility press: 다시 넘기기 refusal not reported (\(presses.refused))") }
++    _ = view.pills[.viewOnly]?.accessibilityPerformPress()
++    if presses.actions.count != 1 || presses.actions.first?.0 != .viewOnly {
++        failures.append("accessibility press: 보기만 did not run (\(presses.actions.map { $0.0?.rawValue ?? "-" }))")
++    } else if presses.actions.first?.1 != false {
++        failures.append("accessibility press: a pill read as tracking its own mouse-down without one")
++    }
++    if presses.refused != 1 { failures.append("accessibility press: 보기만 was refused") }
++    return failures
++}
++
++let failures: [String] = MainActor.assumeIsolated {
++    _ = NSApplication.shared
++    NSApp.setActivationPolicy(.prohibited)
++    try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
++    var failures: [String] = []
++    var images: [(String, NSBitmapImageRep)] = []
++    let pad: CGFloat = 14, scale: CGFloat = 2
++    let size = ScreenSessionBarView.size
++    for item in cases {
++        let presentation = ScreenSessionBarText.present(item.state, notice: item.notice)
++        let view = ScreenSessionBarView(frame: NSRect(origin: NSPoint(x: pad, y: pad), size: size))
++        view.show(presentation)
++        if view.shown != presentation { failures.append("\(item.name): the view did not take the presentation") }
++        for action in ScreenSessionBarAction.allCases where (view.pills[action]?.isHidden ?? true) == presentation.actions.contains(action) {
++            failures.append("\(item.name): \(action.rawValue) pill \(presentation.actions.contains(action) ? "hidden" : "shown")")
++        }
++        if view.pills[.end]?.hint != "⌃⌥⌘." { failures.append("\(item.name): the end pill lost the hot key") }
++        // A backdrop like a desktop behind the glass, since nothing is behind an offscreen view.
++        let frame = NSRect(x: 0, y: 0, width: size.width + pad * 2, height: size.height + pad * 2)
++        let backdrop = NSView(frame: frame)
++        backdrop.wantsLayer = true
++        let gradient = CAGradientLayer()
++        gradient.frame = frame
++        gradient.colors = [NSColor(srgbRed: 0.23, green: 0.32, blue: 0.47, alpha: 1).cgColor,
++                           NSColor(srgbRed: 0.55, green: 0.42, blue: 0.5, alpha: 1).cgColor]
++        gradient.startPoint = CGPoint(x: 0, y: 0)
++        gradient.endPoint = CGPoint(x: 1, y: 1)
++        backdrop.layer?.addSublayer(gradient)
++        backdrop.addSubview(view)
++        backdrop.layoutSubtreeIfNeeded()
++        for line in view.overflowingText() where !(item.titleMayTruncate && line == presentation.title) {
++            failures.append("\(item.name): cut off — \(line)")
++        }
++        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(frame.width * scale), pixelsHigh: Int(frame.height * scale),
++                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
++                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else {
++            failures.append("\(item.name): no bitmap"); continue
++        }
++        rep.size = frame.size
++        backdrop.cacheDisplay(in: frame, to: rep)
++        guard let png = rep.representation(using: .png, properties: [:]) else { failures.append("\(item.name): no PNG"); continue }
++        do { try png.write(to: output.appending(path: "\(item.name).png")) } catch { failures.append("\(item.name): \(error)") }
++        images.append((item.name, rep))
++    }
++    // One sheet with every state, top to bottom.
++    if let first = images.first?.1 {
++        let width = first.pixelsWide, height = first.pixelsHigh
++        if let sheet = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height * images.count, bitsPerSample: 8,
++                                        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
++                                        bytesPerRow: 0, bitsPerPixel: 0),
++           let context = NSGraphicsContext(bitmapImageRep: sheet) {
++            NSGraphicsContext.saveGraphicsState()
++            NSGraphicsContext.current = context
++            for (index, image) in images.enumerated() {
++                image.1.draw(in: NSRect(x: 0, y: height * (images.count - 1 - index), width: width, height: height))
++            }
++            NSGraphicsContext.restoreGraphicsState()
++            try? sheet.representation(using: .png, properties: [:])?.write(to: output.appending(path: "all.png"))
++        }
++    }
++    failures += accessibilityPressFailures()
++    if !NSApp.windows.isEmpty { failures.append("a window was created: \(NSApp.windows.count)") }
++    return failures
++}
++
++if !failures.isEmpty {
++    FileHandle.standardError.write(Data((failures.joined(separator: "\n") + "\n").utf8))
++    exit(1)
++}
++print("session bar: \(cases.count) states rendered offscreen, no fixed line cut off, accessibility press refused on 다시 넘기기, no window — \(output.path)")
+diff --git a/scripts/check-screen-control.ts b/scripts/check-screen-control.ts
+index f7c35e91..389dff10 100644
+--- a/scripts/check-screen-control.ts
++++ b/scripts/check-screen-control.ts
+@@ -3,6 +3,8 @@
+ // `bun scripts/check-screen-control.ts [packageDir]` — the optional directory lets a mutated copy be checked.
+ // Then the status file the main app's work-mode panel reads (ScreenHost/ScreenStatusFile.swift): written by the Swift
+ // type, it must equal Tests/StatusContract/status.json, the sample src-tauri/src/screen_helper.rs is tested against.
++// On a Mac, also the host's XCTest suites and the floating session bar (`checkSessionBar`: offscreen render + panel
++// contract); its PNGs go to tests/results/screen-session-bar/ (SCREEN_SESSION_BAR_EVIDENCE overrides).
+ import {deepStrictEqual, strictEqual} from 'node:assert';
+ import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from 'node:fs';
+ import {tmpdir} from 'node:os';
+@@ -107,14 +109,121 @@ guard !FileManager.default.fileExists(atPath: own.path) else { exit(4) }
+   // ControllerSessionTests, ScreenPowerTests, ControllerLogTests, ControllerStoreTests, PairingHostTests: the Mac-to-Mac
+   // host packages (docs/design/mac-to-mac-2026-11-01 15절), named here ahead so each package only adds its tests.
+   // ControllerSectionTests: the menu and status window's 「다른 Mac에서 이 Mac 보기」 model, its raising gate and wiring.
++  // ScreenSessionBarTests: the floating session bar's words and buttons per state, the hand-back click rule and its hold on
++  // the session's input receiver, in memory; never a window, the keychain, capture, an input event or the screen port.
+   if (process.platform === 'darwin') {
+     const host = Bun.spawnSync(['swift', 'test', '--package-path', packagePath, '--filter',
+-      'LocalInputMonitorTests|ScreenControllerTests|WeeklyUsageOutboxTests|ControllerSessionTests|ScreenPowerTests|ControllerLogTests|ControllerStoreTests|PairingHostTests|ControllerSectionTests'],
++      'LocalInputMonitorTests|ScreenControllerTests|WeeklyUsageOutboxTests|ControllerSessionTests|ScreenPowerTests|ControllerLogTests|ControllerStoreTests|PairingHostTests|ControllerSectionTests|ScreenSessionBarTests'],
+       {stdout: 'pipe', stderr: 'pipe', timeout: 180_000});
+     if (host.exitCode !== 0) throw Error('Native local-input ledger checks failed:\n' + host.stdout.toString() + host.stderr.toString());
+     console.log(host.stdout.toString().trim());
++    checkSessionBar();
+   }
+ 
+ } finally {
+   rmSync(temporary, {recursive: true, force: true});
+ }
++
++/** The floating session bar (docs/design/mac-to-mac-2026-11-01/DESIGN.md 「부록 A」). First its view, drawn offscreen for
++ * every state with the model it draws from, compiled as one module the way the Control bar's view can be: it fails on a
++ * fixed line cut off, a wrong pill or any window, and leaves PNGs under the ignored tests/results/ as evidence. Then the
++ * panel's source, which no unit check reaches (an app-target NSPanel): the Control bar's level order and Spaces
++ * behaviour, staying in the captured picture, and 「다시 넘기기」 going through the click rule and nowhere else. */
++function checkSessionBar() {
++  const evidence = resolve(process.env.SCREEN_SESSION_BAR_EVIDENCE ?? join(import.meta.dir, '..', 'tests', 'results', 'screen-session-bar'));
++  const render = join(temporary, 'session-bar-render');
++  const compile = Bun.spawnSync(['swiftc', '-swift-version', '6', join(packagePath, 'Tests', 'SessionBarRender', 'main.swift'),
++    join(packagePath, 'Sources', 'AgentsToZScreen', 'ScreenSessionBarView.swift'),
++    join(packagePath, 'Sources', 'ScreenHost', 'ScreenSessionBarModel.swift'), '-o', render], {stderr: 'pipe'});
++  if (compile.exitCode !== 0) throw Error('Session bar render compilation failed:\n' + compile.stderr.toString());
++  const run = Bun.spawnSync([render, evidence], {stdout: 'pipe', stderr: 'pipe', timeout: 60_000});
++  if (run.exitCode !== 0) throw Error('Session bar render check failed:\n' + run.stderr.toString());
++  console.log(run.stdout.toString().trim());
++
++  const source = (...path: string[]) => readFileSync(join(packagePath, 'Sources', ...path), 'utf8');
++  const bar = source('AgentsToZScreen', 'ScreenSessionBar.swift');
++  const view = source('AgentsToZScreen', 'ScreenSessionBarView.swift');
++  const service = source('ScreenHost', 'ScreenService.swift');
++  const expect = (ok: boolean, what: string) => { if (!ok) throw Error('Session bar contract: ' + what); };
++  const make = bar.slice(bar.indexOf('private func make()'), bar.indexOf('private func appear('));
++  expect(bar.includes('override var canBecomeKey: Bool { false }') && bar.includes('override var canBecomeMain: Bool { false }'),
++    'the panel never becomes key or main');
++  expect(make.includes('[.borderless, .nonactivatingPanel]'), 'a non-activating borderless panel');
++  const floating = make.indexOf('panel.isFloatingPanel = true');
++  expect(floating >= 0 && floating < make.indexOf('panel.level = .statusBar'), 'the status-bar level is set after isFloatingPanel, which resets it');
++  expect(make.includes('[.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]'), 'every Space, full screen, out of the cycle');
++  expect(make.includes('isMovableByWindowBackground = true') && bar.includes('func windowDidMove(') && bar.includes('ScreenSessionBarPlacement.origin('),
++    'draggable, and opens where it was left');
++  const update = bar.slice(bar.indexOf('func update()'), bar.indexOf('private func hide()'));
++  expect(update.includes('if panel.level != .statusBar { panel.level = .statusBar }') && update.includes('panel.orderFrontRegardless()'),
++    'the level and the front are put right every tick');
++  expect(!/sharingType\s*=/.test(bar + view), 'the bar stays in the picture the other side sees');
++  const handBackAt = bar.indexOf('case .handBack:');
++  const handBack = bar.slice(handBackAt, bar.indexOf('update()', handBackAt));
++  expect(handBackAt >= 0 && handBack.includes('handBackRefusal(NSApp.currentEvent, bar: panel, pill: sender)') && handBack.includes('resumeRemoteInput(refusal: refusal)'),
++    '다시 넘기기 reads the click that ran it and passes the verdict to the service');
++  expect(bar.split('resumeRemoteInput(').length === 2 && !bar.includes('.resume()'), 'no other way to hand input back from the bar');
++  expect(/func resumeRemoteInput\(refusal: ScreenSessionBarClick\.Refusal\?\) -> Bool \{\s*guard refusal == nil/.test(service),
++    'the service hands back only an accepted click');
++  expect(service.includes('physicalInput = { hold.apply(localMonitor.snapshot()) }') && service.includes('hold.attach(input)'),
++    'the hold sits between the local input monitor and the session receiver');
++  expect(source('AgentsToZScreen', 'ScreenApp.swift').includes('ScreenSessionBar.shared.start()'), 'the app starts the bar');
++
++  // Review F2 (SR-29: the hardware mouse-up must be inside the control that ran; an accessibility action is refused).
++  // The pill knows it tracked its own mouse-down, refuses an accessibility press on 「다시 넘기기」, and the bar passes
++  // that, the mouse-up's place in the pill and its click count to the click rule.
++  expect(/override func mouseDown\(with event: NSEvent\) \{\s*tracksOwnMouseDown = true\s*defer \{ tracksOwnMouseDown = false \}\s*super\.mouseDown\(with: event\)\s*\}/.test(view),
++    'a pill marks the mouse-down it tracks itself, only while it tracks it');
++  expect(/override func accessibilityPerformPress\(\) -> Bool \{\s*guard barAction\?\.needsPersonAtMac != true else \{\s*refusedAccessibilityPress\?\(\)\s*return false\s*\}/.test(view),
++    'an accessibility press never runs 다시 넘기기');
++  const refusalAt = bar.indexOf('static func handBackRefusal(');
++  const refusal = bar.slice(refusalAt, bar.indexOf('static func poster(', refusalAt));
++  expect(refusalAt >= 0 && refusal.includes('pill.tracksOwnMouseDown') && refusal.includes('pill.bounds.contains(pill.convert(event.locationInWindow, from: nil))') &&
++    refusal.includes('inControl: inControl') && refusal.includes('clickCount: mouseUp ? event.clickCount : 0'),
++    'the bar gives the click rule the pill that tracked the click, where the mouse-up landed and its click count');
++  const model = source('ScreenHost', 'ScreenSessionBarModel.swift');
++  expect(model.includes('guard isMouseUp, inBar, inControl else { return .notABarClick }') && model.includes('if sourcePid != hardwareSourcePid {') &&
++    model.includes('return clickCount == 1 ? nil : .repeatedClick'), 'the click rule refuses outside the control, posted events and repeated clicks');
++
++  // Review F1: 「직접 하기」 and 「보기만」 outlast their session. Every session's hold comes from the one ScreenMacHold, the
++  // bar's presses go through it, and only turning on at this Mac (after Touch ID or the password) clears it.
++  expect(!service.includes('ScreenSessionInputHold('), 'no session hold is made outside ScreenMacHold');
++  const acceptAt = service.indexOf('private func accept(');
++  const accept = service.slice(acceptAt, service.indexOf('private func attach(', acceptAt));
++  expect(acceptAt >= 0 && accept.includes('let hold = macHold.begin()'), 'a new session takes its hold from ScreenMacHold, paused while this Mac holds its input');
++  expect(service.includes('macHold.pause(active.hold)') && service.includes('macHold.lowerToView(active.hold)') &&
++    service.includes('return macHold.resume(active.hold)') && !/\.hold\.(pause|resume|lowerToView)\(/.test(service),
++    '직접 하기, 보기만 and 다시 넘기기 go through ScreenMacHold');
++  const turnOnAt = service.indexOf('public func turnOn()');
++  const turnOn = service.slice(turnOnAt, service.indexOf('public func turnOff(', turnOnAt));
++  expect(service.split('macHold.reset()').length === 2 && turnOn.indexOf('macHold.reset()') > turnOn.indexOf('Self.authenticate('),
++    'only turning on, after Touch ID or the password at this Mac, clears the hold');
++
++  // Review F4: the bar's hardware rule is a second copy until ScreenInputOrigin.humanClick (wp-input-origin) replaces it.
++  // Its constants are held to the Control bar's and, once ScreenInputOrigin.swift is in the package, to its constants.
++  const one = (text: string, pattern: RegExp, what: string) => {
++    const found = [...text.matchAll(new RegExp(pattern.source, 'g'))];
++    if (found.length !== 1) throw Error(`Session bar click rule: ${what}: expected one match, found ${found.length}`);
++    return found[0]![1]!;
++  };
++  const quoted = (text: string) => [...text.matchAll(/"([^"]+)"/g)].map(m => m[1]!).sort();
++  const rules = (text: string, hardwarePid: RegExp) => ({
++    hardwareSourcePid: Number(one(text, hardwarePid, 'hardware pid')),
++    freshSeconds: Number(one(text, /static let freshSeconds = ([0-9.]+)\b/, 'freshSeconds')),
++    appleRemoteDesktop: quoted(one(text, /static let appleRemoteDesktop: Set<String> = \[([^\]]*)\]/, 'Apple remote desktop')),
++    teamRemoteDesktop: Object.fromEntries([...one(text, /static let teamRemoteDesktop: \[String: Set<String>\] = \[((?:[^[\]]|\[[^\]]*\])*)\]/, 'team remote desktop')
++      .matchAll(/"([^"]+)"\s*:\s*\[([^\]]*)\]/g)].map(m => [m[1]!, quoted(m[2]!)])),
++  });
++  const sessionBarRules = rules(model, /static let hardwareSourcePid: Int64 = (\d+)/);
++  const controlBarRules = rules(readFileSync(join(import.meta.dir, '..', 'native', 'computer-use', 'Sources', 'ComputerUseControlCore', 'ControlBarRules.swift'), 'utf8'),
++    /if sourcePid == (\d+) \{ return nil \}/);
++  deepStrictEqual(sessionBarRules, controlBarRules, 'the session bar click rule drifted from the Control bar rule');
++  const originPath = join(packagePath, 'Sources', 'ScreenControlCore', 'ScreenInputOrigin.swift');
++  if (existsSync(originPath)) {
++    deepStrictEqual(sessionBarRules, rules(readFileSync(originPath, 'utf8'), /static let hardwareSourcePid: Int64 = (\d+)/),
++      'the session bar click rule drifted from ScreenInputOrigin');
++    console.log('session bar: ScreenInputOrigin is in the package — replace ScreenSessionBarClick with ScreenInputOrigin.humanClick (DESIGN 15절 wp-input-origin)');
++  }
++  console.log('session bar: panel contract holds (level order, Spaces, captured, hand-back only by a single tracked hardware click, ' +
++    'accessibility press refused, hold outlasts the session until a person here hands back, click rule equal to the Control bar\'s)');
++}

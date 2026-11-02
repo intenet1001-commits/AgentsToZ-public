@@ -2,7 +2,8 @@ import {afterEach, expect, test} from 'bun:test';
 import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {initializeProjectMemory} from '../project-memory-server';
+import {initializeProjectMemory,detectProjectMemory,writeMemoryDocument,recordProjectMemoryFeedback} from '../project-memory-server';
+import {parseProjectMemoryEntries} from '../src/projectMemoryRecall';
 import {readControlProfileAccess} from '../src/controlProfileStore';
 import {CONTROL_PROFILE_CONTROLLER, CONTROL_PROFILE_HEADER} from '../src/controlProfileContract';
 import {handleAgentsToZUseMcpRequest} from '../agentstoz-use-mcp-server';
@@ -51,6 +52,37 @@ async function fixture(registered = true, entrypoint = 'tests/fixtures/ops-surfa
   const launches = () => existsSync(join(home, 'surface-launches.jsonl')) ? readFileSync(join(home, 'surface-launches.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [];
   return {home, data, root, dev, ports, baseUrl, post, call, launches, access, profile: prepared.body.profile};
 }
+
+test('opt-in OPS and exact DEV relations stay in their own current memory and respect withdrawn source versions', async () => {
+  const f = await fixture(), ops = detectProjectMemory(f.root), dev = detectProjectMemory(f.dev);
+  const a = 'a'.repeat(24), b = 'b'.repeat(24);
+  const document = '# Memory\n\n## Decisions\n\n### Retry failure\n<!-- memory-entry-id:' + a + ' -->\nInspect [[socket epoch]].\n\n### Durable identity\n<!-- memory-entry-id:' + b + ' -->\nPersist [[socket epoch]].\n';
+  writeMemoryDocument(f.root, ops.memoryPath!, document);
+  writeMemoryDocument(f.dev, dev.memoryPath!, document.replace('Persist [[socket epoch]].', 'DEV ONLY [[socket epoch]].'));
+  const base = await f.call('recall_control_context', {query: 'Retry'});
+  expect(base).not.toHaveProperty('relations');
+  const related = await f.call('recall_control_context', {query: 'Retry', includeRelations: true});
+  expect(related.hits).toEqual(base.hits);
+  expect(related.projectMemoryIncluded).toBe(false);
+  expect(related.relations).toMatchObject({state: 'ready', memoryId: ops.config!.memoryId, grantsAuthority: false});
+  expect(related.relations.hits[0]).toMatchObject({entryId: b, body: 'Persist [[socket epoch]].', via: {fromEntryId: a, kind: 'shared-concept'}});
+  expect(JSON.stringify(related.relations)).not.toContain('DEV ONLY');
+  const opsReference = await f.call('read_reference', {role: 'ops', query: 'Retry', includeRelations: true});
+  expect(opsReference.reference.relations).toEqual(related.relations);
+  const devReference = await f.call('read_reference', {role: 'dev', portId: 'dev-project', query: 'Retry', includeRelations: true});
+  expect(devReference.reference.relations.memoryId).toBe(dev.config!.memoryId);
+  expect(devReference.reference.relations.hits[0].body).toBe('DEV ONLY [[socket epoch]].');
+  const withdrawn = parseProjectMemoryEntries(document)[1]!;
+  recordProjectMemoryFeedback({folderPath: f.root, entryKey: withdrawn.entryKey, contentVersionHash: withdrawn.contentVersionHash,
+    kind: 'corrected', evidence: 'This identity rule failed.'});
+  expect((await f.call('recall_control_context', {query: 'Retry', includeRelations: true})).relations.hits).toEqual([]);
+  const denied = await f.post('/api/agentstoz-use/action', {action: 'read-reference', controllerPortId: CONTROL_PROFILE_CONTROLLER,
+    reference: {role: 'dev', portId: 'dev-project', query: 'Retry', includeRelations: true}});
+  expect(denied.status).toBe(403);
+  const unknown = await f.call('read_reference', {role: 'dev', portId: 'unknown-project', query: 'Retry', includeRelations: true});
+  expect(unknown.success).toBe(false);
+  expect(unknown).not.toHaveProperty('reference');
+});
 
 test('OPS external-app/Orca adapters resolve the bound folder and preserve modes, warnings and errors', async () => {
   const f = await fixture();

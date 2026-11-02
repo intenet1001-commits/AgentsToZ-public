@@ -10,7 +10,7 @@ import {randomUUID} from 'node:crypto';
 import type {AiTerminalService} from './aiTerminalService';
 import {deriveAgentRuntimeWorktreeTargetId} from './agentRuntimeTargetInventory';
 import type {TeamExternalRuntime} from './teamLaunchPlan';
-import type {TeamGitScope, TeamMemberGit, WorkroomTeamHost} from './workroomTeam';
+import type {TeamGitScope, TeamMemberGit, WorkroomTeamHost,TeamRemoteRuntime} from './workroomTeam';
 
 export interface WorkroomTeamHostDependencies {
   gitPath: string;
@@ -36,6 +36,7 @@ export interface WorkroomTeamHostDependencies {
   externalRuntime?: TeamExternalRuntime;
   /** Whether an AI's CLI has the agentstoz_use connection (WorkroomTeamHost.teamTool), read from the app's connection settings. */
   teamTool?: WorkroomTeamHost['teamTool'];
+  remoteRuntime?:TeamRemoteRuntime;
 }
 
 /** Paths the app keeps inside the primary checkout; they are not changes a member would miss. */
@@ -140,13 +141,18 @@ export function createWorkroomTeamHost(deps: WorkroomTeamHostDependencies): Work
     // Passed straight through: this host neither reimplements an external surface nor decides what it may claim.
     ...(deps.externalRuntime ? {external: deps.externalRuntime} : {}),
     ...(deps.teamTool ? {teamTool: deps.teamTool} : {}),
+    ...(deps.remoteRuntime?{remote:deps.remoteRuntime}:{}),
     async start(input) {
       // The account and the approval mode ride on the request itself, exactly as the app's own start sends them:
       // `accountId` goes through the same registered-profile launch and validation, and `bypassPermissions` is only
       // ever present when the caller asked for it. No authority is passed, so this stays a host-local start.
       const started = await deps.terminal.perform({operation: 'start', requestId: input.requestId, targetId: input.targetId, agent: input.agent, cols: 100, rows: 28, prompt: input.prompt,
         ...(input.accountId ? {accountId: input.accountId} : {}), ...(input.bypassPermissions ? {bypassPermissions: true} : {})},
-        undefined, {...(input.model ? {launchModel: input.model} : {}), launchEffort: input.effort});
+        undefined, {...(input.model ? {launchModel: input.model} : {}), launchEffort: input.effort,...(input.guard?{
+          effortPolicy:input.guard.effortPolicy,
+          startGuard:async()=>{await input.guard!.beforeEffect();return()=>{if(!input.guard!.active())throw Error('원격 Teams 실행 동의가 변경되었습니다.');};},
+          startEffectGate:<T>(effect:()=>T):T=>{if(!input.guard!.active())throw Error('원격 Teams 실행 동의가 변경되었습니다.');return effect();},
+        }:{})});
       if (!started.session) throw new Error('팀원 워크룸이 시작되지 않았습니다.');
       return {sessionId: started.session.id};
     },
@@ -209,7 +215,10 @@ export function createWorkroomTeamHost(deps: WorkroomTeamHostDependencies): Work
     async instruct(input) {
       // One whole submission under the team's own receipt namespace; a host without it cannot prove what it typed.
       if (!deps.terminal.wholeSubmissionSupported()) throw new Error('이 앱은 열린 세션에 지시문을 확인 가능하게 보낼 수 없습니다. 앱을 업데이트하세요.');
-      const typed = await deps.terminal.submitHostInstruction({id: input.requestId, sessionId: input.sessionId, data: `${input.prompt}\r`, receiptOwner: WORKROOM_TEAM_SUBMISSION_OWNER, skipCorrections: true});
+      const typed = await deps.terminal.submitHostInstruction({id: input.requestId, sessionId: input.sessionId, data: `${input.prompt}\r`, receiptOwner: WORKROOM_TEAM_SUBMISSION_OWNER, skipCorrections: true,...(input.guard?{
+        active:input.guard.active,beforeInput:input.guard.beforeEffect,
+        writeEffectGate:<T>(effect:()=>T):T=>{if(!input.guard!.active())throw Error('원격 Teams 입력 동의가 변경되었습니다.');return effect();},
+      }:{})});
       return typed.state === 'written' ? 'written' : 'unknown';
     },
     async close(sessionId) {

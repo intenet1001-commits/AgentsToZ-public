@@ -5,6 +5,52 @@ import ComputerUseApproval
 #endif
 
 struct ScopeStateChecks {
+    /// Regression evidence, not a safety guarantee: the current implementation ties human hold to the grant. Keep this
+    /// executable evidence until a separately reviewed, process-wide durable hold intentionally changes the contract.
+    static func testCurrentPersonHoldIsLostWhenItsGrantEnds() throws {
+        for ending in ["revoke", "end", "expiry", "owner-death", "running-unknown"] {
+            var time: Int64 = 100_000, alive = true
+            let owner = ControlOwner(pid: 10, start: 1234)
+            let other = ControlOwner(pid: 11, start: 2345)
+            let caller = ControlCaller(sessionId: "session_1", lane: "leader", generation: String(repeating: "a", count: 32))
+            let otherCaller = ControlCaller(sessionId: "session_2", lane: "leader", generation: String(repeating: "d", count: 32))
+            let state = ScopeControlState(now: { time }, newId: { String(repeating: "c", count: 32) },
+                                          ownerAlive: { $0 == owner ? alive : true })
+            func approve(_ id: String, caller: ControlCaller, owner: ControlOwner) throws {
+                let expires = time + 120_000
+                try state.submit(approvalId: id, scope: .desktop, caller: caller, label: "test", expiresAt: expires, owner: owner)
+                let payload = ScopeApprovalPayload(approvalId: id, scope: .desktop,
+                    caller: ScopeApprovalCaller(sessionId: caller.sessionId, lane: caller.lane, generation: caller.generation),
+                    owner: ScopeApprovalOwner(pid: owner.pid, start: String(owner.start)), issuedAt: time, expiresAt: expires)
+                try state.approve(id, signed: ScopedSignedApproval(payload: payload, signature: Data([1]),
+                                  publicKey: Data(repeating: 4, count: 65)), legacyActive: false)
+            }
+            let first = String(repeating: "b", count: 64)
+            try approve(first, caller: caller, owner: owner)
+            let grant = try state.open(first, scope: .desktop, caller: caller, owner: owner, legacyActive: false)
+            var running: ScopedMutationTicket?
+            if ending == "running-unknown" {
+                try state.recordObservation(grant.id, caller: caller, owner: owner, snapshotId: "snap-1")
+                running = try state.beginMutation(grant.id, caller: caller, owner: owner,
+                                                  requestId: "request_123", snapshotId: "snap-1")
+            }
+            try check(state.handToPerson(), "person took control before \(ending)")
+            switch ending {
+            case "revoke": _ = try state.revoke(grant.id, caller: caller, owner: owner)
+            case "end": state.end(owner: owner, sessionId: caller.sessionId)
+            case "expiry": time = grant.expiresAt; state.prune()
+            case "running-unknown":
+                _ = try state.revoke(grant.id, caller: caller, owner: owner)
+                state.finishMutation(running!, result: .unknown)
+            default: alive = false; state.prune()
+            }
+            try check(state.grant == nil, "current \(ending) discards the only human hold")
+            let second = String(repeating: "e", count: 64)
+            try approve(second, caller: otherCaller, owner: other)
+            let opened = try state.open(second, scope: .desktop, caller: otherCaller, owner: other, legacyActive: false)
+            try check(!opened.person, "current state permits another grant after \(ending)")
+        }
+    }
     static func testTakeoverDiagnosticsExcludePrivateValues() throws {
         for code in ["private/path", "private value", String(repeating: "x", count: 61), ""] {
             let time: Int64 = 100_000, owner = ControlOwner(pid: 10, start: 1234)

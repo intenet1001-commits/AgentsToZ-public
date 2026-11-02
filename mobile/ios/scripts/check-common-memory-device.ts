@@ -1,12 +1,27 @@
-/** Real iPhone WKWebView of shipped cloud panels; isolated cloud and owned Git fixtures only. */
+/** Real iPhone WKWebView of shipped cloud panels; isolated cloud and owned Git fixtures only.
+ * `--compile-only` runs just the iPhone compile step: no fixture server, template, device or signing. */
 import {networkInterfaces} from 'node:os';
-import {mkdirSync,readFileSync,writeFileSync,cpSync,readdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,cpSync,mkdtempSync,rmSync} from 'node:fs';
 import {join,resolve} from 'node:path';
+import {workroomFixtureCompileCommands,workroomFixtureSdk,workroomFixtureTarget} from './workroomFixtureCompile';
 import {createHash} from 'node:crypto';
-import {commonMemoryUiFixture} from '../../../tests/fixtures/common-memory/server';
-import {isPrivateRemoteControlIpv4} from '../../../src/remoteControlLanServer';
-const [device,template,identity]=process.argv.slice(2),root=resolve(import.meta.dir,'../../..');
-if(!device||!template||!identity)throw Error('Usage: bun mobile/ios/scripts/check-common-memory-device.ts <UDID> <isolated-workspacetest-template> <signing-identity>');
+const root=resolve(import.meta.dir,'../../..');
+async function command(args:string[],timeout=120_000){const p=Bun.spawn(args,{cwd:root,stdout:'pipe',stderr:'pipe'}),timer=setTimeout(()=>p.kill(),timeout);try{const [exit,out,err]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);if(exit)throw Error(args[0]+' failed: '+err.slice(-2000));return out.trim();}finally{clearTimeout(timer);}}
+// The shared recipe (workroomFixtureCompile.ts): the same modules, App files and Swift 6 mode as check-workroom.ts.
+async function compile(temp:string,app:string){
+ const sdkPath=await command(['xcrun','--sdk',workroomFixtureSdk('device'),'--show-sdk-path']);
+ for(const args of workroomFixtureCompileCommands({root,sdkPath,target:workroomFixtureTarget('device'),buildDir:temp,probe:'commonMemory',output:join(app,'AgentsToZMobile')}))await command(args,300_000);
+}
+if(process.argv[2]==='--compile-only'){
+ const temp=mkdtempSync('/private/tmp/agentstoz-common-iphone-'),app=join(temp,'CompileOnly.app');
+ try{mkdirSync(app);await compile(temp,app);console.log('Common-memory fixture compiled for iPhone; nothing installed.');}finally{rmSync(temp,{recursive:true,force:true});}
+ process.exit(0);
+}
+const [device,template,identity]=process.argv.slice(2);
+if(!device||!template||!identity)throw Error('Usage: bun mobile/ios/scripts/check-common-memory-device.ts <UDID> <isolated-workspacetest-template> <signing-identity> | --compile-only');
+// Host fixture code loads only for a real run, never for --compile-only.
+const {commonMemoryUiFixture}=await import('../../../tests/fixtures/common-memory/server');
+const {isPrivateRemoteControlIpv4}=await import('../../../src/remoteControlLanServer');
 const bundle='com.intenet.agentstoz.workspacetest',address=Object.values(networkInterfaces()).flat().find(r=>r&&!r.internal&&r.family==='IPv4'&&isPrivateRemoteControlIpv4(r.address))?.address;
 if(!address)throw Error('Private LAN required; no public/wildcard fallback');
 const temp=mkdtempSync('/private/tmp/agentstoz-common-iphone-'),evidence=join(root,'mobile/ios/build/common-memory-device-evidence');mkdirSync(evidence,{recursive:true});
@@ -14,13 +29,10 @@ const sourcePaths=['src/CommonMemoryPanel.tsx','src/MetaCommonMemoryPanel.tsx','
 const sourceHashes=Object.fromEntries(sourcePaths.map(p=>[p,createHash('sha256').update(readFileSync(join(root,p))).digest('hex')]));
 const fixture=await commonMemoryUiFixture(address),app=join(temp,'CommonMemoryFixture.app');let installed=false;
 let stopRequested=false;process.once('SIGTERM',()=>{stopRequested=true;});process.once('SIGINT',()=>{stopRequested=true;});
-async function command(args:string[],timeout=120_000){const p=Bun.spawn(args,{cwd:root,stdout:'pipe',stderr:'pipe'}),timer=setTimeout(()=>p.kill(),timeout);try{const [exit,out,err]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);if(exit)throw Error(args[0]+' failed: '+err.slice(-2000));return out.trim();}finally{clearTimeout(timer);}}
 try{
  if(await command(['/usr/libexec/PlistBuddy','-c','Print CFBundleIdentifier',join(template,'Info.plist')])!==bundle)throw Error('Refuses production/development/TestFlight app template');
  cpSync(template,app,{recursive:true});writeFileSync(join(app,'bootstrap.json'),JSON.stringify({pairingURL:fixture.url+'/remote/#pair='+'A'.repeat(43)}),{mode:0o600});
- const sdk=await command(['xcrun','--sdk','iphoneos','--show-sdk-path']),core=join(root,'mobile/ios/AgentsToZCore/Sources/AgentsToZCore');
- await command(['xcrun','swiftc','-parse-as-library','-emit-library','-static','-emit-module','-module-name','AgentsToZCore','-target','arm64-apple-ios17.0','-sdk',sdk,...readdirSync(core).filter(n=>n.endsWith('.swift')).map(n=>join(core,n)),'-o',join(temp,'libAgentsToZCore.a'),'-emit-module-path',join(temp,'AgentsToZCore.swiftmodule')]);
- await command(['xcrun','swiftc','-parse-as-library','-target','arm64-apple-ios17.0','-sdk',sdk,'-I',temp,'-L',temp,'-lAgentsToZCore',join(root,'mobile/ios/App/PortalSchemeHandler.swift'),join(root,'mobile/ios/App/WorkroomStoreWipe.swift'),join(root,'mobile/ios/App/LANWorkroomView.swift'),join(import.meta.dir,'fixtures/CommonMemoryProbe.swift'),'-o',join(app,'AgentsToZMobile')]);
+ await compile(temp,app);
  const entitlements=await command(['codesign','-d','--entitlements',':-',template]);writeFileSync(join(temp,'entitlements.plist'),entitlements,{mode:0o600});await command(['codesign','--force','--sign',identity,'--entitlements',join(temp,'entitlements.plist'),'--timestamp=none',app]);
  await command(['xcrun','devicectl','device','install','app','--device',device,app]);installed=true;await command(['xcrun','devicectl','device','process','launch','--device',device,bundle]);
  writeFileSync('/private/tmp/agentstoz-common-phone-fixture.json',JSON.stringify({bundleId:bundle,device,url:fixture.url,evidence}),{mode:0o600});console.log('Physical iPhone cloud-panel fixture ready; Appium uses the isolated test app.');

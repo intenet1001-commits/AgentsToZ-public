@@ -17,6 +17,9 @@ struct ScreenRegistrationSheet: View {
     @State private var authentication: ScreenDeviceAuthentication = .deviceOwner
     @State private var phase = Phase.ready
     @State private var registrationTask: Task<Void, Never>?
+    @State private var contactStage = ContactStage.preparing
+
+    private enum ContactStage: Equatable { case preparing, nearby, relay, registering, decision }
 
     enum Phase: Equatable {
         case ready, working(String), comparing(String), done, failed(String)
@@ -42,6 +45,9 @@ struct ScreenRegistrationSheet: View {
                             .disabled(invite.purpose != .device || !RegistrationInvite.isShowableName(deviceName))
                     } footer: {
                         Text("연결할 때마다 선택한 방식으로 승인합니다. 인증 방식을 바꾸려면 Mac의 새 QR로 다시 등록한 뒤, Mac의 등록 기기 목록에서 이전 등록을 해지해 주세요. 등록 시각으로 구분할 수 있습니다.")
+                        if invite.nearbyRegistrationService != nil, invite.registrationRelay == nil {
+                            Text("이 QR은 근거리에서 등록합니다. Mac과 iPhone·iPad의 Wi‑Fi를 켜고 가까이에서 등록하세요. 5G만으로 등록할 수는 없습니다. 등록 후 밖에서 사용하려면 별도로 Cloudflare 사설망 연결을 설정하세요.")
+                        }
                     }
                 case .working(let step):
                     Section { ProgressView(step) }
@@ -91,25 +97,31 @@ struct ScreenRegistrationSheet: View {
             let keyID = try await attestService.generateKey()
             let attestation = try await attestService.attestKey(keyID, clientDataHash: record.attestationClientDataHash)
             guard let keyIDData = Data(base64Encoded: keyID) else { return phase = .failed("App Attest 키를 읽지 못했습니다.") }
-            phase = .working("Mac에 등록을 요청하는 중…")
             let transport: any ScreenFrameTransport
             if let nearby = invite.nearbyRegistrationService {
+                contactStage = .nearby
+                phase = .working("가까운 Mac을 찾는 중…")
                 do { transport = try await ScreenNearby.open(serviceName: nearby, maxFrame: 16 * 1024) }
                 catch {
                     guard let relay = invite.registrationRelay else { throw error }
+                    contactStage = .relay
                     phase = .working("인터넷으로 Mac을 찾는 중…")
                     transport = try await ScreenRelayTransport.open(route: relay, purpose: .registration)
                 }
             } else {
+                contactStage = .nearby
+                phase = .working("같은 네트워크에서 Mac을 찾는 중…")
                 guard let port = NWEndpoint.Port(rawValue: invite.registrationPort) else { throw RegistrationError.malformed }
                 transport = try await ScreenClient.open(to: .hostPort(host: .init(invite.address), port: port), maxFrame: 16 * 1024)
             }
             // Fallback above happens only while opening; never resend a QR proof after an uncertain registration.
             let registrationTransport: any ScreenFrameTransport = invite.nearbyRegistrationService == nil ? transport
                 : RegistrationPrivacyTransport(over: transport, code: invite.code, role: .device)
+            contactStage = .registering
+            phase = .working("Mac에 등록을 요청하는 중…")
             let mac = try await RegistrationClient.register(
                 over: registrationTransport, record: record, code: invite.code, attestation: attestation, attestationKeyID: keyIDData,
-                showSAS: { sas in await MainActor.run { phase = .comparing(sas) } })
+                showSAS: { sas in await MainActor.run { contactStage = .decision; phase = .comparing(sas) } })
             let saved = SavedScreenMac(id: mac.fingerprint.map { String(format: "%02x", $0) }.joined(), macName: invite.macName,
                                        macPublicKey: mac.publicKey.x963Representation, hostName: invite.hostName,
                                        address: invite.address, port: invite.screenPort, deviceKey: deviceKey,
@@ -120,7 +132,15 @@ struct ScreenRegistrationSheet: View {
             try registered(saved)
             phase = .done
         } catch {
-            phase = .failed(Self.message(for: error))
+            if contactStage == .nearby, case TransportError.timedOut = error {
+                phase = .failed("근거리에서 Mac을 찾지 못했습니다. 두 기기의 Wi‑Fi와 iPhone·iPad의 AgentsToZ 로컬 네트워크 권한을 확인하세요. 5G만 사용 중이면 Mac과 같은 Wi‑Fi에 연결하고 새 QR로 등록해 주세요.")
+            } else if contactStage == .relay, case TransportError.timedOut = error {
+                phase = .failed("인터넷 중계로 Mac을 찾지 못했습니다. Mac의 자체 중계 연결 상태와 등록 QR을 확인해 주세요. 등록 요청을 다시 보내지는 않았습니다.")
+            } else if contactStage == .decision, case TransportError.timedOut = error {
+                phase = .failed("Mac의 등록 승인 시간이 지났습니다. Mac에서 실제 등록 여부를 확인한 뒤 필요하면 새 QR로 시작해 주세요.")
+            } else {
+                phase = .failed(Self.message(for: error))
+            }
         }
     }
 

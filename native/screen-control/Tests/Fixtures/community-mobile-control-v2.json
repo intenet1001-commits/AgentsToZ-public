@@ -1,0 +1,276 @@
+{
+  "effect": {
+    "operationId": "01a3185c-5000-7000-8000-000000000001",
+    "createdAt": 1800000000000
+  },
+  "fixtureOnly": true,
+  "softwareKeyScalars": {
+    "senderEphemeral": 1,
+    "receiverEphemeral": 2,
+    "mobileUse": 3,
+    "receiverControl": 4,
+    "issuer": 11
+  },
+  "authority": {
+    "origin": "https://fixture.workers.dev",
+    "issuerPublicKey": "BD7RE7eIO0xZBjg3nbDCHNoWdC7QJVBIv0MzkdN0vCHRkJkgmszEyKIkyEOvpPTGigkNBNpemIna4vju_OgqN0A",
+    "profileId": "51c574e8-2109-4065-92e0-66523c206fe8"
+  },
+  "now": 1800000000000,
+  "mobileAuthorization": {
+    "version": 1,
+    "communityId": "10000000-0000-4000-8000-000000000001",
+    "profileId": "51c574e8-2109-4065-92e0-66523c206fe8",
+    "enrollmentId": "10000000-0000-4000-8000-000000000002",
+    "deviceId": "10000000-0000-4000-8000-000000000003",
+    "deviceKind": "mobile",
+    "name": "아이패드 / 시험",
+    "hostPublicKey": "BFFZC3pRUUDS14TIVghmj9_vjIL9H1vlJCFVSg3D0DPt4MF9qJBKcn2K4b82v4p5Jg0BLwDU2AiI0dC7RP2hbaQ",
+    "publicKey": "BLAaFyp2pGAsktMkLLiX3eMCTHQN67IVtMawquk8IpGp6FwQdDI32tVv7A4t-6cDeRwA93Acfha9_XxIU4_Hf-I",
+    "biometricPublicKey": "BI5TO2-gv3tGJbswZnwB-2B--fi4qA_vWzAGKHAxh7Kjc-sdveAzGDZtBp-DpvWQAFPHNjPLBBshxV4ahsH0ALQ",
+    "controlKey": null,
+    "agentDeviceId": null,
+    "capabilities": [
+      "screen.view",
+      "screen.control",
+      "agent.communicate",
+      "teams.run",
+      "computer-use.agent-settings",
+      "computer-use.browser"
+    ],
+    "revision": 1,
+    "keyEpoch": 1,
+    "issuedAt": 1800000000000,
+    "expiresAt": 1800000090000
+  },
+  "receiverAuthorization": {
+    "version": 1,
+    "communityId": "10000000-0000-4000-8000-000000000001",
+    "profileId": "51c574e8-2109-4065-92e0-66523c206fe8",
+    "enrollmentId": "10000000-0000-4000-8000-000000000004",
+    "deviceId": "10000000-0000-4000-8000-000000000005",
+    "deviceKind": "desktop",
+    "name": "아젠투지3호 / 회사",
+    "hostPublicKey": "BGLZd52-6bBTQEJ0LTq1TK3B0jiYD86X27TdncHbb7OTrVrMvZHp2CRP8V13EWfO4KLtUfa752p42lQKag8JlX4",
+    "publicKey": "BOpo17b-3wtxh4k41R1x-HKeCsuMLG34s9eeikuQlJ7gKidEyXLJ_OeHAUqWSo6gyE1xT-qk3oI_6FoiSk3QSPo",
+    "biometricPublicKey": "BM72bWsqOpk-WRIU0eoiP7VFymxHHEgwbkw2BpQExXI_h4ZioimqrpBuEjzdnTtMEFkN7Sn-dR7uyjS7qkSvB3M",
+    "controlKey": "BOJTSjUy0I-7oC3eZZ7mK9ADH-LbeFWW71CTAkRrAwhS4PFXWkxjPMcZ3-5f2oYtdk78lsPzDuAFXELCPxhO2MY",
+    "agentDeviceId": "10000000-0000-4000-8000-000000000006",
+    "capabilities": [
+      "screen.view",
+      "screen.control",
+      "screen.receive.view",
+      "screen.receive.control",
+      "agent.communicate",
+      "teams.run",
+      "computer-use.agent-settings",
+      "computer-use.browser"
+    ],
+    "revision": 2,
+    "keyEpoch": 1,
+    "issuedAt": 1800000000000,
+    "expiresAt": 1800000090000
+  },
+  "useSession": {
+    "version": 1,
+    "communityId": "10000000-0000-4000-8000-000000000001",
+    "enrollmentId": "10000000-0000-4000-8000-000000000002",
+    "sessionId": "10000000-0000-4000-8000-000000000007",
+    "publicKey": "BF7L5NGmMwpEyPfvlR1L8WXmxrch762phftBZhvG5_1shzRkDEmY_343SwbOGmSi7NgqsDY4T7g9mnmxJ6J9UDI",
+    "capabilities": [
+      "screen.view",
+      "screen.control",
+      "agent.communicate",
+      "teams.run",
+      "computer-use.agent-settings",
+      "computer-use.browser"
+    ],
+    "revision": 1,
+    "sequence": 0,
+    "lastHumanAt": 1800000000000,
+    "idleExpiresAt": 1800003600000,
+    "issuedAt": 1800000000000,
+    "expiresAt": 1800000090000
+  },
+  "envelopes": {
+    "mobile": {
+      "payload": "WzIsImF1dGhvcml6YXRpb24iLCIxMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMGMiLDE4MDAwMDAwMDAwMDAseyJ2ZXJzaW9uIjoxLCJjb21tdW5pdHlJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInByb2ZpbGVJZCI6IjUxYzU3NGU4LTIxMDktNDA2NS05MmUwLTY2NTIzYzIwNmZlOCIsImVucm9sbG1lbnRJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImRldmljZUlkIjoiMTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZGV2aWNlS2luZCI6Im1vYmlsZSIsIm5hbWUiOiLslYTsnbTtjKjrk5wgLyDsi5ztl5giLCJob3N0UHVibGljS2V5IjoiQkZGWkMzcFJVVURTMTRUSVZnaG1qOV92aklMOUgxdmxKQ0ZWU2czRDBEUHQ0TUY5cUpCS2NuMks0YjgydjRwNUpnMEJMd0RVMkFpSTBkQzdSUDJoYmFRIiwicHVibGljS2V5IjoiQkxBYUZ5cDJwR0Fza3RNa0xMaVgzZU1DVEhRTjY3SVZ0TWF3cXVrOElwR3A2RndRZERJMzJ0VnY3QTR0LTZjRGVSd0E5M0FjZmhhOV9YeElVNF9IZi1JIiwiYmlvbWV0cmljUHVibGljS2V5IjoiQkk1VE8yLWd2M3RHSmJzd1pud0ItMkItLWZpNHFBX3ZXekFHS0hBeGg3S2pjLXNkdmVBekdEWnRCcC1EcHZXUUFGUEhOalBMQkJzaHhWNGFoc0gwQUxRIiwiY29udHJvbEtleSI6bnVsbCwiYWdlbnREZXZpY2VJZCI6bnVsbCwiY2FwYWJpbGl0aWVzIjpbInNjcmVlbi52aWV3Iiwic2NyZWVuLmNvbnRyb2wiLCJhZ2VudC5jb21tdW5pY2F0ZSIsInRlYW1zLnJ1biIsImNvbXB1dGVyLXVzZS5hZ2VudC1zZXR0aW5ncyIsImNvbXB1dGVyLXVzZS5icm93c2VyIl0sInJldmlzaW9uIjoxLCJrZXlFcG9jaCI6MSwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsImV4cGlyZXNBdCI6MTgwMDAwMDA5MDAwMH1d",
+      "signature": "ybnVptYyKjHByZlCM02TRrQfDJMzUjrzrySOc2d7hnULV0Bk3TJAE2yxofM5BFgzRYHwkXPGtV550-HBWdhflw"
+    },
+    "receiver": {
+      "payload": "WzIsImF1dGhvcml6YXRpb24iLCIxMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMGQiLDE4MDAwMDAwMDAwMDAseyJ2ZXJzaW9uIjoxLCJjb21tdW5pdHlJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsInByb2ZpbGVJZCI6IjUxYzU3NGU4LTIxMDktNDA2NS05MmUwLTY2NTIzYzIwNmZlOCIsImVucm9sbG1lbnRJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsImRldmljZUlkIjoiMTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA1IiwiZGV2aWNlS2luZCI6ImRlc2t0b3AiLCJuYW1lIjoi7JWE7KCg7Yis7KeAM-2YuCAvIO2ajOyCrCIsImhvc3RQdWJsaWNLZXkiOiJCR0xaZDUyLTZiQlRRRUowTFRxMVRLM0IwamlZRDg2WDI3VGRuY0hiYjdPVHJWck12WkhwMkNSUDhWMTNFV2ZPNEtMdFVmYTc1MnA0MmxRS2FnOEpsWDQiLCJwdWJsaWNLZXkiOiJCT3BvMTdiLTN3dHhoNGs0MVIxeC1IS2VDc3VNTEczNHM5ZWVpa3VRbEo3Z0tpZEV5WExKX09lSEFVcVdTbzZneUUxeFQtcWszb0lfNkZvaVNrM1FTUG8iLCJiaW9tZXRyaWNQdWJsaWNLZXkiOiJCTTcyYldzcU9way1XUklVMGVvaVA3VkZ5bXhISEVnd2JrdzJCcFFFeFhJX2g0WmlvaW1xcnBCdUVqemRuVHRNRUZrTjdTbi1kUjd1eWpTN3FrU3ZCM00iLCJjb250cm9sS2V5IjoiQk9KVFNqVXkwSS03b0MzZVpaN21LOUFESC1MYmVGV1c3MUNUQWtSckF3aFM0UEZYV2t4alBNY1ozLTVmMm9ZdGRrNzhsc1B6RHVBRlhFTENQeGhPMk1ZIiwiYWdlbnREZXZpY2VJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNiIsImNhcGFiaWxpdGllcyI6WyJzY3JlZW4udmlldyIsInNjcmVlbi5jb250cm9sIiwic2NyZWVuLnJlY2VpdmUudmlldyIsInNjcmVlbi5yZWNlaXZlLmNvbnRyb2wiLCJhZ2VudC5jb21tdW5pY2F0ZSIsInRlYW1zLnJ1biIsImNvbXB1dGVyLXVzZS5hZ2VudC1zZXR0aW5ncyIsImNvbXB1dGVyLXVzZS5icm93c2VyIl0sInJldmlzaW9uIjoyLCJrZXlFcG9jaCI6MSwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsImV4cGlyZXNBdCI6MTgwMDAwMDA5MDAwMH1d",
+      "signature": "t5AE1lOjcwHqQJ-NK4uzxNoJAcpKtmIh8ydqVTvxxhbf6SEs7tWgBGmT2j5awANVOkebdXu7bp5SSheNLpNvNw"
+    },
+    "use": {
+      "payload": "WzIsInNlc3Npb24iLCIxMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDciLDE4MDAwMDAwMDAwMDAseyJ2ZXJzaW9uIjoxLCJjb21tdW5pdHlJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImVucm9sbG1lbnRJZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInNlc3Npb25JZCI6IjEwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNyIsInB1YmxpY0tleSI6IkJGN0w1TkdtTXdwRXlQZnZsUjFMOFdYbXhyY2g3NjJwaGZ0Qlpodkc1XzFzaHpSa0RFbVlfMzQzU3diT0dtU2k3Tmdxc0RZNFQ3Zzltbm14SjZKOVVESSIsImNhcGFiaWxpdGllcyI6WyJzY3JlZW4udmlldyIsInNjcmVlbi5jb250cm9sIiwiYWdlbnQuY29tbXVuaWNhdGUiLCJ0ZWFtcy5ydW4iLCJjb21wdXRlci11c2UuYWdlbnQtc2V0dGluZ3MiLCJjb21wdXRlci11c2UuYnJvd3NlciJdLCJyZXZpc2lvbiI6MSwic2VxdWVuY2UiOjAsImxhc3RIdW1hbkF0IjoxODAwMDAwMDAwMDAwLCJpZGxlRXhwaXJlc0F0IjoxODAwMDAzNjAwMDAwLCJpc3N1ZWRBdCI6MTgwMDAwMDAwMDAwMCwiZXhwaXJlc0F0IjoxODAwMDAwMDkwMDAwfV0",
+      "signature": "mJQOU9_TEFxA7M_ZMyoWQX3-s09UIjqAhoBEDrqd8H2wZeRwNRpsPyZg509f9GzMa-wqzzbo3X2EK4rQ4L877g"
+    }
+  },
+  "policyArrays": {
+    "mobile": [
+      1,
+      "10000000-0000-4000-8000-000000000001",
+      "51c574e8-2109-4065-92e0-66523c206fe8",
+      "10000000-0000-4000-8000-000000000002",
+      "10000000-0000-4000-8000-000000000003",
+      null,
+      "mobile",
+      "아이패드 / 시험",
+      "BFFZC3pRUUDS14TIVghmj9_vjIL9H1vlJCFVSg3D0DPt4MF9qJBKcn2K4b82v4p5Jg0BLwDU2AiI0dC7RP2hbaQ",
+      "BLAaFyp2pGAsktMkLLiX3eMCTHQN67IVtMawquk8IpGp6FwQdDI32tVv7A4t-6cDeRwA93Acfha9_XxIU4_Hf-I",
+      "BI5TO2-gv3tGJbswZnwB-2B--fi4qA_vWzAGKHAxh7Kjc-sdveAzGDZtBp-DpvWQAFPHNjPLBBshxV4ahsH0ALQ",
+      null,
+      [
+        "screen.view",
+        "screen.control",
+        "agent.communicate",
+        "teams.run",
+        "computer-use.agent-settings",
+        "computer-use.browser"
+      ],
+      1,
+      1
+    ],
+    "receiver": [
+      1,
+      "10000000-0000-4000-8000-000000000001",
+      "51c574e8-2109-4065-92e0-66523c206fe8",
+      "10000000-0000-4000-8000-000000000004",
+      "10000000-0000-4000-8000-000000000005",
+      "10000000-0000-4000-8000-000000000006",
+      "desktop",
+      "아젠투지3호 / 회사",
+      "BGLZd52-6bBTQEJ0LTq1TK3B0jiYD86X27TdncHbb7OTrVrMvZHp2CRP8V13EWfO4KLtUfa752p42lQKag8JlX4",
+      "BOpo17b-3wtxh4k41R1x-HKeCsuMLG34s9eeikuQlJ7gKidEyXLJ_OeHAUqWSo6gyE1xT-qk3oI_6FoiSk3QSPo",
+      "BM72bWsqOpk-WRIU0eoiP7VFymxHHEgwbkw2BpQExXI_h4ZioimqrpBuEjzdnTtMEFkN7Sn-dR7uyjS7qkSvB3M",
+      "BOJTSjUy0I-7oC3eZZ7mK9ADH-LbeFWW71CTAkRrAwhS4PFXWkxjPMcZ3-5f2oYtdk78lsPzDuAFXELCPxhO2MY",
+      [
+        "screen.view",
+        "screen.control",
+        "screen.receive.view",
+        "screen.receive.control",
+        "agent.communicate",
+        "teams.run",
+        "computer-use.agent-settings",
+        "computer-use.browser"
+      ],
+      2,
+      1
+    ],
+    "use": [
+      1,
+      "https://fixture.workers.dev",
+      "BD7RE7eIO0xZBjg3nbDCHNoWdC7QJVBIv0MzkdN0vCHRkJkgmszEyKIkyEOvpPTGigkNBNpemIna4vju_OgqN0A",
+      "51c574e8-2109-4065-92e0-66523c206fe8",
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002",
+      "10000000-0000-4000-8000-000000000003",
+      1,
+      1,
+      "10000000-0000-4000-8000-000000000007",
+      "BF7L5NGmMwpEyPfvlR1L8WXmxrch762phftBZhvG5_1shzRkDEmY_343SwbOGmSi7NgqsDY4T7g9mnmxJ6J9UDI",
+      [
+        "screen.view",
+        "screen.control",
+        "agent.communicate",
+        "teams.run",
+        "computer-use.agent-settings",
+        "computer-use.browser"
+      ],
+      3600000
+    ]
+  },
+  "transcriptFields": [
+    "version",
+    "purpose",
+    "profileId",
+    "communityId",
+    "channelId",
+    "senderKind",
+    "receiverKind",
+    "senderDeviceId",
+    "receiverDeviceId",
+    "senderEnrollmentId",
+    "receiverEnrollmentId",
+    "senderPolicyDigest",
+    "receiverPolicyDigest",
+    "senderUseId",
+    "senderUsePublicKey",
+    "senderUsePolicyDigest",
+    "senderConnectionId",
+    "receiverConnectionId",
+    "receiverBootId",
+    "receiverInstance",
+    "senderEphemeral",
+    "receiverEphemeral",
+    "senderNonce",
+    "receiverNonce"
+  ],
+  "transcript": {
+    "version": 2,
+    "purpose": "mobile-agent",
+    "profileId": "51c574e8-2109-4065-92e0-66523c206fe8",
+    "communityId": "10000000-0000-4000-8000-000000000001",
+    "channelId": "10000000-0000-4000-8000-000000000008",
+    "senderKind": "mobile",
+    "receiverKind": "desktop",
+    "senderDeviceId": "10000000-0000-4000-8000-000000000003",
+    "receiverDeviceId": "10000000-0000-4000-8000-000000000005",
+    "senderEnrollmentId": "10000000-0000-4000-8000-000000000002",
+    "receiverEnrollmentId": "10000000-0000-4000-8000-000000000004",
+    "senderPolicyDigest": "8fe41b61f82c62fd288ae837c3685b0944498b7e810d105e001977e0f80a80dd",
+    "receiverPolicyDigest": "823ea4e3326625a505c48c598ec6021f338fb1dda30230b657f1b032e46b6930",
+    "senderUseId": "10000000-0000-4000-8000-000000000007",
+    "senderUsePublicKey": "BF7L5NGmMwpEyPfvlR1L8WXmxrch762phftBZhvG5_1shzRkDEmY_343SwbOGmSi7NgqsDY4T7g9mnmxJ6J9UDI",
+    "senderUsePolicyDigest": "a500f84efa2d522ac404a5d8ee14d6dd5611158b979bd873409cedec234d110b",
+    "senderConnectionId": "10000000-0000-4000-8000-000000000009",
+    "receiverConnectionId": "10000000-0000-4000-8000-00000000000a",
+    "receiverBootId": "11223344556677889900aabbccddeeff",
+    "receiverInstance": "ffeeddccbbaa00998877665544332211",
+    "senderEphemeral": "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+    "receiverEphemeral": "BHzyexiNA09-ilI4AwS1GsPAiWnid_IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E",
+    "senderNonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "receiverNonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+  },
+  "canonicalArrayUTF8": "[2,\"mobile-agent\",\"51c574e8-2109-4065-92e0-66523c206fe8\",\"10000000-0000-4000-8000-000000000001\",\"10000000-0000-4000-8000-000000000008\",\"mobile\",\"desktop\",\"10000000-0000-4000-8000-000000000003\",\"10000000-0000-4000-8000-000000000005\",\"10000000-0000-4000-8000-000000000002\",\"10000000-0000-4000-8000-000000000004\",\"8fe41b61f82c62fd288ae837c3685b0944498b7e810d105e001977e0f80a80dd\",\"823ea4e3326625a505c48c598ec6021f338fb1dda30230b657f1b032e46b6930\",\"10000000-0000-4000-8000-000000000007\",\"BF7L5NGmMwpEyPfvlR1L8WXmxrch762phftBZhvG5_1shzRkDEmY_343SwbOGmSi7NgqsDY4T7g9mnmxJ6J9UDI\",\"a500f84efa2d522ac404a5d8ee14d6dd5611158b979bd873409cedec234d110b\",\"10000000-0000-4000-8000-000000000009\",\"10000000-0000-4000-8000-00000000000a\",\"11223344556677889900aabbccddeeff\",\"ffeeddccbbaa00998877665544332211\",\"BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU\",\"BHzyexiNA09-ilI4AwS1GsPAiWnid_IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E\",\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\"]",
+  "transcriptBytesHex": "6167656e7473746f7a2e636f6d6d756e6974792d6d6f62696c652d636f6e74726f6c2f7472616e7363726970742f7632005b322c226d6f62696c652d6167656e74222c2235316335373465382d323130392d343036352d393265302d363635323363323036666538222c2231303030303030302d303030302d343030302d383030302d303030303030303030303031222c2231303030303030302d303030302d343030302d383030302d303030303030303030303038222c226d6f62696c65222c226465736b746f70222c2231303030303030302d303030302d343030302d383030302d303030303030303030303033222c2231303030303030302d303030302d343030302d383030302d303030303030303030303035222c2231303030303030302d303030302d343030302d383030302d303030303030303030303032222c2231303030303030302d303030302d343030302d383030302d303030303030303030303034222c2238666534316236316638326336326664323838616538333763333638356230393434343938623765383130643130356530303139373765306638306138306464222c2238323365613465333332363632356135303563343863353938656336303231663333386662316464613330323330623635376631623033326534366236393330222c2231303030303030302d303030302d343030302d383030302d303030303030303030303037222c224246374c354e476d4d777045795066766c52314c3857586d7872636837363270686674425a687647355f3173687a526b44456d595f3334335377624f476d5369374e677173445934543767396d6e6d784a364a39554449222c2261353030663834656661326435323261633430346135643865653134643664643536313131353862393739626438373334303963656465633233346431313062222c2231303030303030302d303030302d343030302d383030302d303030303030303030303039222c2231303030303030302d303030302d343030302d383030302d303030303030303030303061222c223131323233333434353536363737383839393030616162626363646465656666222c226666656564646363626261613030393938383737363635353434333332323131222c224247735830664c684c454a482d4c7a6d35574f6b51504a33413332424c65737a6f5053684f5558596d4d4b57542d4e43347634616635754f352d744b66412d654669764f4d3164724d56374f79375a416144655f556655222c2242487a796578694e4130392d696c4934417753314773504169576e69645f49624e61594c535078485a706c3442336456454e754f30454170505a72476e3351773237703972655938365949706e6753336e534a34633945222c2241414543417751464267634943516f4c4441304f4478415245684d554652595847426b6147787764486838222c22494345694979516c4a69636f4b536f724c4330754c7a41784d6a4d304e5459334f446b364f7a7739506a38225d",
+  "transcriptHashHex": "11ed9ba619bbbba33dfbd4aaecaf08768e6c60e74a3f1a83984abf6dd8fe3ce1",
+  "proofBytesHex": {
+    "client": "6167656e7473746f7a2e636f6d6d756e6974792d6d6f62696c652d636f6e74726f6c2f70726f6f662f763200636c69656e740011ed9ba619bbbba33dfbd4aaecaf08768e6c60e74a3f1a83984abf6dd8fe3ce1",
+    "host": "6167656e7473746f7a2e636f6d6d756e6974792d6d6f62696c652d636f6e74726f6c2f70726f6f662f763200686f73740011ed9ba619bbbba33dfbd4aaecaf08768e6c60e74a3f1a83984abf6dd8fe3ce1"
+  },
+  "signatures": {
+    "client": "HZ2gIwy79PqNit9dNetd2cZzXUvsDq7ubU7nfajEGKF-h1H6lwrcC1_RFoZP8H60fmYQrCBcjoKJGUJP9FyO1A",
+    "host": "UWyEFL5Un8WzVPYrLcYWfWbT0k3LDW5zUGxu4AcIP6ACwG1iJF_1jYrXfEjkgZCYpOjTQ5RdFI3HedjBibvA9w"
+  },
+  "ecdhSharedSecretHex": "7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978",
+  "derivedKeysHex": {
+    "client-to-host": "7f98964e6a77dfa7eef919c90532f755425ab4adb4cefb3e39582bfa04eb918e",
+    "host-to-client": "f3d1ed812a2feaacea5d19ec4bdd85660beee692a18de90898afe87d4a384f71",
+    "client-confirm": "7e27106c9f97edb0a0f6d91380de013866f14f1cf1677f752d9168710eb466fc",
+    "host-confirm": "30c5753ec50cd10fad97e6db13e3b6838e54407e3d5661ab6270a935abe85bac"
+  },
+  "confirmations": {
+    "client": "NRdBVEihsWtfHwxPWcImhnndBc7vTs5w1-SAHIFHOOA",
+    "host": "aYJpHTdO3pS_YHGWMRyYgpgBnu_92p5AietQl1yyz-8"
+  },
+  "readyConfirmation": "Fzy9wfiUk-lsd0aU5t5rCr4T_DVvlq5pv3tmIB9cdGY",
+  "record": {
+    "requestId": "10000000-0000-4000-8000-00000000000b",
+    "direction": "client",
+    "seq": 1,
+    "nonceHex": "633268000000000000000001",
+    "aadUTF8": "[\"agentstoz.community-mobile-control/record/v2\",\"10000000-0000-4000-8000-000000000008\",\"mobile-agent\",\"client\",1,\"10000000-0000-4000-8000-00000000000b\"]",
+    "plaintextUTF8": "{\"v\":1,\"kind\":\"request\",\"mode\":\"query\",\"requestId\":\"10000000-0000-4000-8000-00000000000b\",\"command\":{\"kind\":\"agent\",\"op\":\"targets\"}}",
+    "ciphertext": "x_dYvRs-DQqX45gwCLpdLYDC46IcLpyABqPyMjl9r9EyOGVVo1TOfTA9EFYzKdNQVZpIRjs7U_lc631I7Evgfy8hNZxNwoJJZnpv3DWQmVebX6_gi36VHWo0R82ETaA9VG-mm6XWp6eTD91q2Z7po_D4LCW741twuzfEULXGkAXlc1PKsoZ0BYCFBt5QlM5defB47g",
+    "wire": {
+      "v": 2,
+      "type": "record",
+      "channelId": "10000000-0000-4000-8000-000000000008",
+      "direction": "client",
+      "seq": 1,
+      "requestId": "10000000-0000-4000-8000-00000000000b",
+      "ciphertext": "x_dYvRs-DQqX45gwCLpdLYDC46IcLpyABqPyMjl9r9EyOGVVo1TOfTA9EFYzKdNQVZpIRjs7U_lc631I7Evgfy8hNZxNwoJJZnpv3DWQmVebX6_gi36VHWo0R82ETaA9VG-mm6XWp6eTD91q2Z7po_D4LCW741twuzfEULXGkAXlc1PKsoZ0BYCFBt5QlM5defB47g"
+    }
+  }
+}

@@ -48,11 +48,11 @@ private final class ScopedCaptureHarness {
             protectedOverlaysAbsent: { self.overlaysAbsent }, displayLayout: { self.layout },
             resolveApplication: { pid, _ in guard let identity = self.identities[pid] else {
                 throw ControlError.refuse("scope-app-unverifiable") }; return identity },
-            isProtectedApplication: { $0.bundleId.hasPrefix("com.apple.SecurityAgent") })
+            isProtectedApplication: { $0.bundleId == "com.apple.WindowServer" ? false : ScopedProtectedTargets.refuses(bundleId: $0.bundleId) })
     }
-    func run(_ scope: ScopeApprovalScope = .desktop) async throws -> [String: Any] {
+    func run(_ scope: ScopeApprovalScope = .desktop, maxBytes: Int? = nil) async throws -> [String: Any] {
         try await captureScopedDisplay(scope: scope, displayID: display.id, layout: [display, second], checks: checks,
-                                       screenPermission: { self.screen }, source: source)
+                                       maxBytes: maxBytes, screenPermission: { self.screen }, source: source)
     }
 }
 
@@ -68,10 +68,29 @@ final class ScopedCaptureTests: XCTestCase {
         let jpeg = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(result["data"] as? String)))
         XCTAssertLessThanOrEqual(jpeg.count, 240_000); XCTAssertEqual(Array(jpeg.prefix(2)), [0xff, 0xd8])
     }
+    @MainActor func testBoundedCaptureFailsInsteadOfReturningAnOversizedImage() async throws {
+        let h = ScopedCaptureHarness()
+        do { _ = try await h.run(maxBytes: 1024); XCTFail("oversized capture returned") }
+        catch { XCTAssertEqual((error as? ControlError)?.code, "screen-image-too-large") }
+        let result = try await h.run(maxBytes: 240_000)
+        let image = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(result["data"] as? String)))
+        XCTAssertLessThanOrEqual(image.count, 240_000)
+    }
     @MainActor func testDesktopFilterExcludesProtectedApplications() async throws {
         let h = ScopedCaptureHarness()
         _ = try await h.run()
         XCTAssertEqual(h.source.captured.first?.1, .excludeProtectedApplications(pids: [101]))
+    }
+    @MainActor func testRemoteDesktopViewerIsExcludedFromDesktopCapture() async throws {
+        let h = ScopedCaptureHarness()
+        let viewer = ScopeApplicationIdentity(bundleId: "com.apple.ScreenSharing", teamId: "ABCDEFGHIJ",
+            codeHash: String(repeating: "c", count: 40), pid: 102, processStart: "2002")
+        h.identities[102] = viewer
+        h.source.value = .init(displays: h.source.value.displays,
+            applications: h.source.value.applications + [.init(pid: 102, bundleId: viewer.bundleId)])
+        _ = try await h.run()
+        XCTAssertEqual(h.source.captured.first?.1, .excludeProtectedApplications(pids: [101, 102]))
+        XCTAssertFalse(ScopedNativeSession.allows(viewer, in: .desktop))
     }
     /// Measured 2026-10-30 (macOS 26.7): ScreenCaptureKit lists WindowServer with bundleIdentifier "", and every real
     /// capture refused while the menu bar was on screen. Only the resolver-proven compositor may have an empty bundle.

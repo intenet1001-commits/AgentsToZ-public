@@ -131,6 +131,12 @@ final class ScreenPushCenter {
         }
     }
 
+    /// Community membership has one notification subscription, independent of per-Mac QR registrations.
+    func communityDeviceToken() async throws -> Data {
+        guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) else { throw URLError(.userAuthenticationRequired) }
+        return try await deviceToken()
+    }
+
     // MARK: Notifications
 
     /// 「알림 받기」: permission, the token, then Face ID to sign the registration with this device's key for that Mac.
@@ -280,7 +286,7 @@ extension SavedScreenMac {
 /// Receives the APNs token and notification taps. Does nothing unless the build has a push endpoint.
 @MainActor final class ScreenPushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        guard ScreenPushConfig.isEnabled else { return true }
+        guard ScreenPushConfig.isEnabled || ScreenCommunityAuthority.configured != nil else { return true }
         UNUserNotificationCenter.current().delegate = self
         // Only to notice a changed token; this shows no prompt, and a device that never subscribed registers nothing.
         if !ScreenPushTokens.load().isEmpty { application.registerForRemoteNotifications() }
@@ -302,6 +308,13 @@ extension SavedScreenMac {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
+        // A community notification opens a verified review only; a tap never registers or connects a device.
+        if let notice = userInfo["communityEnrollment"] as? [String: Any],
+           let payload = notice["payload"] as? String, let signature = notice["signature"] as? String,
+           payload.utf8.count <= 65_536, signature.utf8.count == 86 {
+            await MobileScreenCommunity.shared.receive(ScreenCommunityEnvelope(payload: payload, signature: signature))
+            return
+        }
         // Only the parts the event needs cross over: two base64 strings.
         guard let screen = userInfo["screen"] as? [String: Any], let m = screen["m"] as? String, let s = screen["s"] as? String else { return }
         await MainActor.run { ScreenPushCenter.shared.tapped(["screen": ["m": m, "s": s]]) }

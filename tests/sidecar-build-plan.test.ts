@@ -51,7 +51,9 @@ describe('sidecar build plan', () => {
     );
     expect(plan.nativeCommands[1]!.outfile).toBe(join('/private/tmp/agentstoz-source','src-tauri/resources/agentstoz-api-sidecar-control-link.node'));
     expect(plan.nativeCommands[1]!.args).toContain('-bundle');
-    expect(plan.nativeCommands[1]!.args).not.toContain('-framework');
+    expect(plan.nativeCommands[1]!.args).toContain('Security');
+    expect(plan.nativeCommands[1]!.args).toContain('CoreFoundation');
+    expect(plan.nativeCommands[1]!.args).toContain('-lbsm');
     expect(plan.commands.flatMap(command => command.args).join('\n'))
       .not.toContain('__AGENTSTOZ_MACOS_RUNTIME_PRODUCTION_TEAM_IDENTIFIER__');
   });

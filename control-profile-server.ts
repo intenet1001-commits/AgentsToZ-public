@@ -3,7 +3,8 @@ import {join,dirname,basename,isAbsolute} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ControlProfileStore,readControlProfileSeed,controlMemoryRevision,type ControlProfileCandidate,type ControlProfileSeed} from './src/controlProfileStore';
 import {CONTROL_PROFILE_PRIVATE_PATH,CONTROL_PROFILE_MARKER,ControlProfileError} from './src/controlProfileContract';
-import {detectProjectMemory,detectProjectMemoryIdentity,initializeProjectMemory,readProjectMemorySnapshot,readMemoryDocument,writeMemoryDocument,pullProjectMemory,pushProjectMemory,runWithTimeout,previewProjectMemoryConflict,resolveProjectMemoryConflict} from './project-memory-server';
+import {detectProjectMemory,detectProjectMemoryIdentity,initializeProjectMemory,readProjectMemorySnapshot,readMemoryDocument,writeMemoryDocument,pullProjectMemory,pushProjectMemory,runWithTimeout,previewProjectMemoryConflict,resolveProjectMemoryConflict,recallCuratedProjectMemory} from './project-memory-server';
+import {readProjectMemoryFeedback} from './src/projectMemoryFeedback';
 import {parseProjectMemoryEntries,recallProjectMemoryEntries} from './src/projectMemoryRecall';
 import {isAgentsToZControlProject} from './buzz-agent-bootstrap-server';
 import {LEGACY_OPS_FOLDER_NAMES,OPS_FOLDER_NAME,isOpsFolderName} from './src/opsFolderName';
@@ -169,8 +170,8 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
    writeMemoryDocument(memory.projectRoot,memory.memoryPath!,updated);
   }),
  });
- const recall=(query:string)=>{
-  const {status,snapshot}=store.read();
+ const recall=(query:string,includeRelations=false)=>{
+  const {status,snapshot,binding}=store.read();
   let bytes=0;const hits=[];
   let deviceMemoryState:'ready'|'unavailable'='ready';
   try{for(const hit of options.deviceRecall?.(query)??[]){const size=Buffer.byteLength(JSON.stringify(hit));if(bytes+size>8*1024)break;bytes+=size;hits.push(hit);}}catch{deviceMemoryState='unavailable';}
@@ -179,7 +180,18 @@ export function createControlProfileHost(options:ControlProfileHostOptions){
    const dto={entryId:hit.entryId,title:hit.title,body:hit.body,scope:'operating',revision:status.revision,updatedAt:status.lastSavedAt};
    const size=Buffer.byteLength(JSON.stringify(dto));if(bytes+size>16*1024)break;bytes+=size;hits.push(dto);
   }
-  return {profile:store.context(),hits,bytes,scope:'operating',...(options.deviceRecall?{deviceMemoryState}:{}),projectMemoryIncluded:false};
+  let relations;
+  if(includeRelations){
+   let ledger:ReturnType<typeof readProjectMemoryFeedback>=[],complete=true;
+   try{ledger=readProjectMemoryFeedback(binding.root);}catch{complete=false;}
+   relations=recallCuratedProjectMemory({memoryId:binding.memoryId,document:snapshot.document,query,limit:8,ledger,
+     correctionSearchComplete:complete,includeRelations:true}).relations;
+   const current=store.read();
+   if(current.binding.profileId!==binding.profileId||current.binding.memoryId!==binding.memoryId||current.binding.root!==binding.root||current.status.revision!==status.revision)
+    throw new ControlProfileError('CONTROL_PROFILE_REVISION_CHANGED','운영 기억 연결이나 내용이 바뀌었습니다. 현재 상태로 다시 확인하세요.');
+  }
+  return {profile:store.context(),hits,bytes,scope:'operating',...(options.deviceRecall?{deviceMemoryState}:{}),projectMemoryIncluded:false,
+    ...(includeRelations?{relations}:{})};
  };
  /** get_control_profile only: context() rides along with every recall, so the entry titles (last 20, titles only) stay here. */
  const profile=()=>{

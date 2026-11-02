@@ -92,11 +92,12 @@ export class UserProfileHost {
     return { storage: 'local' as const, profile: await this.#store.save(save), policy: USER_PROFILE_POLICY };
   }
   /** Exact current project admission before and after a possibly asynchronous key read. */
-  async recallForProject(projectId: string, query?: string): Promise<UserProfileRecall> {
+  async recallForProject(projectId: string, query?: string, includeExplanation?: boolean): Promise<UserProfileRecall> {
     if (typeof projectId !== 'string' || !projectId || projectId.length > 200) fail('USER_PROFILE_INVALID_INPUT');
     const project = await this.#resolve(projectId);
     if (!project) fail('USER_PROFILE_SCOPE_UNAVAILABLE');
-    const input = normalizeUserProfileRecallRequest({ projectMemoryId: project.memoryId, ...(query === undefined ? {} : { query }) });
+    const input = normalizeUserProfileRecallRequest({ projectMemoryId: project.memoryId, ...(query === undefined ? {} : { query }),
+      ...(includeExplanation === undefined ? {} : {includeExplanation}) });
     const recalled = await this.#store.recall(input);
     const current = await this.#resolve(projectId);
     if (!current || current.memoryId !== project.memoryId) fail('USER_PROFILE_SCOPE_UNAVAILABLE');

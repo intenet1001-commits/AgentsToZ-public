@@ -69,6 +69,17 @@ function taskTimeoutMs(): number {
   return Number.isSafeInteger(value) && value >= 50 && value <= 30_000 ? value : 30_000;
 }
 
+// Only this isolated sidecar records stderr from its compiled software provider.
+// Production intentionally discards provider stderr; never add this to that path.
+const fixtureDiagnostics = new Map<string, {
+  phase: 'spawning' | 'spawned' | 'spawn-failed' | 'exited' | 'exit-wait-failed';
+  guardPid: number | null;
+  exitCode: number | null;
+  signal: null; // The guarded public child handle does not expose an exit signal.
+  requestedSignal: number | NodeJS.Signals | null;
+  stderr: Uint8Array;
+}>();
+
 const service = createAgentRuntimeService({
   journal,
   managedExecutionEnabled: true,
@@ -113,10 +124,68 @@ const service = createAgentRuntimeService({
       throw error;
     }
   },
-  runCodex: input => runCodexAgentTask(input, {
-    spawn: guardLaunchers.spawnCodex,
-    timeoutMs: taskTimeoutMs(),
-  }),
+  runCodex: input => {
+    const diagnostic = {
+      phase: 'spawning' as 'spawning' | 'spawned' | 'spawn-failed' | 'exited' | 'exit-wait-failed',
+      guardPid: null as number | null,
+      exitCode: null as number | null,
+      signal: null,
+      requestedSignal: null as number | NodeJS.Signals | null,
+      stderr: new Uint8Array(0),
+    };
+    fixtureDiagnostics.set(input.taskId, diagnostic);
+    while (fixtureDiagnostics.size > 16) {
+      fixtureDiagnostics.delete(fixtureDiagnostics.keys().next().value!);
+    }
+    return runCodexAgentTask(input, {
+      spawn: (command, options, identity) => {
+        let child;
+        try {
+          child = guardLaunchers.spawnCodex(command, options, identity);
+        } catch (error) {
+          diagnostic.phase = 'spawn-failed';
+          throw error;
+        }
+        diagnostic.phase = 'spawned';
+        diagnostic.guardPid = child.pid ?? null;
+        const [stderr, diagnosticStderr] = child.stderr.tee();
+        void (async () => {
+          const reader = diagnosticStderr.getReader();
+          try {
+            while (true) {
+              const next = await reader.read();
+              if (next.done) break;
+              const remaining = 4096 - diagnostic.stderr.byteLength;
+              if (remaining > 0) {
+                const bounded = next.value.subarray(0, remaining);
+                const captured = new Uint8Array(diagnostic.stderr.byteLength + bounded.byteLength);
+                captured.set(diagnostic.stderr);
+                captured.set(bounded, diagnostic.stderr.byteLength);
+                diagnostic.stderr = captured;
+              }
+              // Keep draining after the byte limit so diagnostic collection
+              // cannot block the guarded provider or the production stderr pump.
+            }
+          } finally {
+            reader.releaseLock();
+          }
+        })().catch(() => undefined);
+        void child.exited.then(exitCode => {
+          diagnostic.exitCode = exitCode;
+          diagnostic.phase = 'exited';
+        }, () => { diagnostic.phase = 'exit-wait-failed'; });
+        return {
+          ...child,
+          stderr,
+          kill: signal => {
+            diagnostic.requestedSignal = signal ?? 'SIGTERM';
+            return child.kill(signal);
+          },
+        };
+      },
+      timeoutMs: taskTimeoutMs(),
+    });
+  },
   cancelWaitMs: 2_000,
   resolutionTimeoutMs: 4_000,
   shutdownWaitMs: 5_000,
@@ -127,6 +196,21 @@ const server = Bun.serve({
   port: 0,
   fetch: async request => {
     const url = new URL(request.url);
+    if (request.method === 'GET' && url.pathname === '/test/fixture-diagnostics') {
+      const taskId = url.searchParams.get('taskId');
+      if (!taskId || !/^[A-Za-z0-9_-]{8,128}$/.test(taskId)
+        || [...url.searchParams.keys()].join(',') !== 'taskId') {
+        return Response.json({ error: 'invalid fixture request' }, { status: 400 });
+      }
+      const diagnostic = fixtureDiagnostics.get(taskId);
+      if (!diagnostic) return Response.json({ error: 'unknown fixture task' }, { status: 404 });
+      return Response.json({
+        ...diagnostic,
+        // stream:true omits an incomplete trailing UTF-8 character instead of
+        // expanding it beyond the 4 KiB byte budget with replacement characters.
+        stderr: new TextDecoder().decode(diagnostic.stderr, { stream: true }),
+      });
+    }
     if (request.method === 'POST' && url.pathname === '/test/cancellation-intent-only') {
       const body = await request.json() as { taskId?: unknown; requestId?: unknown };
       if (typeof body.taskId !== 'string' || typeof body.requestId !== 'string') {

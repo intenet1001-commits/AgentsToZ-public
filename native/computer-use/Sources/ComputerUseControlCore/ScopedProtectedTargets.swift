@@ -4,11 +4,17 @@ import Foundation
 /// excluded; a nil or unverifiable bundle must be refused by the caller rather than treated as an ordinary app.
 /// One golden list (Tests/ControlContract/protected-targets.json) is compared with this file and with
 /// src/computerUseScopeProtocol.ts, so neither side can drift. Bundle IDs were read from the installed apps and their
-/// code signatures on macOS 26.7 (2026-10-29), not guessed.
+/// code signatures on macOS 26.7 (2026-10-29). Of the remote desktop clients below, only Screen Sharing has been
+/// checked against an installed bundle; the remaining published IDs still require device-specific verification.
 public enum ScopedProtectedTargets {
     /// Never a target or a capture subject. A window of one of these above layer 0 blocks capture and input.
     static let bundles: Set<String> = [
         "com.intenet.agentstozbycs", "com.apple.systempreferences", "com.apple.keychainaccess", "com.apple.windowserver"]
+    /// Remote desktop viewers are never an input target or a captured application, even for local AI sessions.
+    static let remoteDesktopClients: Set<String> = [
+        "com.apple.screensharing", "com.apple.remotedesktop", "com.p5sys.jump.mac.viewer", "com.p5sys.jump.mac.viewer.web",
+        "com.teamviewer.teamviewer", "com.philandro.anydesk", "tv.parsec.www", "com.microsoft.rdc.macos",
+        "com.microsoft.rdc.mac", "com.carriez.rustdesk"]
     /// OS authentication, consent and security prompts. Any visible window of one, at any layer and on any display,
     /// blocks capture and input, not only when it is the window under the point.
     static let securitySurfaces: Set<String> = [
@@ -24,7 +30,7 @@ public enum ScopedProtectedTargets {
     public static func refuses(bundleId: String?) -> Bool {
         guard let bundleId, !bundleId.isEmpty else { return true }
         let lower = bundleId.lowercased()
-        return bundles.contains(lower) || securitySurfaces.contains(lower) || prefixes.contains { lower.hasPrefix($0) }
+        return bundles.contains(lower) || remoteDesktopClients.contains(lower) || securitySurfaces.contains(lower) || prefixes.contains { lower.hasPrefix($0) }
     }
     /// Whether a visible window of this owner blocks everything wherever it is. An unidentified owner does.
     public static func blocksWhileVisible(bundleId: String?) -> Bool {

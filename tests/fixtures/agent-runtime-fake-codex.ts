@@ -1,15 +1,38 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 type JsonObject = Record<string, any>;
 
 const cwd = process.cwd();
+let bootstrapPhase = 'read-mode';
+let descendantPid: number | null = null;
+let descendantExitCode: number | null = null;
+let observedReadyText: string | null = null;
+process.once('exit', exitCode => {
+  if (exitCode === 0) return;
+  // This executable is compiled solely for isolated tests. Emit no argv,
+  // environment, prompt or account data; the fixture sidecar bounds stderr.
+  try {
+    writeSync(2, JSON.stringify({
+      fixture: 'agent-runtime-fake-codex',
+      phase: bootstrapPhase,
+      providerPid: process.pid,
+      guardPid: process.ppid,
+      descendantPid,
+      descendantExitCode,
+      observedReadyText,
+      exitCode,
+      signal: null,
+    }) + '\n');
+  } catch {}
+});
 const modePath = join(cwd, 'fake-codex-mode.txt');
 const statePath = join(cwd, 'fake-codex-state.json');
 const mode = readFileSync(modePath, 'utf8').trim();
 if (mode !== 'hold' && mode !== 'success') process.exit(64);
 
+bootstrapPhase = 'read-descendant';
 const descendantExecutable = readFileSync(
   join(cwd, 'fake-codex-descendant-path.txt'),
   'utf8',
@@ -18,20 +41,26 @@ const descendantReadyPath = join(cwd, 'fake-codex-descendant-ready.txt');
 const descendantTermPath = join(cwd, 'fake-codex-descendant-term.txt');
 try { unlinkSync(descendantReadyPath); } catch {}
 try { unlinkSync(descendantTermPath); } catch {}
+bootstrapPhase = 'spawn-descendant';
 const descendant = Bun.spawn([descendantExecutable, descendantReadyPath, descendantTermPath], {
   stdin: 'ignore',
   stdout: 'ignore',
   stderr: 'ignore',
   detached: false,
 });
+descendantPid = descendant.pid;
+void descendant.exited.then(code => { descendantExitCode = code; }, () => undefined);
 // A compiled child can take several seconds to start when the full Bun suite
 // saturates the host. The e2e gate is about process-tree cleanup after it starts.
 const descendantReadyDeadline = performance.now() + 8_000;
+bootstrapPhase = 'wait-descendant-ready';
 while (!existsSync(descendantReadyPath) && performance.now() < descendantReadyDeadline) {
   await Bun.sleep(5);
 }
-if (!existsSync(descendantReadyPath)
-  || Number(readFileSync(descendantReadyPath, 'utf8')) !== descendant.pid) {
+bootstrapPhase = 'verify-descendant-ready';
+const readyText = existsSync(descendantReadyPath) ? readFileSync(descendantReadyPath, 'utf8') : null;
+observedReadyText = readyText?.slice(0, 64) ?? null;
+if (readyText === null || Number(readyText) !== descendant.pid) {
   try { descendant.kill('SIGKILL'); } catch {}
   process.exit(70);
 }
@@ -40,7 +69,8 @@ const threadId = randomUUID();
 const turnId = randomUUID();
 
 function persistState(phase: 'booting' | 'holding' | 'completed'): void {
-  writeFileSync(statePath, JSON.stringify({
+  const pendingPath = `${statePath}.${process.pid}.pending`;
+  writeFileSync(pendingPath, JSON.stringify({
     invocationId,
     guardPid: process.ppid,
     providerPid: process.pid,
@@ -49,6 +79,7 @@ function persistState(phase: 'booting' | 'holding' | 'completed'): void {
     turnId,
     phase,
   }), { mode: 0o600 });
+  renameSync(pendingPath, statePath);
 }
 
 function send(value: JsonObject): void {
@@ -130,11 +161,13 @@ function handle(message: JsonObject): void {
   }
 }
 
+bootstrapPhase = 'protocol-start';
 persistState('booting');
 const reader = Bun.stdin.stream().getReader();
 const decoder = new TextDecoder();
 let buffered = '';
 try {
+  bootstrapPhase = 'protocol-stdin';
   while (true) {
     const next = await reader.read();
     if (next.done) break;
@@ -153,4 +186,5 @@ try {
 
 // The process guard owns descendant cleanup. Exiting here deliberately leaves
 // the child alive long enough for the guard's PGID proof to be exercised.
+bootstrapPhase = 'protocol-done';
 process.exit(0);

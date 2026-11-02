@@ -1,0 +1,7 @@
+{
+  "name":"agentstoz-screen-community",
+  "private":true,
+  "type":"module",
+  "scripts":{"deploy":"wrangler deploy","dev":"wrangler dev","test":"bun tests/worker.mjs"},
+  "devDependencies":{"wrangler":"4.156.1","miniflare":"^4"}
+}

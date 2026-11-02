@@ -106,7 +106,37 @@ import buildInfo from '../build-number.json';
 //         login-cancel / archive add and remove accounts through the person's browser sign-in (email, loginId, code);
 //         login-add-start never changes this Mac's account. everywhere-set {enabled} turns project accounts on or off
 //         outside Workrooms (every terminal and git on this Mac); native-status / project report it as everywhere.
-export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.75.0';
+// 1.76.0: agentstoz_use_computer_session reaches another community Mac without a Workroom: optional device (a community
+//         deviceId; an endpointId from list_ops_devices is converted), operation devices, and observe capture (the same
+//         observation captured in one round trip). Only that Mac's whole desktop under its person's standing allowance;
+//         nobody there is asked. Remote right/double click, scroll and drag follow the local rules (D11). The tool text
+//         stays under 2,000 characters with the remote rules first. A remote receipt reports an actual receipt or
+//         not-run (reason stale|clock|busy|session-ended|receiver-off|blocked|unseen), in-progress, or unknown-final
+//         (reason boot-changed|evicted|evicted-range|window-passed|not-this-connection) - the receiver's raw `unseen` and
+//         `evicted` are judged by remoteReceiptVerdict and never shown as "not run" without same-connection,
+//         same-boot, in-range evidence. Remote failures carry a code and an outcome (not-run | unknown | state-unknown |
+//         read): REMOTE_DEVICE_UNKNOWN, REMOTE_SELF, REMOTE_PROFILE_REQUIRED, REMOTE_NOT_IN_COMMUNITY,
+//         REMOTE_HOST_OUTDATED, REMOTE_UNSUPPORTED, REMOTE_SENDER_UNSUPPORTED, REMOTE_BLOCKED_BY_PERSON,
+//         REMOTE_DEVICE_BLOCKED, REMOTE_NEEDS_STANDING, REMOTE_APP_SCOPE_ACTIVE, REMOTE_PEER_NOT_READY,
+//         REMOTE_RECOVERY_REQUIRED, REMOTE_NO_ANSWER, REMOTE_BAD_ANSWER (an unreadable or mismatched answer to a read),
+//         REMOTE_UNKNOWN_OUTCOME (an input: it blocks further input to that device, REMOTE_BLOCKED_BY_UNKNOWN, until its
+//         receipt settles; never resent), REMOTE_STATE_UNKNOWN, REMOTE_ID_BOUND_ELSEWHERE (a grant or requestId claimed for
+//         another device or this Mac; claiming alone does not prove dispatch), REMOTE_SESSION_RESTARTED, REMOTE_SESSION_MISSING, REMOTE_SESSION_PENDING,
+//         REMOTE_NOT_RUN (a refusal the other Mac claimed without a code), REMOTE_BAD_REQUEST, REMOTE_PART_LOST,
+//         REMOTE_LOOP_TARGET, REMOTE_DESKTOP_CLIENT, REMOTE_CHAIN_DENIED, REMOTE_RATE_LIMITED; and this MCP's own
+//         AGENTSTOZ_USE_HOST_OUTDATED when this Mac's AgentsToZ predates the remote route (nothing then runs here
+//         instead) and AGENTSTOZ_USE_HOST_UNAVAILABLE when it is not running (nothing sent). The MCP server instructions
+//         are unchanged.
+// 1.77.0: signed Control also refuses the known remote-desktop viewer list as a target and excludes it from scoped
+//          captures. Returning input from its floating bar requires the button's own single hardware click; remote
+//          desktop and accessibility presses cannot hand input back. Device names are display-only, not key proof.
+//          Optional click axOnly and capture maxBytes fail closed on older Control; existing calls retain their behavior.
+// 1.78.0: remote devices names an empty community list; a person-held scoped grant reports person-has-control to another AI,
+//          and MCP guidance distinguishes a pre-approval busy refusal from an unknown outcome or a person's refusal.
+// 1.79.0: common-authenticated remote Teams, receiver-selected project allowlist and opaque remote execution proxies.
+// 1.80.0: combines remote Teams with the public release's opt-in one-hop OPS/DEV memory relations and
+//          bounded personal-preference selection explanations; preserves both optional recall extensions.
+export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.80.0';
 
 export function agentsToZUseMcpServerVersion(buildNumber: number): string {
   return `${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.${buildNumber}`;

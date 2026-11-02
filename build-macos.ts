@@ -29,11 +29,15 @@ import { stageMacOSRuntimeDevelopmentBundle } from "./stage-macos-runtime-develo
 import { stageWorkroomBrowserBundle } from "./stageWorkroomBrowserBundle";
 import { assertMacosBrowserBuildVariant } from "./src/macosBrowserUpgrade";
 import { freshDmgs, parseDeveloperIdNotaryOptions, preflightDeveloperId, resolveMacOSCargoTargetDir, signNotarizeAndStaple } from "./src/macOSDeveloperIdBuild";
+import {stageViewerControlBundle} from './stageViewerControlBundle';
+import {prepareViewerSigningProfile} from './scripts/build-viewer-app';
 import { stageScreenControlBundle } from "./stageScreenControlBundle";
 import { refreshBundledAppDmgs } from "./refreshBundledAppDmgs";
+import {parseMainCommunityBuildOptions,sealMainCommunityBuildConfig} from './scripts/mainCommunityBuildConfig';
 
-const {buildArguments,notaryOptions} = parseDeveloperIdNotaryOptions(process.argv.slice(2));
-const allowedBuildArguments = new Set(["--dmg", "--allow-unpublished-source", "--embedded-browser", "--developer-id"]);
+const communityOptions=parseMainCommunityBuildOptions(process.argv.slice(2));
+const {buildArguments,notaryOptions} = parseDeveloperIdNotaryOptions(communityOptions.buildArguments);
+const allowedBuildArguments = new Set(["--dmg", "--allow-unpublished-source", "--embedded-browser", "--developer-id", "--with-viewer"]);
 const rejectedBuildArguments = buildArguments.filter(value => !allowedBuildArguments.has(value));
 if (rejectedBuildArguments.length > 0) {
   console.error(`[build-macos] 지원하지 않는 옵션: ${rejectedBuildArguments.join(", ")}`);
@@ -43,11 +47,13 @@ if (rejectedBuildArguments.length > 0) {
       + "ad-hoc 빌드로 대체하지 않습니다.",
     );
   }
-  console.error("usage: bun build-macos.ts [--dmg | --embedded-browser] [--developer-id [--notary-profile PROFILE [--notary-keychain /absolute/path]]] [--allow-unpublished-source]");
+  console.error("usage: bun build-macos.ts [--dmg | --embedded-browser] [--with-viewer] [--developer-id [--notary-profile PROFILE [--notary-keychain /absolute/path]]] [--community-config /absolute/public-config.json] [--allow-unpublished-source]");
   process.exit(64);
 }
 
 const developerId = buildArguments.includes("--developer-id");
+const withViewer = buildArguments.includes("--with-viewer");
+if (withViewer && !developerId) throw Error('--with-viewer requires --developer-id to preserve the independent Viewer identity');
 const targetDir = resolveMacOSCargoTargetDir(process.env, homedir(), developerId);
 process.env.CARGO_TARGET_DIR = targetDir;
 
@@ -71,6 +77,7 @@ console.log(`[build-macos] CARGO_TARGET_DIR=${targetDir}`);
 console.log(`[build-macos] Build type: ${embeddedBrowser ? ".app with embedded Chromium" : isDmg ? "DMG only" : "full (.app + DMG)"}`);
 // Developer ID: check the identity and the notary key before spending a whole build on them.
 const developerIdPreflight = developerId ? await preflightDeveloperId(notaryOptions) : undefined;
+if (withViewer && developerIdPreflight) prepareViewerSigningProfile(developerIdPreflight.identity.certificateFingerprint);
 if (developerIdPreflight) console.log(`[build-macos] Developer ID: ${developerIdPreflight.identity.commonName} — 서명·공증·스테이플까지 한다`);
 
 // The version files are rewritten in place for one build and never committed
@@ -183,6 +190,7 @@ process.on('exit', () => { for (const path of pendingDmgs) rmSync(path, { force:
 // again. The bundle ID is unique to AgentsToZ, so seal the unpacked app with a
 // stable identifier-based requirement after Tauri finishes signing it.
 if (existsSync(appBundlePath)) {
+  sealMainCommunityBuildConfig(join(appBundlePath,'Contents/Info.plist'),communityOptions.communityConfig);
   const runtimeStage = stageMacOSRuntimeDevelopmentBundle({
     appBundlePath,
     artifactRoot: join(
@@ -201,7 +209,12 @@ if (existsSync(appBundlePath)) {
     // This Mac's own build only (the public base pipeline never passes one): notifications, remote stop and the weekly
     // allowance alerts go through this relay. Unset: the bundled Screen has push off, as before.
     pushEndpoint: process.env.AGENTSTOZ_SCREEN_PUSH_URL,
+    communityConfig: communityOptions.communityConfig,
   });
+  if (withViewer && developerIdPreflight) {
+    await stageViewerControlBundle({appBundlePath, version: `${newVersion}.0.0`,
+      signingIdentity: developerIdPreflight.identity.certificateFingerprint,communityConfig:communityOptions.communityConfig});
+  }
   if (developerIdPreflight) {
     // Opt-in only (--developer-id): every piece gets a Developer ID signature with its own
     // entitlements and the Team ID anchored requirement, then the app — and any DMG this build

@@ -107,6 +107,16 @@ final class ScopedOSGuardTests: XCTestCase {
         XCTAssertThrowsError(try target(-50, -50, hit: 30, [unknown, below]), "an unverifiable owner")
         XCTAssertThrowsError(try target(-50, -50, hit: 10, [unknown, below]), "an unknown window in front of the hit-test target")
     }
+    @MainActor func testPointTargetRejectsBackgroundRemoteDesktopViewer() throws {
+        let viewer = ScopeApplicationIdentity(bundleId: "com.apple.ScreenSharing", teamId: "ABCDEFGHIJ",
+            codeHash: String(repeating: "c", count: 40), pid: 102, processStart: "2002")
+        let display = ScopedOSDisplay(nativeID: 1, frame: CGRect(x: 0, y: 0, width: 100, height: 100), scale: 1, rotation: 0)
+        let window = ScopedOSWindow(id: 1, pid: 102, frame: display.frame, alpha: 1)
+        XCTAssertThrowsError(try ScopedOSGuard.pointTarget(at: CGPoint(x: 50, y: 50), hitPID: 102, windows: [window], displays: [display],
+            systemOverlay: { _, _ in false }, resolve: { _ in viewer })) { error in
+                XCTAssertEqual((error as? ControlError)?.code, "protected-target")
+            }
+    }
 
     /// The window list read on a 3440x1440 Mac (2026-10-28), front to back: WindowServer decorations, Control Center
     /// items, the Dock's display-sized layer-20 sheet, AgentsToZ's always-on-top layer-5 「아젠투지 호출」 panel, a

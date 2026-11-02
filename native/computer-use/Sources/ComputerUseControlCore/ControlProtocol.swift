@@ -119,7 +119,7 @@ public enum RefusedTargets {
     public static let teams: Set<String> = ["DA8QKAQ2C9"]
     public static func refuses(bundle: String) -> Bool {
         let id = bundle.lowercased()
-        return bundles.contains { $0.lowercased() == id } || prefixes.contains { id.hasPrefix($0.lowercased()) }
+        return ScopedProtectedTargets.refuses(bundleId: id) || bundles.contains { $0.lowercased() == id } || prefixes.contains { id.hasPrefix($0.lowercased()) }
     }
     public static func refuses(_ target: ApprovalTarget) -> Bool { refuses(bundle: target.bundleId) || teams.contains(target.teamId) }
 }
@@ -390,11 +390,11 @@ public enum ControlConsentText {
         }
     }
     /// The standing allowance (StandingAllowance), as the review row, the settings window and the menu describe it.
-    public static let standingOffer = "「항상 허용」은 이 요청을 승인하고, 앞으로 이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 쓰게 합니다. 앱·Control을 다시 시작하거나 업데이트해도 유지되고, 끄거나 「중단」을 누르면 끝납니다."
-    public static let standingOff = "꺼짐: AI가 컴퓨터 유즈를 요청할 때마다 여기서 Touch ID나 로그인 암호로 승인합니다. 켜면 이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 씁니다. 커뮤니티의 다른 Mac에서 맡긴 작업도 이 Mac의 AI가 하므로 그대로 이어집니다."
+    public static let standingOffer = "「항상 허용」은 이 요청을 승인하고, 앞으로 이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티의 다른 Mac AI가 이 Mac의 받기 설정에 따라 다시 묻지 않고 전체 Mac을 쓰게 합니다. 앱·Control을 다시 시작하거나 업데이트해도 유지되고, 끄거나 「중단」을 누르면 끝납니다."
+    public static let standingOff = "꺼짐: AI가 컴퓨터 유즈를 요청할 때마다 여기서 Touch ID나 로그인 암호로 승인합니다. 켜면 이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티의 다른 Mac AI가 이 Mac의 받기 설정에 따라 다시 묻지 않고 전체 Mac을 씁니다."
     public static func standingOn(since: Date) -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "ko_KR"); formatter.dateFormat = "M월 d일 a h:mm"
-        return "켜짐(\(formatter.string(from: since))부터): 이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac의 화면을 읽고 마우스·키보드를 씁니다. 화면 아래 Control 막대의 「직접 하기」로 언제든 넘겨받고, 「중단」을 누르면 상시 허용도 꺼집니다. 앱을 고르는 범위는 매번 승인합니다."
+        return "켜짐(\(formatter.string(from: since))부터): 이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티의 다른 Mac AI가 이 Mac의 받기 설정에 따라 다시 묻지 않고 전체 Mac의 화면을 읽고 마우스·키보드를 씁니다. 화면 아래 Control 막대의 「직접 하기」로 언제든 넘겨받고, 「중단」을 누르면 상시 허용도 꺼집니다. 앱을 고르는 범위는 매번 승인합니다."
     }
 }
 

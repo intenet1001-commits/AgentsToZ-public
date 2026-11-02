@@ -941,6 +941,8 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_send_workroom_keys",
       "agentstoz_use_wait_workroom_session",
       "agentstoz_use_create_team",
+      "agentstoz_use_team_remote_devices",
+      "agentstoz_use_team_remote_projects",
       "agentstoz_use_read_team",
       "agentstoz_use_wait_team",
       "agentstoz_use_team_member",

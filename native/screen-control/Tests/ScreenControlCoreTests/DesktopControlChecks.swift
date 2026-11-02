@@ -51,7 +51,9 @@ extension ScreenControlChecks {
             .navigateSpace(.missionControl), .spaceResult(.previous, .applied), .spaceChanged,
             .setVideoQuality(.saver), .videoQuality(.balanced), .setVideoQuality(.sharp),
             .pointerPosition(.init(x: 0, y: .max)), .pointerPosition(.init(x: .max, y: 0))
-        ] + ScreenInputAvailability.allCases.map { .inputAvailability($0) }
+        ] + ([.ready, .permissionsRequired, .secureInput, .monitorUnavailable, .localActivity] as [ScreenInputAvailability]).map {
+            .inputAvailability($0)   // version 5's view-only reason: SessionV5Checks.swift
+        }
         for message in messages {
             try check(message.minimumVersion == 3 && (try ControlMessage(decoding: message.encoded, version: 3)) == message, "v3 round trip")
             for version: UInt16 in [1, 2] {

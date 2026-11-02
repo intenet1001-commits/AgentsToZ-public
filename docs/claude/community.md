@@ -345,3 +345,54 @@
 - 마이그레이션 `20261004020000_agent_dialogue_pairings.sql`은 **정본 SQL 전체**다(전부
   `create table if not exists`/`create or replace`라 멱등). 그래서 테스트가 파일 == `AGENT_DIALOGUE_SQL`을
   그대로 비교했다(지금은 그 역할이 `20261004030000`으로 넘어갔다). 라이브 DB에는 2026-10-05에 적용됐다(위 커뮤니티 절).
+
+## 에뮬레이터 픽스처 — 두 Mac이 같은 제어 폴더 프로필로 커뮤니티에 들어간다 (WP10, 2026-11-01)
+
+커뮤니티·기기 제어를 에뮬레이터에서 시험하려면 **샌드박스 사이드카 두 대(Mac A·B)가 같은 운영 프로필**을 써야 한다
+(대화 RPC는 `profile_id`가 같은 끝점끼리만 만난다). 그 상태를 손으로 쓴 binding/access 파일로 흉내 내지 않는다 —
+**실제 `ControlProfileStore.sharedProfileId()`가 픽스처 id를 돌려주는지**로 증명한다. 정본은
+`scripts/emulator-e2e/controlProfileFixture.ts`, 레인은 `bun scripts/emulator-e2e.ts j4-fixture`(무인, 등록 루트 밖 복사본에서만).
+
+레시피(Mac마다, 서로 다른 스크래치 앱 데이터):
+1. `ports.json`에 `<격리 루트>/projects/AgentsToZ-OPS`를 `name:'AgentsToZ-OPS', role:'ops'`로 등록(등록 id는 Mac마다 다르다),
+   `portal.json`에 **Mac마다 다른 `deviceId`**·`deviceName`·shim 주소, `supabase-service.json`(shim의 service 키, 0600)을 준비한다.
+2. 그 폴더를 **샌드박스 자식**(`controlProfileFixture.ts seed`)이 실제 `initializeProjectMemory`(합류 경로 — 공유 `memoryId`,
+   `autoBackup:false`)로 만들고 `CONTROL_PROFILE_MARKER` 표식 `{schemaVersion:1, profileId, memoryId}`를 둔다. 실제 두 Mac에서는 이 폴더가
+   git clone으로 같다. profileId와 memoryId는 일부러 다르게 둔다 — 표식이 이겼다는 증거다.
+   seed가 끝나면 사이드카를 띄운다. WP2 shim은 이 빈 픽스처의 `GET /rest/v1/portmgr_what_i_said_memory_policy` 공유 정책 조회만 service role로 지원한다. 다른 표 조회나 정책 변경을 흉내 내지는 않는다.
+3. 사이드카 **자신의** `POST /api/control-profile/prepare {projectId}`가 binding.json·access.json을 쓴다(연결 키는 Mac마다 다르다).
+   prepare 전 `agent-dialogue/manage status`는 `AGENT_DIALOGUE_SHARED_PROFILE_REQUIRED`여야 한다(음성 대조).
+4. 샌드박스 검증 자식(`controlProfileFixture.ts verify --app-data`)이 그 앱 데이터로 실제 `new ControlProfileStore(…).sharedProfileId()`를
+   부른다. 연결 키는 SHA-256 앞 12자만 내보낸다. 자식은 자기 `APP_DATA_DIR`·격리 루트 밖을 읽거나 쓰지 않는다(거절).
+5. Mac 화면 클릭의 대역으로 관리 API: `enable {source:{target:'ops'}, consent:true}` → `community-join`. 영수증은
+   `j4-fixture/receipts.jsonl`(`scriptedApproval:true`).
+
+양 끝 단언: A·B가 `agent-dialogue/control devices`로 서로를(OPS 끝점, 자기 자신은 빠짐) 보고, A→B·B→A `{kind:'projects'}` 제어
+우편함 왕복이 상대의 `deviceName`·`opsTargetId`·픽스처 프로젝트로 답한다. shim의 `dialogue-db.json`에는 같은 `profile_id`·다른
+`device_id`의 살아 있는 기기 키 둘, 활성 OPS 끝점 둘(=`enable` 영수증), 활성 커뮤니티 방 하나에 joined 둘, 각 제어가
+pending→taken→done **정확히 한 번**이 있어야 한다(`judgeDialogueDump`). 휴대폰 끝은 이 레인 범위가 아니다(WP11 j4-web).
+
+- ⚠️ **대화 기기 키는 키체인에 있다** — `secretUncached` → `createProductionPromptGuideKeyProvider`가 `/usr/bin/security
+  find|add-generic-password -a device-master-v1 -s com.portmanager.portmanager.agent-dialogue.v1 -w`를 부르고, 샌드박스는
+  `security` 실행을 막는다(EPERM). 그래서 `enable`이 막힌다. 운영 사이드카에 seam을 두지 않고(설계 검토 #14), **레인 전용 진입 래퍼**
+  `scripts/emulator-e2e/dialogue-keychain-entry.ts`(`startSidecar({entryWrapper})`, 소스 모드만 — build-sidecar 계획에 없다)가
+  api-server를 import하기 전에 `node:child_process`의 spawn을 감싸 **정확히 그 두 호출**만 스크래치의 `/bin/sh` 대역
+  (`dialogueKeychainStandIn.ts` — find 없음 44 · 이미 있음 45 · add-only)으로 보낸다. provider·decodeKey·HMAC·`register-device`는
+  실제 코드다. 다른 security 호출(음성 기록 키 등)은 그대로 실제 실행 파일로 가서 샌드박스가 막는다. 대역 스크립트는 그 사이드카의 격리
+  루트 안에 있어야 하고(아니면 래퍼가 64로 시작을 거절), 기록에는 동작·결과만 남긴다(키 값 없음).
+- 실측 2026-11-01(run `20261101-072734-7cd8d9`, 등록 루트 밖 복사본): pass, 9.6초. 두 Mac의 `sharedProfileId()`가 같은 픽스처 id,
+  deviceId·연결 키(앞 12자) 다름, `controlDevices` 서로 1대(OPS), 제어 왕복 양쪽 성공, shim unknown routes 0, 대역 키체인 Mac마다
+  find:absent → add:added → find:found 한 번씩(거절 0). 관측 래퍼에는 security가 Mac마다 6줄로 남는다 — Bun의
+  `child_process.spawn`이 안에서 `Bun.spawn`을 불러 한 호출이 두 줄이 된다(대역 기록은 3건).
+- 사이드카 부팅의 자동 prepare(`runOpsFolderBoot`)는 `NODE_ENV=test`에서 돌지 않는다 — 그래서 3단계가 명시적이고 음성 대조가 성립한다.
+- `tests/emulator-control-profile-fixture.test.ts`가 사이드카 없이 같은 레시피(seed·verify 자식은 샌드박스, prepare는 실제
+  `createControlProfileHost`)로 두 스토어의 `sharedProfileId()`가 같은 픽스처 id인지, deviceId·연결 키가 다른지를 본다.
+
+
+### J3A 컴퓨터 유즈 프로세스 픽스처
+
+등록 루트 밖 `git archive` 사본에서 `bun install --frozen-lockfile`, `bun scripts/emulator-e2e.ts preflight` 뒤
+`bun scripts/emulator-e2e.ts j3a-process`를 실행한다. 레인은 실제 MCP stdio 프로세스와 서로 다른 두 샌드박스 픽스처 호스트,
+PGlite 대역 우편함을 연결하고 B의 합성 화면·가짜 Control에서 단일 클릭 영수증과 우편함 행을 대조한다. MCP 주소는 A의 임시
+loopback 포트에 명시한다. 3001은 거부 정책에 포함되며 직접 접속하지 않는다. 두 픽스처의 설치·서명 입장 사실, 승인, Control 키는
+대역이므로 이 레인의 통과는 설치 사이드카·서명된 Control·실제 화면이나 두 Mac의 동작을 증명하지 않는다.

@@ -59,9 +59,9 @@ const readableTime = (value: string | null): string => {
  */
 function ScreenHelperEntry() {
   const [lang] = useAppLanguage(), copy = workModeCopy(lang);
-  const { status, opening, note, error, open } = useScreenHelper(copy.screenUnverified);
-  if (!status?.supported) return null;
-  const { line, notes, canOpen } = screenHelperLines(status, copy);
+  const { status, opening, statusFailed, note, error, open } = useScreenHelper(copy.screenUnverified);
+  if (!status?.supported && !(statusFailed && !status)) return null;
+  const { line, notes, canOpen } = status ? screenHelperLines(status, copy) : { line: copy.screenInstanceUnknown, notes: [], canOpen: false };
   return (
     <section data-testid="qr-remote-screen" aria-labelledby="qr-remote-screen-title" className="mb-4 rounded-2xl border border-[rgb(var(--surface-highlight-rgb))]/[0.08] bg-[rgb(var(--surface-highlight-rgb))]/[0.02] p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

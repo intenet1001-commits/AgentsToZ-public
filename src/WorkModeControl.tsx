@@ -1,11 +1,12 @@
 import React,{useCallback,useEffect,useId,useRef,useState} from 'react';
 import {invoke,isTauri} from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
-import {Coffee,MonitorSmartphone,X} from 'lucide-react';
+import {Coffee,Monitor,MonitorSmartphone,X} from 'lucide-react';
 import {appLocale,workModeCopy,type Lang} from './i18n';
 import {useAppLanguage} from './useAppLanguage';
 import {screenHelperLines} from './workModeScreenHelper';
 import {useScreenHelper} from './useScreenHelper';
+import {useViewerHelper,viewerHelperLines} from './useViewerHelper';
 import './WorkModeControl.css';
 
 /** Closed-lid work (Mac): `state` mirrors work_mode.rs — lowBattery means nearly empty, hot stops it for the session. */
@@ -35,9 +36,9 @@ export function workModeRemaining(endsAt:number,now:number,lang:Lang='ko'){
  * Switching it on and adding a device stay in the helper, behind Touch ID.
  */
 function ScreenHelperPanel({copy}:{copy:ReturnType<typeof workModeCopy>}){
-  const {status,opening,note,error,open}=useScreenHelper(copy.screenUnverified);
-  if(!status?.supported)return null;
-  const {line,notes,canOpen}=screenHelperLines(status,copy);
+  const {status,opening,statusFailed,note,error,open}=useScreenHelper(copy.screenUnverified);
+  if(!status?.supported&&!(statusFailed&&!status))return null;
+  const {line,notes,canOpen}=status?screenHelperLines(status,copy):{line:copy.screenInstanceUnknown,notes:[],canOpen:false};
   return <div className="work-mode__screen" data-testid="work-mode-screen">
     <strong><MonitorSmartphone size={14} aria-hidden="true"/>{copy.screenHeading}</strong>
     <p className="work-mode__status" data-testid="work-mode-screen-status">{line}</p>
@@ -46,6 +47,26 @@ function ScreenHelperPanel({copy}:{copy:ReturnType<typeof workModeCopy>}){
     {note&&<p className="work-mode__hint" role="status">{note}</p>}
     {error&&<p role="alert">{error}</p>}
     {canOpen&&<p className="work-mode__hint">{copy.screenHint}</p>}
+  </div>;
+}
+
+/**
+ * 「다른 Mac 화면 보기」 (docs/design/mac-to-mac-2026-11-01/DESIGN.md 5.4): opens AgentsToZ Viewer, the app on this Mac
+ * that shows another Mac. Hidden when this app has no Viewer to install or open. Mounted only while the panel is open.
+ * The button names no Mac and starts no session: choosing a Mac and connecting stay in the Viewer, behind Touch ID.
+ */
+function ViewerHelperPanel({copy}:{copy:ReturnType<typeof workModeCopy>}){
+  const {status,opening,statusFailed,note,error,open}=useViewerHelper(copy.viewerUnverified);
+  const lines=viewerHelperLines(status,copy)??(statusFailed&&!status?{line:copy.viewerInstanceUnknown,notes:[]}:null);
+  if(!lines)return null;
+  return <div className="work-mode__screen" data-testid="work-mode-viewer">
+    <strong><Monitor size={14} aria-hidden="true"/>{copy.viewerHeading}</strong>
+    <p className="work-mode__status" data-testid="work-mode-viewer-status">{lines.line}</p>
+    {lines.notes.map(text=><p key={text} className="work-mode__hint">{text}</p>)}
+    {status&&<button type="button" data-testid="work-mode-viewer-open" disabled={opening||status.otherInstanceRunning||status.instanceStatusUnknown} onClick={()=>void open()}>{opening?copy.viewerOpening:copy.viewerOpen}</button>}
+    {note&&<p className="work-mode__hint" role="status">{note}</p>}
+    {error&&<p role="alert">{error}</p>}
+    {status&&<p className="work-mode__hint">{copy.viewerHint}</p>}
   </div>;
 }
 
@@ -128,6 +149,7 @@ export function WorkModeControl({compact=false}:{compact?:boolean}){
       {lid?.error&&<p role="alert">{lid.error}</p>}
       <small>{copy.note}</small>
       <ScreenHelperPanel copy={copy}/>
+      <ViewerHelperPanel copy={copy}/>
     </section>}
   </div>;
 }

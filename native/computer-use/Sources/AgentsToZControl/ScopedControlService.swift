@@ -39,6 +39,13 @@ final class ScopedControlService {
         }
         standing = allowance; standingKey = found.key
     }
+    /// Ready key loss/replacement is a refusal, never permission to recreate a standing key.
+    func standingForReception() -> Bool {
+        guard let current = standing, let key = standingKey,
+              let found = try? ComputerUseApproval.standingKey(tag: Self.standingKeyTag), StandingAllowance.parse(found.label) == current,
+              let expected = try? ComputerUseApproval.publicPoint(of: key), let actual = try? ComputerUseApproval.publicPoint(of: found.key) else { return false }
+        return expected == actual
+    }
 
     func refresh() {
         state.prune()
@@ -61,6 +68,9 @@ final class ScopedControlService {
 
     private func run(_ request: ScopeControlRequest, owner: ControlOwner) async throws -> Data {
         let body = request.body
+        if let caller = request.caller, caller.lane == "remote",
+           !["scope-receipt", "scope-revoke"].contains(request.operation),
+           !CommunityReceiveService.shared.allows(sessionID: caller.sessionId, owner: owner) { throw ControlError.refuse("remote-receive-not-authorized") }
         switch request.operation {
         case "scope-status":
             let screenRecording = CGPreflightScreenCaptureAccess()
@@ -102,6 +112,7 @@ final class ScopedControlService {
                 guard let self else { throw ControlError.refuse("worker-halted") }
                 // Every operation is admitted through `state.access` (which refuses a person-held grant) before it runs.
                 _ = try self.state.access(bound.id, caller: caller, owner: owner, allowPerson: true)
+                if caller.lane == "remote", !CommunityReceiveService.shared.allows(sessionID: caller.sessionId, owner: owner) { throw ControlError.refuse("remote-receive-not-authorized") }
             })
             return ControlResponse.success(["bound": true, "grant": bound.id, "expiresAt": bound.expiresAt,
                 "scopeProtocolVersion": 2, "operations": Array(ScopeControlRequest.agentOperations.union(ScopeControlRequest.managementOperations)).sorted(),
@@ -119,7 +130,7 @@ final class ScopedControlService {
                   let snapshot = body["snapshotId"] as? String, let display = body["displayId"] as? String else { throw ControlError.invalid }
             _ = try state.access(grant, caller: caller, owner: owner)
             guard let session else { throw ControlError.refuse("worker-halted") }
-            let result = try await session.capture(snapshotId: snapshot, displayId: display)
+            let result = try await session.capture(snapshotId: snapshot, displayId: display, maxBytes: (body["maxBytes"] as? NSNumber)?.intValue)
             _ = try state.access(grant, caller: caller, owner: owner)
             return ControlResponse.success(result)
         case "scope-click", "scope-type-text", "scope-key", "scope-scroll", "scope-drag", "scope-focus-app":
@@ -158,10 +169,16 @@ final class ScopedControlService {
         }
     }
     func end(owner: ControlOwner, sessionId: String? = nil) {
+        if sessionId == nil { CommunityControlService.shared.end(owner: owner) }
         let grantMatches = state.grant.map { $0.owner == owner && (sessionId == nil || $0.caller.sessionId == sessionId) } ?? false
         state.end(owner: owner, sessionId: sessionId)
         if grantMatches { session?.stop(); session = nil }
         refresh()
+    }
+    func endRemoteReception() {
+        var entries = Array(state.approvals.values).filter { $0.caller.lane == "remote" }.map { ($0.owner, $0.caller.sessionId) }
+        if let grant = state.grant, grant.caller.lane == "remote" { entries.append((grant.owner, grant.caller.sessionId)) }
+        for (owner, id) in entries { end(owner: owner, sessionId: id) }
     }
     func matches(_ entry: ScopedApprovalEntry) -> Bool {
         guard ProcessGeneration.alive(entry.owner) else { return false }
@@ -180,6 +197,7 @@ final class ScopedControlService {
         problem = nil
         guard approving == nil, let entry = state.approvals[id], entry.state == .pending else { return }
         guard matches(entry) else { problem = "요청한 앱이 바뀌었거나 종료됐습니다. 다시 요청하세요."; return }
+        guard entry.caller.lane != "remote" || CommunityReceiveService.shared.allows(sessionID: entry.caller.sessionId, owner: entry.owner) else { problem = "공통 권한관리에서 원격 AI 받기를 먼저 복구하세요."; return }
         guard ControlShared.service.state.grants.isEmpty, state.grant == nil else {
             problem = "이미 다른 창이나 범위를 제어 중입니다. 먼저 중단하세요."; return
         }
@@ -207,6 +225,7 @@ final class ScopedControlService {
         }
         do {
             try ScopedOSGuard.requireConsentEnvironment()
+            guard current.caller.lane != "remote" || CommunityReceiveService.shared.allows(sessionID: current.caller.sessionId, owner: current.owner) else { throw ControlError.refuse("remote-receive-not-authorized") }
             let key = try ComputerUseApproval.approvalKey(tag: ControlService.approvalKeyTag, authenticationContext: context)
             let payload = ScopeApprovalPayload(approvalId: id, scope: current.scope,
                 caller: ScopeApprovalCaller(sessionId: current.caller.sessionId, lane: current.caller.lane, generation: current.caller.generation),
@@ -235,6 +254,7 @@ final class ScopedControlService {
     private func approveByStanding(_ id: String) {
         guard let key = standingKey, standing != nil, let entry = state.approvals[id], entry.state == .pending,
               StandingAllowance.covers(entry.scope), ControlShared.service.state.grants.isEmpty, state.grant == nil,
+              entry.caller.lane != "remote" || CommunityReceiveService.shared.allows(sessionID: entry.caller.sessionId, owner: entry.owner),
               ProcessGeneration.alive(entry.owner) else { return }
         do {
             try ScopedOSGuard.requireConsentEnvironment()
@@ -260,7 +280,7 @@ final class ScopedControlService {
         defer { enablingStanding = false; refresh() }
         let context = LAContext()
         let authenticated = await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac의 화면 읽기와 마우스·키보드 제어를 하도록 상시 허용합니다") { okay, _ in
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티 다른 Mac AI가 이 Mac의 받기 설정에 따라 다시 묻지 않고 전체 Mac을 제어하도록 상시 허용합니다") { okay, _ in
                 continuation.resume(returning: okay)
             }
         }
@@ -282,6 +302,8 @@ final class ScopedControlService {
     }
     /// Turning it off ends what it allowed: the open grant halts and nothing is approved without the person again.
     func disableStanding() {
+        do { try CommunityControlService.shared.disable() }
+        catch { problem = "커뮤니티 권한을 이 실행에서는 중단했습니다. 저장 결과를 확인하지 못했으므로 다시 켜기 전에 상태를 확인하세요." }
         let had = standing != nil || standingKey != nil
         standing = nil; standingKey = nil
         do { try ComputerUseApproval.deleteStandingKey(tag: Self.standingKeyTag) }
@@ -308,6 +330,11 @@ final class ScopedControlService {
     }
     /// The person's 「중단」 (bar, menu, review window): the grant halts and the standing allowance ends with it, so the AI
     /// cannot open a new grant by itself right after being stopped.
-    func stop() { state.stop(); session?.stop(); if standing != nil || standingKey != nil { disableStanding() } else { refresh() } }
+    func stop() {
+        state.stop(); session?.stop()
+        do { try CommunityControlService.shared.disable() }
+        catch { problem = "커뮤니티 권한 중단의 저장 결과를 확인하지 못했습니다." }
+        if standing != nil || standingKey != nil { disableStanding() } else { refresh() }
+    }
     func dismissProblem() { problem = nil }
 }

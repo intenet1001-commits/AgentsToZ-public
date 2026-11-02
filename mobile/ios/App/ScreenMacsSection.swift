@@ -12,14 +12,22 @@ struct ScreenMacsSection: View {
     /// with the saved workspace when the app comes back to the front.
     var registrationOpen: Binding<Bool> = .constant(false)
     @State private var macs = ScreenMacStore.load()
+    @State private var community = MobileScreenCommunity.shared
+    private var availableMacs: [SavedScreenMac] {
+        let common = Set(community.unified.screenTargets.map(\.id))
+        let legacy = Set(macs.map(\.id))
+        return macs.filter { !common.contains($0.id) } + community.macs.filter { !community.unified.hasEnrollmentPlan && !legacy.contains($0.id) && !common.contains($0.id) }
+    }
     /// One sheet for the whole registration: the scanner turns into the registration in place. Closing the scanner
     /// and presenting the registration as a second sheet lost the second one — iOS ignores a presentation while
     /// another sheet is still going away — so a scan only closed the scanner (2026-10-25, iPad mini).
+    @State private var actionsOpen = false
     @State private var registering = false
     @State private var invite: RegistrationInvite?
     /// The open registration has started (key, App Attest, the Mac's answer) and not yet ended.
     @State private var registrationBusy = false
     @State private var viewing: SavedScreenMac?
+    @State private var commonViewing: MobileCommunityScreenTarget?
     @AppStorage("screenControl.connectionRoute") private var connectionRoute = ScreenConnectionRoute.automatic
     @State private var notice: String?
     @State private var deleting: [SavedScreenMac] = []
@@ -28,6 +36,12 @@ struct ScreenMacsSection: View {
 
     var body: some View {
         Section {
+            ScreenCommunityControls()
+            Button("커뮤니티 기능 · Teams·CLI·브라우저",systemImage:"rectangle.connected.to.line.below") {
+                registrationOpen.wrappedValue = true; actionsOpen = true
+            }
+            .accessibilityIdentifier("communityActionsOpen")
+            .sheet(isPresented:$actionsOpen,onDismiss:{ registrationOpen.wrappedValue = registering }) { CommunityActionsView() }
             Picker("화면 연결 경로", selection: $connectionRoute) {
                 Text("자동").tag(ScreenConnectionRoute.automatic)
                 Text("근거리").tag(ScreenConnectionRoute.nearby)
@@ -35,7 +49,17 @@ struct ScreenMacsSection: View {
                 Text("사설망 · Cloudflare").tag(ScreenConnectionRoute.privateNetwork)
             }
             .accessibilityIdentifier("screenConnectionRoute")
-            ForEach(macs) { mac in
+            ForEach(community.unified.screenTargets) { target in
+                Button { commonViewing = target } label: {
+                    Label {
+                        VStack(alignment: .leading) {
+                            Text(target.peer.body.name)
+                            Text("공통 등록 · Cloudflare · 사용 세션 인증 공유").font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "display") }
+                }.accessibilityIdentifier("openCommonScreen")
+            }
+            ForEach(availableMacs) { mac in
                 Button { viewing = mac } label: {
                     Label {
                         VStack(alignment: .leading) {
@@ -47,11 +71,13 @@ struct ScreenMacsSection: View {
                 .accessibilityIdentifier("openScreen")
                 .contextMenu {
                     Button("사설망 연결 설정…", systemImage: "network.badge.shield.half.filled") { privateNetworkSetup = mac }
-                    ScreenRemoteStopMenu(mac: mac, ask: { remoteStop = $0 }, notice: { notice = $0 })
+                    if mac.communityID == nil { ScreenRemoteStopMenu(mac: mac, ask: { remoteStop = $0 }, notice: { notice = $0 }) }
                 }
             }
             .onDelete { offsets in
-                deleting = offsets.map { macs[$0] }
+                let selected = offsets.map { availableMacs[$0] }
+                deleting = selected.filter { $0.communityID == nil }
+                if selected.contains(where: { $0.communityID != nil }) { notice = "커뮤니티 기기의 접근 권한은 관리 기기에서 등록을 해제해 주세요." }
             }
             // The presentations hang off this one row, which is always there: modifiers on a List section reach
             // each of its rows, and several rows bound to the same sheet state fight over presenting it.
@@ -89,6 +115,7 @@ struct ScreenMacsSection: View {
             }
             .sheet(item: $privateNetworkSetup) { mac in
                 ScreenPrivateNetworkSettings(mac: mac) { route in
+                    if mac.communityID != nil { try community.saveRoute(for: mac, route: route); return }
                     var latest = try ScreenMacStore.loadForUpdate()
                     guard let index = latest.firstIndex(of: mac) else { throw RegistrationError.malformed }
                     latest[index].privateNetwork = route
@@ -96,8 +123,17 @@ struct ScreenMacsSection: View {
                     macs = latest
                 }
             }
+            .fullScreenCover(item: $commonViewing) { target in
+                ScreenViewerView(mac: target.mac, route: .automatic, communityTarget: target.peer)
+            }
             .fullScreenCover(item: $viewing) { mac in
                 ScreenViewerView(mac: mac, route: connectionRoute)
+            }
+            .onChange(of: community.macs.map(\.id)) { _, ids in
+                if let current = viewing, current.communityID != nil, !ids.contains(current.id) { viewing = nil }
+            }
+            .onChange(of: community.unified.screenTargets.map(\.id)) { _, ids in
+                if let current = commonViewing, !ids.contains(current.id) { commonViewing = nil }
             }
             .screenRemoteStop($remoteStop) // push hook
             // The home screen and the workspace's 「Mac 화면」 sheet each hold a copy; a Mac registered in one shows in the other.
@@ -118,7 +154,7 @@ struct ScreenMacsSection: View {
             Text("Mac의 AgentsToZ에서 근무 모드 → 「AgentsToZ Screen 열기」(또는 메뉴 막대의 화면 아이콘)를 눌러 화면 제어를 켜고 「기기 등록…」을 누르면 QR이 뜹니다. 그 QR을 여기서 찍으세요(주소를 Safari에 입력하지 않습니다). 근거리에서는 두 기기의 Wi‑Fi를 켜세요. 밖에서는 Mac을 길게 눌러 「사설망 연결 설정…」을 저장하고 경로를 ‘사설망 · Cloudflare’로 고르세요. 목록에서 지워도 Mac 쪽 등록은 남으니, Mac에서도 해지하세요.")
             // push hook: only in a build with a push endpoint.
             if ScreenPushConfig.isEnabled {
-                Text("Mac을 길게 누르면 알림을 켜거나, 연결을 끊거나, 기기를 해지하거나, 화면 제어를 끌 수 있습니다. 기기 인증이 필요한 동작은 등록 시 선택한 방식으로 승인합니다. 다시 켜는 것은 Mac에서만 됩니다.")
+                Text("QR로 개별 등록한 Mac을 길게 누르면 알림·연결 끊기·화면 제어 끄기를 사용할 수 있습니다. 커뮤니티 기기의 접근 해제는 위의 ‘등록 기기 관리’에서 합니다. 화면 제어를 다시 켜는 것은 Mac에서만 됩니다.")
             }
         }
     }

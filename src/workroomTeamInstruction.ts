@@ -111,6 +111,16 @@ export function teamLeaderInstruction(input: {goal: string; members: TeamLeaderM
 - 팀원마다 고른 실행 위치·계정·권한 우회·실행 옵션을 그대로 지킵니다. 다른 값으로 바꾸거나 워크룸으로 대신 시작하지 않습니다.
 - create_team이 어느 값을 거절하면 그 팀원을 바꾸지 말고, 거절 내용과 함께 사람에게 보고합니다.
 - 「자동 관리」 팀원만 지시와 보고가 자동으로 오갑니다. 「연결 대기」는 연결이 확인된 뒤에, 「수동 합류」는 사람이 시작을 확인한 뒤에야 작업 중으로 셉니다. 열기·입력칸 채우기·복사는 작업 시작이 아닙니다.${computerUseRule}` : '';
+  // This is guidance, not permission or a device-wide lock. The installed team skill covers less explicit wording too.
+  const taskText = [input.goal, ...input.members.map(member => member.task ?? '')].join('\n');
+  const mentionsRemote = /원격|다른\s*(?:mac|맥)|remote|another\s+(?:mac|computer|device)/i.test(taskText);
+  const mentionsComputerUse = /컴퓨터\s*(?:유즈|사용)|computer[\s-]*use/i.test(taskText);
+  const remoteComputerRules = mentionsRemote && mentionsComputerUse ? `
+
+다른 Mac의 컴퓨터 유즈를 사람이 요청한 경우:
+- agentstoz_use_computer_session의 devices로 대상을 확인하고 그 Mac의 device를 매 호출에 넣습니다. 대상이 불분명하면 임의로 고르지 않습니다. 같은 Mac은 한 번에 한 팀원에게만 맡기고 인계합니다.
+- 입력 결과가 불명이면 담당 팀원이 원래 연결에서 같은 device와 requestId로 receipt를 확인합니다. 확인 전까지 그 Mac의 추가 입력을 멈추고, 다른 팀원·새 연결·새 requestId로 입력을 반복하지 않습니다. 확인할 수 없으면 미확정으로 보고합니다. 실행 뒤에는 다시 관찰해 결과를 확인합니다.
+- 앱 팀원의 computerUseApprovals는 이 Mac의 해당 앱에 한정된 1회성 승인만 뜻하며, 원격 Mac 승인이나 전체 Mac 권한을 추가하지 않습니다.` : '';
   const instruction=`[AgentsToZ 팀 작전 · 리더]
 당신이 이 작업의 리더입니다. agentstoz-team 스킬의 순서를 따르세요.
 
@@ -126,7 +136,7 @@ ${members}${launchRules}
 3. agentstoz_use_create_team으로 팀원을 각자의 워크트리와 고른 실행 위치에서 시작합니다. 모델은 위 구성대로 model(Hermes는 provider도)에 넣고, 「에포트 고정 <값>」인 팀원만 effort에 그 값을 넣습니다(「에포트 자동」은 effort를 비웁니다).${joined}${reviewCreate} 팀원 값은 아래 선택 블록의 members를 그대로 쓰고, 비어 있는 task·name만 채웁니다.
 4. agentstoz_use_wait_team과 agentstoz_use_read_team으로 보고를 기다립니다. 막힌 팀원에게는 agentstoz_use_team_member의 read/send/reveal/keys를 teamId/memberId로 사용합니다(keys는 Orca 워크트리 팀원의 1회성 화면에만, 화면을 읽은 뒤 그 화면이 묻는 키만). 자동 입력을 지원하지 않는 외부 팀원은 실제 화면을 확인하고 수동 확인·옮긴 보고로 기록하며, 워크룸 지시로 대신 보내지 않습니다.
 5. 각 브랜치의 diff를 검토하고 이 체크아웃에 병합한 뒤 검사합니다. 충돌은 리더가 해결합니다.${reviewMerge}
-6. agentstoz_use_close_team으로 정리하고, 팀원별 결과와 검사 결과를 보고합니다. push는 하지 않습니다.
+6. agentstoz_use_close_team으로 정리하고, 팀원별 결과와 검사 결과를 보고합니다. push는 하지 않습니다.${remoteComputerRules}
 
 선택 블록(구성기가 고른 그대로입니다. 고치지 마세요):
 ${block}`;

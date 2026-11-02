@@ -92,6 +92,8 @@ export type AgentsToZUseActionRequest = {
   reference?: import('./agentstozMention').AgentMentionReference;
   controllerPortId: string;
   controlQuery?: string;
+  includeRelations?: boolean;
+  includeExplanation?: boolean;
   userMemoryRange?: {start:string;end:string;cursor?:string;origin?:'all'|'human'};
   controlProposal?: {requestId:string;title:string;body:string;evidence:string;expectedRevision:string};
   portId: string | null;
@@ -328,6 +330,9 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     );
   }
   const controllerPortId = requiredId(body.controllerPortId, "controllerPortId");
+  for(const [key,allowed] of [['includeRelations','recall-control-context'],['includeExplanation','recall-user-profile']] as const){
+    if(Object.hasOwn(body,key)&&(action!==allowed||typeof body[key]!=='boolean'))throw new AgentsToZUseControlError('회상 부가 정보는 지원하는 읽기 요청에 boolean으로 지정하세요.','AGENTSTOZ_USE_REQUEST_INVALID');
+  }
   let sdkProject:AgentsToZUseActionRequest['sdkProject'];
   if(action==='sdk-project'){const v=body.sdkProject as any;if(!v||!['status','prepare','recommend'].includes(v.op))throw new AgentsToZUseControlError('SDK 관리 동작을 확인하세요.','SDK_REQUEST_INVALID');sdkProject={op:v.op,...(v.op==='recommend'?{projectGoal:commonMemoryText(v.projectGoal)}:{})};}
   const commonMemory:AgentsToZUseActionRequest['commonMemory']=action==='common-memory'?parseAgentsToZUseCommonMemory(body.commonMemory):undefined;
@@ -596,6 +601,8 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
   return { ...(team?{team}:{}), ...(platformCli?{platformCli}:{}), ...(aiLabelJob?{aiLabelJob}:{}), ...(overview?{testerOverview:overview}:{}), ...(tester?{tester}:{}), ...(controlQuery ? {controlQuery} : {}), ...(historyRange ? {userMemoryRange:historyRange} : {}), ...(controlProposal ? {controlProposal} : {}), action, controllerPortId, portId, agent, projectName, ...(action==='register-existing-project'?{folderName}:{}), workspaceRootId, channelId, channelName, visibility, archiveMemory, sessionId, after, requestId, instruction, ...(shellCommand?{shellCommand}:{}),
     ...(action==='service-use'?{serviceUse:parseServiceUseRequest(body.serviceUse)}:{}),
     ...(action==='read-reference'?{reference:parseAgentMentionReference(body.reference)}:{}),
+    ...(action==='recall-control-context'&&body.includeRelations===true?{includeRelations:true}:{}),
+    ...(action==='recall-user-profile'&&body.includeExplanation===true?{includeExplanation:true}:{}),
     ...(action==='resolve-target'?{targetAlias}:{}),
     ...(commonMemory?{commonMemory}:{}),...(sdkProject?{sdkProject}:{}),...(projectGoal?{projectGoal}:{}),...(commonMemoryIds?{commonMemoryIds}:{}),...(commonMemorySelections?{commonMemorySelections}:{}),
     ...(action === 'meta-common-memory' ? { metaMemory: parseMetaMemoryRequest(body.metaMemory) } : {}),

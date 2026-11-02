@@ -1,3 +1,4 @@
+import {remoteDesktopClientBundle} from './computerUseScopeProtocol';
 /** Background native control is independent of Screen pairing, OPS and browser grants. */
 export const COMPUTER_USE_PATH = '/api/agent-runtime/computer-use';
 export const COMPUTER_USE_AGENT_PATH = '/api/computer-use-agent';
@@ -30,7 +31,8 @@ export const COMPUTER_REFUSAL_REASONS = ['stale-observation', 'unsupported-actio
   'target-changed', 'target-refused', 'permission-or-secure-input', 'worker-halted', 'native-refused',
   'coordinate-unavailable', 'screen-consent-required', 'screen-permission-required', 'screen-image-too-large',
   'control-update-required'] as const;
-export type ComputerRefusalReason = typeof COMPUTER_REFUSAL_REASONS[number] | 'worker-refused';
+/** `person-has-control` is the host's own (SR-34: a person controls this Mac through AgentsToZ Screen), never a worker's. */
+export type ComputerRefusalReason = typeof COMPUTER_REFUSAL_REASONS[number] | 'worker-refused' | 'person-has-control';
 export interface ComputerReceipt {requestId: string; state: ComputerActionState; reason?: ComputerRefusalReason}
 /**
  * The Workroom session and team lane an agent request comes from. Only an authenticated transport sets it
@@ -68,7 +70,7 @@ export const COMPUTER_USE_REFUSED_BUNDLE_PREFIXES: readonly string[] = ['com.int
 export const COMPUTER_USE_REFUSED_TEAMS: readonly string[] = ['DA8QKAQ2C9'];
 export function isRefusedComputerTarget(t: {bundleId: string; teamId: string}) {
   const bundle = t.bundleId.toLowerCase();
-  return COMPUTER_USE_REFUSED_BUNDLES.some(b => b.toLowerCase() === bundle)
+  return remoteDesktopClientBundle(bundle) || COMPUTER_USE_REFUSED_BUNDLES.some(b => b.toLowerCase() === bundle)
     || COMPUTER_USE_REFUSED_BUNDLE_PREFIXES.some(p => bundle.startsWith(p.toLowerCase()))
     || COMPUTER_USE_REFUSED_TEAMS.includes(t.teamId);
 }

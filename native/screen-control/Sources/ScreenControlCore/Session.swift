@@ -23,24 +23,65 @@ public enum SessionEndReason: UInt8, Sendable, CaseIterable {
     /// Version 2: the phone of this session turned screen control off (`ControlMessage.turnOff`), as the menu's 끄기
     /// does. A version-1 session never carries it; its phone would hear `turnedOff`.
     case turnedOffFromDevice = 7
+    /// Version 5: a registered phone connected while this Mac controller watched, and the phone's session took over
+    /// (DESIGN 6.5). An older peer hears `replaced`.
+    case takenOver = 8
+    /// Version 5: another session holds the Mac; this one was refused after the key exchange. An older peer hears a
+    /// goodbye that names no reason.
+    case busy = 9
+    /// Version 5: the Mac cannot capture its screen (screen recording is not allowed). An older peer hears `endedAtMac`.
+    case captureUnavailable = 10
 
     public var encoded: Data { Data([rawValue]) }
 
     /// The first session version that names this reason.
-    public var minimumVersion: UInt16 { self == .turnedOffFromDevice ? 2 : 1 }
+    public var minimumVersion: UInt16 {
+        switch self {
+        case .idle, .timeLimit, .endedAtMac, .turnedOff, .revoked, .replaced: 1
+        case .turnedOffFromDevice: 2
+        case .takenOver, .busy, .captureUnavailable: 5
+        }
+    }
+
+    /// The reason a session of an older version hears instead; nil for a goodbye that names none.
+    private var fallback: SessionEndReason? {
+        switch self {
+        case .turnedOffFromDevice: .turnedOff
+        case .takenOver: .replaced
+        case .captureUnavailable: .endedAtMac
+        case .busy: nil
+        case .idle, .timeLimit, .endedAtMac, .turnedOff, .revoked, .replaced: self
+        }
+    }
 
     /// The `.close` payload for a session of `version`: the nearest reason that version knows, so an older phone never
-    /// reads a reason it would not recognise.
+    /// reads a reason it would not recognise. A reason with no older counterpart leaves the payload empty, as a goodbye
+    /// that names no reason.
     public func closePayload(version: UInt16) -> Data {
-        minimumVersion <= version ? encoded : SessionEndReason.turnedOff.encoded
+        var reason: SessionEndReason? = self
+        while let current = reason, current.minimumVersion > max(version, 1) { reason = current.fallback }
+        return reason?.encoded ?? Data()
     }
 
-    /// The reason a `.close` payload names: nil for the phone's empty goodbye, and for anything this version does not
-    /// know, which still ends the session.
+    /// The reason a `.close` payload names, read as this build's newest version: nil for the phone's empty goodbye, and
+    /// for anything it does not know, which still ends the session.
     public init?(closePayload: Data) {
-        guard closePayload.count == 1, let reason = SessionEndReason(rawValue: closePayload[closePayload.startIndex]) else { return nil }
+        self.init(closePayload: closePayload, version: ScreenControlProtocol.version)
+    }
+
+    /// The reason as a session of `version` reads it: a reason newer than the session is unknown there, as it would be to
+    /// a build of that version, and the session still ends.
+    public init?(closePayload: Data, version: UInt16) {
+        guard closePayload.count == 1, let reason = SessionEndReason(rawValue: closePayload[closePayload.startIndex]),
+              reason.minimumVersion <= version else { return nil }
         self = reason
     }
+}
+
+/// What a Mac controller's registration lets its session do (DESIGN 6.5): told once at the start of a version-5 session
+/// (`ControlMessage.sessionLimits`). The input the Mac actually takes is `ScreenInputAvailability`.
+public enum ScreenSessionGrant: UInt8, Sendable, CaseIterable {
+    case view = 1, control = 2
 }
 
 /// The standard session ends after one hour without input; active sessions have no wall-clock limit.
@@ -127,6 +168,26 @@ public typealias LocalInputProbe = @Sendable (LocalInputKind) -> Double?
 /// Unavailable observation and a held physical key/button both keep remote input paused.
 public enum ScreenInputAvailability: UInt8, CaseIterable, Sendable {
     case ready = 0, permissionsRequired, secureInput, monitorUnavailable, localActivity
+    /// Version 5: the Mac controller's registration grants viewing only; the Mac drops its input. An older session hears
+    /// `permissionsRequired`, as before.
+    ///
+    /// A controller granted control that may still only watch hears why instead (DESIGN 6.5, 12절):
+    /// `notificationsUnconfirmed` or `controlNotInThisBuild` for the Mac's release gate (9절), `permissionsRequired` when
+    /// the Mac's own input protection could not start.
+    case viewOnly = 5
+    /// Version 5: granted control, but the Mac lets it only watch until its notifications and remote stop are confirmed to
+    /// reach the owner's phones (DESIGN 9절 「pushLive」).
+    case notificationsUnconfirmed = 6
+    /// Version 5: granted control, but this Mac's AgentsToZ Screen does not open control to another Mac yet (S-M3).
+    case controlNotInThisBuild = 7
+
+    /// The first session version that carries this reason.
+    public var minimumVersion: UInt16 {
+        switch self {
+        case .ready, .permissionsRequired, .secureInput, .monitorUnavailable, .localActivity: 3
+        case .viewOnly, .notificationsUnconfirmed, .controlNotInThisBuild: 5
+        }
+    }
 }
 
 public struct PhysicalInputSnapshot: Sendable {
@@ -134,9 +195,12 @@ public struct PhysicalInputSnapshot: Sendable {
     public var lastEvent: ContinuousClock.Instant?
     public var held: Bool
     public var secureInput: Bool
-    public init(available: Bool, lastEvent: ContinuousClock.Instant? = nil, held: Bool = false, secureInput: Bool = false) {
+    /// The host's explicit session-bar hold, separate from ordinary physical activity.
+    public var heldAtMac: Bool
+    public init(available: Bool, lastEvent: ContinuousClock.Instant? = nil, held: Bool = false, secureInput: Bool = false,
+                heldAtMac: Bool = false) {
         self.available = available; self.lastEvent = lastEvent; self.held = held
-        self.secureInput = secureInput
+        self.secureInput = secureInput; self.heldAtMac = heldAtMac
     }
 }
 public typealias PhysicalInputProbe = @Sendable () -> PhysicalInputSnapshot
@@ -170,6 +234,7 @@ public struct LocalPriority: Sendable {
     public let policy: Policy
     public private(set) var isPaused = false
     public private(set) var availability: ScreenInputAvailability = .ready
+    public private(set) var heldAtMac = false
     private var injected: [LocalInputKind: [ContinuousClock.Instant]] = [:]
     private var lastLocal: ContinuousClock.Instant?
 
@@ -206,10 +271,11 @@ public struct LocalPriority: Sendable {
     }
 
     public mutating func updatePhysical(_ snapshot: PhysicalInputSnapshot, at now: ContinuousClock.Instant) -> Change? {
+        heldAtMac = snapshot.heldAtMac
         if let event = snapshot.lastEvent, event <= now, lastLocal.map({ event > $0 }) ?? true { lastLocal = event }
         // Secure Event Input hides keyboard activity from a passive tap. Never interpret that silence as idle.
         let reason: ScreenInputAvailability = !snapshot.available ? .monitorUnavailable : snapshot.secureInput ? .secureInput
-            : snapshot.held || (lastLocal.map { now < $0 + policy.window } ?? false) ? .localActivity : .ready
+            : snapshot.heldAtMac || snapshot.held || (lastLocal.map { now < $0 + policy.window } ?? false) ? .localActivity : .ready
         availability = reason
         let pause = reason != .ready
         defer { isPaused = pause }

@@ -2,9 +2,10 @@ import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {computerCallerGeneration,isLiveComputerCallerGeneration,type AuthenticatedComputerCaller} from './computerUseCaller';
 import type {ComputerUseNativeChannel} from './computerUseNative';
 import {ComputerScopeApprovalVerifier,parseScopeOwner,type ScopeCaller,type ScopeOwner} from './computerUseScopeApproval';
-import {COMPUTER_USE_SCOPE_LIMITS,COMPUTER_USE_SCOPE_OPERATIONS,COMPUTER_USE_SCOPE_PERMISSIONS,parseComputerScopeAgentRequest,parseComputerUseScope,protectedScopeBundle,sameComputerUseScope,type ComputerUseScope,type ComputerUseScopeLimits} from './computerUseScopeProtocol';
+import {COMPUTER_USE_SCOPE_LIMITS,COMPUTER_USE_SCOPE_OPERATIONS,COMPUTER_USE_SCOPE_PERMISSIONS,computerUseRemoteRefusal,parseComputerScopeAgentRequest,parseComputerUseScope,protectedScopeBundle,remoteDesktopClientBundle,sameComputerUseScope,type ComputerUseScope,type ComputerUseScopeLimits} from './computerUseScopeProtocol';
 import type {ComputerUseRecovery,ScopedRecoveryOperation} from './computerUseRecovery';
 import {callerHostOwns,unknownCallerHost,type ComputerCallerHost} from './computerUseCallerHost';
+import {noRemoteHumanInput,remoteHumanInputGuidance,type RemoteHumanInputReader} from './computerUseRemoteHumanInput';
 
 const nowDefault=()=>Date.now(), hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const id=(v:unknown)=>typeof v==='string'&&Buffer.byteLength(v)<=200&&/^[\x21-\x7e]+$/.test(v);
@@ -46,6 +47,10 @@ type NativeCaller=ScopeCaller;
 type Pending={connectionId:string;caller:AuthenticatedComputerCaller;request:ReturnType<ComputerScopeApprovalVerifier['request']>};
 type Snapshot={id:string;nativeId:string;expires:number;displays:Map<string,{width:number;height:number;originX:number;originY:number}>;applications:Set<string>;bundles:Map<string,string>;foreground:string|null;capture?:{displayId:string;width:number;height:number}};
 const INPUT_OPERATIONS=new Set(['scope-click','scope-type-text','scope-key','scope-scroll','scope-drag','scope-focus-app']);
+// Operations that may use the real pointer (a left click falls back to it when no accessible control is under it).
+const POINTER_OPERATIONS=new Set(['scope-click','scope-scroll','scope-drag']);
+/** The main display (origin 0,0) of an observation, or its first one. */
+const mainDisplay=(obs:Snapshot)=>[...obs.displays].find(([,d])=>d.originX===0&&d.originY===0)?.[0]??obs.displays.keys().next().value as string|undefined;
 // setTimeout runs a longer delay at once, so a grant's 30-day horizon is waited for in steps.
 const MAX_TIMER_MS=2_147_483_647;
 // A spent request ID whose full receipt was dropped (only the newest are kept): it was settled and never runs again.
@@ -53,6 +58,10 @@ const EVICTED_GUIDANCE='이 요청 ID는 이미 사용됐고 결과가 정해졌
 const evicted=(requestId:string)=>({success:true,receipt:{requestId,state:'evicted'},guidance:EVICTED_GUIDANCE});
 const OWN_HOST_REFUSED='이 AI가 실행 중인 앱(자기 호스트)에는 컴퓨터 유즈로 입력하지 않습니다. 그 앱의 창은 사람이 다룹니다.';
 const HOST_UNKNOWN_REFUSED='이 AI 연결이 실행 중인 앱을 확인하지 못해 보내지 않았습니다. AI 연결을 다시 연 뒤 상태를 확인하세요.';
+/** The caller's "own host" refusal: its app for a local AI, this Mac's terminals, AI apps and tools for a remote one. */
+const hostRefusal=(host:ComputerCallerHost)=>host.state==='remote'?computerUseRemoteRefusal('REMOTE_LOOP_TARGET'):Error(host.state==='unknown'?HOST_UNKNOWN_REFUSED:OWN_HOST_REFUSED);
+/** An application scope belongs to a local AI whose host is read; a remote AI only ever has the whole Mac (RC-3). */
+const appScopeHostRefusal=(host:ComputerCallerHost)=>host.state==='remote'?computerUseRemoteRefusal('REMOTE_OPERATION_REFUSED'):hostRefusal(host);
 // Control refuses a request whose deadline is past its own wait limit as `approval-expired`. A request made just now can
 // only hit that when the running Control waits less than this host asks (an older Control: 120 s against 10 min), so that
 // Control process is remembered as needing an update until another Control process answers (2026-10-31, 1호: Control 1557).
@@ -77,11 +86,16 @@ export class ComputerUseScopeHost {
   /**
    * `callerHost`: the app the connection's AI runs in, resolved by the runtime from its process ancestry at registration
    * (src/computerUseCallerHost.ts). Without it every host is unknown: no application scope and no desktop input.
+   * `remoteHumanInput`: a person controlling this Mac from another device through AgentsToZ Screen in the last 10 s
+   * (src/computerUseRemoteHumanInput.ts). Without it nothing is read and input goes on as before.
    */
   constructor(private readonly channel:ComputerUseNativeChannel,private readonly recovery:ComputerUseRecovery,private readonly now:()=>number=nowDefault,
     private readonly callerHost:(sessionId:string)=>Promise<ComputerCallerHost>=async()=>unknownCallerHost('resolver-missing'),
-    private readonly limits:ComputerUseScopeLimits=COMPUTER_USE_SCOPE_LIMITS){this.approvals=new ComputerScopeApprovalVerifier(now);}
+    private readonly limits:ComputerUseScopeLimits=COMPUTER_USE_SCOPE_LIMITS,
+    private readonly remoteHumanInput:RemoteHumanInputReader=noRemoteHumanInput){this.approvals=new ComputerScopeApprovalVerifier(now);}
   private async host(sessionId:string):Promise<ComputerCallerHost>{try{return await this.callerHost(sessionId);}catch{return unknownCallerHost('resolver-failed');}}
+  /** A reader that fails is the same as no file: today's behaviour, with the person's Control bar and Control's guards. */
+  private async remotePerson(){try{return await this.remoteHumanInput();}catch{return null;}}
   private caller(caller:AuthenticatedComputerCaller):NativeCaller {const generation=computerCallerGeneration(caller);if(!generation)throw Error('AI 연결이 끝났습니다.');return {sessionId:caller.sessionId,lane:caller.lane,generation};}
   private safeRecovery(scope:ComputerUseScope){try{return this.recovery.unresolvedScope(scope);}catch{return true;}}
   private retire(body:Record<string,unknown>){if(this.channel.retire)this.channel.retire(body);else void this.channel.request(body).catch(()=>this.channel.dispose());}
@@ -111,7 +125,7 @@ export class ComputerUseScopeHost {
     if(this.safeRecovery(scope))throw Error('이 범위에 결과를 확인하지 못한 작업이 있습니다. 사람이 먼저 확인해야 합니다.');
     // An application scope is never the app this AI runs in, and an unread host cannot show that it is not.
     if(scope.kind==='application'){const host=await this.host(caller.sessionId);
-      if(host.state!=='known')throw Error(HOST_UNKNOWN_REFUSED);if(callerHostOwns(host,scope.application.bundleId))throw Error(OWN_HOST_REFUSED);}
+      if(host.state!=='known')throw appScopeHostRefusal(host);if(callerHostOwns(host,scope.application.bundleId))throw Error(OWN_HOST_REFUSED);}
     const {owner,value:native}=await this.checkNative();
     if(native.accessibility!==true||native.screenRecording!==true||native.secureInput===true)throw Error('Control의 손쉬운 사용과 화면 기록 권한을 확인하고 보안 입력을 끝낸 뒤 다시 요청하세요.');
     const nativeCaller=this.caller(caller);
@@ -154,6 +168,8 @@ export class ComputerUseScopeHost {
   }
   async refreshCapability(){try{await this.checkNative();}catch{}return this.managementStatus();}
   knownStanding(){return this.standingState??null;}
+  /** Control's status as last read here, without a new read or sync (a remote request-access names an outdated Control). */
+  lastNative():Record<string,unknown>|undefined{return this.native?{...this.native}:undefined;}
   /** Read fresh from Control: the person may have turned it on or off there (or pressed 「중단」) since the last status. */
   async standing():Promise<{since:number}|null>{try{await this.checkNative();}catch{return null;}return this.standingState??null;}
   /** The person's 「끄기」 in the main app. Control halts the open grant itself. An older Control has nothing to end. */
@@ -178,6 +194,8 @@ export class ComputerUseScopeHost {
   async agentStatus(caller:AuthenticatedComputerCaller){await this.sync();const c=this.caller(caller),age=this.native&&typeof this.native.observedAt==='number'?this.now()-this.native.observedAt:-1;if(age<0||age>10000)try{await this.checkNative();}catch{}if(computerCallerGeneration(caller)!==c.generation)throw Error('AI 연결이 끝났습니다.');const mine=[...this.grants.values()].filter(g=>g.caller.generation===c.generation);
     return {native:this.native??{success:false,code:'scope-status-unchecked'},grants:mine.map(g=>this.publicGrant(g,true)),...(mine.some(g=>!g.halted&&g.person)?{guidance:PERSON_HOLDS}:{}),pending:[...this.pending.values()].filter(p=>p.request.caller.generation===c.generation).map(p=>({expiresAt:p.request.expiresAt}))};}
   revoke(id:string){const g=this.grants.get(id);if(g)this.remove(g);return {success:true};}
+  /** Open (not halted) grants by connection: for the runtime's remote summary and its chain guard. Nothing secret. */
+  grantHolders(){this.reap();return [...this.grants.values()].filter(g=>!g.halted).map(g=>({sessionId:g.caller.sessionId,grantId:g.id,person:g.person,usedAt:g.usedAt}));}
   endSession(sessionId:string){let had=false;for(const g of [...this.grants.values()])if(g.caller.sessionId===sessionId){had=true;this.remove(g);}for(const[id,p]of this.pending)if(p.request.caller.sessionId===sessionId){had=true;this.pending.delete(id);this.approvals.cancel(id);}if(had)this.retire({operation:'scope-revoke-session',sessionId});}
   private holder(g:Grant,person:boolean){if(person)g.observation=undefined;g.person=person;}
   private halt(g:Grant){if(!g.halted){g.halted=true;g.epoch++;}g.observation=undefined;this.retireGrant(g);}
@@ -185,17 +203,21 @@ export class ComputerUseScopeHost {
     const c=this.caller(caller),r=parseComputerScopeAgentRequest(input);if(r.operation==='scope-status')return this.agentStatus(caller);this.reap();
     const g=[...this.grants.values()].find(g=>hash(g.secret)===hash(r.grant));
     if(!g||g.caller.generation!==c.generation||g.caller.sessionId!==c.sessionId||g.caller.lane!==c.lane)throw Error('사람이 허용한 컴퓨터 제어 연결이 필요합니다.');
-    g.usedAt=this.now();
+    // An input held for a person below did nothing, so it does not count as use (the idle hand-over still sees the grant idle).
+    const lastUsed=g.usedAt;g.usedAt=this.now();
     if(r.operation==='scope-receipt'){const record=g.receipts.get(r.requestId);if(record)return {success:true,receipt:{...record.receipt}};if(g.spent.has(r.requestId))return evicted(r.requestId);throw Error('이 요청의 영수증이 없습니다.');}
     this.active(g);if(r.epoch!==g.epoch)throw Error('새 관찰이 필요합니다.');if(r.operation==='scope-request-human'){this.halt(g);return {success:true,owner:'human'};}
     // Checked again on every operation, not only at approval: an application scope on the caller's own host does nothing,
     // and desktop input needs a host it can tell apart (below, against the observed target).
-    const host=await this.host(c.sessionId);this.active(g);
-    if(g.scope.kind==='application'&&(host.state!=='known'||callerHostOwns(host,g.scope.application.bundleId)))throw Error(host.state!=='known'?HOST_UNKNOWN_REFUSED:OWN_HOST_REFUSED);
-    if(host.state!=='known'&&INPUT_OPERATIONS.has(r.operation))throw Error(HOST_UNKNOWN_REFUSED);
+    // Input also reads whether a person is controlling this Mac from another device right now (SR-34); it refuses below,
+    // after the same request ID's earlier receipt has had its say and before anything is recorded or sent.
+    const host=await this.host(c.sessionId),person=INPUT_OPERATIONS.has(r.operation)?await this.remotePerson():null;this.active(g);
+    if(g.scope.kind==='application'&&(host.state!=='known'||callerHostOwns(host,g.scope.application.bundleId)))throw appScopeHostRefusal(host);
+    // A remote caller's host is named by the receiving host (its refused set); only an unread local host refuses all input.
+    if(host.state==='unknown'&&INPUT_OPERATIONS.has(r.operation))throw Error(HOST_UNKNOWN_REFUSED);
     if(g.busy)throw Error('다른 제어 작업이 진행 중입니다.');
     if(r.operation==='scope-observe'){
-      g.busy=true;g.observation=undefined;try{
+      let observed:Record<string,unknown>;g.busy=true;g.observation=undefined;try{
         let answer:Record<string,any>;try{answer=await this.channel.request({operation:'scope-observe',grant:g.nativeGrant,caller:g.caller});}catch(error){if((error as {notDispatched?:boolean})?.notDispatched!==true)this.halt(g);throw Error('도우미 관찰 결과를 확인하지 못했습니다.');}
         this.active(g);if(answer.halted===true){this.halt(g);throw Error('제어가 중단됐습니다.');}
         if(personHolds(answer)){this.holder(g,true);throw Error(PERSON_HOLDS);}
@@ -206,36 +228,49 @@ export class ComputerUseScopeHost {
         for(const a of answer.applications){if(!exact(a,['id','name','bundleId'])||!id(a.id)||applications.has(a.id)||typeof a.name!=='string'||a.name.length>200||typeof a.bundleId!=='string'||! /^[A-Za-z0-9.-]{1,200}$/.test(a.bundleId)||protectedScopeBundle(a.bundleId)||g.scope.kind==='application'&&a.bundleId!==g.scope.application.bundleId)throw Error('앱 정보를 확인하지 못했습니다.');applications.add(a.id);bundles.set(a.id,a.bundleId);}
         if(answer.foreground!==null&&(!exact(answer.foreground,['applicationId','bundleId','pid','processStart'])||!applications.has(answer.foreground.applicationId)||bundles.get(answer.foreground.applicationId)!==answer.foreground.bundleId||protectedScopeBundle(answer.foreground.bundleId)||!Number.isSafeInteger(answer.foreground.pid)||answer.foreground.pid<1||typeof answer.foreground.processStart!=='string'||! /^[1-9][0-9]{0,19}$/.test(answer.foreground.processStart)||g.scope.kind==='application'&&(answer.foreground.pid!==g.scope.application.pid||answer.foreground.processStart!==g.scope.application.processStart)))throw Error('전면 앱 정보를 확인하지 못했습니다.');
         this.holder(g,false);const observationId=randomUUID();g.observation={id:observationId,nativeId:answer.snapshotId,expires:this.now()+15000,displays,applications,bundles,foreground:answer.foreground?.bundleId??null};
-        return {success:true,epoch:g.epoch,observationId,observation:{scope:structuredClone(g.scope),applications:answer.applications,displays:answer.displays,foreground:answer.foreground}};
+        observed={success:true,epoch:g.epoch,observationId,observation:{scope:structuredClone(g.scope),applications:answer.applications,displays:answer.displays,foreground:answer.foreground}};
       }finally{g.busy=false;}
+      if(r.capture!==true)return observed;
+      // observe {capture:true}: the same observation captured right away (one round trip for an AI on another Mac).
+      // Its display is the one asked for, or the main one (origin 0,0). A capture that fails fails the whole call.
+      const obs=g.observation!,displayId=typeof r.displayId==='string'?r.displayId:mainDisplay(obs);
+      if(!displayId)throw Error('캡처할 화면이 관찰에 없습니다. 다시 observe하세요.');
+      return {...observed,image:await this.captureFrom(g,obs,displayId,r.maxBytes)};
     }
     const fingerprint=r.operation==='scope-capture'?undefined:hash(JSON.stringify(r));
     if(fingerprint!==undefined){const prior=g.receipts.get(r.requestId);if(prior){if(prior.fingerprint!==fingerprint)throw Error('같은 요청 ID의 내용이 달라졌습니다.');return {success:true,receipt:{...prior.receipt}};}
       if(g.spent.has(r.requestId))return evicted(r.requestId);}
     const obs=g.observation;if(!obs||obs.id!==r.observationId||obs.expires<=this.now())throw Error('대상을 새로 관찰하세요.');
-    if(r.operation==='scope-capture'){
-      if(!obs.displays.has(r.displayId))throw Error('화면을 새로 관찰하세요.');g.busy=true;obs.capture=undefined;
-      try{let answer:Record<string,any>;try{answer=await this.channel.request({operation:'scope-capture',grant:g.nativeGrant,caller:g.caller,snapshotId:obs.nativeId,displayId:r.displayId});}catch(error){if((error as {notDispatched?:boolean})?.notDispatched!==true)this.halt(g);throw error;}this.active(g);
-        if(personHolds(answer)){this.holder(g,true);throw Error(PERSON_HOLDS);}
-        if(answer.success!==true){if(answer.halted===true||answer.notDispatched!==true)this.halt(g);throw Error(`화면을 읽지 못했습니다: ${typeof answer.code==='string'&&/^[a-z-]{1,60}$/.test(answer.code)?answer.code:'capture-failed'}`);}
-        if(g.observation!==obs||obs.expires<=this.now()||answer.halted===true||answer.displayId!==r.displayId||answer.mediaType!=='image/jpeg'||typeof answer.data!=='string'||!answer.data.length||answer.data.length>320000||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(answer.data)||!Number.isSafeInteger(answer.width)||!Number.isSafeInteger(answer.height)||answer.width<1||answer.height<1||answer.width>1280||answer.height>1280||!finite(answer.displayWidth)||!finite(answer.displayHeight)||answer.displayWidth<=0||answer.displayHeight<=0||!finite(answer.originX)||!finite(answer.originY)){this.halt(g);throw Error('화면 결과를 확인하지 못했습니다.');}
-        const d=obs.displays.get(r.displayId)!;if(d.width!==answer.displayWidth||d.height!==answer.displayHeight||d.originX!==answer.originX||d.originY!==answer.originY){g.observation=undefined;throw Error('화면 구성이 바뀌었습니다.');}obs.capture={displayId:r.displayId,width:d.width,height:d.height};
-        return {success:true,observationId:obs.id,image:{mediaType:answer.mediaType,data:answer.data,width:answer.width,height:answer.height,displayWidth:answer.displayWidth,displayHeight:answer.displayHeight,displayId:answer.displayId,originX:answer.originX,originY:answer.originY}};
-      }finally{g.busy=false;}
-    }
+    if(r.operation==='scope-capture')return {success:true,observationId:obs.id,image:await this.captureFrom(g,obs,r.displayId,r.maxBytes)};
     // The memory bound of the spent IDs, not a time: the grant ends so request-access can ask the person again.
     if(g.spent.size>=this.limits.actionsPerGrant){this.remove(g);throw Error(`이 승인으로 할 수 있는 작업 수(${this.limits.actionsPerGrant}개)를 다 써서 허용을 끝냈습니다. request-access로 다시 승인을 요청하세요.`);}
-    if(['scope-click','scope-scroll','scope-drag'].includes(r.operation)){
+    if(POINTER_OPERATIONS.has(r.operation)){
       const cap=obs.capture;if(!cap||cap.displayId!==r.displayId||r.x>=cap.width||r.y>=cap.height||r.operation==='scope-drag'&&(r.endX>=cap.width||r.endY>=cap.height))throw Error('화면을 다시 확인하세요.');
     }
     if(r.operation==='scope-focus-app'&&!obs.applications.has(r.applicationId))throw Error('앱을 새로 관찰하세요.');
     // Desktop input never goes to the caller's own host: not by focusing it, not while it is the observed foreground.
     // Focusing another app is how the AI leaves its host, so focus-app is judged by its target alone; Control still
     // applies its own foreground and overlay rules. A background host window under a desktop pointer is not told apart
-    // here (that needs the native hit test).
+    // here (that needs the native hit test). A remote caller's "host" is this Mac's terminals, AI apps and tools (D2).
+    // Remote desktop clients are refused for every caller the same way (RC-4): Control takes a click they inject as a
+    // person's, so typing or clicking into one would act on another Mac as a person. A remote caller sends no pointer
+    // input at all while one is running: a click on its window behind could bring it forward and land in it.
     if(r.operation==='scope-focus-app'){const target=obs.bundles.get(r.applicationId);
-      if(!target||protectedScopeBundle(target))throw Error('이 앱은 컴퓨터 유즈 대상이 될 수 없습니다.');if(callerHostOwns(host,target))throw Error(OWN_HOST_REFUSED);}
-    else if(INPUT_OPERATIONS.has(r.operation)&&callerHostOwns(host,obs.foreground))throw Error(OWN_HOST_REFUSED);
+      if(!target||protectedScopeBundle(target))throw Error('이 앱은 컴퓨터 유즈 대상이 될 수 없습니다.');if(callerHostOwns(host,target))throw hostRefusal(host);
+      if(remoteDesktopClientBundle(target))throw computerUseRemoteRefusal('REMOTE_DESKTOP_CLIENT');}
+    else if(INPUT_OPERATIONS.has(r.operation)){
+      if(callerHostOwns(host,obs.foreground))throw hostRefusal(host);
+      if(remoteDesktopClientBundle(obs.foreground))throw computerUseRemoteRefusal('REMOTE_DESKTOP_CLIENT');
+      if(host.state==='remote'&&POINTER_OPERATIONS.has(r.operation)&&[...obs.bundles.values()].some(bundle=>remoteDesktopClientBundle(bundle)))throw computerUseRemoteRefusal('REMOTE_DESKTOP_CLIENT');
+    }
+    // A person is controlling this Mac from another device (SR-34): refused before anything is recorded or sent, in the
+    // shape of the Control bar's 「직접 하기」 — a settled `refused` receipt for this request ID, no halt, no recovery row.
+    if(person){
+      const receipt:Record<string,unknown>={requestId:r.requestId,state:'refused',reason:'person-has-control'};
+      g.spent.add(r.requestId);g.receipts.set(r.requestId,{fingerprint:fingerprint!,receipt});
+      if(g.receipts.size>this.limits.receiptsKept)g.receipts.delete(g.receipts.keys().next().value as string);
+      g.observation=undefined;g.usedAt=lastUsed;return {success:true,receipt:{...receipt},owner:'person',guidance:remoteHumanInputGuidance({remoteCaller:host.state==='remote'})};
+    }
     let recoveryId:string;try{recoveryId=this.recovery.beginScope({scope:g.scope,operation:r.operation as ScopedRecoveryOperation,requestId:r.requestId,sessionId:c.sessionId,lane:c.lane});}catch{throw Error('결과를 확인하지 못한 작업이 있거나 기록을 남기지 못해 보내지 않았습니다.');}
     const receipt:Record<string,unknown>={requestId:r.requestId,state:'unknown'};g.spent.add(r.requestId);g.receipts.set(r.requestId,{fingerprint:fingerprint!,receipt});
     // Only a settled receipt is dropped: an unknown or takeover halts the grant, so it is always the newest.
@@ -257,6 +292,17 @@ export class ComputerUseScopeHost {
       if(answer.success===true&&answer.receipt?.requestId===r.requestId){const samples=scopeGuardSamples(answer.receipt.guardSamples);if(samples)receipt.guardSamples=samples;}
       if(state==='unknown'||state==='human-takeover'||answer.halted===true)this.halt(g);
       return {success:true,receipt:{...receipt},...(g.halted?{owner:'human'}:{})};
+    }finally{g.busy=false;}
+  }
+  /** One capture of `displayId` from observation `obs`: its own operation, or right after observe with capture:true. */
+  private async captureFrom(g:Grant,obs:Snapshot,displayId:string,maxBytes?:number){
+    if(!obs.displays.has(displayId))throw Error('화면을 새로 관찰하세요.');this.active(g);if(g.busy)throw Error('다른 제어 작업이 진행 중입니다.');g.busy=true;obs.capture=undefined;
+    try{let answer:Record<string,any>;try{answer=await this.channel.request({operation:'scope-capture',grant:g.nativeGrant,caller:g.caller,snapshotId:obs.nativeId,displayId,...(maxBytes===undefined?{}:{maxBytes})});}catch(error){if((error as {notDispatched?:boolean})?.notDispatched!==true)this.halt(g);throw error;}this.active(g);
+      if(personHolds(answer)){this.holder(g,true);throw Error(PERSON_HOLDS);}
+      if(answer.success!==true){if(answer.halted===true||answer.notDispatched!==true)this.halt(g);throw Error(`화면을 읽지 못했습니다: ${typeof answer.code==='string'&&/^[a-z-]{1,60}$/.test(answer.code)?answer.code:'capture-failed'}`);}
+      if(g.observation!==obs||obs.expires<=this.now()||answer.halted===true||answer.displayId!==displayId||answer.mediaType!=='image/jpeg'||typeof answer.data!=='string'||!answer.data.length||answer.data.length>320000||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(answer.data)||Buffer.from(answer.data,'base64').length>(maxBytes??240000)||!Number.isSafeInteger(answer.width)||!Number.isSafeInteger(answer.height)||answer.width<1||answer.height<1||answer.width>1280||answer.height>1280||!finite(answer.displayWidth)||!finite(answer.displayHeight)||answer.displayWidth<=0||answer.displayHeight<=0||!finite(answer.originX)||!finite(answer.originY)){this.halt(g);throw Error('화면 결과를 확인하지 못했습니다.');}
+      const d=obs.displays.get(displayId)!;if(d.width!==answer.displayWidth||d.height!==answer.displayHeight||d.originX!==answer.originX||d.originY!==answer.originY){g.observation=undefined;throw Error('화면 구성이 바뀌었습니다.');}obs.capture={displayId,width:d.width,height:d.height};
+      return {mediaType:answer.mediaType,data:answer.data,width:answer.width,height:answer.height,displayWidth:answer.displayWidth,displayHeight:answer.displayHeight,displayId:answer.displayId,originX:answer.originX,originY:answer.originY};
     }finally{g.busy=false;}
   }
   dispose(){if(this.disposed)return;this.disposed=true;for(const g of [...this.grants.values()])this.remove(g);for(const[id]of this.pending)this.approvals.cancel(id);this.pending.clear();}

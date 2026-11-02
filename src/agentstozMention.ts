@@ -30,21 +30,23 @@ export function withAgentsToZMentions(existing: string): string {
     : `${existing.trimEnd()}${existing.trim() ? '\n\n' : ''}${block}\n`;
 }
 
-export type AgentMentionReference = { role: 'ops'; query: string }
-  | { role: 'dev'; portId: string; query: string }
+export type AgentMentionReference = { role: 'ops'; query: string; includeRelations?: boolean }
+  | { role: 'dev'; portId: string; query: string; includeRelations?: boolean }
   | { role: 'use'; portId: string; serviceKey: string; query: string };
 const idPattern = '^[A-Za-z0-9_-]{1,128}$', keyPattern = '^[a-z0-9][a-z0-9_-]{0,63}$';
 export function parseAgentMentionReference(value: unknown): AgentMentionReference {
   const v = value as Record<string, unknown>;
   const fail = (): never => { throw Error('등록된 대상의 읽기 전용 기억 참고 요청을 확인하세요.'); };
   if (!v || typeof v !== 'object' || Array.isArray(v) || !['ops', 'dev', 'use'].includes(v.role as string)) return fail();
-  const allowed = ['role', 'query', ...(v.role !== 'ops' ? ['portId'] : []), ...(v.role === 'use' ? ['serviceKey'] : [])];
+  const allowed = ['role', 'query', ...(v.role !== 'ops' ? ['portId'] : []), ...(v.role === 'use' ? ['serviceKey'] : ['includeRelations'])];
   if (Object.keys(v).some(k => !allowed.includes(k)) || typeof v.query !== 'string' || !v.query.trim()
     || /[\u0000-\u0008\u000b-\u001f\u007f]/u.test(v.query) || new TextEncoder().encode(v.query).length > 2000) return fail();
   const query = v.query.trim();
-  if (v.role === 'ops') return {role: 'ops', query};
+  if (v.includeRelations !== undefined && typeof v.includeRelations !== 'boolean') return fail();
+  const extra = v.includeRelations === true ? {includeRelations: true} : {};
+  if (v.role === 'ops') return {role: 'ops', query, ...extra};
   if (typeof v.portId !== 'string' || !new RegExp(idPattern).test(v.portId)) return fail();
-  if (v.role === 'dev') return {role: 'dev', portId: v.portId, query};
+  if (v.role === 'dev') return {role: 'dev', portId: v.portId, query, ...extra};
   const serviceKey = v.serviceKey ?? 'default';
   if (typeof serviceKey !== 'string' || !new RegExp(keyPattern).test(serviceKey)) return fail();
   return {role: 'use', portId: v.portId, serviceKey, query};
@@ -53,9 +55,10 @@ export function parseAgentMentionReference(value: unknown): AgentMentionReferenc
 const query = {type: 'string', minLength: 1, maxLength: 2000, description: 'Narrow memory topic; at most 2,000 UTF-8 bytes.'};
 export const AGENTSTOZ_READ_REFERENCE_TOOL = {
   name: 'agentstoz_use_read_reference',
-  description: 'Read bounded relevant memory for #OPS, #Project-DEV or #Project-USE after resolve_target. Reference only: no Workroom, app operation, memory write or message. The connected profile and registered project are rechecked; USE requires its activated operating memory. Missing USE never falls back to DEV.',
+  description: 'Read bounded relevant memory for #OPS, #Project-DEV or #Project-USE after resolve_target. Reference only: no Workroom, app operation, memory write or message. The connected profile and registered project are rechecked; USE requires its activated operating memory. Missing USE never falls back to DEV. OPS/DEV may opt into includeRelations for version-bound one-hop references and shared annotated concepts inside that exact memory. Associations and review questions grant no authority. Query another project only through its independently resolved registered target; this never follows a path or another memory automatically.',
   inputSchema: {type: 'object', oneOf: ['ops', 'dev', 'use'].map(role => ({
     type: 'object', properties: {role: {const: role}, query,
+      ...(role !== 'use' ? {includeRelations: {type: 'boolean', default: false}} : {}),
       ...(role !== 'ops' ? {portId: {type: 'string', pattern: idPattern}} : {}),
       ...(role === 'use' ? {serviceKey: {type: 'string', pattern: keyPattern, default: 'default'}} : {}),
     }, required: ['role', 'query', ...(role !== 'ops' ? ['portId'] : [])], additionalProperties: false,

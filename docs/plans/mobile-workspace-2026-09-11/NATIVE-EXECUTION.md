@@ -41,13 +41,13 @@ xcodebuild -project mobile/ios/AgentsToZMobile.xcodeproj \
   -derivedDataPath mobile/ios/build/DerivedData \
   CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES build
 python3 mobile/ios/scripts/simulator-smoke.py
-bun mobile/ios/scripts/check-workroom.ts
+bun scripts/emulator-e2e.ts j1-pty
 ```
 
-마지막 명령은 사설 IPv4가 필요하다. 공인/wildcard 대체는 없다. 실제 포털의 익명 smoke를 추가할 때만 로컬 환경 변수 `AGENTSTOZ_IOS_PORTAL_URL`에 본인 HTTPS origin을 넣어 실행한다. 주소·운영 계정·토큰·대화 원문을 fixture 소스나 공개 문서에 넣지 않는다. 기본 실행은 운영 포털에 접근하지 않는다.
+마지막 명령(check-workroom의 시뮬레이터 여정)은 에뮬레이터 하네스의 샌드박스 안에서만 시작하고 en0의 사설 IPv4가 필요하다(없으면 blocked). 공인/wildcard 대체는 없다. 레인은 en0 주소의 세 포트(페어링 서버·「남의」 origin·리다이렉트 QR origin)를 골라 프로필에 LAN inbound로 선언하고 `--lan-address`·`--lan-ports`로 넘긴 뒤, 도는 동안 lsof로 그 셋 말고 비-loopback 리스너가 없는지 단언한다. 이 Mac(Darwin 25.5)에서는 프로필의 `local ip "localhost:*"` 허용이 en0 주소에도 맞아 SBPL이 포트를 막지 못했으므로(2026-11-01 측정), 바인딩을 지키는 것은 이 lsof 단언이다. 맨 셸의 `bun mobile/ios/scripts/check-workroom.ts`는 샌드박스가 없어 거절된다. 컴파일 단계만은 `bun mobile/ios/scripts/check-workroom.ts --compile-only [simulator|device]`. 실제 포털의 익명 smoke를 추가할 때만 `--portal-url <본인 HTTPS origin>`을 준다(시뮬레이터 실행은 상속된 `AGENTSTOZ_IOS_PORTAL_URL`을 읽지 않는다. `--device` 실행은 그 환경 변수도 따른다). 주소·운영 계정·토큰·대화 원문을 fixture 소스나 공개 문서에 넣지 않는다. 기본 실행은 운영 포털에 접근하지 않는다.
 
 - `mobile/ios/build/evidence/`: 온보딩 캡처·실행 결과. 첫 부팅 시스템 알림이 캡처 위에 잠시 표시될 수 있다.
-- `mobile/ios/build/workroom-evidence/`: `result.json`, `run-status.json`, `workroom.png`, `resumed.png`, 선택적 `portal.png`. 결과의 `anonymousPortal`과 `actualIPhone`으로 실행 표면을 구분한다. 폴더는 Git에 넣지 않는다.
+- `mobile/ios/build/workroom-evidence/`(j1-pty 레인은 `mobile/ios/build/emulator-evidence/<runId>/j1-pty/`): `result.json`, `run-status.json`(passed·failed·blocked, 종료 코드 0·1·78), `workroom.png`, `resumed.png`, 선택적 `portal.png`. 결과의 `anonymousPortal`과 `actualIPhone`으로 실행 표면을 구분한다. 폴더는 Git에 넣지 않는다.
 - `native-ios.yml`: 이제 아래 XCUITest의 기본 실행을 수행한다. LAN/PTY 및 선택적 HTTPS 시험은 로컬에서 따로 실행한다. CI 완료를 해당 시험의 성공으로 해석하지 않는다.
 
 ## 후속: 실제 컨트롤과 앱 프로세스 재실행

@@ -245,7 +245,7 @@ bun run test:smoke
 bun run test:ios
 swift test --package-path mobile/ios/AgentsToZCore
 bun run preflight:ios
-bun mobile/ios/scripts/check-workroom.ts
+bun scripts/emulator-e2e.ts j1-pty   # check-workroom's simulator journey; it starts only inside the harness sandbox
 python3 mobile/ios/scripts/check-ui.py
 bun run build:portal
 bun run test:smoke:vercel

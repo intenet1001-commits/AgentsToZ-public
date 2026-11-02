@@ -57,6 +57,12 @@ public enum ScreenNotice: Equatable, Sendable {
     case inputAvailability(ScreenInputAvailability)
     case pointerPosition(ScreenPointerPosition)
     case textAndReturnResult(id: UInt32, ScreenTextReturnResult)
+    /// Version 5, to a Mac controller: what its registration grants and the limits the Mac holds the session to.
+    case sessionLimits(grant: ScreenSessionGrant, limits: SessionLimits)
+    /// Version 5, to a Mac controller: private addresses the Mac answers on. The Viewer only ever offers to save them.
+    case addressHint([ScreenPrivateNetworkRoute])
+    /// Version 5: B's person explicitly took input back, or handed it back at B.
+    case inputHeldAtMac(Bool)
 }
 
 /// What the phone shows of the Mac beside the picture, from its notices in order. Each notice changes only its own
@@ -65,6 +71,7 @@ public enum ScreenNotice: Equatable, Sendable {
 public struct ScreenMacState: Equatable, Sendable {
     /// Someone at the Mac is using its own mouse or keyboard; the Mac drops this phone's input until it says so.
     public private(set) var inputPaused = false
+    public private(set) var inputHeldAtMac = false
     /// Whether the Mac's screen is locked, as the Mac said outside the picture; nil until it says.
     public private(set) var locked: Bool?
     public private(set) var displayCount = 1
@@ -74,7 +81,14 @@ public struct ScreenMacState: Equatable, Sendable {
     public private(set) var videoQuality: ScreenVideoQuality?
     public private(set) var inputAvailability: ScreenInputAvailability?
     public private(set) var pointerPosition: ScreenPointerPosition?
-    public var canSendInput: Bool { !inputPaused && (inputAvailability == nil || inputAvailability == .ready) }
+    /// Version 5: what the Mac said this controller's registration grants, and the session's limits; nil until it says.
+    public private(set) var grant: ScreenSessionGrant?
+    public private(set) var limits: SessionLimits?
+    /// Version 5: the private addresses the Mac named, unsaved.
+    public private(set) var addressHint: [ScreenPrivateNetworkRoute] = []
+    public var canSendInput: Bool {
+        !inputPaused && !inputHeldAtMac && (inputAvailability == nil || inputAvailability == .ready) && grant != .view
+    }
 
     public init() {}
 
@@ -85,6 +99,7 @@ public struct ScreenMacState: Equatable, Sendable {
         switch notice {
         case .remoteInputPaused: inputPaused = true
         case .remoteInputResumed: inputPaused = false
+        case .inputHeldAtMac(let held): inputHeldAtMac = held
         case .macLocked: locked = true
         case .macUnlocked: locked = false
         case let .displays(count, current):
@@ -94,10 +109,17 @@ public struct ScreenMacState: Equatable, Sendable {
         case .videoQuality(let quality): videoQuality = quality
         case .inputAvailability(let reason): inputAvailability = reason
         case .pointerPosition(let position): pointerPosition = position
+        case let .sessionLimits(grant, limits):
+            self.grant = grant
+            self.limits = limits
+        case .addressHint(let routes): addressHint = routes
         case .spaceResult, .spaceChanged, .textAndReturnResult: break
         }
     }
 }
+
+/// A version-5 viewer cannot safely continue after it has lost an ordered state notice or its consumer.
+enum ScreenViewerNoticeError: Error, Equatable { case overflow, consumerEnded }
 
 /// A screen session from the phone: pictures in, input and a keyframe request when the phone has none out, `.close`
 /// on the way out.
@@ -105,10 +127,11 @@ public final class ScreenViewer: Sendable {
     let connection: SecureConnection
     private enum Outgoing: Sendable { case input(InputEvent), control(ControlMessage) }
     private let inputs: AsyncStream<Outgoing>.Continuation
-    /// Notices in arrival order. One consumer; keeps the newest few while nobody reads. Ends with the session.
+    /// Notices in arrival order. One consumer; version 5 ends the session if the bounded buffer cannot preserve them.
     public let notices: AsyncStream<ScreenNotice>
     private let noticeSink: AsyncStream<ScreenNotice>.Continuation
     private let ended = OSAllocatedUnfairLock<SessionEndReason?>(initialState: nil)
+    private let unenrolled = Once()
 
     init(connection: SecureConnection) {
         self.connection = connection
@@ -130,21 +153,37 @@ public final class ScreenViewer: Sendable {
         }
     }
 
-    /// `signer` should already carry this connection's Face ID approval (`FaceIDApprovedSigner`).
-    public static func connect(to endpoint: NWEndpoint, mac: PinnedMac, signer: TranscriptSigner) async throws -> ScreenViewer {
+    /// `signer` should already carry this connection's Face ID approval (`FaceIDApprovedSigner`). A phone keeps the
+    /// default `peerClass`, which offers version 4 and no more (SR-36); a Mac controller passes `.controller`.
+    public static func connect(to endpoint: NWEndpoint, mac: PinnedMac, signer: TranscriptSigner,
+                               peerClass: ScreenPeerClass = .phone) async throws -> ScreenViewer {
         ScreenViewer(connection: try await ScreenClient.connect(
-            to: endpoint, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey), signer: signer))
+            to: endpoint, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey, peerClass: peerClass),
+            signer: signer))
     }
 
     public static func connect(over transport: any ScreenFrameTransport, mac: PinnedMac,
-                               signer: any TranscriptSigner) async throws -> ScreenViewer {
+                               signer: any TranscriptSigner, peerClass: ScreenPeerClass = .phone) async throws -> ScreenViewer {
         ScreenViewer(connection: try await ScreenTransportHandshake.connect(
-            over: transport, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey), signer: signer))
+            over: transport, handshake: DeviceHandshake(mac: mac, devicePublicKey: signer.publicKey, peerClass: peerClass),
+            signer: signer))
     }
 
     /// Why the Mac ended the session, once `pictures()` finished because it did: idle, time limit, ended at the Mac and
     /// so on. Nil while the session runs, when the phone left, or when the Mac named no reason this version knows.
     public var endReason: SessionEndReason? { ended.withLock { $0 } }
+
+    private static func deliver(_ notice: ScreenNotice, to sink: AsyncStream<ScreenNotice>.Continuation, version: UInt16) throws {
+        let result = sink.yield(notice)
+        // Version 4 keeps its existing behavior and wire; v5 state must never silently lose a hold/hand-back transition.
+        guard version >= 5 else { return }
+        switch result {
+        case .enqueued: return
+        case .dropped: throw ScreenViewerNoticeError.overflow
+        case .terminated: throw ScreenViewerNoticeError.consumerEnded
+        @unknown default: throw ScreenViewerNoticeError.consumerEnded
+        }
+    }
 
     /// Pictures in arrival order until the Mac closes the session. One consumer; a malformed frame ends the session.
     /// Notices that arrive meanwhile go to `notices`.
@@ -159,28 +198,33 @@ public final class ScreenViewer: Sendable {
                         let record = try await connection.receive()
                         switch record.type {
                         case .close:
-                            ended.withLock { $0 = SessionEndReason(closePayload: record.payload) }
+                            ended.withLock { $0 = SessionEndReason(closePayload: record.payload, version: connection.version) }
                             break receiving
                         case .control:
                             // Only what the Mac sends, and only what this session's version carries: the Mac never
                             // sends anything else, so anything else ends the session.
                             let message = try ControlMessage(decoding: record.payload, version: connection.version)
                             guard message.sender == .mac else { throw ScreenControlWireError.malformed }
+                            let notice: ScreenNotice
                             switch message {
-                            case .remoteInputPaused: noticeSink.yield(.remoteInputPaused)
-                            case .remoteInputResumed: noticeSink.yield(.remoteInputResumed)
-                            case .macLocked: noticeSink.yield(.macLocked)
-                            case .macUnlocked: noticeSink.yield(.macUnlocked)
-                            case let .displays(count, current): noticeSink.yield(.displays(count: count, current: current))
-                            case let .keyboardState(id, state, result): noticeSink.yield(.keyboardState(id: id, state, result))
-                            case let .spaceResult(action, result): noticeSink.yield(.spaceResult(action, result))
-                            case .spaceChanged: noticeSink.yield(.spaceChanged)
-                            case .videoQuality(let quality): noticeSink.yield(.videoQuality(quality))
-                            case .inputAvailability(let reason): noticeSink.yield(.inputAvailability(reason))
-                            case .pointerPosition(let position): noticeSink.yield(.pointerPosition(position))
-                            case let .textAndReturnResult(id, result): noticeSink.yield(.textAndReturnResult(id: id, result))
+                            case .remoteInputPaused: notice = .remoteInputPaused
+                            case .remoteInputResumed: notice = .remoteInputResumed
+                            case .macLocked: notice = .macLocked
+                            case .macUnlocked: notice = .macUnlocked
+                            case let .displays(count, current): notice = .displays(count: count, current: current)
+                            case let .keyboardState(id, state, result): notice = .keyboardState(id: id, state, result)
+                            case let .spaceResult(action, result): notice = .spaceResult(action, result)
+                            case .spaceChanged: notice = .spaceChanged
+                            case .videoQuality(let quality): notice = .videoQuality(quality)
+                            case .inputAvailability(let reason): notice = .inputAvailability(reason)
+                            case .pointerPosition(let position): notice = .pointerPosition(position)
+                            case let .textAndReturnResult(id, result): notice = .textAndReturnResult(id: id, result)
+                            case let .sessionLimits(grant, limits): notice = .sessionLimits(grant: grant, limits: limits)
+                            case .addressHint(let routes): notice = .addressHint(routes)
+                            case .inputHeldAtMac(let held): notice = .inputHeldAtMac(held)
                             default: throw ScreenControlWireError.malformed
                             }
+                            try Self.deliver(notice, to: noticeSink, version: connection.version)
                         case .video:
                             let frame = try VideoFrame(decoding: record.payload)
                             do {
@@ -254,6 +298,15 @@ public final class ScreenViewer: Sendable {
         guard macHasSessionControls else { throw ChannelError.notNegotiated }
         guard approval.claim() else { throw HandshakeError.alreadyUsed }
         try await connection.send(ControlMessage.turnOff)
+    }
+
+    /// Asks a version-5 Mac to remove this controller's registration (DESIGN 6.6); the Mac then ends the session with
+    /// `revoked`. Sent once per session whatever happens: a request whose outcome is unknown is never sent again (SR-31).
+    /// Throws `ChannelError.notNegotiated` below version 5, before sending anything.
+    public func unenrollSelf() async throws {
+        guard connection.version >= 5 else { throw ChannelError.notNegotiated }
+        guard unenrolled.claim() else { throw HandshakeError.alreadyUsed }
+        try await connection.send(ControlMessage.unenrollSelf)
     }
 
     public func close() async {

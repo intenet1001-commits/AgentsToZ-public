@@ -20,7 +20,7 @@ import {tmpdir} from 'node:os';
 import postcss from 'postcss';
 import tailwind from 'tailwindcss';
 import tailwindConfig from '../../../tailwind.config';
-export async function commonMemoryUiFixture(hostname='127.0.0.1'){
+export async function commonMemoryUiFixture(hostname='127.0.0.1',options:{crossPageLessons?:boolean}={}){
   if(hostname!=='127.0.0.1'&&!isPrivateRemoteControlIpv4(hostname))throw Error('Fixture requires loopback or a private LAN address');
   const built=await Bun.build({entrypoints:[import.meta.dir+'/panel.tsx'],target:'browser',minify:false});if(!built.success)throw Error(String(built.logs));
   const javascript=await built.outputs[0]!.text(),root=mkdtempSync(join(tmpdir(),'common-memory-screen-'));
@@ -28,6 +28,12 @@ export async function commonMemoryUiFixture(hostname='127.0.0.1'){
   const css=(await postcss([tailwind(tailwindConfig as any)]).process(portalCss,{from:undefined})).css;
   const cloud=Object.assign(new CommonCloud(),{commonMemoryScope:'a'.repeat(64)}),service=createCommonMemoryService(()=>cloud);
   cloud.source(C,'### iOS 권한\n<!-- memory-entry-id:dddddddddddddddddddddddd -->\n아이폰 권한은 사용자 동의로 시작한다.\n'+Array.from({length:24},(_,i)=>`\n### iOS 추가 ${i}\n아이폰 검증 조건 ${i}`).join('\n'));
+  if(options.crossPageLessons){
+    cloud.tables.portmgr_project_memory_heads=[];cloud.tables.portmgr_project_memory_revisions=[];
+    cloud.source(A,'### Bun environment isolation\nBun loads .env files automatically. The --no-env-file flag does not exist in Bun. Use --env-file=/dev/null and launch from a neutral working directory so project secrets are never loaded.');
+    for(let n=1;n<=16;n++)cloud.source(`18000000-0000-4000-8000-${String(n).padStart(12,'0')}`,`### 메모 ${n}\n짧은 메모`);
+    cloud.source(B,'### Keep Bun from loading project secrets\nBun automatically loads .env and has no --no-env-file option. Use --env-file=/dev/null and start from a neutral working directory so project secrets are never loaded.');
+  }
   const local:any[]=[];let clones=0,lose=false,restoreFailure=false;
   const seed=join(root,'seed');mkdirSync(seed);writeFileSync(join(seed,'README.md'),'owned fixture repository\n');
   for(const args of [['init','-q'],['add','README.md'],['-c','user.name=Fixture','-c','user.email=fixture@invalid','commit','-qm','fixture']])if(Bun.spawnSync(['git',...args],{cwd:seed}).exitCode)throw Error('fixture git seed');

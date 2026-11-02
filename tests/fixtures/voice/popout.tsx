@@ -9,7 +9,7 @@ import {voiceMediaClient} from '../../../src/voiceMediaClient';
 import type {VoiceSnapshot} from '../../../src/voiceSessionProtocol';
 
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
-const f=window as any;f.isTauri=true;f.helpdeskOpens=0;window.addEventListener('agentstoz:open-helpdesk',()=>f.helpdeskOpens++);f.nativeCalls=[];f.requests=[];f.trackStops=0;f.mediaStarts=0;f.client=voiceMediaClient;
+const f=window as any;f.isTauri=true;f.helpdeskOpens=0;window.addEventListener('agentstoz:open-helpdesk',()=>f.helpdeskOpens++);f.nativeCalls=[];f.failScreenStatus=f.failViewerStatus=new URLSearchParams(location.search).has('helper-status-fail');f.requests=[];f.trackStops=0;f.mediaStarts=0;f.client=voiceMediaClient;
 let next=1;const callbacks=new Map<number,Function>(),listeners=new Map<number,{event:string;handler:number}>();
 // The voice window's saved-notice stack (and the main window's while it is closed) reads the local API; answer it here
 // so the fixture never reaches whatever sidecar listens on this Mac's 3001.
@@ -28,8 +28,20 @@ f.workMode=()=>workMode;
 /** Lets a test move the native revision past events it injected, as the Rust worker's counter would be. */
 f.setWorkMode=(patch:Partial<typeof workMode>)=>{workMode={...workMode,...patch};};
 // AgentsToZ Screen as screen_helper.rs reports it: installed and not running until 「열기」.
-let screenHelper={supported:true,installed:true,running:false,state:null as null|Record<string,unknown>};
+let screenHelper={supported:true,installed:true,running:false,updatePending:false,otherInstanceRunning:false,instanceStatusUnknown:false,state:null as null|Record<string,unknown>};
 f.setScreenHelper=(patch:Partial<typeof screenHelper>)=>{screenHelper={...screenHelper,...patch};};
+// At most two held replies per helper for completion-order tests; never a live IPC call.
+const heldHelperStatus=new Map<string,{snapshot:unknown;resolve:(v:unknown)=>void;reject:(e:Error)=>void}[]>();
+f.heldHelperStatuses=()=>[...heldHelperStatus].flatMap(([kind,rows])=>rows.map(()=>kind));
+f.releaseHeldHelperStatuses=(success:boolean,oldestOnly=false)=>{for(const [kind,rows] of heldHelperStatus){const selected=rows.splice(0,oldestOnly?1:rows.length);if(!rows.length)heldHelperStatus.delete(kind);for(const row of selected)if(success)row.resolve(row.snapshot);else row.reject(Error('fixture: older status failed'));}};
+const readHelperStatus=(kind:'Screen'|'Viewer',value:unknown)=>{
+ if(f[`holdNext${kind}Status`]){f[`holdNext${kind}Status`]=false;const rows=heldHelperStatus.get(kind)??[];if(rows.length>=2)throw Error('fixture: held status budget exceeded');return new Promise((resolve,reject)=>{rows.push({snapshot:value,resolve,reject});heldHelperStatus.set(kind,rows);});}
+ if(f[`fail${kind}Status`])throw Error('fixture: helper status unavailable');
+ return value;
+};
+// AgentsToZ Viewer as screen_helper.rs reports it: carried by this app, installed and not running until 「다른 Mac 화면 보기」.
+let viewerHelper={supported:true,installed:true,bundled:true,running:false,updatePending:false,otherInstanceRunning:false,instanceStatusUnknown:false};
+f.setViewerHelper=(patch:Partial<typeof viewerHelper>)=>{viewerHelper={...viewerHelper,...patch};};
 let session:VoiceSnapshot;
 f.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'voice-dock'},currentWebview:{label:'voice-dock'}},transformCallback:(fn:Function)=>{const id=next++;callbacks.set(id,fn);return id;},unregisterCallback:(id:number)=>callbacks.delete(id),
  invoke:async(command:string,args:any={})=>{
@@ -50,11 +62,17 @@ f.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'voice-dock'},currentWebvi
    workMode={...workMode,revision:workMode.revision+1,lid:{...workMode.lid,granted:!!args.granted}};
    f.nativeEvent('work-mode:changed',{...workMode});return {...workMode};
   }
-  if(command==='get_screen_helper')return {...screenHelper};
+  if(command==='get_screen_helper')return readHelperStatus('Screen',{...screenHelper});
   if(command==='open_screen_helper'){
    if(f.failScreenOpen)throw Error('AgentsToZ Screen을 열지 못했습니다: 찾을 수 없음');
    if(!screenHelper.running)screenHelper={...screenHelper,installed:true,running:true,state:{power:'off',viewing:false,devices:0,capture:true,control:false,loginItem:'off'}};
    return {verified:!f.unverifiedScreenOpen};
+  }
+  if(command==='get_viewer_helper')return readHelperStatus('Viewer',{...viewerHelper});
+  if(command==='open_viewer_helper'){
+   if(f.failViewerOpen)throw Error('AgentsToZ Viewer를 열지 못했습니다: 찾을 수 없음');
+   viewerHelper={...viewerHelper,installed:true,running:true};
+   return {verified:!f.unverifiedViewerOpen};
   }
   if(command==='resize_voice_window'&&f.resizeNativeContent)return f.resizeNativeContent(args);
   if(command==='plugin:event|listen'){const id=next++;listeners.set(id,{event:args.event,handler:args.handler});return id;}

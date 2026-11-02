@@ -38,13 +38,14 @@ struct ScopeProtocolChecks {
         }
         let lowered = { (values: [String]) in Set(values.map { $0.lowercased() }) }
         try check(ScopedProtectedTargets.bundles == list(scope, "bundles"), "scope bundles equal the golden list")
+        try check(ScopedProtectedTargets.remoteDesktopClients == list(scope, "remoteDesktopClients"), "remote desktop clients equal the golden list")
         try check(ScopedProtectedTargets.securitySurfaces == list(scope, "securitySurfaces"), "scope security surfaces equal the golden list")
         try check(Set(ScopedProtectedTargets.prefixes) == list(scope, "prefixes"), "scope prefixes equal the golden list")
         try check(lowered(Array(RefusedTargets.bundles)) == list(window, "bundles"), "window bundles equal the golden list")
         try check(RefusedTargets.bundles.count == lowered(Array(RefusedTargets.bundles)).count, "window bundles differ by more than case")
         try check(lowered(RefusedTargets.prefixes) == list(window, "prefixes"), "window prefixes equal the golden list")
         try check(RefusedTargets.teams == list(window, "teams", lower: false), "window teams equal the golden list")
-        for bundle in ScopedProtectedTargets.bundles.union(ScopedProtectedTargets.securitySurfaces) {
+        for bundle in ScopedProtectedTargets.bundles.union(ScopedProtectedTargets.remoteDesktopClients).union(ScopedProtectedTargets.securitySurfaces) {
             try check(RefusedTargets.refuses(bundle: bundle), "window mode also refuses \(bundle)")
             try check(ScopedProtectedTargets.refuses(bundleId: bundle), "\(bundle) is refused by the scope")
         }
@@ -90,6 +91,14 @@ struct ScopeProtocolChecks {
         try expectCode("invalid-request") { _ = try decode("scope-status", ["extra": true]) }
         try expectCode("invalid-request") { _ = try decode("scope-open-grant", ["approvalId": approval, "scope": ["kind": "desktop", "pid": 42], "caller": caller]) }
         try expectCode("invalid-request") { _ = try decode("scope-click", merged(["displayId": "display-1", "x": -1, "y": 1, "button": "left", "clickCount": 1])) }
+        _ = try decode("scope-click", merged(["displayId": "display-1", "x": 1, "y": 1, "button": "left", "clickCount": 1, "axOnly": true]))
+        try expectCode("invalid-request") { _ = try decode("scope-click", merged(["displayId": "display-1", "x": 1, "y": 1, "button": "right", "clickCount": 1, "axOnly": true])) }
+        try expectCode("invalid-request") { _ = try decode("scope-click", merged(["displayId": "display-1", "x": 1, "y": 1, "button": "left", "clickCount": 1, "axOnly": 1])) }
+        let capture = requests["scope-capture"]!
+        _ = try decode("scope-capture", capture.merging(["maxBytes": 1024]) { _, b in b })
+        for bad: Any in [1023, 240001, true, 1.5] {
+            try expectCode("invalid-request") { _ = try decode("scope-capture", capture.merging(["maxBytes": bad]) { _, b in b }) }
+        }
         try expectCode("invalid-request") { _ = try decode("scope-key", merged(["key": "Enter", "modifiers": ["cmd", "cmd"]])) }
         try expectCode("invalid-request") { _ = try decode("scope-scroll", merged(["displayId": "display-1", "x": 1, "y": 1, "deltaX": 1201, "deltaY": 0])) }
         try expectCode("invalid-request") { _ = try decode("scope-type-text", merged(["text": String(repeating: "x", count: 4001)])) }

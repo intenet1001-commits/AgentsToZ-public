@@ -1,0 +1,10 @@
+{
+  "name": "agentstoz-screen-community",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "migrations": [{"tag":"v1","new_sqlite_classes":["ScreenCommunityRegistry"]},{"tag":"v2","new_sqlite_classes":["CommunityRelayHub"]}],
+  "durable_objects": {"bindings":[{"name":"REGISTRY","class_name":"ScreenCommunityRegistry"},{"name":"RELAY","class_name":"CommunityRelayHub"}]},
+  "observability": {"enabled":false}
+}

@@ -85,7 +85,10 @@ Mac 앞이 아니어도 휴대폰을 먼저 **데이터에** 연결할 수 있�
 bun run test:ios
 bun run preflight:ios
 # 전체 Xcode와 사용 가능한 iOS simulator runtime 필요
-bun mobile/ios/scripts/check-workroom.ts
+# LAN 워크룸 시뮬레이터 여정: 에뮬레이터 하네스의 샌드박스 안에서만 시작한다(등록 루트 밖 분리 워크트리에서)
+bun scripts/emulator-e2e.ts j1-pty
+# 그 fixture의 컴파일 단계만 (아무것도 띄우지 않음)
+bun mobile/ios/scripts/check-workroom.ts --compile-only [simulator|device]
 python3 mobile/ios/scripts/check-ui.py
 # 실제 프로덕션 SurfaceView의 한 손가락 클릭·두 손가락 우클릭 (별도 빈 simulator)
 python3 mobile/ios/scripts/check-ui.py --screen-gestures
@@ -122,7 +125,9 @@ iPad/iPhone에 표시된 **‘XCTest’의 Touch ID/Face ID · Enable UI Automat
 
 `check-workroom.ts`는 **고유한 일회용 iPhone 시뮬레이터**와 테스트 앱을 만듭니다. 프로덕션 `LANWorkroomView.swift`와 실제 Mac LAN HTML·JS·CSP·WebSocket·PTY를 사용하고, 임시 등록 프로젝트와 네트워크를 쓰지 않는 가짜 CLI만 실행합니다. 프로젝트·AI 선택, opt-in 전 거부/후 허용, 중복 시작·전송·종료, 실제 출력, 기억 초안 보존/비실행, 외부 탐색·팝업 차단, background 복귀 후 동일 WKWebView·연결 소유자·Mac 작업 유지, 새 연결의 권한 격리를 확인합니다. 일회용 시뮬레이터에서 Settings를 전면에 열고 복귀해 실제 SwiftUI background hook도 검사합니다. 실제 iPhone의 카메라·LAN 권한 동작은 아래 실기기 항목으로 구분합니다.
 
-테스트 서버는 운영 중인 포트 3001과 실제 앱 데이터를 사용하지 않습니다. 사설 IPv4 인터페이스가 없으면 실패하며 공인 IP나 wildcard로 대체하지 않습니다. 테스트 QR은 임시 파일/stdin으로만 전달합니다. own listener·가짜 PTY·시뮬레이터·임시 토큰은 finally에서 제거하고, 비밀이 없는 결과·화면은 `mobile/ios/build/workroom-evidence/`에 남깁니다. 다른 시뮬레이터는 종료하거나 앱을 설치하지 않습니다.
+테스트 서버는 운영 중인 포트 3001과 실제 앱 데이터를 사용하지 않습니다. 사설 IPv4 인터페이스가 없으면 **blocked**(종료 코드 78)이며 공인 IP나 wildcard로 대체하지 않습니다. 테스트 QR은 임시 파일/stdin으로만 전달합니다. own listener·가짜 PTY·시뮬레이터·임시 토큰은 finally에서 제거하고, 비밀이 없는 결과·화면은 `mobile/ios/build/workroom-evidence/`(또는 `--evidence-dir <새 폴더>`)에 남깁니다. 다른 시뮬레이터는 종료하거나 앱을 설치하지 않습니다.
+
+시뮬레이터 여정은 실제 LAN 페어링 리스너·PTY·Python을 띄우므로 **에뮬레이터 하네스의 샌드박스 안에서만** 시작합니다(`bun scripts/emulator-e2e.ts j1-pty`, `docs/design/emulator-e2e-2026-11-01/DESIGN.md` §2.3). 레인이 WP1 프로필에 LAN inbound를 더해 `sandbox-exec`로 이 스크립트를 돌리고(레인이 en0 주소의 세 포트(페어링 서버·「남의」 origin·그리로 보내는 리다이렉트)를 골라 프로필에 선언하고 `--lan-address`·`--lan-ports`로 넘기며, 도는 동안 lsof로 그 셋 말고 loopback 밖에서 듣는 리스너가 있으면 실패시킨다 — 이 Mac에서는 SBPL이 en0 포트를 막지 못해(2026-11-01 측정) 이 단언이 실제 경계다), 스크립트는 OS가 샌드박스를 확인하고(`sandbox_check`) 그 샌드박스가 워크트리 쓰기를 거절할 때만 시작합니다 — 맨 셸에서 `bun mobile/ios/scripts/check-workroom.ts`를 부르면 거절(종료 1)합니다. `TMPDIR`은 실제 홈 밖이어야 합니다. 판정은 `run-status.json`이고 종료 코드는 0 passed · 1 failed(거절 포함) · 78 blocked입니다. 검사 전에 `run-status.json`을 `failed`(stage `startup`)로 먼저 바꾸므로 이전 실행의 pass가 남지 않습니다. 설계 §2.5의 격리 사실(기존 시뮬레이터 불변·소유 시뮬레이터 삭제·새 Simulator.app 없음) 중 하나라도 어긋나면 failed입니다. 소유 device set과 udid는 `simctl create` 전후로 기록되어, 중간에 죽은 실행이 남긴 시뮬레이터는 다음 j1-pty 실행이 지웁니다. swiftc 모듈 캐시는 실행의 임시 폴더에 둡니다. 세 fixture(`check-workroom`·`prepare-workroom-persona-device`·`check-common-memory-device`)의 컴파일 목록은 `mobile/ios/scripts/workroomFixtureCompile.ts` 하나입니다.
 
 실기기 격리 fixture도 같은 runner로 실행할 수 있습니다. 서명된 템플릿의 bundle ID는 반드시 `com.intenet.agentstoz.workspacetest`여야 합니다. 다른 앱으로 재서명하거나 기존 앱을 삭제하지 않습니다.
 
@@ -164,6 +169,28 @@ xcodebuild -project mobile/ios/AgentsToZMobile.xcodeproj \
 ```sh
 bun run install:ios:development -- --device '<connected-device-id>'
 ```
+
+공통 커뮤니티 기능을 쓰는 서명된 **기기용 QA 빌드만** 만들 때는 명시적인 공개 설정 파일을 사용합니다.
+파일은 `origin`, `issuerPublicKey`, `profileId` 세 공개 필드만 포함하는 정규 JSON이어야 합니다.
+기존 커밋과 같은 Screen·Viewer·Control 빌드에 사용한 설정을 선택하세요.
+
+```sh
+bun --env-file=/dev/null mobile/ios/scripts/build-community.ts \
+  --community-config /absolute/path/community-public.json \
+  --team DA8QKAQ2C9 --bundle com.intenet.agentstoz.mobile.testflight
+```
+
+이 명령은 전체 소스가 커밋된 상태에서 기존 Apple Development 인증서·프로필로 Debug/iphoneos 앱을 빌드합니다.
+별도의 `build/community-device-qa/run-*/`에 원본을 보존한 Info.plist 사본을 만들고,
+세 공개 필드를 넣은 뒤 **최종 코드 서명 전에** Main target 전용 `AGENTSTOZ_APP_INFO_PLIST`로 전달합니다.
+Share Extension의 Info.plist·번들 ID·App Group·entitlement는 바꾸지 않습니다.
+실제 앱의 봉인 설정·소스 commit·버전·Share 신원과 엄격한 서명 검사를 통과해야
+`community-device-build.receipt.json`을 기록합니다. `--output /absolute/new/private-directory`로 새 출력 폴더를 지정할 수도 있습니다.
+
+환경 변수나 런타임 파일로 서버·issuer를 선택하지 않으며 QA compile flag와 공개 설정을 혼합하지 않습니다.
+기존 프로필이 없으면 실패하며 Apple 계정·프로비저닝을 갱신하지 않습니다.
+**설치·실행·archive·업로드는 하지 않습니다.** receipt의 `officialRelease`, `testFlightReady`, `installed`, `uploaded`는 false입니다.
+이 개발용 `.testflight` 번들 빌드는 TestFlight 배포 archive를 뜻하지 않습니다.
 
 ## 사진 공유 → VOC (Share Extension)
 

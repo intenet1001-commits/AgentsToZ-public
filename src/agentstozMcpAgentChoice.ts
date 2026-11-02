@@ -1,7 +1,8 @@
 /** MCP preparation only: no launch, host read, account lookup or inferred selection. */
 import {AI_TERMINAL_AGENTS, type AiTerminalAgent} from './aiTerminalProtocol';
 import {hermesVariantModel, launchChoiceLabel, launchChoiceTarget, workroomLaunchChoices, type HermesVariant} from './hermesVariants';
-import {TEAM_LAUNCH_SURFACES, TEAM_MAX_MEMBERS, parseTeamMemberSelection, teamLaunchSurfacesFor, teamLaunchSupport, teamSurfaceName, type AiTerminalLaunchModel, type TeamLaunchSupport, type TeamLaunchSurface} from './teamLaunchOptions';
+import {TEAM_LAUNCH_SURFACES, TEAM_MAX_MEMBERS, teamLaunchSurfacesFor, teamLaunchSupport, teamSurfaceName, type AiTerminalLaunchModel, type TeamLaunchSupport, type TeamLaunchSurface} from './teamLaunchOptions';
+import {parseTeamMemberWithRemote} from './remoteTeamProtocol';
 import {workroomAppConfirmMessage} from './workroomAppRoute';
 
 export const AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE = 'Missing agent/surface/Hermes(default/Claude/Codex): agentstoz_use_prepare_agent_launch, ask and wait. Keep explicit choices/buttons/blocks. Infer nothing from current AI/tool names/defaults. Choose only on explicit delegation. Preparation never executes.';
@@ -87,7 +88,7 @@ function potentialMember(raw: unknown, windows: boolean): raw is Record<string, 
     if (variant !== undefined && agent !== 'hermes') continue;
     const {hermesVariant: _variant, ...fields} = raw;
     try {
-      parseTeamMemberSelection({...fields, agent, ...(surface !== undefined ? {surface} : {}),
+      parseTeamMemberWithRemote({...fields, agent, ...(surface !== undefined ? {surface} : {}),
         // An otherwise valid explicit external preset is refused by the preflight above, not sent to the host.
         // Validate its remaining external fields here; do not disguise malformed fields as a support refusal.
         ...(variant && variant !== 'default' && surface === 'internal' ? hermesVariantModel(variant as HermesVariant) : {})});

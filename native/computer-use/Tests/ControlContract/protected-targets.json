@@ -1,7 +1,8 @@
 {
- "_note": "Golden lists of apps AgentsToZ Control never controls. Compared case-insensitively and as sets with RefusedTargets (ControlProtocol.swift) and src/computerUseProtocol.ts (window, v1) and with ScopedProtectedTargets.swift and src/computerUseScopeProtocol.ts (scope, v2) by the Swift checks and tests/computer-use-scope.test.ts. Any difference fails both. Window mode also refuses everything the scope protects. Bundle IDs were read from installed apps and code signatures on macOS 26.7 (2026-10-29).",
+ "_note": "Golden lists of apps AgentsToZ Control never controls. Compared case-insensitively and as sets with RefusedTargets (ControlProtocol.swift) and src/computerUseProtocol.ts (window, v1) and with ScopedProtectedTargets.swift and src/computerUseScopeProtocol.ts (scope, v2) by the Swift checks and tests/computer-use-scope.test.ts. Any difference fails both. Window mode also refuses everything the scope protects. The remote desktop list is mirrored separately: only Screen Sharing was checked against an installed bundle, and other published IDs require device-specific confirmation.",
  "scope": {
   "bundles": ["com.intenet.agentstozbycs", "com.apple.systempreferences", "com.apple.keychainaccess", "com.apple.windowserver"],
+  "remoteDesktopClients": ["com.apple.screensharing", "com.apple.remotedesktop", "com.p5sys.jump.mac.viewer", "com.p5sys.jump.mac.viewer.web", "com.teamviewer.teamviewer", "com.philandro.anydesk", "tv.parsec.www", "com.microsoft.rdc.macos", "com.microsoft.rdc.mac", "com.carriez.rustdesk"],
   "securitySurfaces": [
    "com.apple.loginwindow", "com.apple.passwords", "com.apple.securityagent", "com.apple.securityagenthelper.arm64",
    "com.apple.securityagenthelper.x86_64", "com.apple.authorizationhost", "com.apple.usernotificationcenter",

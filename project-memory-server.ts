@@ -55,6 +55,7 @@ import {
   recallProjectMemoryEntries,
   stabilizeProjectMemoryEntryIds,
 } from "./src/projectMemoryRecall";
+import {recallMemoryRelations} from './src/projectMemoryRelations';
 import {
   appendProjectMemoryFeedback,
   appendProjectMemoryFeedbackBatch,
@@ -2744,7 +2745,7 @@ function searchProjectMemoryJournal(status: ProjectMemoryRecallStatus, input: {q
 /** Pure curated selection used by bounded readers. Never touches disk, journal, common memory or providers. */
 export function recallCuratedProjectMemory(input: {
   memoryId: string; document: string; query: string; limit?: number;
-  ledger: ReturnType<typeof readProjectMemoryFeedback>; correctionSearchComplete?: boolean; relatedness?: boolean;
+  ledger: ReturnType<typeof readProjectMemoryFeedback>; correctionSearchComplete?: boolean; relatedness?: boolean; includeRelations?: boolean;
 }) {
   const { document, ledger } = input;
   const correctionSearch = { complete: input.correctionSearchComplete !== false };
@@ -2767,6 +2768,8 @@ export function recallCuratedProjectMemory(input: {
     searchText: entry => (reports.get(projectMemoryFeedbackScopeKey(entry.entryKey, entry.contentVersionHash)) ?? []).map(report => report.evidence ?? '').join('\n')});
   return {
     hits:matches,
+    ...(input.includeRelations ? {relations: recallMemoryRelations({memoryId: input.memoryId, document,
+      seeds: matches, eligible: entry => !isWithdrawn(entry), correctionSearchComplete: correctionSearch.complete})} : {}),
     corrections:withdrawn.map(hit=>({entryKey:hit.entryKey,contentVersionHash:hit.contentVersionHash,title:hit.title,
       status:'needs-review' as const,source:'reported-correction' as const,
       // Internal only (the correction-task path): counts for the outcome protocol, computed from text already in memory.
@@ -2783,6 +2786,7 @@ export function recallProjectMemory(input: {
   appDataDir?: string;
   /** false: no common-memory lookup at all (voice reads only the project's own memory). */
   includeCommon?: boolean;
+  includeRelations?: boolean;
 }, detected?: ProjectMemoryRecallStatus, internal?: { document?: string; skipJournal?: boolean; relatedness?: boolean }) {
   const status = detected ?? detectProjectMemory(input.folderPath);
   if (!status.exists || !status.config || !status.memoryPath) {
@@ -2796,7 +2800,7 @@ export function recallProjectMemory(input: {
     correctionSearch = {complete: false, warning: '교정 기록을 읽을 수 없어 현재 기억 지침의 재사용을 보류했습니다. 기록을 복구한 뒤 다시 검색하세요.'};
   }
   const curated = recallCuratedProjectMemory({ memoryId: status.config.memoryId, document, query: input.query,
-    limit: input.limit, ledger, correctionSearchComplete: correctionSearch.complete, relatedness: internal?.relatedness });
+    limit: input.limit, ledger, correctionSearchComplete: correctionSearch.complete, relatedness: internal?.relatedness, includeRelations: input.includeRelations });
   // The correction-only path never reads journal hits; skip the journal read and its index (an sqlite file in tmpdir).
   const journalSearch: ReturnType<typeof recallProjectMemoryJournal> = internal?.skipJournal
     ? { hits: [], mode: "empty", complete: false, indexedEntries: 0, indexRebuilt: false, indexRecovered: false }

@@ -97,7 +97,7 @@ final class ControlAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
         menu.addItem(.separator())
         let standing = ScopedControlShared.service.standing
-        let allowance = NSMenuItem(title: standing == nil ? "상시 허용 켜기…" : "상시 허용 끄기 (전체 Mac · 모든 AgentsToZ AI)",
+        let allowance = NSMenuItem(title: standing == nil ? "상시 허용 켜기…" : "상시 허용 끄기 (전체 Mac · 이 Mac과 커뮤니티 AI)",
                                    action: standing == nil ? #selector(enableStanding) : #selector(disableStanding), keyEquivalent: "")
         allowance.target = self; allowance.isEnabled = !ScopedControlShared.service.enablingStanding
         menu.addItem(allowance)

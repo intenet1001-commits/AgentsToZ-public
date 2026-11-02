@@ -3,6 +3,7 @@ import {IncrementalListMore, useIncrementalRender} from './components/Incrementa
 import {
   normalizeUserProfileSave, normalizeUserProfileSnapshot, USER_PROFILE_MAX_BODY_BYTES,
   USER_PROFILE_MAX_ENTRIES, type UserProfileEntry, type UserProfileSnapshot,
+  selectUserProfileRecall, type UserProfileRecall,
 } from './userProfileContract';
 
 export interface UserProfileProject {memoryId: string; name: string}
@@ -68,6 +69,13 @@ const ko = {
   bytes: '바이트', allProjects: '이 Mac의 모든 프로젝트', projectOnly: '선택한 프로젝트만', project: '프로젝트', chooseProject: '프로젝트를 선택하세요', missingProject: '연결되지 않은 프로젝트',
   more: '더 보기', add: '새 항목 추가', inactiveHint: '「사용 중지」한 항목은 회상에 쓰지 않으며 「다시 사용」으로 복원할 수 있습니다. 원문 기록은 바꾸지 않습니다.',
   confirmLabel: '프로필 직접 확인', confirmation: '이 내용과 적용 범위를 직접 확인했습니다.', saving: '저장 중…', save: '직접 확인한 내용 저장',
+  previewTitle: '작업에 적용될 선호 확인', previewHint: '저장본에서 범위와 주제에 맞는 활성 선호를 최대 5개 확인합니다. 현재 지시가 우선하며 설정을 바꾸지 않습니다.',
+  previewProject: '조회할 프로젝트', previewGlobal: '모든 프로젝트에 공통인 선호만', previewQuery: '작업 주제', previewAction: '적용 이유 확인',
+  previewSaveFirst: '저장하지 않은 변경이나 확인할 저장 결과가 있습니다. 먼저 저장 상태를 확인해 주세요.',
+  previewEmpty: '선택한 범위와 주제에 맞는 활성 선호가 없습니다.', previewCount: '선택된 선호', previewTruncated: '조회 한도로 일부 항목은 표시하지 않았습니다.',
+  scopeMatch: '활성 상태와 적용 범위로 선택했습니다.', topicMatch: '일치한 주제', modified: '마지막 수정',
+  overlapHint: '같은 제목의 다른 내용이 겹칩니다. 두 항목과 적용 범위를 검토해 주세요. 자동으로 하나를 우선하지 않습니다.',
+  previewError: '작업 주제를 더 짧게 입력한 뒤 다시 확인해 주세요.',
 };
 const en: Record<keyof typeof ko, string> = {
   title: 'My profile', localOnly: 'For the current OS user on this Mac only. Stored encrypted on this device, with no sync to other devices.',
@@ -95,6 +103,13 @@ const en: Record<keyof typeof ko, string> = {
   bytes: ' bytes', allProjects: 'All projects on this Mac', projectOnly: 'Selected project only', project: 'Project', chooseProject: 'Select a project', missingProject: 'Project no longer connected',
   more: 'Show more', add: 'Add entry', inactiveHint: 'Inactive entries are excluded from recall. Use “Use again” to restore them. Original records are unchanged.',
   confirmLabel: 'Personally confirm profile', confirmation: 'I have personally reviewed this content and its scope.', saving: 'Saving…', save: 'Save personally reviewed content',
+  previewTitle: 'Check preferences for a task', previewHint: 'Check up to five active saved preferences matching the scope and topic. Current instructions take priority. This changes no settings.',
+  previewProject: 'Project to check', previewGlobal: 'Preferences shared by all projects only', previewQuery: 'Task topic', previewAction: 'Explain selection',
+  previewSaveFirst: 'There are unsaved changes or an unconfirmed save. Check the saved state first.',
+  previewEmpty: 'No active preferences match this scope and topic.', previewCount: 'Selected preferences', previewTruncated: 'Some entries were omitted by the retrieval limit.',
+  scopeMatch: 'Selected by active state and scope.', topicMatch: 'Matching terms', modified: 'Last edited',
+  overlapHint: 'Different content shares the same title. Review both entries and their scope. Neither is automatically given priority.',
+  previewError: 'Enter a shorter task topic and try again.',
 };
 type CopyKey = keyof typeof ko;
 
@@ -112,6 +127,9 @@ export function UserProfilePanel({request, language = 'ko', projects: suppliedPr
   const [reading, setReading] = useState(false), [saving, setSaving] = useState(false);
   const [pending, setPending] = useState<SaveRequest | null>(null);
   const [error, setError] = useState<CopyKey | ''>(''), [notice, setNotice] = useState<CopyKey | ''>('');
+  const [previewProject, setPreviewProject] = useState(''), [previewQuery, setPreviewQuery] = useState('');
+  const [preview, setPreview] = useState<UserProfileRecall | null>(null), [previewError, setPreviewError] = useState(false);
+  useEffect(() => {setPreview(null); setPreviewError(false);}, [base, dirty, latest, pending, previewProject, previewQuery, projects]);
   const alive = useRef(true), generation = useRef(0), readSerial = useRef(0), newIds = useRef(new Set<string>());
   const editVersion = useRef(0), dirtyRef = useRef(false), draftRef = useRef(entries);
   const pendingRef = useRef<SaveRequest | null>(null), saveLock = useRef(false);
@@ -255,6 +273,31 @@ export function UserProfilePanel({request, language = 'ko', projects: suppliedPr
       </div>
     </section>)}
     {!base ? <p style={{margin: 0}}>{reading ? t.loading : t.readFirst}</p> : <>
+      <details data-testid="user-profile-preview" style={{...box, border: '1px solid var(--line)', borderRadius: 10, padding: 12}}>
+        <summary style={{minHeight: 44, cursor: 'pointer', fontWeight: 600}}>{t.previewTitle}</summary>
+        <p>{t.previewHint}</p>
+        <div style={{display: 'grid', gap: 10}}>
+          <label className="user-profile-select">{t.previewProject}<select aria-label={t.previewProject} style={field} value={previewProject} onChange={event => setPreviewProject(event.target.value)}>
+            <option value="">{t.previewGlobal}</option>{projects.map(project => <option key={project.memoryId} value={project.memoryId}>{project.name}</option>)}
+          </select></label>
+          <label>{t.previewQuery}<input aria-label={t.previewQuery} style={field} value={previewQuery} maxLength={240} onChange={event => setPreviewQuery(event.target.value)}/></label>
+          {(dirty || !!latest || !!pending || conflicts.length > 0) && <p style={{margin: 0}}>{t.previewSaveFirst}</p>}
+          <button type="button" style={{...button, justifySelf: 'start'}} disabled={reading || saving || dirty || !!latest || !!pending || conflicts.length > 0 || !!previewProject && (!projectsReady || !projects.some(p => p.memoryId === previewProject))}
+            onClick={() => {try {setPreview(selectUserProfileRecall(base, {projectMemoryId: previewProject || null, query: previewQuery, includeExplanation: true})); setPreviewError(false);} catch {setPreview(null); setPreviewError(true);}}}>{t.previewAction}</button>
+          {previewError && <p role="alert">{t.previewError}</p>}
+          {preview && <div data-testid="user-profile-preview-result" style={{display: 'grid', gap: 8}}>
+            <p role="status" style={{margin: 0}}>{preview.entries.length ? `${t.previewCount}: ${preview.entries.length}` : t.previewEmpty}</p>
+            {preview.truncated && <p role="status" style={{margin: 0}}>{t.previewTruncated}</p>}
+            {preview.explanation!.overlaps.length > 0 && <p role="alert" style={{margin: 0, color: 'var(--warn)'}}>{t.overlapHint}</p>}
+            {preview.entries.map(entry => {const selected = preview.explanation!.selections.find(s => s.entryId === entry.id)!; return <article key={entry.id} data-testid="user-profile-preview-entry" style={{borderTop: '1px solid var(--line)', paddingTop: 8, overflowWrap: 'anywhere'}}>
+              <strong>{entry.title}</strong><p style={{margin: '4px 0', whiteSpace: 'pre-wrap'}}>{entry.body}</p>
+              <p style={{margin: '4px 0', color: 'var(--ink-2)'}}>{describeScope(entry)}</p>
+              <p style={{margin: '4px 0'}}>{selected.reason === 'active-in-scope' ? t.scopeMatch : `${t.topicMatch}: ${selected.matchedTerms.join(', ')}`}</p>
+              <small>{t.modified}: <time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString(locale)}</time></small>
+            </article>;})}
+          </div>}
+        </div>
+      </details>
       {entries.length === 0 && <p style={{margin: 0}}>{t.empty}</p>}
       <fieldset disabled={saving || !!pending || conflicts.length > 0} style={{...box, border: 0, padding: 0, margin: 0, display: 'grid', gap: 12}}>
         {entries.map((entry, index) => index < page.limit || newIds.current.has(entry.id) ? <article key={entry.id} data-testid="user-profile-entry" data-entry-id={entry.id} data-state={entry.state} style={{...box, display: 'grid', gap: 10, padding: 14, border: '1px solid var(--line)', borderRadius: 12}}>

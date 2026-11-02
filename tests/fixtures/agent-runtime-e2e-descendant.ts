@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 
 const [readyPath, termPath] = process.argv.slice(2);
 if (!readyPath || !termPath) process.exit(64);
@@ -8,5 +8,9 @@ process.on('SIGTERM', () => {
   // task-group SIGKILL path exercised by the vertical runtime test.
   writeFileSync(termPath, String(process.pid), { mode: 0o600 });
 });
-writeFileSync(readyPath, String(process.pid), { mode: 0o600 });
+// Existence is the provider's readiness gate. Publish only a complete positive
+// PID, so it cannot observe the empty final file between open and write.
+const pendingReadyPath = `${readyPath}.${process.pid}.pending`;
+writeFileSync(pendingReadyPath, String(process.pid), { mode: 0o600 });
+renameSync(pendingReadyPath, readyPath);
 setInterval(() => {}, 1_000);

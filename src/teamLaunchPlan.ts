@@ -34,6 +34,7 @@ export const teamReportProvenance = (report: {provenance?: 'member' | 'manual'} 
  */
 export type TeamExecutionRef =
   | {kind: 'workroom'; sessionId: string}
+  | import('./remoteTeamProtocol').RemoteTeamRef
   | {
       kind: 'external';
       surface: TeamExternalSurface;

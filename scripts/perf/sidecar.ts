@@ -11,118 +11,35 @@
  * QR 토큰 → WebSocket `controller.pair` → `projects.list` 페이지 넘기기)를 그대로 돈다. 사설 IPv4가 없는
  * 기기에서는 건너뛴다(실제 리스너가 그것만 받는다). 리스너는 측정이 끝나면 끈다.
  */
-import {execFileSync, spawnSync} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
 import {existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync} from 'node:fs';
-import {homedir, networkInterfaces} from 'node:os';
+import {networkInterfaces} from 'node:os';
 import {join} from 'node:path';
+import {
+  INSTALLED_SIDECAR,
+  REAL_APP_DATA_DIR,
+  forbiddenOpenFiles,
+  isolatedRoot,
+  managementRequest,
+  startSidecar as startIsolatedSidecar,
+  type IsolatedRoot,
+  type RunningSidecar,
+} from '../emulator-e2e/isolatedSidecar';
 import {REMOTE_CONTROL_PROTOCOL_VERSION} from '../../src/remoteControlCore';
 import {isPrivateRemoteControlIpv4} from '../../src/remoteControlLanServer';
-import {REPO_ROOT, collect, log, now, record, recorder, sampled} from './environment';
+import {collect, log, now, record, recorder, sampled} from './environment';
 import type {PerfMeasurement} from './stats';
 
-export const REAL_APP_DATA_DIR = join(homedir(), 'Library', 'Application Support', 'com.portmanager.portmanager');
-const INSTALLED_SIDECAR = '/Applications/AgentsToZ_byCS.app/Contents/Resources/resources/agentstoz-api-sidecar';
-const FORBIDDEN_PREFIXES = [REAL_APP_DATA_DIR, join(homedir(), '.claude'), join(homedir(), '.codex'), join(homedir(), '.hermes'), join(homedir(), '.gemini')];
-const MANAGEMENT_ORIGIN = 'http://localhost:9000';
+// 격리 사이드카 런처(isolatedRoot·forbiddenOpenFiles·startSidecar)는 scripts/emulator-e2e/isolatedSidecar.ts로 옮겼다 —
+// 포트 소유 확인은 같이 쓴다. 성능 측정은 측정 의미(샌드박스 검사 비용이 섞이지 않은 기동 시간)를 지키려고 샌드박스를
+// 명시적으로 빼고, 대신 아래 lsof 누수 검사로 측정을 버린다. 환경은 docs/perf/baseline.json을 잰 그때와 같다
+// (buildPerfMeasurementEnv: 상속 PATH·TMPDIR, NODE_ENV·PORT 없음, 관리 Origin http://localhost:9000) — 하네스의 허용 목록
+// 환경(NODE_ENV=test·PORT·잘린 PATH)을 쓰면 기준선과 다른 조건이 된다.
+export {REAL_APP_DATA_DIR, forbiddenOpenFiles, isolatedRoot};
+export type {IsolatedRoot, RunningSidecar};
 
-/** 측정이 중단돼도(Ctrl-C·예외) 격리 사이드카를 남기지 않는다. */
-const runningChildren = new Set<Bun.Subprocess>();
-const killAll = () => { for (const child of runningChildren) { try { child.kill('SIGKILL'); } catch {} } };
-process.on('exit', killAll);
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { killAll(); process.exit(130); });
-
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({hostname: '127.0.0.1', port: 0, fetch: () => new Response('')});
-  const port = probe.port;
-  probe.stop(true);
-  if (!port) throw new Error('no free port');
-  return port;
-}
-
-export interface IsolatedRoot { root: string; home: string; appDataDir: string }
-
-export function isolatedRoot(scratch: string, label: string): IsolatedRoot {
-  const root = realpathSync(mkdtempSync(join(scratch, `sidecar-${label}-`)));
-  const home = join(root, 'home');
-  const appDataDir = join(root, 'app-data');
-  mkdirSync(home, {recursive: true});
-  mkdirSync(appDataDir, {recursive: true});
-  return {root, home, appDataDir};
-}
-
-function isolatedEnv(root: IsolatedRoot, port: number): Record<string, string> {
-  return {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    HOME: root.home,
-    USERPROFILE: root.home,
-    TMPDIR: process.env.TMPDIR ?? '/tmp',
-    LANG: 'en_US.UTF-8',
-    APP_DATA_DIR: root.appDataDir,
-    APPDATA: join(root.root, 'roaming'),
-    XDG_CONFIG_HOME: join(root.home, '.config'),
-    HERMES_HOME: join(root.home, '.hermes'),
-    API_PORT: String(port),
-    // 부팅 때 사용자 설정을 맞추는 작업은 격리 HOME에서도 돌 이유가 없다.
-    AGENTSTOZ_SKIP_HERMES_SYNC: '1',
-    AGENTSTOZ_SKIP_OUTPUT_STYLE_SYNC: '1',
-    AGENTSTOZ_SKIP_CONTROL_BOOTSTRAP: '1',
-    AGENTSTOZ_SKIP_MCP_CONNECTION_SYNC: '1',
-  };
-}
-
-export interface RunningSidecar {
-  child: Bun.Subprocess;
-  baseUrl: string;
-  readyMs: number;
-  stop: () => Promise<void>;
-}
-
-/** 프로세스가 연 파일 중 금지된 위치가 있으면 그 경로들을 돌려준다. */
-export function forbiddenOpenFiles(pid: number): string[] {
-  const out = spawnSync('/usr/sbin/lsof', ['-p', String(pid), '-Fn'], {encoding: 'utf8'}).stdout ?? '';
-  return out.split('\n').filter(line => line.startsWith('n')).map(line => line.slice(1))
-    // A managed checkout may live under ~/.codex/worktrees. lsof reports the
-    // sidecar's cwd there even when it opens no user data; keep every child
-    // path subject to the guard so .env and other files are still detected.
-    .filter(path => path !== REPO_ROOT && FORBIDDEN_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`)));
-}
-
-export async function startSidecar(root: IsolatedRoot, kind: 'source' | 'installed'): Promise<RunningSidecar> {
-  const port = await freePort();
-  const env = isolatedEnv(root, port);
-  const command = kind === 'source'
-    // --env-file=/dev/null: 작업 트리에 .env가 있어도 읽지 않는다(CLAUDE.md 「에이전트 런타임 가드」).
-    ? [process.execPath, '--env-file=/dev/null', join(REPO_ROOT, 'api-server.ts')]
-    : [INSTALLED_SIDECAR];
-  // 파이프로 받으면 아무도 읽지 않는 동안 버퍼가 차서 사이드카가 멈출 수 있다 — 파일로 받는다.
-  const stderrLog = join(root.root, `sidecar-${port}.stderr.log`);
-  const t0 = now();
-  const child = Bun.spawn(command, {cwd: kind === 'source' ? REPO_ROOT : root.root, env, stdout: 'ignore', stderr: Bun.file(stderrLog)});
-  runningChildren.add(child);
-  void child.exited.then(() => runningChildren.delete(child));
-  const baseUrl = `http://127.0.0.1:${port}`;
-  let exitCode: number | null = null;
-  void child.exited.then(code => { exitCode = code; });
-  let readyMs = -1;
-  while (now() - t0 < 30_000) {
-    if (exitCode !== null) break;
-    try {
-      const response = await fetch(`${baseUrl}/api/health`);
-      if (response.status === 200) { readyMs = now() - t0; break; }
-    } catch { /* not listening yet */ }
-    await Bun.sleep(5);
-  }
-  const stop = async () => {
-    try { child.kill('SIGTERM'); } catch {}
-    const exited = await Promise.race([child.exited, Bun.sleep(8_000).then(() => null)]);
-    if (exited === null) { try { child.kill('SIGKILL'); } catch {} await child.exited; }
-  };
-  if (readyMs < 0) {
-    const stderr = await Bun.file(stderrLog).text().catch(() => '');
-    await stop();
-    throw new Error(`isolated ${kind} sidecar never became healthy (exit=${exitCode}): ${stderr.slice(-1500)}`);
-  }
-  return {child, baseUrl, readyMs, stop};
+function startSidecar(root: IsolatedRoot, kind: 'source' | 'installed'): Promise<RunningSidecar> {
+  return startIsolatedSidecar(root, kind, {sandbox: 'unsandboxed-perf-measurement'});
 }
 
 async function assertIsolatedWhileRunning(sidecar: RunningSidecar, label: string) {
@@ -215,10 +132,9 @@ function privateAddress(): string | null {
   return null;
 }
 
-async function management(baseUrl: string, path: string, body: Record<string, unknown> = {}) {
-  const response = await fetch(`${baseUrl}${path}`, {method: 'POST', headers: {'Content-Type': 'application/json', Origin: MANAGEMENT_ORIGIN}, body: JSON.stringify(body)});
-  const json = await response.json() as Record<string, any>;
-  if (!response.ok) throw new Error(`${path} → ${response.status} ${JSON.stringify(json).slice(0, 300)}`);
+async function management(sidecar: RunningSidecar, path: string, body: Record<string, unknown> = {}) {
+  const {status, json} = await managementRequest(sidecar, path, body);
+  if (status < 200 || status >= 300) throw new Error(`${path} → ${status} ${JSON.stringify(json).slice(0, 300)}`);
   return json;
 }
 
@@ -256,12 +172,12 @@ export async function measureRemoteProjectList(scratch: string, samples: number,
   let walkData!: ReturnType<typeof walkRec.done>, pollData!: ReturnType<typeof pollRec.done>, coldFirstPoll = -1;
   try {
     await assertIsolatedWhileRunning(sidecar, 'remote-list');
-    const interfaces = await management(sidecar.baseUrl, '/api/remote-control/interfaces');
+    const interfaces = await management(sidecar, '/api/remote-control/interfaces');
     if (!(interfaces.interfaces as Array<{address: string}>).some(entry => entry.address === address)) throw new Error('sidecar does not offer the private address');
-    await management(sidecar.baseUrl, '/api/remote-control/enable', {interfaceAddress: address});
+    await management(sidecar, '/api/remote-control/enable', {interfaceAddress: address});
     // 첫 표본은 버린다(목록 경로의 모듈·캐시 데우기) — 휴대폰이 두 번째 이후 여는 경우와 같다.
     for (let i = -1; i < samples; i += 1) {
-      const pairing = await management(sidecar.baseUrl, '/api/remote-control/pairing/rotate');
+      const pairing = await management(sidecar, '/api/remote-control/pairing/rotate');
       const url = new URL(String(pairing.pairingUrl));
       const token = new URLSearchParams(url.hash.slice(1)).get('pair') ?? '';
       const {socket, next} = await openSocket(url.origin);
@@ -301,19 +217,19 @@ export async function measureRemoteProjectList(scratch: string, samples: number,
     walkData = walkRec.done();
     // 워크룸 목록 폴링: 휴대폰의 워크룸 화면은 세션 목록·출력을 1초 남짓마다 읽는다. 그 한 번의 호스트 몫.
     {
-      const pairing = await management(sidecar.baseUrl, '/api/remote-control/pairing/rotate');
+      const pairing = await management(sidecar, '/api/remote-control/pairing/rotate');
       const url = new URL(String(pairing.pairingUrl));
       const token = new URLSearchParams(url.hash.slice(1)).get('pair') ?? '';
       const {socket, next} = await openSocket(url.origin);
       socket.send(JSON.stringify({type: 'controller.pair', protocolVersion: REMOTE_CONTROL_PROTOCOL_VERSION, token}));
       const ready = await next();
       if (ready.type !== 'session.ready') throw new Error('pairing for terminal poll failed');
-      const status = await management(sidecar.baseUrl, '/api/remote-control/status');
+      const status = await management(sidecar, '/api/remote-control/status');
       const row = (status.sessions as Array<{id: string; connected: boolean}>).find(entry => entry.connected);
       if (!row) throw new Error('no connected LAN session to grant terminal access');
       // 이 격리 사이드카 안에서만, 그 세션에 워크룸 접근을 허용한다(Mac 화면의 「허용」과 같은 관리 요청).
       const grant = await fetch(`${sidecar.baseUrl}/api/agent-runtime/terminals/access`, {method: 'POST',
-        headers: {'Content-Type': 'application/json', Origin: MANAGEMENT_ORIGIN}, body: JSON.stringify({owner: `lan:${row.id}`, enabled: true})});
+        headers: {'Content-Type': 'application/json', Origin: sidecar.managementOrigin}, body: JSON.stringify({owner: `lan:${row.id}`, enabled: true})});
       if (!grant.ok) throw new Error(`terminal access grant failed: ${grant.status} ${(await grant.text()).slice(0, 200)}`);
       const poll = async () => {
         const t = now();
@@ -332,7 +248,7 @@ export async function measureRemoteProjectList(scratch: string, samples: number,
       socket.send(JSON.stringify({type: 'session.end', protocolVersion: REMOTE_CONTROL_PROTOCOL_VERSION, sessionToken: ready.sessionToken}));
       socket.close();
     }
-    await management(sidecar.baseUrl, '/api/remote-control/disable').catch(() => undefined);
+    await management(sidecar, '/api/remote-control/disable').catch(() => undefined);
   } finally { await sidecar.stop(); }
   const where = `격리 사이드카(소스) + 합성 프로젝트 ${fixture.count}개(워크트리 ${fixture.worktrees}) + 실제 LAN 리스너·WebSocket(${REMOTE_CONTROL_PROTOCOL_VERSION}).`;
   return {

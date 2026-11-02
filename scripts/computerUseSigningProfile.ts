@@ -25,23 +25,30 @@ export function resolveControlSigningIdentityFingerprint(identity:string, listin
 
 /** Metadata and certificate membership only; Apple/OS trust, installed validation, TCC and human approval remain separate. */
 export function assertComputerUseSigningProfile(value:unknown,signingFingerprint:string,now=Date.now()){
-  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Control provisioning profile metadata is invalid');
-  const p=value as Record<string,any>,ent=p.Entitlements,id=CONTROL_TEAM_ID+'.'+CONTROL_BUNDLE_ID;
-  if(!Array.isArray(p.TeamIdentifier)||p.TeamIdentifier.length!==1||p.TeamIdentifier[0]!==CONTROL_TEAM_ID)throw Error('Control provisioning profile must belong to the configured Developer ID team');
+  return assertIndependentHelperSigningProfile(value,signingFingerprint,
+    {bundleId:CONTROL_BUNDLE_ID,teamId:CONTROL_TEAM_ID,label:'Control'},now);
+}
+
+/** The same admission for independent helper identities; callers supply a fixed build-time App ID. */
+export function assertIndependentHelperSigningProfile(value:unknown,signingFingerprint:string,
+  {bundleId,teamId,label}:{bundleId:string;teamId:string;label:string},now=Date.now()){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error(`${label} provisioning profile metadata is invalid`);
+  const p=value as Record<string,any>,ent=p.Entitlements,id=teamId+'.'+bundleId;
+  if(!Array.isArray(p.TeamIdentifier)||p.TeamIdentifier.length!==1||p.TeamIdentifier[0]!==teamId)throw Error(`${label} provisioning profile must belong to the configured Developer ID team`);
   if(!ent||typeof ent!=='object'||Array.isArray(ent)||ent['com.apple.application-identifier']!==id
-    ||ent['com.apple.developer.team-identifier']!==CONTROL_TEAM_ID)throw Error('A dedicated AgentsToZ Control App ID profile is required; the Screen profile cannot be reused');
-  if(p.ProvisionsAllDevices!==true||p.ProvisionedDevices!==undefined||ent['get-task-allow']===true||ent['com.apple.security.get-task-allow']===true)throw Error('Control requires a Developer ID distribution profile, not a development or device-bound profile');
+    ||ent['com.apple.developer.team-identifier']!==teamId)throw Error(`A dedicated AgentsToZ ${label} App ID profile is required; the Screen profile cannot be reused`);
+  if(p.ProvisionsAllDevices!==true||p.ProvisionedDevices!==undefined||ent['get-task-allow']===true||ent['com.apple.security.get-task-allow']===true)throw Error(`${label} requires a Developer ID distribution profile, not a development or device-bound profile`);
   // Profiles describe allowed entitlements: Apple's team wildcard authorizes the app's exact group.
   // The signed binary still requests only `id` in controlEntitlements(), never the profile's wildcard.
   const groups=ent['keychain-access-groups'];
   if(!Array.isArray(groups)||!groups.every(g=>typeof g==='string')
-    ||!groups.some(g=>g===id||g===CONTROL_TEAM_ID+'.*'))throw Error('Control provisioning profile does not grant its own approval keychain group');
+    ||!groups.some(g=>g===id||g===teamId+'.*'))throw Error(`${label} provisioning profile does not grant its own approval keychain group`);
   const expiry=typeof p.ExpirationDate==='string'?Date.parse(p.ExpirationDate):NaN;
-  if(!Number.isFinite(expiry)||expiry<=now)throw Error('Control provisioning profile is expired or has no valid expiration');
+  if(!Number.isFinite(expiry)||expiry<=now)throw Error(`${label} provisioning profile is expired or has no valid expiration`);
   const certs=p.DeveloperCertificateSHA1;
-  if(!/^[A-F0-9]{40}$/u.test(signingFingerprint)||!Array.isArray(certs)||!certs.length||!certs.every(c=>typeof c==='string'&&/^[A-F0-9]{40}$/u.test(c)))throw Error('Control provisioning profile certificate metadata is invalid');
-  if(!certs.includes(signingFingerprint))throw Error('The selected signing certificate is not included in the Control provisioning profile; no build was started');
-  return {bundleId:CONTROL_BUNDLE_ID,teamId:CONTROL_TEAM_ID,expiresAt:new Date(expiry).toISOString()};
+  if(!/^[A-F0-9]{40}$/u.test(signingFingerprint)||!Array.isArray(certs)||!certs.length||!certs.every(c=>typeof c==='string'&&/^[A-F0-9]{40}$/u.test(c)))throw Error(`${label} provisioning profile certificate metadata is invalid`);
+  if(!certs.includes(signingFingerprint))throw Error(`The selected signing certificate is not included in the ${label} provisioning profile; no build was started`);
+  return {bundleId,teamId,expiresAt:new Date(expiry).toISOString()};
 }
 
 /** Decode the exact bytes that will later be embedded. The temporary input is not written to disk or included in errors. */

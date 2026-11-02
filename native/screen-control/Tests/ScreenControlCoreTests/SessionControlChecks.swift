@@ -205,7 +205,8 @@ extension ScreenControlChecks {
                   && SessionEndReason.turnedOffFromDevice.closePayload(version: 2) == Data([7])
                   && SessionEndReason.turnedOffFromDevice.closePayload(version: 1) == SessionEndReason.turnedOff.encoded,
                   "a version-1 phone hears 「turned off」")
-        for reason in SessionEndReason.allCases where reason != .turnedOffFromDevice {
+        // Version 5's reasons: SessionV5Checks.swift.
+        for reason: SessionEndReason in [.idle, .timeLimit, .endedAtMac, .turnedOff, .revoked, .replaced] {
             try check(reason.minimumVersion == 1 && reason.closePayload(version: 1) == reason.encoded, "\(reason) is version 1's")
         }
     }

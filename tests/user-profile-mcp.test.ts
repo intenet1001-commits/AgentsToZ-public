@@ -8,6 +8,21 @@ import {join} from 'node:path';
 const roots:string[]=[],servers:ReturnType<typeof Bun.serve>[]=[];
 afterEach(()=>{for(const server of servers.splice(0))server.stop(true);for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
 const name='agentstoz_use_recall_user_profile';
+test('optional explanation and relation flags survive both parsers without entering another role or action',()=>{
+ const explained=agentsToZUseMcpActionForTool(name,{portId:'registered-project',query:'writing',includeExplanation:true},'fixture-controller');
+ expect(parseAgentsToZUseActionRequest(explained)).toMatchObject({action:'recall-user-profile',includeExplanation:true});
+ const related=agentsToZUseMcpActionForTool('agentstoz_use_recall_control_context',{query:'writing',includeRelations:true},'fixture-controller');
+ expect(parseAgentsToZUseActionRequest(related)).toMatchObject({action:'recall-control-context',includeRelations:true});
+ const reference=agentsToZUseMcpActionForTool('agentstoz_use_read_reference',{role:'dev',portId:'registered-project',query:'writing',includeRelations:true},'fixture-controller');
+ expect(parseAgentsToZUseActionRequest(reference).reference).toMatchObject({role:'dev',includeRelations:true});
+ for(const value of ['true',1,null]){
+  expect(()=>agentsToZUseMcpActionForTool(name,{portId:'registered-project',query:'writing',includeExplanation:value},'fixture-controller')).toThrow();
+  expect(()=>agentsToZUseMcpActionForTool('agentstoz_use_recall_control_context',{query:'writing',includeRelations:value},'fixture-controller')).toThrow();
+ }
+ expect(()=>agentsToZUseMcpActionForTool('agentstoz_use_read_reference',{role:'use',portId:'registered-project',query:'writing',includeRelations:true},'fixture-controller')).toThrow();
+ expect(()=>parseAgentsToZUseActionRequest({...explained,action:'recall-user-memory'})).toThrow();
+ expect(()=>parseAgentsToZUseActionRequest({...related,action:'get-control-profile'})).toThrow();
+});
 test('personal preference recall keeps its target and normalized query through both input boundaries',()=>{
  const action=agentsToZUseMcpActionForTool(name,{portId:'registered-project',query:'  문서\n작성  '},'fixture-controller');
  expect(action).toEqual({action:'recall-user-profile',controllerPortId:'fixture-controller',portId:'registered-project',query:'문서 작성'});

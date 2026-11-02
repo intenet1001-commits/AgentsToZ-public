@@ -46,6 +46,8 @@ output/playwright/
 
 # macOS
 .DS_Store
+# Per-machine Viewer provisioning input; never include the downloaded profile in source snapshots.
+native/screen-control/App/AgentsToZ_Viewer_Developer_ID.provisionprofile
 
 # Local data files
 .ports.json

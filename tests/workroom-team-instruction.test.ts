@@ -3,6 +3,7 @@ import {readTeamBuilderDraft,teamLeaderInstruction} from '../src/workroomTeamIns
 import {blankTeamRow,restoredTeamRows,teamRowMember} from '../src/WorkroomTeamBuilder';
 import {parseTeamSelectionBlock,teamSelectionBlock} from '../src/teamLaunchOptions';
 import {hermesVariantItems} from '../src/hermesVariants';
+import {AGENTSTOZ_TEAM_SKILL} from '../src/agentstozTeamSkill';
 
 const variants=hermesVariantItems(new Set(['anthropic']));
 test('reopening the composed draft restores only its goal and exact member choices, then a bypass cancellation replaces old authority',()=>{
@@ -66,4 +67,26 @@ test('the app member computer use opt-in is the builder\'s own choice: off by de
  expect(restoredTeamRows(readTeamBuilderDraft(text).members!)[0]).toMatchObject({surface:'app',computerUse:true});
  // Moving the member off the app keeps the tick visible and lets the shared parser refuse it, never drop it.
  expect(()=>teamLeaderInstruction({goal:'앱 작업',members:[teamRowMember({...row,surface:'orca-worktree'},{variants}).member!]})).toThrow('데스크톱 앱');
+});
+test('a requested remote computer-use team names the device and coordinates unknown inputs without changing chosen members',()=>{
+ const members=[{agent:'codex' as const,task:'화면 확인'},{agent:'claude' as const,role:'reviewer' as const}];
+ const local=teamLeaderInstruction({goal:'화면 검사',members});
+ const remote=teamLeaderInstruction({goal:'다른 Mac에서 컴퓨터 유즈로 화면 확인',members});
+ expect(parseTeamSelectionBlock(remote)).toEqual(parseTeamSelectionBlock(local));
+ expect(readTeamBuilderDraft(remote).goal).toBe('다른 Mac에서 컴퓨터 유즈로 화면 확인');
+ expect(remote).toContain('devices로 대상을 확인');
+ expect(remote).toContain('대상이 불분명하면 임의로 고르지 않습니다');
+ expect(remote).toContain('한 번에 한 팀원에게만');
+ expect(remote).toContain('원래 연결에서 같은 device와 requestId로 receipt');
+ expect(remote).toContain('다른 팀원·새 연결·새 requestId로 입력을 반복하지 않습니다');
+ expect(remote).toContain('원격 Mac 승인이나 전체 Mac 권한을 추가하지 않습니다');
+ expect(local).not.toContain('devices로 대상을 확인');
+ expect(AGENTSTOZ_TEAM_SKILL).toContain('not a device-wide lock');
+ expect(AGENTSTOZ_TEAM_SKILL).toContain('original MCP connection');
+ expect(AGENTSTOZ_TEAM_SKILL).toContain('never repeat the input through another member');
+});
+test('remote computer-use guidance also follows an explicitly assigned English member task',()=>{
+ const text=teamLeaderInstruction({goal:'Improve the workflow',members:[{agent:'codex',task:'Use remote computer-use on the named Mac'}]});
+ expect(text).toContain('devices로 대상을 확인');
+ expect(parseTeamSelectionBlock(text).members[0]).toMatchObject({agent:'codex',task:'Use remote computer-use on the named Mac'});
 });

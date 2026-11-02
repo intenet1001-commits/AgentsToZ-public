@@ -11,7 +11,16 @@ public enum ScreenControlProtocol {
     /// screen control off from the phone (`ControlMessage`). The key exchange and records remain version 1's.
     /// Version 3 adds keyboard acknowledgements, Spaces and bounded video-quality requests.
     /// Version 4 adds a single admitted text and Return request with posting-only feedback.
-    public static let version: UInt16 = 4
+    /// Version 5 is the Mac controller's (docs/design/mac-to-mac-2026-11-01 7.2): the peer class bound into the
+    /// transcript, the view-only reason, the taken-over, busy and capture-unavailable end reasons, and the session
+    /// limits, address hint and self-unenrolment messages. Only Mac controller sessions settle on it.
+    public static let version: UInt16 = 5
+    /// What a phone offers and the most a Mac settles on with one (SR-36). The phone stays at 4: rebuilding this core
+    /// for the next iOS build changes neither its handshake bytes nor how it reads the Mac.
+    public static let phoneVersion: UInt16 = 4
+    /// The oldest version a Mac controller session may use. A Viewer refuses an older Mac before signing anything, and a
+    /// Mac refuses a controller that settles below it.
+    public static let controllerMinimumVersion: UInt16 = 5
     /// The oldest session version this build still speaks, so a Mac and a phone of different builds still connect.
     public static let minimumVersion: UInt16 = 1
     /// Registration (QR, record, acknowledgement, approval) did not change with version 2 and stays at 1, so a phone and a

@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 #if !CORE_CHECKS
 import ComputerUseApproval
 #endif
@@ -57,7 +58,12 @@ public struct ScopeControlRequest {
               let channelName = body["channel"] as? String, let channel = ControlChannel(rawValue: channelName),
               let op = body["op"] as? String, let shape = shapes[op],
               (channel == .agent ? agentOperations : managementOperations).contains(op),
-              Set(body.keys) == shape.union(["v", "channel", "op"]) else { throw ControlError.invalid }
+              Set(body.keys).isSuperset(of: shape.union(["v", "channel", "op"])) else { throw ControlError.invalid }
+        let optional: Set<String> = op == "scope-click" ? ["axOnly"] : op == "scope-capture" ? ["maxBytes"] : []
+        guard Set(body.keys).isSubset(of: shape.union(["v", "channel", "op"]).union(optional)) else { throw ControlError.invalid }
+        if let value = body["maxBytes"] {
+            guard let n = ControlRequest.integer(value), (1024...240000).contains(n) else { throw ControlError.invalid }
+        }
         if shape.contains("approvalId"), ControlRequest.approvalId(body["approvalId"]) == nil { throw ControlError.invalid }
         if shape.contains("scope"), scope(body["scope"]) == nil { throw ControlError.invalid }
         if shape.contains("caller"), ControlRequest.caller(body["caller"]) == nil { throw ControlError.invalid }
@@ -85,6 +91,10 @@ public struct ScopeControlRequest {
         if op == "scope-click" {
             guard let button = body["button"] as? String, ["left", "right"].contains(button),
                   let count = ControlRequest.integer(body["clickCount"]), [1, 2].contains(count) else { throw ControlError.invalid }
+            if let value = body["axOnly"] {
+                guard CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID(), let flag = value as? Bool,
+                      !flag || button == "left" && count == 1 else { throw ControlError.invalid }
+            }
         }
         if op == "scope-key" {
             guard let key = body["key"] as? String, validKey(key), let modifiers = body["modifiers"] as? [String],

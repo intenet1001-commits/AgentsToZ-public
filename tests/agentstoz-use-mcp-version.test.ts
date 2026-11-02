@@ -6,7 +6,7 @@ import {
   agentsToZUseMcpServerVersion,
   parseAgentsToZUseMcpBuild,
 } from '../src/agentstozUseMcpVersion';
-import { handleAgentsToZUseMcpRequest } from '../agentstoz-use-mcp-server';
+import { AGENTSTOZ_USE_MCP_TOOLS, handleAgentsToZUseMcpRequest } from '../agentstoz-use-mcp-server';
 
 const buildNumber = JSON.parse(readFileSync(new URL('../build-number.json', import.meta.url), 'utf8')).buildNumber as number;
 
@@ -53,8 +53,29 @@ describe('agentstoz_use MCP server version comes from the build', () => {
     // 1.72.0 adds computer-session request-access, which only asks for the scope the person switched on.
     // 1.73.0 adds guardReason to refused computer-session receipts and lets focus-app leave the AI's own host app.
     // 1.75.0 lets an AI chat add, switch and remove CLI accounts through platform_cli.
-    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.75.0');
+    // 1.76.0 lets agentstoz_use_computer_session reach another community Mac (device, devices, observe capture) and
+    // names the remote receipt states and error codes.
+    // 1.79.0 adds certified remote Teams device/project discovery and bounded create_team remote members.
+    // 1.80.0 preserves the public memory-relation and preference-explanation extensions alongside remote Teams.
+    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.80.0');
     expect(AGENTSTOZ_USE_MCP_SERVER_VERSION.startsWith(`${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.`)).toBe(true);
+  });
+
+  test('recall extensions are optional booleans and USE cannot opt into DEV/OPS relations', () => {
+    const schema = (name: string) => AGENTSTOZ_USE_MCP_TOOLS.find(tool => tool.name === `agentstoz_use_${name}`)!.inputSchema as any;
+    for (const [name, flag] of [['recall_control_context', 'includeRelations'], ['recall_user_profile', 'includeExplanation']]) {
+      expect(schema(name!).properties[flag!]).toEqual({type: 'boolean', default: false});
+      expect(schema(name!).required).not.toContain(flag);
+    }
+    const scopes = schema('read_reference').oneOf;
+    for (const role of ['ops', 'dev']) {
+      const variant = scopes.find((item: any) => item.properties.role.const === role);
+      expect(variant.properties.includeRelations).toEqual({type: 'boolean', default: false});
+      expect(variant.required).not.toContain('includeRelations');
+    }
+    const use = scopes.find((item: any) => item.properties.role.const === 'use');
+    expect(use.properties).not.toHaveProperty('includeRelations');
+    expect(use.additionalProperties).toBe(false);
   });
 
   test('older fixed versions parse as unknown build, not as a match', () => {

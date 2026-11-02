@@ -130,7 +130,7 @@ export function planSidecarBuild(
     outfile: controlLinkOutput,
     args: Object.freeze([
       '/usr/bin/clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-      '-bundle', '-undefined', 'dynamic_lookup', '-I', join(projectRoot, 'node_modules/node-api-headers/include'),
+      '-bundle', '-undefined', 'dynamic_lookup', '-framework', 'Security', '-framework', 'CoreFoundation', '-lbsm', '-I', join(projectRoot, 'node_modules/node-api-headers/include'),
       join(projectRoot, 'src-tauri/native/computer-use/PrivateLink/addon.c'), '-o', controlLinkOutput,
     ]),
   })].filter(command => mode.kind !== "macos-runtime-production" || command.outfile !== controlLinkOutput) : [];

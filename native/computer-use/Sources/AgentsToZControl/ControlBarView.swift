@@ -27,6 +27,10 @@ final class ControlBarView: NSView {
         var style: Style = .quiet { didSet { refresh() } }
         var label = "" { didSet { refresh() } }
         var symbol = "" { didSet { refresh() } }
+        /// True only while this button handles its own mouse-down; an accessibility press cannot reuse another click.
+        private(set) var tracksOwnMouseDown = false
+        var requiresPhysicalHandBack = false
+        var refusedAccessibilityPress: (() -> Void)?
         private var hovering = false
         private var pressed = false
         private var hoverArea: NSTrackingArea?
@@ -48,6 +52,15 @@ final class ControlBarView: NSView {
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            tracksOwnMouseDown = true
+            defer { tracksOwnMouseDown = false }
+            super.mouseDown(with: event)
+        }
+        override func accessibilityPerformPress() -> Bool {
+            guard !requiresPhysicalHandBack else { refusedAccessibilityPress?(); return false }
+            return super.accessibilityPerformPress()
+        }
         override var intrinsicContentSize: NSSize {
             let content = super.intrinsicContentSize
             return NSSize(width: ceil(content.width) + 24, height: 30)

@@ -76,6 +76,9 @@ final class ScreenAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         watchSession()
+        ScreenShared.service.startCommunityRegistration()
+        ControllerSectionActions.connect(ScreenShared.service)
+        ScreenSessionBar.shared.start() // the floating session bar follows the session by itself (ScreenSessionBar.swift)
         // A login item opens quietly in the menu bar; the main app, Finder or `open` show where things are.
         if ScreenLaunch.showWindow || !Self.launchedAsLoginItem { PanelWindows.showStatus() }
         // Permissions change in System Settings without telling this app. The status is written only when it changed.
@@ -157,7 +160,9 @@ struct ScreenMenu: View {
         case .off(let reason):
             Text("화면 제어: 꺼짐")
             if let reason { Text(reason) }
-            Button("켜기 (Touch ID)…") { Task { await service.turnOn() } }
+            if service.unifiedReceivingRegistered {
+                Button("화면 제어 켜기…") { PanelWindows.showStatus() }
+            } else { Button("켜기 (Touch ID)…") { Task { await service.turnOn() } } }
         case .starting:
             Text("켜는 중…")
         case .on(let address):
@@ -173,11 +178,12 @@ struct ScreenMenu: View {
             }
             Button("끄기") { service.turnOff() }
         }
-        if let session = service.session {
+        // A Mac controller's session is in 「다른 Mac에서 이 Mac 보기」 below.
+        if let session = service.session, session.peerClass == .phone {
             Divider()
             Text("보는 기기: \(session.deviceName)\(session.canControl ? "" : " (보기만)")")
             Button("연결 끊기 (\(EndSessionHotKey.label))") { service.disconnect() }
-        } else if let ended = service.lastEnded {
+        } else if service.session == nil, let ended = service.lastEnded {
             Divider()
             Text(ended)
         }
@@ -205,6 +211,8 @@ struct ScreenMenu: View {
         }
         // The self-hosted relay's state, only where one is saved: 「꺼짐」 here read as if remote use were off.
         if service.internetRoute != nil { Text(service.internetConnection.label) }
+        Divider()
+        ControllerMenuSection(service: service)
         Divider()
         if ScreenRecordingPermission.current == .granted {
             Text("화면 기록 권한: 허용됨")
@@ -237,12 +245,19 @@ struct ScreenMenu: View {
         Divider()
         Button("상태 창 열기…") { PanelWindows.showStatus() }
         LoginItemToggle(service: service)
-        Button("AgentsToZ Screen 종료") {
-            // Lets go of held input at once, then gives the phone up to a second to hear why before quitting.
-            Task {
-                await service.quit()
-                NSApp.terminate(nil)
-            }
+        // While kept on (SR-27), 「끄고 끝내기」 is the default and lets it go; 「켜 둔 채 끝내기」 says it turns on again.
+        let quit = ControllerSectionModel(service.controllerSectionState()).quit
+        Button(quit.primaryTitle) { Self.quit(service, keepingOn: false) }
+        if let keeping = quit.keepingOnTitle {
+            Button(keeping) { Self.quit(service, keepingOn: true) }
+        }
+    }
+
+    /// Lets go of held input at once, then gives the phone up to a second to hear why before quitting.
+    static func quit(_ service: ScreenService, keepingOn: Bool) {
+        Task {
+            await service.quit(keepingOn: keepingOn)
+            NSApp.terminate(nil)
         }
     }
 
@@ -275,6 +290,10 @@ struct NetworkText {
             title = "승인되지 않은 네트워크 (\(label))"
             detail = "승인된 네트워크에서만 연결을 받습니다. 이 네트워크에서도 쓰려면 승인하세요."
             canApprove = true
+        case .notKept(let label):
+            title = "켜짐 · 켜 두기에 저장하지 않은 네트워크 (\(label))"
+            detail = "저장하지 않은 네트워크라 받지 않습니다. 저장한 네트워크에 연결되면 다시 연결을 받습니다. 여기서 쓰려면 끈 뒤 이 Mac에서 다시 켜세요."
+            canApprove = false
         }
     }
 }
@@ -339,7 +358,9 @@ struct StatusPanel: View {
                     case .off(let reason):
                         Label("화면 제어 꺼짐", systemImage: "display.and.arrow.down")
                         if let reason { Text(reason).font(.callout).foregroundStyle(.secondary) }
-                        Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(touchIDReturnKey)
+                        if service.unifiedReceivingRegistered {
+                            HardwareButton(title: "커뮤니티 화면 제어 켜기") { click in Task { await service.turnOnFromCommunity(click: click) } }
+                        } else { Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(touchIDReturnKey) }
                     case .starting:
                         Label("켜는 중…", systemImage: "hourglass")
                     case .on(let address):
@@ -360,12 +381,12 @@ struct StatusPanel: View {
                             Button("끄기") { service.turnOff() }
                         }
                     }
-                    if let session = service.session {
+                    if let session = service.session, session.peerClass == .phone {
                         Divider()
                         Text("보는 기기: \(session.deviceName)\(session.canControl ? "" : " (보기만)")")
                         Button("연결 끊기") { service.disconnect() }
                         Text("Mac 키보드에서 \(EndSessionHotKey.label)를 눌러도 바로 끊깁니다.").font(.callout).foregroundStyle(.secondary)
-                    } else if let ended = service.lastEnded {
+                    } else if service.session == nil, let ended = service.lastEnded {
                         Text(ended).font(.callout).foregroundStyle(.secondary)
                     }
                 }
@@ -374,7 +395,7 @@ struct StatusPanel: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     let usable = service.devices.filter { !$0.isExpired() }.count
-                    Text("등록된 기기 \(usable)대 · 현재 연결 \(service.session == nil ? 0 : 1)대")
+                    Text("등록된 기기 \(usable)대 · 현재 연결 \(service.session?.peerClass == .phone ? 1 : 0)대")
                     Button("기기 등록…") { PanelWindows.showRegistration() }
                         .disabled(!service.isOn || service.session != nil)
                     Text(service.isOn ? "기기마다 한 번, 이 Mac 앞에서 QR을 찍고 Touch ID로 승인합니다."
@@ -434,6 +455,9 @@ struct StatusPanel: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GroupBox {
+                ControllerStatusSection(service: service)
             }
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {

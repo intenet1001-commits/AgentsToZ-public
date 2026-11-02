@@ -124,6 +124,9 @@ final class ControlService {
 
     func handle(_ data: Data, owner: ControlOwner) async -> Data {
         defer { refresh() }
+        if let community = try? CommunityControlRequest.decode(data) {
+            return CommunityControlService.shared.handle(community, owner: owner)
+        }
         if let scoped = try? ScopeControlRequest.decode(data) {
             return await ScopedControlShared.service.handle(scoped, owner: owner)
         }

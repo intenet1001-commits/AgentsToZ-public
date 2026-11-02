@@ -115,7 +115,9 @@ struct Fixture: @unchecked Sendable {
         mac = MacHandshake(signer: macSigner, replay: NonceReplayCache(), versions: macVersions) { registry[$0] }
     }
 
-    /// A phone that negotiates like this build; with `version`, one that speaks exactly that version and offers nothing.
+    /// A device whose key the Mac holds as a phone, offering everything this build speaks (5): the Mac answers it in 4,
+    /// a phone's most (SR-36). With `version`, one that speaks exactly that version and offers nothing. The iOS app's
+    /// own offer is `VersionPolicy.phone`: `device(versions: .phone)`, or `PeerFixture.phone()`.
     func device(version: UInt16? = nil) -> DeviceHandshake {
         device(versions: version.map { .only($0) } ?? .current)
     }
@@ -200,7 +202,8 @@ struct ScreenControlChecks {
     }
 
     func testRoleLabelsAreNotInterchangeable() async throws {
-        let labels = HandshakeLabels(version: ScreenControlProtocol.version)
+        // The labels of the version a phone session settles on (SR-36); version 5's: SessionV5Checks.swift.
+        let labels = HandshakeLabels(version: ScreenControlProtocol.phoneVersion)
         let mislabeledMac = MislabelingSigner(from: labels.macSignature, to: labels.deviceSignature)
         let macSide = Fixture(macSigner: mislabeledMac)
         let device = macSide.device()
@@ -359,7 +362,8 @@ struct ScreenControlChecks {
         // SR-4: each side signs the ephemeral keys it saw. An attacker in the middle who swaps both ephemeral keys and
         // recomputes every confirmation from the secrets it shares with each side still breaks a signature.
         let fixture = Fixture()
-        let version = ScreenControlProtocol.version, labels = HandshakeLabels(version: version)
+        // The version the fixture's phone settles on (SR-36), so only the swapped keys can break the signatures.
+        let version = ScreenControlProtocol.phoneVersion, labels = HandshakeLabels(version: version)
         let macFingerprint = ScreenControlIdentity.fingerprint(of: fixture.macSigner.publicKey)
         let towardMac = P256.KeyAgreement.PrivateKey(), towardDevice = P256.KeyAgreement.PrivateKey()
         let device = fixture.device()
@@ -821,8 +825,15 @@ struct ScreenControlChecks {
     }
 
     // Notifications and remote stop: PushChecks.swift.
-    static var all: [(String, (ScreenControlChecks) -> () async throws -> Void)] { pushChecks + controllerChecks + coreChecks }
+    // Session protocol 5: SessionV5Checks.swift. The connector's pre-authentication accounts: PreAuthConnectorChecks.swift.
+    // Hardware-only input judgement: InputOriginChecks.swift. Direct controller pairing: ControllerPairingChecks.swift.
+    // The AgentsToZ Viewer's route, targets, loopback session and source contract: ViewerRouteChecks.swift.
+    static var all: [(String, (ScreenControlChecks) -> () async throws -> Void)] {
+        pushChecks + controllerChecks + inputOriginChecks + coreChecks + sessionV5Checks + preAuthConnectorChecks
+            + controllerPairingChecks + viewerRouteChecks
+    }
     static var coreChecks: [(String, (ScreenControlChecks) -> () async throws -> Void)] { [
+        ("connection diagnostics distinguish path, authentication and video", { $0.testConnectionDiagnosticsDistinguishStages }),
         ("private network route is explicit and bounded", { $0.testPrivateNetworkRouteIsExplicitAndBounded }),
         ("desktop controls strictly versioned", { $0.testDesktopControlsAreStrictAndVersioned }),
         ("Caps Lock tap, hold and cancellation", { $0.testCapsLockTapHoldAndCancellation }),
@@ -930,6 +941,18 @@ struct ScreenControlChecks {
 import XCTest
 final class ScreenControlCoreTests: XCTestCase {
     func testTextAndReturn() async throws { try await ScreenControlChecks().testTextAndReturnIsVersionedAndSingleAdmission() }
+    func testViewerHumanButtonContract() async throws {
+        let checks = ScreenControlChecks()
+        try await checks.testViewerControlActuation()
+        try await checks.testViewerSourceContract()
+    }
+    /// Isolated session checks: software identities, synthetic input and loopback only, no Secure Enclave or keychain.
+    func testVersionFiveExplicitMacHold() async throws {
+        let checks = ScreenControlChecks()
+        try await checks.testPhoneStaysOnVersionFourByteForByte()
+        try await checks.testVersionFiveValuesParseStrictlyByVersion()
+        try await checks.testExplicitMacHoldOverSession()
+    }
     func testSecurityRequirements() async throws {
         for (name, run) in ScreenControlChecks.all {
             do { try await run(ScreenControlChecks())() } catch { XCTFail("\(name): \(error)") }

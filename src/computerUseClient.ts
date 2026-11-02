@@ -12,7 +12,10 @@ export type ComputerUseManagementRequest=
   |{operation:'scope-access-set';enabled:true;scope:ComputerUseScope}
   |{operation:'scope-access-set';enabled:false}
   |{operation:'scope-revoke';id:string}
-  |{operation:'scope-review-recovery';id:string;confirmed:true};
+  |{operation:'scope-review-recovery';id:string;confirmed:true}
+  // Another Mac's AI on this Mac (the person's switches, saved in computer-use-remote.json) and this Mac's AI on another Mac.
+  |{operation:'scope-remote-set';allowRemote?:boolean;block?:{deviceId:string;name?:string;connection?:string;minutes?:number};unblock?:{deviceId:string};noticeShown?:true}
+  |{operation:'scope-remote-outgoing-close';deviceId:string};
 export type ComputerUseManagementRequester=(body:ComputerUseManagementRequest)=>Promise<Record<string,any>>;
 /**
  * The request's name in Control's review, made from what the person picked (the connection and the scope). It only

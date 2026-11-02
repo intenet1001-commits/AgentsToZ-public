@@ -4,6 +4,7 @@ import {COMPUTER_USE_LIMITS as L, COMPUTER_USE_WORKER_PROTOCOL, COMPUTER_REFUSAL
 import {isAuthenticatedComputerCaller, computerCallerGeneration, isLiveComputerCallerGeneration, type AuthenticatedComputerCaller} from './computerUseCaller';
 import type {ComputerApprovalVerifier} from './computerUseApproval';
 import type {ComputerUseRecoveryStore} from './computerUseRecovery';
+import {remoteHumanInputGuidance,type RemoteHumanInputReader} from './computerUseRemoteHumanInput';
 
 /**
  * The trusted host supplies a versioned native adapter. Agents cannot select an executable. In production this is a
@@ -60,10 +61,15 @@ export class ComputerUseHost {
   private inflight = new Set<string>();
   /**
    * `recovery` is the durable unknown-action ledger (computerUseRecovery.ts) and `approvals` the helper-signed
-   * human approval (computerUseApproval.ts); there is no mode without either.
+   * human approval (computerUseApproval.ts); there is no mode without either. `remoteHumanInput`: a person controlling
+   * this Mac from another device through AgentsToZ Screen in the last 10 s (SR-34, computerUseRemoteHumanInput.ts);
+   * without it nothing is read.
    */
   constructor(private readonly deps: {createWorker: (context: ComputerWorkerContext) => Promise<ComputerWorker>; recovery: ComputerUseRecoveryStore;
-    approvals: Pick<ComputerApprovalVerifier, 'request' | 'verify' | 'redeem' | 'cancel' | 'cancelSession'>; now?: () => number}) {}
+    approvals: Pick<ComputerApprovalVerifier, 'request' | 'verify' | 'redeem' | 'cancel' | 'cancelSession'>; now?: () => number;
+    remoteHumanInput?: RemoteHumanInputReader}) {}
+  /** A reader that fails is the same as no file: the action goes on, with Control's own guards. */
+  private async remotePerson() {try {return await this.deps.remoteHumanInput?.() ?? null;} catch {return null;}}
   /**
    * An app with an action whose result nobody will report (a lost answer, or any row left by an earlier process),
    * or a ledger that cannot be read, takes no new grant or action until a person reviews it.
@@ -222,6 +228,11 @@ export class ComputerUseHost {
           windowWidth:answer.windowWidth,windowHeight:answer.windowHeight}};
       } finally {g.busy=false;this.windows.delete(key);}
     }
+    // A person controlling this Mac from another device right now (SR-34) is read before anything below: the checks after
+    // it run without a wait, so nothing changes between them and the ledger row. Another action may have started meanwhile.
+    const person=await this.remotePerson();
+    this.active(g);
+    if(g.busy||this.windows.has(key))throw Error('이 창의 다른 작업이 진행 중입니다. 끝난 뒤 새로 관찰하세요.');
     const fingerprint=hash(JSON.stringify(r));
     const prior=g.receipts.get(r.requestId);
     if(prior) {
@@ -234,6 +245,13 @@ export class ComputerUseHost {
       || (r.operation==='click' ? !obs.capture||r.x>=obs.capture.width||r.y>=obs.capture.height : !obs.elements.has(r.element)))
       throw Error('대상 창을 새로 관찰하고 화면을 확인하세요.');
     if(this.unresolved(g.target))throw Error(REVIEW_FIRST);
+    // Held for that person, in the shape of the whole-Mac scope's: a settled refused receipt for this request ID, the
+    // observation used up, no ledger row, no halt, nothing sent to the worker.
+    if(person) {
+      const receipt:ComputerReceipt={requestId:r.requestId,state:'refused',reason:'person-has-control'};
+      g.receipts.set(r.requestId,{fingerprint,receipt});g.observation=undefined;
+      return {success:true,receipt:{...receipt},guidance:remoteHumanInputGuidance({window:true})};
+    }
     // Durable before dispatch: a crash or restart from here on leaves an unknown row for a person to review.
     let recoveryId:string;
     try {recoveryId=this.deps.recovery.begin({bundleId:g.target.bundleId,windowId:g.target.windowId,operation:r.operation,

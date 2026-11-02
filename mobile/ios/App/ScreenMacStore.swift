@@ -20,6 +20,9 @@ struct SavedScreenMac: Codable, Identifiable, Hashable {
     var relay: ScreenRelayRoute? = nil
     var privateNetwork: ScreenPrivateNetworkRoute? = nil
     var authentication: ScreenDeviceAuthentication = .biometricsOnly
+    /// Ephemeral projection from a current community lease; never persisted as a pairwise registration.
+    var communityID: String? = nil
+    var communityGrant: String? = nil
 
     var pinned: PinnedMac? {
         guard let key = try? P256.Signing.PublicKey(x963Representation: macPublicKey) else { return nil }

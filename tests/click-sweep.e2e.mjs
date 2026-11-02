@@ -31,9 +31,30 @@ const PORTS = [
   {id: '44444444-aaaa-4aaa-8aaa-000000000004', name: 'vault', aiName: 'AI Knowledge Vault', category: 'notes', folderPath: '/fixture/vault'},
   {id: '55555555-aaaa-4aaa-8aaa-000000000005', name: 'ShadowLoop', category: 'game', port: 8080, folderPath: '/fixture/product/ShadowLoop', favorite: true},
 ];
+// 컴퓨터 유즈 패널(도구 및 설정 → 컴퓨터 유즈)의 관리 상태. 경로로만 고르므로 켜기·끊기·막기에도 같은 상태가 돌아온다.
+// 다른 Mac의 AI(받기 스위치·원격 행·막은 기기·첫 안내)와 이 Mac의 AI가 다른 Mac을 쓰는 줄까지 보이게 한다.
+const CU_DEVICES = ['3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a', '7c1f2e3d-4b5a-4968-8776-5a4b3c2d1e0f', '5e6f7a8b-1c2d-4e3f-8a9b-0c1d2e3f4a5b'];
+const COMPUTER_USE_STATUS = {
+  success: true, available: true, restartRequired: false,
+  native: {success: true, protocolVersion: 1, accessibility: true, secureInput: false, operations: ['capture', 'click']},
+  access: {enabled: false},
+  connections: [
+    {id: 'mcp_fixture', code: '00000000-0000-4000-8000-000000000001', label: 'codex', scope: 'mcp-connection', expiresAt: FIXED_NOW + 75e3},
+    {id: 'rcu_fixture', code: '11111111-0000-4000-8000-000000000001', label: '원격 1호 (3a9d)', scope: 'remote-connection', expiresAt: FIXED_NOW + 75e3,
+      remote: {deviceId: CU_DEVICES[0], deviceName: '1호', deviceCode: '3a9d', connection: 'a'.repeat(32)}},
+  ],
+  grants: [], pending: [], recovery: [],
+  scoped: {native: {success: true, scopeProtocolVersion: 2, accessibility: true, screenRecording: true, secureInput: false,
+    operations: ['scope-observe', 'scope-capture', 'scope-click', 'scope-type-text', 'scope-key']}, grants: [], pending: [], recovery: []},
+  remote: {accepting: true, allowRemote: true, noticeShown: false, profileReady: true,
+    blockedDevices: [{deviceId: CU_DEVICES[1], name: '2호', since: FIXED_NOW - DAY}],
+    blockedConnections: [{deviceId: CU_DEVICES[0], instance: 'b'.repeat(32), until: FIXED_NOW + 1800e3}]},
+  outgoing: [{deviceId: CU_DEVICES[2], deviceName: '3호', connection: 'cccccccc', client: 'codex-mcp-client', since: FIXED_NOW - 60e3, lastCallAt: FIXED_NOW - 5e3, active: true}],
+};
 // 경로로만 고른다(projects-tab-ui와 같은 규칙) — 이 앱은 읽기에도 POST를 쓰는 곳이 많다.
 // 여기 없는 요청은 모두 503으로 답하고 기록한다(보고서의 unmockedGet·interceptedWrites).
 const FIXTURE = {
+  '/api/agent-runtime/computer-use': COMPUTER_USE_STATUS,
   '/api/ports': PORTS,
   '/api/portal': {},
   '/api/workspace-roots': [{id: 'root1', name: 'product', path: '/fixture/product'}],
