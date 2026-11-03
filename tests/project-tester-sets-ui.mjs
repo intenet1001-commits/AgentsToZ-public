@@ -91,6 +91,18 @@ try{for(const width of [1440,390]){
  }
  sweep={...sweep,surfaces:sweep.surfaces.map(s=>s.id==='native'?{...s,last:{...validNative,passed:false,state:'unavailable',completed:false,elements:0,clicked:0}}:s)};
  await composition.getByRole('button',{name:'구성 새로고침',exact:true}).click();await native.getByText(/실행 불가 · 통과 아님/).waitFor();
+ // Actual native preparation is distinct from a browser pass and from explicit manual observations.
+ sweep={...sweep,operative:{state:'blocked',surfaceId:'native',bundleId:'com.example.Product',verdict:null}};
+ await composition.getByRole('button',{name:'구성 새로고침',exact:true}).click();
+ const operative=card.getByTestId('tester-desktop-operative');await operative.getByText(/CUA 실행 어댑터 미연결/).waitFor();
+ assert.equal(await operative.getByRole('button').count(),0,'viewing preparation never starts a native driver or app');
+ await card.getByText(/기존 웹 기준선은 유지합니다/).waitFor();assert.equal(await card.getByRole('button',{name:'기준선 만들기',exact:true}).count(),0,'an absent native adapter cannot trigger a rebuild of the existing web baseline');
+ sweep={...sweep,operative:{state:'observed',surfaceId:'native',bundleId:'com.example.Product',appCommit:'a'.repeat(40),device:'Mac 3',mode:'operational',inventory:2,clicked:2,effects:2,verdict:null}};
+ await composition.getByRole('button',{name:'구성 새로고침',exact:true}).click();await operative.getByText(/실제 데스크톱 앱 검사 · 수동 관찰 기록/).waitFor();
+ await operative.getByText(/관찰 목록 2개 · 동작 2건 · 효과 관찰 2건/).waitFor();await operative.getByText(/수동 기록도 실제 앱 자동 PASS로 바꾸지 않습니다/).waitFor();
+ await native.getByText(/실행 불가 · 통과 아님/).waitFor();
+ sweep={...sweep,operative:{...sweep.operative,state:'unknown',effects:1}};
+ await composition.getByRole('button',{name:'구성 새로고침',exact:true}).click();await operative.getByText(/미확정 동작 확인 필요/).waitFor();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'independent scope rows fit both viewport sizes');
  await card.screenshot({path:join(evidence,`project-click-sweep-set-${width}.png`)});
  assert.deepEqual(errors,[]);

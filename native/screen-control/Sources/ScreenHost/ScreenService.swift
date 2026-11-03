@@ -125,6 +125,9 @@ public final class ScreenService {
     /// reached the relay with a phone in it within 30 minutes and a phone still in use (`ScreenPeerKeys.pushGateOpen`).
     public private(set) var pushLive = false
     public private(set) var unifiedSafetyNotice = "공통 수신 안전 연결 준비 전"
+    /// Negative presentation only. Actual ON still checks the broker's current signed consent and private hold.
+    public private(set) var trustedCommunityTurnOnNotice: String?
+    static let receivingHoldRecoveryNotice = "이 Mac의 커뮤니티 화면 수신이 보류되어 있습니다. ‘고급 · 이전 직접 등록 관리’에서 ‘다른 Mac 연결 허용’을 이 Mac에서 다시 켜고 Touch ID 또는 Apple Watch로 확인해 주세요. 등록 승인이나 입력 보류 해제 위임으로는 이 수신 보류가 해제되지 않습니다."
     @ObservationIgnored private var safetyPoller: ScreenCommunitySafetyPoller?
     @ObservationIgnored private var safetyActivation: ScreenCommunityBroker.SafetyActivation?
     @ObservationIgnored private var unifiedSafetyOwn: CommunityAuthorization?
@@ -385,6 +388,7 @@ public final class ScreenService {
         if held || previousPolicy != nextPolicy {ownerLifecycleGeneration=UUID().uuidString.lowercased()}
         updateCommunityDesktops(own,peers:peers)
         unifiedSafetyOwn=own;unifiedReceivingHeld=held
+        trustedCommunityTurnOnNotice=held ? Self.receivingHoldRecoveryNotice:nil
         if own?.isCurrent() == true,own?.body.capabilities.contains(.desktopTrust) == true { preparePersistentInputHold() }
         unifiedReceivingRegistered = own?.isCurrent() == true && own?.body.capabilities.contains(.receiveView) == true
         guard let own, unifiedReceivingRegistered, !held, canReceiveUnified, let broker = communityBroker,
@@ -628,15 +632,20 @@ public final class ScreenService {
     }
 
     public var offersTrustedCommunityTurnOn:Bool { unifiedReceivingRegistered && unifiedSafetyOwn?.isCurrent() == true && unifiedSafetyOwn?.body.capabilities.contains(.desktopTrust) == true }
+    public var canTurnOnFromTrustedCommunity:Bool { offersTrustedCommunityTurnOn && !unifiedReceivingHeld && !quitting }
     /// Explicit device-trust ON only. Neither persistent receive hold nor the person's input hold is cleared.
     public func turnOnFromTrustedCommunity() async {
-        guard let broker=communityBroker else { return }
+        guard let broker=communityBroker else {
+            problem="기기 신뢰 수신 권한을 아직 확인할 수 없습니다. 커뮤니티 기기 등록·승인에서 이 Mac의 등록 상태를 새로 고침해 주세요."
+            return
+        }
         await turnOnFromTrustedCommunity(consent:{ try await broker.trustedConsentForTurningOn() },refresh:{ try await broker.refreshAccess() })
     }
     /// The actual startup lifecycle, with typed native authority. Software checks replace only the network awaits.
     func turnOnFromTrustedCommunity(consent: @MainActor () async throws -> CommunityDesktopReceiveTrust,
                                    refresh: @MainActor () async throws -> Void) async {
-        guard !quitting,case .off=power,!unifiedReceivingHeld else { return }
+        guard !quitting,case .off=power else { return }
+        guard !unifiedReceivingHeld else { problem=Self.receivingHoldRecoveryNotice;return }
         let powerEpoch=epoch
         // Claim before the first await: another ON cannot share this epoch. OFF invalidates this entire attempt.
         power = .starting;problem=nil

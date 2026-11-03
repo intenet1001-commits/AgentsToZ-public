@@ -10,6 +10,17 @@
       "updateArgs": ["--update"],
       "baseline": "tests/click-sweep/desktop.json",
       "timeoutSeconds": 1800
+    },
+    {
+      "id": "native-app",
+      "label": "실제 데스크톱 앱 · 현재 CUA 호스트 수동 검사",
+      "target": "desktop",
+      "environment": "native",
+      "platform": "darwin",
+      "command": ["bun", "scripts/desktop-operative.ts", "report"],
+      "updateArgs": [],
+      "baseline": ".agentstoz/click-sweep/desktop/native/darwin/native-app.json",
+      "timeoutSeconds": 30
     }
   ]
 }

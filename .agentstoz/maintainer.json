@@ -633,7 +633,9 @@
         "./tests/tester-sets.test.ts",
         "./tests/tester-click-sweep-enable.test.ts",
         "./tests/click-sweep-compare.test.ts",
-        "./tests/click-sweep-engine.test.ts"
+        "./tests/click-sweep-engine.test.ts",
+        "./tests/tester-desktop-operative.test.ts",
+        "./tests/tester-desktop-operative-cli.test.ts"
       ],
       "timeoutSeconds": 180,
       "requires": [
@@ -653,7 +655,10 @@
         "src/testerSetsReader.ts",
         "src/testerClickSweepScope.ts",
         "src/ProjectTesterSets.tsx",
-        "docs/click-sweep-targets.md"
+        "docs/click-sweep-targets.md",
+        "src/testerDesktopOperative.ts",
+        "scripts/desktop-operative.ts",
+        ".agentstoz/desktop-operative.json"
       ],
       "covers": [
         "공통 페르소나에서 프로젝트 여정과 실제 검사 연결",
@@ -661,7 +666,8 @@
         "등록 응답 유실의 동일 요청 복구",
         "같은 목표의 서로 다른 역할 보존과 검사 없는 후보 구분",
         "프로젝트별 일반·페르소나 구성의 제한된 읽기",
-        "Click sweep keeps web, native desktop, fixture and legacy scopes distinct; project commands require matching completion evidence and empty adapters are unavailable"
+        "Click sweep keeps web, native desktop, fixture and legacy scopes distinct; project commands require matching completion evidence and empty adapters are unavailable",
+        "Actual desktop preparation and manual inventory/action/effect evidence stay separate from web/fixture PASS; absent CUA adapter and original unknown effects block automatic native execution."
       ],
       "evidence": "real-python-project-persona-contracts"
     },

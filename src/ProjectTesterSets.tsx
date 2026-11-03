@@ -1,3 +1,4 @@
+import {desktopOperativeBaselineBlocked} from './testerDesktopOperative';
 import React,{useEffect,useRef,useState} from 'react';
 import type {TesterClickSweepSet,TesterSets,TesterTarget} from './testerAgentContract';
 import {testerSetsCache,type TesterSetsSnapshot} from './testerSetsCache';
@@ -52,10 +53,19 @@ function ClickSweepCard({set,portId,workspaceTargetId}:{set?:TesterClickSweepSet
     setBusy(true);setError('');
     try{await testerRequest({portId,...(workspaceTargetId?{workspaceTargetId}:{}),operation});onChanged();}catch(e){setError(e instanceof Error?e.message:'요청을 처리하지 못했습니다.');}finally{setBusy(false);}
   };
-  const surfaces=set.surfaces,missing=surfaces.filter(s=>!s.baselinePresent).length;
+  const surfaces=set.surfaces,missing=surfaces.filter(s=>!s.baselinePresent).length,operativeBlocked=desktopOperativeBaselineBlocked(set);
   return <div data-testid="tester-click-sweep-set"><strong>전수 클릭 세트</strong>
     <b>{set.state==='none'?'구성 전':set.state==='invalid'?'설정 확인':`${surfaces.length}개 대상`}</b>
     {set.state==='none'&&<span>웹 화면과 프로젝트의 데스크톱 앱을 대상별 하네스로 구성합니다</span>}
+    {set.operative&&<div data-testid="tester-desktop-operative" className="tester-sets-gap">
+      <strong>실제 데스크톱 앱 검사 · {set.operative.state==='invalid'?'기록 확인 필요':set.operative.state==='unknown'?'미확정 동작 확인 필요':set.operative.state==='observed'?'수동 관찰 기록':'CUA 실행 어댑터 미연결'}</strong>
+      {set.operative.bundleId&&<p>대상 앱 · {set.operative.bundleId}{set.operative.device?` · ${set.operative.device}`:''}{set.operative.appCommit?` · 소스 ${set.operative.appCommit.slice(0,8)}`:''}</p>}
+      {set.operative.mode&&<p>범위 · {set.operative.mode==='isolated'?'격리 앱 데이터':'명시한 운영 범위'}</p>}
+      {set.operative.inventory!==undefined&&<p>관찰 목록 {set.operative.inventory}개 · 동작 {set.operative.clicked}건 · 효과 관찰 {set.operative.effects}건</p>}
+      <p>브라우저·모의 검사와 별도입니다. 현재 연결된 CUA 호스트의 실행 어댑터는 제공되지 않으며, 수동 기록도 실제 앱 자동 PASS로 바꾸지 않습니다.</p>
+      <p>프로젝트 하네스 준비·기록 계약: bun scripts/desktop-operative.ts contract. 앱·소스·기기와 격리 데이터 또는 명시한 운영 범위를 먼저 정하세요.</p>
+    </div>}
+
     {set.state==='none'&&set.enableUrl===null&&<span>웹 주소가 등록되지 않았습니다. 데스크톱 앱은 포트 없이 프로젝트 command 하네스로 구성할 수 있습니다.</span>}
     {set.state==='none'&&typeof set.enableUrl==='string'&&<button type="button" data-testid="tester-click-sweep-enable" disabled={busy} onClick={()=>void act('sweep-enable')}>{busy?'켜는 중…':`웹 켜기 · ${set.enableUrl.replace(/^https?:\/\//,'').replace(/\/$/,'')}`}</button>}
     {set.state==='configured'&&<span>기준선 파일 {surfaces.length-missing}/{surfaces.length} · 대상별 결과는 아래에 표시합니다</span>}
@@ -82,7 +92,8 @@ function ClickSweepCard({set,portId,workspaceTargetId}:{set?:TesterClickSweepSet
       {set.scopeVersion!==2&&<p>대상별 계약을 사용하려면 테스터 공통 러너를 업데이트하세요.</p>}
     </details>
     {!!missing&&!running&&<span className="tester-sets-gap">기준선 필요 {missing}개{surfaces.some(s=>!s.baselinePresent&&s.kind==='url')?' — 웹 개발 서버를 켜 둔 채 만드세요':''}</span>}
-    {set.state==='configured'&&!!missing&&<button type="button" data-testid="tester-click-sweep-baseline" disabled={busy||running} onClick={()=>void act('sweep-baseline')}>{running?'기준선 만드는 중…':'기준선 만들기'}</button>}
+    {operativeBlocked&&<span className="tester-sets-gap">실제 앱 실행 어댑터를 연결한 뒤 해당 기준선을 만드세요. 기존 웹 기준선은 유지합니다.</span>}
+    {set.state==='configured'&&!!missing&&!operativeBlocked&&<button type="button" data-testid="tester-click-sweep-baseline" disabled={busy||running} onClick={()=>void act('sweep-baseline')}>{running?'기준선 만드는 중…':'기준선 만들기'}</button>}
     {set.job&&<span role="status" className={set.job.state==='failed'||set.job.state==='unavailable'?'tester-sets-gap':undefined}>{set.job.message}</span>}
     {set.problem&&<span className="tester-sets-gap">{set.problem}</span>}
     {error&&<span role="alert" className="tester-sets-gap">{error}</span>}

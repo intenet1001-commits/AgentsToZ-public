@@ -33,7 +33,9 @@
         "./tests/tester-agent-host.test.ts",
         "./tests/tester-agent-api.test.ts",
         "./tests/tester-mobile.test.ts",
-        "./tests/tester-overview.test.ts"
+        "./tests/tester-overview.test.ts",
+        "./tests/tester-desktop-operative.test.ts",
+        "./tests/tester-desktop-operative-cli.test.ts"
       ],
       "timeoutSeconds": 600
     }

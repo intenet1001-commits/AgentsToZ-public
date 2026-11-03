@@ -41,6 +41,40 @@ struct ViewerPendingEnrollment: Decodable, Sendable {
     let planId: String, name: String, kind: CommunityDeviceKind, expiresAt: Int64
 }
 
+/// Presentation only. An expired challenge never remains confirmable and never creates a new request.
+struct ViewerEnrollmentReviewPresentation {
+    struct Expired: Equatable {
+        let planId: String, name: String
+        let choice: CommunityManagementChoice
+        let requestExpiresAt: Int64
+        let message = "검토 유효기간 만료·원래 등록 요청 유지"
+    }
+    private(set) var review: CommunityAccessReview?
+    private(set) var confirmation = CommunityEnrollmentConfirmation()
+    private(set) var expired: Expired?
+    private var requestExpiresAt: Int64?
+    mutating func open(_ review: CommunityAccessReview, requestExpiresAt: Int64?) {
+        dismiss(); self.review = review; self.requestExpiresAt = requestExpiresAt
+    }
+    mutating func dismiss() { review = nil; confirmation.reset(); expired = nil; requestExpiresAt = nil }
+    mutating func resetConfirmation() { confirmation.reset() }
+    mutating func confirm(digest: String, confirmed: Bool, at now: Date = Date()) {
+        guard let review, review.digest == digest else { confirmation.reset(); return }
+        confirmation.setConfirmed(confirmed, for: review, now: now)
+    }
+    @discardableResult mutating func expire(at now: Date, choice: CommunityManagementChoice) -> Bool {
+        let at = Int64(now.timeIntervalSince1970 * 1000)
+        guard let review, review.expiresAt <= at else { return false }
+        let pending = requestExpiresAt.flatMap { $0 > at ? Expired(planId: review.planId, name: review.plan.name, choice: choice, requestExpiresAt: $0) : nil }
+        dismiss(); expired = pending
+        return true
+    }
+    mutating func validatePending(_ pending: [ViewerPendingEnrollment]) {
+        guard let expired else { return }
+        if !pending.contains(where: { $0.planId == expired.planId && $0.expiresAt == expired.requestExpiresAt }) { self.expired = nil }
+    }
+}
+
 /// No BIO key replacement. The operation key and unknown-result fence have their own access-grouped item.
 final class ViewerUnifiedStore: @unchecked Sendable {
     struct Accepted: Codable, Sendable { let envelope: ScreenCommunityEnvelope; let checkedAt: Date }
@@ -105,8 +139,10 @@ final class ViewerUnifiedEnrollment {
     private var expiry: Task<Void, Never>?
     private var generation = 0
     private(set) var prepared: ViewerPreparedEnrollment?
-    private(set) var review: CommunityAccessReview?
-    private(set) var confirmation = CommunityEnrollmentConfirmation()
+    private var reviewPresentation = ViewerEnrollmentReviewPresentation()
+    var review: CommunityAccessReview? { reviewPresentation.review }
+    var confirmation: CommunityEnrollmentConfirmation { reviewPresentation.confirmation }
+    var expiredReview: ViewerEnrollmentReviewPresentation.Expired? { reviewPresentation.expired }
     private(set) var pending: [ViewerPendingEnrollment] = []
     private(set) var pendingStatus = "등록 요청을 아직 조회하지 않았습니다."
     private(set) var managementChoice = CommunityManagementChoice.unchanged
@@ -121,22 +157,21 @@ final class ViewerUnifiedEnrollment {
         do { hasEnrollmentPlan = try store.read()?.plan != nil }
         catch { hasEnrollmentPlan = true } // An unreadable common account cannot authorize a weaker community path.
     }
-    func set(_ capability: CommunityCapability, selected: Bool) { selectionEdited=true;confirmation.reset(); selection.set(capability, selected: selected) }
-    func selectAll() { selectionEdited=true;confirmation.reset(); selection.selectAll() }
-    func cancelSelectionChanges() { if let plan=try? store.read()?.plan { selection.restore(plan.capabilities) };selectionEdited=false;confirmation.reset() }
+    func set(_ capability: CommunityCapability, selected: Bool) { selectionEdited=true;reviewPresentation.resetConfirmation(); selection.set(capability, selected: selected) }
+    func selectAll() { selectionEdited=true;reviewPresentation.resetConfirmation(); selection.selectAll() }
+    func cancelSelectionChanges() { if let plan=try? store.read()?.plan { selection.restore(plan.capabilities) };selectionEdited=false;reviewPresentation.resetConfirmation() }
     var selected: [CommunityCapability] { selection.capabilities }
     var isWaitingForApproval: Bool { prepared?.isCurrent() ?? false }
     var registrationCode: String? { guard isWaitingForApproval, let prepared else { return nil }; return CommunityEnrollmentCode.formatted(digest: prepared.digest) }
     func pendingUnavailable() { pending = []; pendingStatus = "등록 요청 조회 실패 · 새로 고침으로 다시 확인하세요." }
-    func resetConfirmation() { confirmation.reset() }
+    func resetConfirmation() { reviewPresentation.resetConfirmation() }
     func confirmRegistration(digest: String, confirmed: Bool) {
-        guard let review, review.digest == digest else { confirmation.reset(); return }
-        confirmation.setConfirmed(confirmed, for: review)
+        reviewPresentation.confirm(digest: digest, confirmed: confirmed)
     }
-    func dismissReview() { reviewEpoch &+= 1; confirmation.reset(); review = nil; managementChoice = .unchanged }
+    func dismissReview() { reviewEpoch &+= 1; reviewPresentation.dismiss(); managementChoice = .unchanged }
     private var administratorContext: String?
     private var administratorRevision: Int64?
-    func validateReviewContext(certificate: ScreenCommunityCertificate?, revision: Int64? = nil) {
+    func validateReviewContext(certificate: ScreenCommunityCertificate?, revision: Int64? = nil, at now: Date = Date()) {
         let context = certificate.map { "\($0.communityID):\($0.member.enrollmentID):\($0.member.keyEpoch):\($0.member.admin):\(ScreenCommunityRequest.base64($0.member.hostKey)):\(ScreenCommunityRequest.base64($0.member.viewerKey))" }
         if administratorContext != context || (revision != nil && administratorRevision != nil && administratorRevision != revision) {
             dismissReview()
@@ -146,8 +181,8 @@ final class ViewerUnifiedEnrollment {
         guard let review else { return }
         guard let certificate, certificate.member.admin, review.admin == certificate.member.enrollmentID,
               review.management == nil || review.management?.communityId == certificate.communityID,
-              revision == nil || revision == review.revision,
-              review.expiresAt > Int64(Date().timeIntervalSince1970 * 1000) else { dismissReview(); return }
+              revision == nil || revision == review.revision else { dismissReview(); return }
+        if reviewPresentation.expire(at: now, choice: managementChoice) { reviewEpoch &+= 1; managementChoice = .unchanged }
     }
     var hasPendingMutation: Bool { (try? store.read()?.journal) != nil }
 
@@ -350,7 +385,8 @@ final class ViewerUnifiedEnrollment {
             let rows = try JSONDecoder().decode([ViewerPendingEnrollment].self, from: reply.encodedValue())
             guard rows.count <= 32, Set(rows.map(\.planId)).count == rows.count,
                   rows.allSatisfy({ UUID(uuidString: $0.planId)?.uuidString.lowercased() == $0.planId && CommunityAccessName.isValid($0.name) && $0.expiresAt > Int64(Date().timeIntervalSince1970 * 1000) }) else { throw ScreenCommunityError.malformed }
-            pending = rows; pendingStatus = rows.isEmpty ? "관리 기기 · 현재 승인할 기능 등록 요청이 없습니다." : "관리 기기 · 기능 등록 요청 \(rows.count)건"
+            pending = rows; reviewPresentation.validatePending(rows)
+            pendingStatus = rows.isEmpty ? "관리 기기 · 현재 승인할 기능 등록 요청이 없습니다." : "관리 기기 · 기능 등록 요청 \(rows.count)건"
         } catch { pending = []; pendingStatus = "등록 요청 조회 실패 · 새로 고침으로 다시 확인하세요."; throw error }
     }
     private func refreshAccepted(_ saved:ViewerUnifiedStore.Accepted,plan:CommunityAccessPlan,staged:CommunityAccessPlan?,identity:ScreenCommunityHostIdentity,transport:CommunityAccessCoordinator,epoch:Int,expectedEnrollment:String?) async throws {
@@ -376,7 +412,7 @@ final class ViewerUnifiedEnrollment {
         let response = try await transport.request(operation, actor: legacy.member.enrollmentID, argumentsJSON: args(values), signer: identity.signer)
         let checked = try choice == .unchanged ? response.review(authority: authority, adminId: legacy.member.enrollmentID) : response.managementReview(authority: authority, administrator: legacy)
         guard epoch == reviewEpoch, managementChoice == choice else { throw ScreenCommunityError.service("REVIEW_CONTEXT_CHANGED") }
-        review = checked
+        reviewPresentation.open(checked, requestExpiresAt: pending.first(where: { $0.planId == checked.planId })?.expiresAt)
     }
     func approve(signer: any TranscriptSigner, legacy: ScreenCommunityCertificate, confirmedDigest: String) async throws {
         guard let review, review.hasValidManagementBinding, legacy.member.admin, confirmedDigest == review.digest, confirmation.isConfirmed(for: review), review.admin == legacy.member.enrollmentID, review.expiresAt > Int64(Date().timeIntervalSince1970 * 1000),
@@ -416,7 +452,7 @@ final class ViewerUnifiedEnrollment {
         try Self.validate(authorization,plan:plan)
         return try CommunityOwnerOperationSigner(inner:SecureEnclaveTranscriptSigner(dataRepresentation:state.operationBlob),own:authorization)
     }
-    func endLocally() { generation &+= 1; expiry?.cancel(); authorization = nil; targets = []; peerAuthorizations = [:]; pending = []; confirmation.reset(); review = nil }
+    func endLocally() { generation &+= 1; expiry?.cancel(); authorization = nil; targets = []; peerAuthorizations = [:]; pending = []; dismissReview() }
     /// Registration is deliberately separate from driver readiness; these labels never claim live control.
     func status(for capability: CommunityCapability) -> String {
         guard let authorization, authorization.isCurrent(), authorization.body.capabilities.contains(capability) else {

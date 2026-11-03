@@ -86,3 +86,29 @@ exit 0만 반환, 빈 UI/0개 대상/0회 클릭, 결과 없음, 과거 runId, �
 - 앱은 대상별로 기준선 파일·최근 결과·실행 방법·환경을 표시한다. 웹 통과가 다른 데스크톱 대상의 준비 완료를 뜻하지 않는다.
 
 실행: `python3 scripts/agentstoz-maintainer.py sweep status --root .`, `sweep run --root . --surface <id>`, 기준선은 명시한 `--update`. 0 통과, 1 검사 실패, 2 미구성/설정 오류, 3 실행 불가이며 2·3은 통과가 아니다.
+
+## 실제 앱의 현재 CUA 호스트 수동 검사 준비·기록
+
+이 프로젝트의 `native-app` 대상은 별도 `desktop/native/darwin` 레인이다. `.agentstoz/desktop-operative.json`의 surfaceId는 이 native-app 대상과 정확히 대응한다. 현재 연결된 CUA의 실제 앱 객체를 프로젝트 스크립트에 가져오는 지원 adapter는 **아직 없다**. `report`는 항상 실행 불가(exit 3)를 반환하며 기준선·PASS를 생성하지 않는다. 이 대상만 기준선이 없으면 UI와 Main 호스트 모두 전체 기준선 갱신을 막아 기존 웹 기준선을 보존한다. 보호 대상인 AgentsToZ Main을 기존 Computer Use allowlist에서 해제하거나 다른 앱/브라우저 경유로 우회하지 않는다.
+
+`bun scripts/desktop-operative.ts contract`는 OS 접근 없는 계약 읽기다. `status`도 파일만 읽는다. 실제 CUA 호스트가 이미 승인된 대상의 검사 범위를 정했을 때만 다음 준비를 한다.
+
+```sh
+bun scripts/desktop-operative.ts prepare --device '<실제 기기 표시명>' \
+  --mode operational --scope-reference '<사람이 명시한 앱·동작 범위의 참조>' \
+  --app-source '<설치 앱의 정확한 40자리 소스 SHA>'
+```
+
+현재 프로젝트는 clean이어야 하며, 설치 앱 소스는 프로젝트 이력에 존재해야 한다. `isolated`를 고른 경우 scope-reference에 실제 격리 데이터/fixture 네트워크 범위를 기재한다. 이 선언은 격리 확인이나 OS 제어 허가의 증거가 아니다. 계획은 앱 bundle·앱 소스·기기·운영/격리 범위와 프로젝트 소스·새 run ID에 결속된다. 생성된 plan.json의 30분 관찰 창 안에서 **기존 연결 호스트만** 문서화된 CUA API로 실제 인벤토리를 읽고, 검토한 버튼을 누르고, 효과를 다시 읽는다. 이 스크립트는 앱 실행·입력·캡처·네트워크·키체인·TCC·생체 승인을 하지 않는다.
+
+Root 호스트는 원본 관찰을 프로젝트 상대 경로의 정규 파일로 보존하고 `DesktopManualReceipt`(`src/testerDesktopOperative.ts`) 형식에 맞춘다. 앱 Info 원본 해시/CDHash, 실제 버튼 인벤토리와 각 원래 operation ID·before/after·효과 증거의 경로/SHA256가 필요하다. 0개 인벤토리, 0개 동작, 대상/앱 소스 변경, 같은 operation ID나 버튼 재사용, 효과 없이 observed 선언, 미확정 뒤 추가 동작을 거절한다. 계획·원본 기록은 덮어쓰지 않는다.
+
+```sh
+bun scripts/desktop-operative.ts record-manual \
+  --plan '.agentstoz/maintainer/desktop-operative/<run-id>/plan.json' \
+  --receipt '<프로젝트 상대 경로의 실제 관찰 JSON>'
+```
+
+경로 이탈·심볼릭 링크·다른 UID·증거 해시 불일치를 거절한다(개별 증거 8MB, 합계 64MB). 상태 projection 쓰기가 실패해도 보존된 원문으로 복구하며 동작을 재실행하지 않는다. unknown은 원래 ID의 결과 확인이 필요하다는 뜻이며 새 prepare도 차단한다. CLI에 실제 입력/재실행/미확정 강제 해제 API는 없다.
+
+이 기록은 **명시적인 수동 관찰**이다. 실제 CUA adapter의 구현·권한·호스트 연결이나 OS 실행 attestation을 인증하지 않으며, 기록이 충분해도 자동 native PASS/기준선으로 승격하지 않는다. 웹/fixture 테스트와 현재 수동 현장 결과는 UI와 영수증에서 계속 구분한다. 자동 레인의 실제 connected-host adapter는 후속 구현·실측 대상이다.

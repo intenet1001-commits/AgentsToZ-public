@@ -49,7 +49,14 @@ export function RemoteTeamsPermissions({onClose,returnFocusTo,request=requestRem
       {notice&&<p role="status" className="mt-3 text-sm">{notice}</p>}
       {state?.configured&&<p className="mt-3 text-sm text-[var(--ink-2)]">이 기기의 Teams 공통 등록을 확인했습니다. 현재 {allowed.length}개 프로젝트를 허용하고 있습니다.</p>}
       {state&&!state.configured&&<p className="mt-3 text-sm" data-testid="remote-teams-consent-required">이 기기의 공통 등록에서 Teams 사용 권한을 먼저 확인하세요. 현재 목록을 볼 수 있지만 허용 설정은 저장할 수 없습니다.</p>}
-      {state&&<fieldset disabled={busy||!state.configured||reviewRequired} className="mt-4 min-w-0"><legend className="font-semibold">이 Mac에 등록된 프로젝트 · {selected.length}개 선택</legend>
+      {state&&<fieldset disabled={busy||!state.configured||reviewRequired} className="mt-4 min-w-0"><legend className="font-semibold">이 Mac에 등록된 프로젝트</legend>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p data-testid="remote-teams-selection-count" aria-live="polite" className="text-sm text-[var(--ink-2)]">총 {state.projects.length}개 중 {selected.length}개 선택</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={button} disabled={selected.length===state.projects.length} onClick={()=>setSelected(state.projects.map(project=>project.projectId))}>전체 선택</button>
+            <button type="button" className={button} disabled={selected.length===0} onClick={()=>setSelected([])}>전체 해제</button>
+          </div>
+        </div>
         {state.projects.length===0?<p className="mt-2 text-sm text-[var(--ink-2)]">등록된 프로젝트가 없습니다. 프로젝트를 등록한 뒤 목록을 다시 확인하세요.</p>:<div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-[var(--line)] p-2">
           {state.projects.map(project=><label key={project.projectId} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-3 text-sm">
             <input type="checkbox" className="mt-1 size-4 shrink-0" checked={selected.includes(project.projectId)} onChange={event=>{const checked=event.target.checked;setSelected(current=>checked?[...current,project.projectId]:current.filter(id=>id!==project.projectId));}}/>

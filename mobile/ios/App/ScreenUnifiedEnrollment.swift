@@ -110,7 +110,11 @@ struct MobileCommunityScreenTarget: Identifiable {
     }
     var isWaitingForApproval: Bool { waiting && (approvalDeadline ?? 0) > Int64(Date().timeIntervalSince1970 * 1000) }
     static let available = CommunityCapability.allCases.filter { $0 != .receiveView && $0 != .receiveControl && $0 != .desktopTrust && $0 != .ownerDelegation }
-    var registrationCode: String? { guard isWaitingForApproval, let preparedDigest else { return nil }; return CommunityEnrollmentCode.formatted(digest: preparedDigest) }
+    var pendingRegistrationPresentation: CommunityPendingRegistrationPresentation? {
+        CommunityPendingRegistrationPresentation(digest: preparedDigest, expiresAt: approvalDeadline, waiting: waiting)
+    }
+    var registrationCode: String? { pendingRegistrationPresentation?.code }
+    func pendingRegistrationOnly() { pending = []; pendingStatus = "관리 기기 승인 대기 · 이 기기는 등록 승인 역할이 없습니다." }
     func resetConfirmation() { actionEpoch &+= 1; confirmation.reset() }
     func confirmRegistration(digest: String, confirmed: Bool) {
         guard let review, review.digest == digest else { confirmation.reset(); return }
@@ -596,6 +600,16 @@ struct ScreenUnifiedEnrollmentView: View {
                     Text(center.unified.message).font(.subheadline).foregroundStyle(.secondary)
                     Text("등록은 한 번, 모바일 사용 시작은 생체 인증 한 번입니다. OS 권한과 상대 Mac의 수신 허용은 따로 확인합니다.").font(.caption)
                 }
+                if center.unified.review == nil, let code = center.unified.registrationCode {
+                    Section("이 기기의 등록 코드") {
+                        Text(code).font(.title2.monospaced()).accessibilityIdentifier("screenCommunityRegistrationCode")
+                        if let expires = center.unified.registrationExpiresAt {
+                            Text("코드 만료: " + Date(timeIntervalSince1970: Double(expires) / 1000).formatted(date: .omitted, time: .standard))
+                                .font(.caption).accessibilityIdentifier("screenCommunityRegistrationExpiry")
+                        }
+                        Text("관리 기기에 표시된 코드가 같은지 비교한 뒤 승인하세요. 이름만으로 승인하지 마세요.").font(.caption)
+                    }
+                }
                 Section("관리 역할·승인 요청") {
                     Text(center.managementStatus)
                     Text(center.unified.pendingStatus).font(.caption).foregroundStyle(.secondary)
@@ -629,13 +643,6 @@ struct ScreenUnifiedEnrollmentView: View {
                             Text(center.unified.safetyMessage).font(.caption)
                             Button(center.unified.safetyNotificationsDenied ? "알림 꺼짐 상태 반영" : "공통 알림 허용·상태 반영") { Task { await center.subscribe() } }.disabled(center.unified.busy)
                             NavigationLink("공통 Mac 상태·원격 중지") { ScreenCommunitySafetyView() }
-                        }
-                    }
-                    if let code = center.unified.registrationCode {
-                        Section("이 기기의 등록 코드") {
-                            Text(code).font(.title2.monospaced())
-                            if let expires = center.unified.registrationExpiresAt { Text("코드 만료: " + Date(timeIntervalSince1970: Double(expires) / 1000).formatted(date: .omitted, time: .standard)).font(.caption) }
-                            Text("관리 기기에 표시된 코드가 같은지 비교한 뒤 승인하세요. 이름만으로 승인하지 마세요.").font(.caption)
                         }
                     }
                     Section("이 기기에서 사용할 기능") {

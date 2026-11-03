@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "surfaceId": "native-app",
+  "bundleId": "com.intenet.agentstozbycs",
+  "platform": "darwin",
+  "maxTargets": 64
+}

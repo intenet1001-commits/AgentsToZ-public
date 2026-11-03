@@ -58,3 +58,16 @@ test('sweep operations stay desktop-only: not MCP tools and refused from the pho
   const {h}=host({web:'http://127.0.0.1:9/'});
   await expect(h.perform({portId:'web',operation:'sweep-enable'},{owner:'phone',async authorize(){},executionAllowed:()=>true})).rejects.toThrow('모바일에서는');
 });
+
+test('native preparation alone cannot regenerate the already-present web baseline',async()=>{
+  const {h,root}=host({web:null});
+  writeFileSync(join(root,'.agentstoz/click-sweep.json'),JSON.stringify({schemaVersion:2,surfaces:[
+    {id:'web',target:'web',environment:'browser',command:['python3','-c','raise Exception("must not launch")'],baseline:'web-baseline.json'},
+    {id:'native-app',target:'desktop',environment:'native',platform:'darwin',command:['python3','-c','raise Exception("must not launch")']},
+  ]}));
+  writeFileSync(join(root,'web-baseline.json'),'original web bytes');
+  writeFileSync(join(root,'.agentstoz/desktop-operative.json'),JSON.stringify({schemaVersion:1,surfaceId:'native-app',bundleId:'com.example.Product',platform:'darwin',maxTargets:64}));
+  await expect(h.perform({portId:'web',operation:'sweep-baseline'})).rejects.toMatchObject({code:'TESTER_DESKTOP_ADAPTER_UNAVAILABLE'});
+  expect(readFileSync(join(root,'web-baseline.json'),'utf8')).toBe('original web bytes');
+  expect((await h.perform({portId:'web',operation:'sets'})).sets!.clickSweep?.job).toBeUndefined();
+});

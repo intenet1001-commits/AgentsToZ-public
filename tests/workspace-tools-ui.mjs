@@ -23,12 +23,20 @@ try{
       const menu=page.locator('.workspace-tools'),summary=menu.locator(':scope > summary');
       await summary.click();await page.getByTestId('workspace-viewer-open').waitFor();
       assert.deepEqual(await menu.getByRole('heading',{level:3}).allTextContents(),['기기 연결','AI 협업','설정·지원']);
-      const panel=menu.locator(':scope > .workspace-tools-panel'),box=await panel.boundingBox();
+      const panel=menu.locator(':scope > .workspace-tools-panel');
+      await panel.evaluate(async node=>{await Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished));await new Promise(requestAnimationFrame);});
+      const box=await panel.boundingBox();
       assert(box&&box.x>=0&&box.x+box.width<=width,'panel fits the viewport horizontally');
       assert(box.y>=0&&box.y+box.height<=820,'panel fits the viewport vertically');
       assert.equal(await panel.evaluate(node=>node.scrollWidth>node.clientWidth),false,'no horizontal panel overflow');
       assert.equal(await page.getByTestId('ops').isVisible(),false,'OPS advanced action is folded');
       assert.equal(await page.getByRole('checkbox').count(),0,'opening tools offers no automatic permission choice');
+      const primary=await page.getByTestId('workspace-screen-entry').boundingBox(),peer=await page.getByTestId('workspace-viewer-entry').boundingBox();
+      const teams=await page.getByTestId('teams').boundingBox(),chat=await page.getByTestId('chat').boundingBox(),voice=await page.getByTestId('voice').boundingBox(),call=await page.getByTestId('call').boundingBox();
+      if(width===1100){assert(Math.abs(primary.y-peer.y)<1&&primary.x<peer.x,'desktop primary actions share a clear row');assert(Math.abs(teams.y-chat.y)<1&&teams.x<chat.x,'desktop secondary actions use two compact columns');assert(Math.abs(voice.y-call.y)<1&&voice.x<call.x,'four collaboration actions fill two rows rather than an accidental full-width third action');}
+      else{assert(peer.y>=primary.y+primary.height,'narrow primary entries stack without overlap');assert(chat.y>=teams.y+teams.height,'narrow secondary actions use one column');}
+      for(const id of ['workspace-screen-open','workspace-viewer-open','teams','chat','voice','call','effort','settings','helpdesk'])assert((await page.getByTestId(id).boundingBox()).height>=44,'every purpose action keeps a44px hit area');
+      await panel.evaluate(node=>node.scrollTop=0);await page.screenshot({path:`${evidence}/${name}-${width}-initial.png`,fullPage:true});
       await page.getByTestId('workspace-screen-open').click();await page.getByTestId('workspace-viewer-open').click();
       assert.deepEqual(await page.evaluate(()=>window.nativeCalls.filter(name=>name.startsWith('open_'))),['open_screen_helper','open_viewer_helper'],'open only the two existing helper UIs');
       for(const id of ['pinned-project','computer-use','teams','chat','voice','call','effort','settings','helpdesk','data-export'])await page.getByTestId(id).click();

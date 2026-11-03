@@ -29,6 +29,26 @@ function fixture(){
 }
 function member(f:ReturnType<typeof fixture>,deviceId=f.mobile.device){return (f.store.get<any>(`community:${f.cid}`).memberIds as string[]).map(id=>f.store.get<any>(`member:${id}`)).find(m=>m.deviceId===deviceId&&m.revokedAt===null);}
 describe('explicit management consent and advisory v2 notifications',()=>{
+  test('review challenge expires at 120 seconds while the original ten-minute request remains reviewable',()=>{
+    for(const elapsed of [119_999,120_000]){
+      const f=fixture(),p=f.prepare(),r=f.review(p.planId).value;
+      expect(r.expiresAt-f.now()).toBe(120_000);expect(p.expiresAt-f.now()).toBe(600_000);
+      f.advance(elapsed);
+      const result=f.run(f.approval(r));
+      if(elapsed===119_999)expect(result.kind).toBe('authorization');
+      else{
+        expect(result.kind).toBe('error');expect(result.value.code).toBe('STALE_APPROVAL');
+        const pending=f.run(f.request('list',[f.cid])).value;
+        expect(pending.map((row:any)=>row.planId)).toContain(p.planId);
+        const renewed=f.review(p.planId).value;
+        expect(renewed.planId).toBe(p.planId);expect(renewed.digest).toBe(r.digest);
+        expect(renewed.challenge).not.toBe(r.challenge);expect(renewed.expiresAt).toBe(f.now()+120_000);
+        expect(f.store.get<any>(`access-plan:${p.planId}`).expiresAt).toBe(p.expiresAt);
+        expect(member(f)).toBeUndefined(); // Reviewing again is never approval.
+      }
+      f.db.close();
+    }
+  });
   test('ordinary full-feature approval never creates a mobile administrator and preserves a prior role',()=>{
     const f=fixture(),p=f.prepare(),r=f.review(p.planId).value;expect(f.run(f.approval(r)).kind).toBe('authorization');expect(member(f).admin).toBe(false);
     const m=member(f);m.admin=true;f.store.put(`member:${m.enrollmentId}`,m);

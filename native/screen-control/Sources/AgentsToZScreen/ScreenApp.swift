@@ -361,7 +361,8 @@ struct StatusPanel: View {
                         if service.unifiedReceivingRegistered {
                             if service.offersTrustedCommunityTurnOn {
                                 Button("기기 신뢰로 화면 수신 켜기") { Task { await service.turnOnFromTrustedCommunity() } }
-                                Text("수신·입력 보류는 유지합니다. 최초 입력 보호 이행과 명시적 보류 해제 때만 이 Mac의 계정 소유자 확인이 필요합니다.").font(.caption)
+                                    .disabled(!service.canTurnOnFromTrustedCommunity)
+                                Text(service.trustedCommunityTurnOnNotice ?? "수신·입력 보류는 유지합니다. 최초 입력 보호 이행과 명시적 보류 해제 때만 이 Mac의 계정 소유자 확인이 필요합니다.").font(.caption)
                             } else { HardwareButton(title: "커뮤니티 화면 제어 켜기") { click in Task { await service.turnOnFromCommunity(click: click) } } }
                         } else { Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(touchIDReturnKey) }
                     case .starting:

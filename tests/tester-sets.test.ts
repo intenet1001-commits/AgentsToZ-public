@@ -142,3 +142,16 @@ test('desktop completion summaries need exact flags, nonzero bounded counts and 
   expect((await read()).clickSweep!.surfaces[0]?.last).toMatchObject({state:value.state,passed:value.passed,completed:value.completed,elements:value.elements,clicked:value.clicked,failures:value.failures,updated:value.updated});
  }
 });
+
+test('actual desktop operative preparation and manual observations never become a native verdict',async()=>{
+ const {root,save}=fixture();const read=()=>readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n));
+ save('.agentstoz/desktop-operative.json',{schemaVersion:1,surfaceId:'native-app',bundleId:'com.example.Product',platform:'darwin',maxTargets:64});
+ expect((await read()).clickSweep?.operative).toEqual({state:'blocked',surfaceId:'native-app',bundleId:'com.example.Product',verdict:null});
+ mkdirSync(join(root,'.agentstoz/maintainer/desktop-operative'));
+ const status={schemaVersion:1,state:'observed',bundleId:'com.example.Product',appCommit:'a'.repeat(40),device:'Mac 3',mode:'operational',runId:'10000000-0000-4000-8000-000000000001',inventory:2,clicked:2,effects:2,reason:'manual-observations',verdict:null};
+ save('.agentstoz/maintainer/desktop-operative/status.json',status);
+ expect((await read()).clickSweep?.operative).toMatchObject({state:'observed',appCommit:'a'.repeat(40),inventory:2,verdict:null});
+ for(const patch of [{verdict:'PASS'},{state:'passed'},{bundleId:'com.example.Other'},{clicked:3},{reason:'native-driver-ready'}]){
+  save('.agentstoz/maintainer/desktop-operative/status.json',{...status,...patch});expect((await read()).clickSweep?.operative).toEqual({state:'invalid',verdict:null});
+ }
+});

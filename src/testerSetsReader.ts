@@ -1,3 +1,4 @@
+import {parseDesktopOperativeConfig,parseDesktopOperativeStatus} from './testerDesktopOperative';
 import {constants} from 'node:fs';
 import {lstat,open,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -135,6 +136,14 @@ export async function readProjectTesterSets(root:string,clean:(value:unknown,lim
       sweep.state='configured';
     }
   }catch(e){Object.assign(sweep,{state:'invalid',problem:clean(e instanceof Error?e.message:e,160),surfaces:[]});}
+  // File-only metadata; no application probing, CUA execution, Git, or privilege assertions.
+  try{
+    const raw=await read('.agentstoz/desktop-operative.json',16_000);
+    if(raw){const config=parseDesktopOperativeConfig(object(raw));const recorded=await read('.agentstoz/maintainer/desktop-operative/status.json',16_000);
+      if(recorded){const status=parseDesktopOperativeStatus(object(recorded),config);const {state,bundleId,appCommit,device,mode,inventory,clicked,effects}=status;sweep.operative={state,surfaceId:config.surfaceId,bundleId,appCommit,device,mode,inventory,clicked,effects,verdict:null};}
+      else sweep.operative={state:'blocked',surfaceId:config.surfaceId,bundleId:config.bundleId,verdict:null};
+    }
+  }catch{sweep.operative={state:'invalid',verdict:null};}
   const provided:Record<string,boolean>={};
   for(const file of ['AGENTS.md','CLAUDE.md','GEMINI.md']){
     // Match the runner's guide-only budget. Configuration limits and the total

@@ -1,3 +1,4 @@
+import {desktopOperativeBaselineBlocked} from './testerDesktopOperative';
 import {spawn,type ChildProcess} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {lstat,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
@@ -363,6 +364,9 @@ export class TesterAgentHost {
     if(this.closed)throw new TesterError('TESTER_CLOSING','앱 종료 후 다시 실행하세요.');
     const python=this.deps.python();if(!python)throw new TesterError('TESTER_PYTHON_MISSING','Python 3.9 이상을 준비한 뒤 다시 확인하세요.');
     const lease=await this.deps.lease(target.root);
+    try{const current=await readProjectTesterSets(target.root,(v,n)=>safeText(v,target.root,n));
+      if(current.clickSweep&&desktopOperativeBaselineBlocked(current.clickSweep))throw new TesterError('TESTER_DESKTOP_ADAPTER_UNAVAILABLE','실제 앱 실행 어댑터를 연결한 뒤 해당 기준선을 만드세요. 기존 웹 기준선은 유지합니다.');
+    }catch(error){await lease.release();throw error;}
     const job:TesterClickSweepJob&{child?:ChildProcess}={state:'running',message:'버튼을 하나씩 눌러 첫 기준선을 만드는 중입니다.',at:new Date().toISOString()};
     this.sweepJobs.set(target.identity,job);
     let output='';

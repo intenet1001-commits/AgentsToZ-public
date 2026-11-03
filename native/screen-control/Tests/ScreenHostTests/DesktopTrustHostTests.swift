@@ -185,6 +185,43 @@ import XCTest
         XCTAssertFalse(try XCTUnwrap(rig.opened.last).isStopped,"A later permitted explicit ON remains reachable")
         await service.quit()
     }
+    func testKnownReceivingHoldDisablesPresentationAndExplainsTheExistingLocalRecoveryWithoutEffects() async throws {
+        let rig=try HostRig(),now=Date()
+        rig.clock.advance(now.timeIntervalSince(rig.clock.now)) // The production presentation reads the real current time.
+        let service=rig.makeService(),(authority,_,own)=try authorizations(now:now)
+        let trust=try CommunityDesktopReceiveTrust.verified(authority:authority,authorization:own,deviceID:own.body.deviceId,hostKey:own.body.hostPublicKey,now:now)
+        service.unifiedAccessChanged(own,peers:[],held:true)
+        XCTAssertTrue(service.offersTrustedCommunityTurnOn)
+        XCTAssertFalse(service.canTurnOnFromTrustedCommunity)
+        XCTAssertEqual(service.trustedCommunityTurnOnNotice,ScreenService.receivingHoldRecoveryNotice)
+        XCTAssertTrue(service.trustedCommunityTurnOnNotice?.contains("고급 · 이전 직접 등록 관리") == true)
+        XCTAssertTrue(service.trustedCommunityTurnOnNotice?.contains("Touch ID 또는 Apple Watch") == true)
+        await service.turnOnFromTrustedCommunity(consent:{XCTFail("A held receiver cannot request positive consent");return trust},refresh:{XCTFail("A held receiver cannot refresh/open")})
+        if case .off=service.power {} else {XCTFail("Known receiving hold must leave power OFF")}
+        XCTAssertEqual(service.problem,ScreenService.receivingHoldRecoveryNotice)
+        XCTAssertTrue(rig.opened.isEmpty);XCTAssertTrue(rig.policies.isEmpty)
+        // A user action, issuer renewal, and an input-resume delegation do not implicitly clear this hold.
+        XCTAssertFalse(service.canTurnOnFromTrustedCommunity)
+        service.unifiedAccessChanged(own,peers:[],held:false) // Fixture invokes the existing native callback only.
+        XCTAssertNil(service.trustedCommunityTurnOnNotice);XCTAssertTrue(service.canTurnOnFromTrustedCommunity)
+        await service.turnOnFromTrustedCommunity(consent:{trust},refresh:{})
+        XCTAssertEqual(rig.opened.count,1);XCTAssertFalse(try XCTUnwrap(rig.opened.first).isStopped)
+        XCTAssertTrue(rig.policies.isEmpty);await service.quit()
+    }
+    func testUnknownOrRevokedTrustedAuthorityNeverLooksReadyOrStartsAListener() async throws {
+        for error in [ScreenCommunityError.service("NOT_ENROLLED"),.service("REVOKED")] {
+            let rig=try HostRig(),service=rig.makeService()
+            service.unifiedAccessChanged(nil,peers:[],held:false)
+            XCTAssertFalse(service.offersTrustedCommunityTurnOn);XCTAssertFalse(service.canTurnOnFromTrustedCommunity)
+            await service.turnOnFromTrustedCommunity() // Missing broker is also a stated refusal, not a silent no-op.
+            XCTAssertTrue(service.problem?.contains("등록 상태를 새로 고침") == true)
+            await service.turnOnFromTrustedCommunity(consent:{throw error},refresh:{XCTFail("Unknown/revoked authority cannot refresh/open")})
+            if case .off(let reason)=service.power {XCTAssertTrue(reason?.contains("기기 신뢰 수신 권한을 확인하지 못했습니다") == true)}
+            else {XCTFail("Unknown/revoked authority must remain OFF")}
+            XCTAssertTrue(rig.opened.isEmpty);XCTAssertTrue(rig.policies.isEmpty)
+            await service.quit()
+        }
+    }
 }
 
 @MainActor final class ScreenPersistentInputHoldTests:XCTestCase {

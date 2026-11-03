@@ -96,20 +96,26 @@
   width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding-bottom: 10px; border-bottom: 1px solid var(--line);
 }
-.workspace-tool-group { width:100%; min-width:0; padding:10px 0; border-bottom:1px solid var(--line); }
-.workspace-tool-group h3 { margin:0 0 7px; color:var(--ink-2); font-size:11.5px; font-weight:700; }
-.workspace-tool-group__actions { display:flex; flex-direction:column; align-items:stretch; gap:6px; min-width:0; }
-.workspace-tool-group__actions > button { width:100%; padding:9px 10px; border:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; white-space:normal; overflow-wrap:anywhere; }
-.workspace-tools-advanced { min-width:0; padding-top:5px; color:var(--ink-2); font-size:12px; }
-.workspace-tools-advanced > summary { cursor:pointer; padding:6px 0; }
-.workspace-tools-advanced > .workspace-tools-advanced__body { display:flex; flex-direction:column; gap:7px; padding-top:7px; }
-.workspace-screen-entry { padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--sunken); min-width:0; }
-.workspace-screen-entry strong { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink); }
-.workspace-screen-entry p { margin:5px 0 0; color:var(--ink-2); font-size:11.5px; line-height:1.45; overflow-wrap:anywhere; }
-.workspace-screen-entry button { width:100%; margin-top:7px; padding:7px 9px; border:1px solid var(--line); color:var(--ink); background:var(--surface); text-align:left; }
+.workspace-tool-group { width:100%; min-width:0; padding:8px 0; border-bottom:1px solid var(--line); }
+.workspace-tool-group h3 { margin:0 0 6px; padding:0 3px; color:var(--ink-2); font-size:11px; font-weight:700; letter-spacing:.02em; }
+.workspace-tool-group__actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; gap:4px; min-width:0; }
+.workspace-tools-panel .workspace-tool-group__actions > button { display:flex; align-items:center; gap:7px; width:100%; min-height:44px; padding:9px 10px; border:0; border-radius:8px; background:transparent; color:var(--ink); text-align:left; white-space:normal; overflow-wrap:anywhere; }
+.workspace-tool-group__actions > button:last-of-type:nth-child(odd) { grid-column:1/-1; }
+.workspace-tool-group__actions .workspace-tool-label { white-space:normal; line-height:1.4; }
+.workspace-tool-group__actions > button:hover:not(:disabled) { background:var(--sunken); }
+.workspace-tools-advanced { grid-column:1/-1; min-width:0; padding-top:4px; color:var(--ink-2); font-size:11.5px; }
+.workspace-tools-advanced > summary { min-height:44px; cursor:pointer; padding:12px 10px; }
+.workspace-tools-advanced > .workspace-tools-advanced__body { display:flex; flex-direction:column; gap:4px; padding:2px 0 0; }
+.workspace-tools-panel .workspace-tools-advanced__body > button { min-height:44px; padding:9px 10px; border:0; background:transparent; color:var(--ink); text-align:left; white-space:normal; }
+.workspace-screen-entry { display:flex; flex-direction:column; gap:6px; padding:10px; border:0; border-radius:10px; background:var(--sunken); min-width:0; }
+.workspace-screen-entry strong { display:flex; align-items:center; gap:6px; font-size:12px; line-height:1.4; color:var(--ink); }
+.workspace-screen-entry strong svg { flex-shrink:0; }
+.workspace-screen-entry p { margin:0; color:var(--ink-2); font-size:11.5px; line-height:1.45; overflow-wrap:anywhere; }
+.workspace-tools-panel .workspace-screen-entry button { width:100%; min-height:44px; margin-top:auto; padding:9px; border:0; color:var(--accent); background:var(--accent-soft); text-align:left; font-weight:700; }
+.workspace-tools-panel .workspace-screen-entry button:hover:not(:disabled) { background:var(--raised) !important; }
 .workspace-screen-entry button:disabled { opacity:.55; cursor:not-allowed; }
-@media(max-width:640px),(pointer:coarse){
- .workspace-tools-panel .workspace-tool-group__actions button,.workspace-tools-advanced summary { min-height:44px; }
+@media(max-width:640px){
+ .workspace-tool-group__actions { grid-template-columns:minmax(0,1fr); }
 }
 .workspace-tools-panel > .flex { flex-wrap: wrap; row-gap: 6px; }
 .workspace-tools-panel button { min-height: 30px; border-radius: 7px !important; font-size: 12px !important; font-family: inherit !important; }

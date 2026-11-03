@@ -66,7 +66,8 @@ final class ViewerCommunitySheet {
         if let review = account.unified?.review { confirmationButton?.state = account.unified?.confirmation.isConfirmed(for: review) == true ? .on : .off }
         // Leases, queue polling and status text do not replace live form controls or their field editor.
         let reviewKey = account.unified?.review.map { "\($0.planId):\($0.digest):\($0.challenge):\($0.management?.digest ?? "normal")" } ?? ""
-        let key = [reviewKey, account.review?.pendingID ?? "", account.removing?.enrollmentID ?? "",
+        let expiredKey = account.unified?.expiredReview.map { "\($0.planId):\($0.requestExpiresAt):\($0.choice)" } ?? ""
+        let key = [reviewKey, expiredKey, account.review?.pendingID ?? "", account.removing?.enrollmentID ?? "",
             account.certificate?.member.enrollmentID ?? "", String(account.certificate?.member.admin == true),
             account.selectedCapabilities.map(\.rawValue).joined(separator: ","), account.unified?.registrationCode ?? "",
             account.directory?.members.map { "\($0.enrollmentID):\($0.keyEpoch)" }.joined(separator: ",") ?? "",
@@ -110,6 +111,16 @@ final class ViewerCommunitySheet {
             let approve = HumanButton(title: label) { [weak account] proof in Task { await account?.approve(proof) } }
             enabled(approve); column.addArrangedSubview(approve)
             column.addArrangedSubview(PresentationButton(title: "목록으로") { [weak account] in account?.dismissReview() })
+        } else if let expired = account.unified?.expiredReview {
+            let (notice, retry) = Self.expiredReviewControls(expired) { [weak account] original in
+                Task { await account?.reloadExpiredUnifiedReview(original) }
+            }
+            column.addArrangedSubview(notice)
+            enabled(retry, when: { [weak account] in
+                account?.certificate?.member.admin == true && expired.requestExpiresAt > Int64(Date().timeIntervalSince1970 * 1000)
+            })
+            column.addArrangedSubview(retry)
+            column.addArrangedSubview(PresentationButton(title: "목록으로") { [weak account] in account?.dismissUnifiedReview() })
         } else {
             if account.certificate == nil { column.addArrangedSubview(nameField) }
             if let code = account.unified?.registrationCode {
@@ -172,6 +183,12 @@ final class ViewerCommunitySheet {
         for field in column.arrangedSubviews.compactMap({ $0 as? NSTextField }) {
             field.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         }
+    }
+    static func expiredReviewControls(_ expired: ViewerEnrollmentReviewPresentation.Expired,
+                                     onReview: @escaping (ViewerEnrollmentReviewPresentation.Expired) -> Void) -> (NSTextField, PresentationButton) {
+        let notice = NSTextField(wrappingLabelWithString: "\(expired.message)\n‘\(expired.name)’의 120초 검토 시간이 끝나 코드 확인 체크를 해제했습니다. 같은 등록 요청을 다시 검토하고 등록 코드를 직접 확인해 주세요. 새 등록 요청이나 승인을 자동으로 보내지 않습니다.")
+        let retry = PresentationButton(title: "같은 등록 요청 다시 검토") { onReview(expired) }
+        return (notice, retry)
     }
     private func renderQueue() {
         let status = account.unified?.pendingStatus ?? (account.supported ? "등록 상태 조회 필요" : "커뮤니티 서비스 설정 필요")

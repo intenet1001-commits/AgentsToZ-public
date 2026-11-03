@@ -164,6 +164,8 @@ enum MobileCommunityStore {
         } catch { message = Self.describe(error) }
     }
     func refresh() async {
+        var unifiedRefreshSucceeded = false
+        var legacyCertificateLookupFailed = false
         do {
             guard let model = try prepare(create: false), let account else { return }
             let original = await model.snapshot()
@@ -173,10 +175,15 @@ enum MobileCommunityStore {
             unified.validateReviewContext(certificate: certificate)
             if let recovered = try? await model.certificate() { certificate = recovered }
             try await unified.refresh(account: account, legacy: certificate)
+            unifiedRefreshSucceeded = true
             await unified.syncSafetyNotifications(account:account,certificate:certificate,requestPermission:false)
             if unified.useSession.isUsable { try await unified.refreshScreenTargets() }
             let snapshot = await model.snapshot()
-            if (try? await model.certificate()) == nil { certificate = try await model.refreshSelfCertificate() }
+            if (try? await model.certificate()) == nil {
+                legacyCertificateLookupFailed = true
+                certificate = try await model.refreshSelfCertificate()
+                legacyCertificateLookupFailed = false
+            }
             if snapshot.uncertainMutation { try await model.recover() }
             let directory = try await model.directory(), certificate = try await model.certificate()
             let preferences = try MobileCommunityStore.routes()
@@ -211,7 +218,13 @@ enum MobileCommunityStore {
             administrator = false; managementStatus = "관리 역할 조회 실패 · 새로 고침 필요"; unified.validateReviewContext(certificate: nil)
             unified.pendingUnavailable()
             if case ScreenCommunityError.service(let code) = error, ["NOT_ENROLLED", "REGISTRATION_REVOKED"].contains(code) {
-                unified.endLocally(); macs = []; registered = false; administrator = false; directory = nil; certificate = nil; pending = []; expiry?.cancel()
+                let preservePending = unified.pendingRegistrationPresentation?.preservesPending(afterLegacyError: code,
+                    unifiedRefreshSucceeded: unifiedRefreshSucceeded, legacyCertificateLookupFailed: legacyCertificateLookupFailed,
+                    hasAuthorization: unified.authorization != nil) == true
+                if preservePending { managementStatus = "관리 기기 등록 승인 대기 · 승인 역할 없음"; unified.pendingRegistrationOnly() }
+                else { unified.endLocally() }
+                macs = []; registered = false; administrator = false; directory = nil; certificate = nil; pending = []; expiry?.cancel()
+                if preservePending { message = unified.message; return }
             }
             if macs.isEmpty { message = Self.describe(error) }
         }

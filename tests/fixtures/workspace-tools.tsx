@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {WorkspaceTools} from '../../src/components/WorkspaceTools';
 import {WorkspaceToolGroup} from '../../src/components/WorkspaceToolGroup';
 import {WorkspaceScreenEntries} from '../../src/WorkspaceScreenEntries';
+import '../../src/appearanceTokens.css';
 import '../../src/workspaceDesign.css';
 
 const fixture=window as typeof window&{isTauri:boolean;nativeCalls:string[];toolActions:string[];failStatus:boolean;blocked:boolean;supported:boolean;tickHelpers:()=>void;helperTimerCount:()=>number;__TAURI_INTERNALS__:unknown};

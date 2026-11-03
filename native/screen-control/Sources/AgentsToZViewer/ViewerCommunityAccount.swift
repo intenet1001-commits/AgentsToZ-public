@@ -5,7 +5,15 @@ import ScreenControlCore
 /// One community key/account per Viewer installation. It never persists peer rows in the pairwise ledger.
 @MainActor
 final class ViewerCommunityAccount {
-    struct Account: Codable, Sendable { let keyBlob: Data; var displayName: String?; var enrollment: ScreenCommunityEnrollmentState? }
+    struct Account: Codable, Sendable {
+        let keyBlob: Data
+        var displayName: String?
+        var enrollment: ScreenCommunityEnrollmentState?
+        // Optional for old accounts. This is native provisioning metadata, never proof of biometric approval.
+        var biometricCandidate: CommunityBiometricKeyCandidate.Binding? = nil
+    }
+    private let biometricPreparation = ViewerCommunityBiometricPreparation()
+    private var biometricCandidate: CommunityBiometricKeyCandidate.Binding?
     private var model: ScreenCommunityEnrollment?
     private(set) var unified: ViewerUnifiedEnrollment?
     private(set) var controlReady = false
@@ -76,30 +84,27 @@ final class ViewerCommunityAccount {
     private func prepare(create: Bool) async throws -> ScreenCommunityEnrollment? {
         if let model { return model }
         guard let authority = ScreenCommunityAuthority.configured else { throw ScreenCommunityError.notConfigured }
-        let stored = try backend.read()
-        if stored == nil && !create { return nil }
+        if !create, !biometricPreparation.hasPendingCandidate {
+            do { if try backend.read() == nil { return nil } }
+            catch { throw CommunityBiometricPreparationError(stage: .accountRead, underlying: error) }
+        }
         let identity = try await ScreenCommunityHostIdentity.load()
         guard identity.profileID == authority.profileID else { throw ScreenCommunityError.wrongCommunity }
-        let account: Account
-        if let stored { account = try JSONDecoder().decode(Account.self, from: stored) }
-        else {
-            guard create else { return nil }
-            let key = try ControllerKeyFactory.make()
-            let chosen = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = chosen.isEmpty ? identity.name : chosen
-            guard RegistrationInvite.isShowableName(name) else { throw ScreenCommunityError.malformed }
-            account = Account(keyBlob: key.blob, displayName: name, enrollment: nil)
-            try backend.write(JSONEncoder().encode(account))
-        }
-        let signer = try SecureEnclaveTranscriptSigner(dataRepresentation: account.keyBlob)
-        guard identity.boundViewerKey == nil || identity.boundViewerKey == signer.publicKey.x963Representation else { throw ScreenCommunityError.wrongCommunity }
-        _ = try await ScreenCommunityCommand(.bind, [.string(ScreenCommunityRequest.key(signer))]).call()
+        let chosen = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = chosen.isEmpty ? identity.name : chosen
+        guard RegistrationInvite.isShowableName(name) else { throw ScreenCommunityError.malformed }
+        let context = CommunityBiometricKeyCandidate.Context(profileId: identity.profileID, deviceId: identity.deviceID,
+                                                             hostPublicKey: identity.publicKey.x963Representation)
+        guard let account = try biometricPreparation.prepare(backend: backend, context: context,
+            boundViewerKey: identity.boundViewerKey, name: name, create: create), let candidate = account.biometricCandidate else { return nil }
+        let publicKey = try candidate.checkedPublicKey(blob: account.keyBlob, context: context, boundViewerKey: identity.boundViewerKey)
+        _ = try await ScreenCommunityCommand(.bind, [.string(ScreenCommunityRequest.base64(publicKey))]).call()
         let backend = backend, keyBlob = account.keyBlob, displayName = account.displayName ?? identity.name
         let model = try ScreenCommunityEnrollment(authority: authority,
             device: ScreenCommunityDevice(id: identity.deviceID, name: displayName, platform: "mac", grant: .control),
-            identity: identity.signer, viewerKey: signer.publicKey.x963Representation, state: account.enrollment,
-            save: { try backend.write(JSONEncoder().encode(Account(keyBlob: keyBlob, displayName: displayName, enrollment: $0))) })
-        self.model = model; blob = keyBlob; return model
+            identity: identity.signer, viewerKey: publicKey, state: account.enrollment,
+            save: { try backend.write(JSONEncoder().encode(Account(keyBlob: keyBlob, displayName: displayName, enrollment: $0, biometricCandidate: candidate))) })
+        self.model = model; blob = keyBlob; biometricCandidate = candidate; return model
     }
     /// A single intent covers the exact selected feature set; staging itself grants no authority.
     func requestUnifiedMembership() async {
@@ -108,7 +113,10 @@ final class ViewerCommunityAccount {
         do {
             guard try await prepare(create: true) != nil, let blob, let unified else { return }
             let identity = try await ScreenCommunityHostIdentity.load()
-            let biometricSigner = try SecureEnclaveTranscriptSigner(dataRepresentation: blob)
+            let context = CommunityBiometricKeyCandidate.Context(profileId: identity.profileID, deviceId: identity.deviceID,
+                                                                 hostPublicKey: identity.publicKey.x963Representation)
+            guard let biometricCandidate else { throw CommunityBiometricPreparationError.invalid(.publicBindingValidate) }
+            let biometricKey = try biometricCandidate.checkedPublicKey(blob: blob, context: context, boundViewerKey: identity.boundViewerKey)
             let saved = try backend.read().map { try JSONDecoder().decode(Account.self, from: $0) }
             let controlKey: Data?, agentDeviceId: String?
             var verifiedControlCandidate:CommunityEnrollmentTransport.ControlCandidate?
@@ -117,7 +125,7 @@ final class ViewerCommunityAccount {
                 do { let candidate = try await prepareControlKey();verifiedControlCandidate=candidate;controlKey = candidate.publicKey; agentDeviceId = candidate.agentDeviceId }
                 catch { throw ScreenCommunityError.service("CONTROL_KEY_NOT_READY") }
             } else { controlKey = nil; agentDeviceId = nil }
-            try await unified.request(identity: identity, biometricKey: biometricSigner.publicKey.x963Representation, name: saved?.displayName ?? identity.name, controlKey: controlKey, agentDeviceId: agentDeviceId,controlCandidate:verifiedControlCandidate)
+            try await unified.request(identity: identity, biometricKey: biometricKey, name: saved?.displayName ?? identity.name, controlKey: controlKey, agentDeviceId: agentDeviceId,controlCandidate:verifiedControlCandidate)
             message = "선택한 기능을 한 번에 등록 요청했습니다. 관리 기기에서 선택 목록을 확인하고 한 번 승인해 주세요."
             resume()
         } catch { actionMessageLocked = true; message = Self.describe(error) }
@@ -141,6 +149,12 @@ final class ViewerCommunityAccount {
             try await unified.loadReview(id, identity: identity, legacy: current, choice: choice)
         }
         catch { message = Self.describe(error) }
+    }
+    func reloadExpiredUnifiedReview(_ expected: ViewerEnrollmentReviewPresentation.Expired) async {
+        guard let unified, unified.expiredReview == expected,
+              expected.requestExpiresAt > Int64(Date().timeIntervalSince1970 * 1000),
+              unified.pending.contains(where: { $0.planId == expected.planId && $0.expiresAt == expected.requestExpiresAt }) else { return }
+        await loadUnifiedReview(expected.planId, choice: expected.choice)
     }
     func approveUnified(_ proof: HumanProof, confirmedDigest: String) async {
         guard !busy, let certificate, let blob, let unified, let review = unified.review,
@@ -411,6 +425,9 @@ final class ViewerCommunityAccount {
             case "REQUEST_EXPIRED", "CODE_EXPIRED_OR_USED", "STALE_APPROVAL", "STALE_REGISTRATION": return "승인 정보가 만료되었거나 바뀌었습니다. 목록을 갱신한 뒤 다시 검토해 주세요."
             default: return "커뮤니티 등록을 확인하지 못했습니다(\(code)). 연결 상태를 확인한 뒤 다시 조회하세요."
             }
+        }
+        if let preparation = error as? CommunityBiometricPreparationError {
+            return "Mac 등록용 키 준비를 완료하지 못했습니다(단계: \(preparation.stage.rawValue), \(preparation.domain):\(preparation.code)). 이번 동작의 새 등록 요청은 보내지 않았습니다. 기존 기기 키와 등록 정보는 유지합니다."
         }
         let detail = error as NSError
         if ["NSOSStatusErrorDomain", "com.apple.LocalAuthentication"].contains(detail.domain) {

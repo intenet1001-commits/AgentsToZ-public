@@ -74,6 +74,8 @@ export interface TesterClickSweepSet {
    * 데스크톱 프로젝트 하네스는 포트 없이 별도로 구성할 수 있다. 칸이 없으면 옛 호스트다 — 그때는 버튼을 그리지 않는다.
    */
   enableUrl?:string|null;
+  /** Project-owned actual-desktop preparation; manual observations are never an automatic native verdict. */
+  operative?:{state:'blocked'|'observed'|'unknown'|'invalid';surfaceId?:string;bundleId?:string;appCommit?:string;device?:string;mode?:'isolated'|'operational';inventory?:number;clicked?:number;effects?:number;verdict:null};
   /** 이 앱이 시작한 기준선 만들기(`sweep run --update`)의 마지막 상태. 앱이 다시 시작되면 사라진다(결과는 summary.json에 남는다). */
   job?:TesterClickSweepJob;
 }
