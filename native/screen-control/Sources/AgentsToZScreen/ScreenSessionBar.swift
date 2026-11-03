@@ -143,8 +143,11 @@ final class ScreenSessionBar: NSObject, NSWindowDelegate {
         case .takeOver: service.pauseRemoteInput()
         case .handBack:
             let refusal = Self.handBackRefusal(NSApp.currentEvent, bar: panel, pill: sender)
-            if !service.resumeRemoteInput(refusal: refusal), let refusal {
-                notice = (.handBackRefused(refusal), Date().addingTimeInterval(4))
+            Task { [weak self] in
+                guard let self else { return }
+                if !(await service.resumeRemoteInput(refusal:refusal)),let refusal,
+                   !service.usesTrustedInputOwnerConfirmation || refusal == .screenInjected { notice=(.handBackRefused(refusal),Date().addingTimeInterval(4)) }
+                update()
             }
         }
         update()

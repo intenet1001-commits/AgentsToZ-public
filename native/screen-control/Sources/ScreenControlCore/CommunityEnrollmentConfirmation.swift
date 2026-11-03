@@ -14,9 +14,10 @@ public struct CommunityEnrollmentConfirmation: Sendable {
     private struct Binding: Equatable, Sendable {
         let planId: String, digest: String, challenge: String, admin: String
         let revision: Int64, expiresAt: Int64
+        let managementDigest: String?
         init(_ review: CommunityAccessReview) {
             planId = review.planId; digest = review.digest; challenge = review.challenge; admin = review.admin
-            revision = review.revision; expiresAt = review.expiresAt
+            revision = review.revision; expiresAt = review.expiresAt; managementDigest = review.management?.digest
         }
     }
     private var binding: Binding?
@@ -32,6 +33,6 @@ public struct CommunityEnrollmentConfirmation: Sendable {
     }
     private static func isCurrent(_ review: CommunityAccessReview, now: Date) -> Bool {
         review.expiresAt > Int64(now.timeIntervalSince1970 * 1000) &&
-        CommunityEnrollmentCode.formatted(digest: review.digest) != nil && (try? review.plan.digest) == review.digest
+        review.hasValidManagementBinding && CommunityEnrollmentCode.formatted(digest: review.digest) != nil && (try? review.plan.digest) == review.digest
     }
 }

@@ -105,6 +105,7 @@ final class InputForwarder {
 
     /// Sends when the hardware check passes and the session takes input; a dropped event is told once per session.
     private func deliver(_ event: NSEvent, _ input: InputEvent) {
+        if session.isTrustedDeviceSession { session.sendTrusted(input);return }
         switch HumanActions.forwardProof(for: event) {
         case .human(let proof): session.send(input, proof: proof)
         case .refused: session.noteDroppedInput()

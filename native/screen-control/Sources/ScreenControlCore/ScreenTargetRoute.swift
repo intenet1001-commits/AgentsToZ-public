@@ -110,6 +110,10 @@ public enum ScreenTargetConnector {
         public let path: ScreenTargetPath
         /// Paths that did not open before this one.
         public let unreachable: [ScreenTargetPath]
+        public let desktopTrust:CommunityDesktopScreenTrust?
+        init(viewer:ScreenViewer,path:ScreenTargetPath,unreachable:[ScreenTargetPath],desktopTrust:CommunityDesktopScreenTrust?=nil) {
+            self.viewer=viewer;self.path=path;self.unreachable=unreachable;self.desktopTrust=desktopTrust
+        }
     }
 
     /// Connects to `target` as a Mac controller. `approve` asks the person (Touch ID, or Apple Watch when the key allows
@@ -173,8 +177,8 @@ public enum ScreenNearbyVersionHint: Equatable, Sendable {
 /// has not paused input here.
 public enum ViewerInputGate {
     public static func allows(_ state: ScreenMacState, pausedHere: Bool,
-                              calibration: ScreenInputCalibration = .current) -> Bool {
-        calibration.allowsControl && state.grant == .control && state.canSendInput && !pausedHere
+                              calibration: ScreenInputCalibration = .current,desktopTrust:CommunityDesktopTrustLease?=nil) -> Bool {
+        (desktopTrust.map { $0.current()?.canControl == true } ?? calibration.allowsControl) && state.grant == .control && state.canSendInput && !pausedHere
     }
 
     /// The locked-Mac entry (DESIGN D-3, SR-28): the conditions are the build, B's control grant and B saying it is
@@ -406,19 +410,20 @@ public struct ViewerSessionModel: Equatable, Sendable {
     private var lastLockedEntryID: UInt32?
     private var nextTextID: UInt32 = 1
     let calibration: ScreenInputCalibration
+    private let desktopTrust:CommunityDesktopTrustLease?
 
-    public init(path: ScreenTargetPath, started: ContinuousClock.Instant) {
-        self.init(path: path, started: started, calibration: .current)
+    public init(path: ScreenTargetPath, started: ContinuousClock.Instant,desktopTrust:CommunityDesktopTrustLease?=nil) {
+        self.init(path: path, started: started, calibration: .current,desktopTrust:desktopTrust)
     }
 
-    init(path: ScreenTargetPath, started: ContinuousClock.Instant, calibration: ScreenInputCalibration) {
+    init(path: ScreenTargetPath, started: ContinuousClock.Instant, calibration: ScreenInputCalibration,desktopTrust:CommunityDesktopTrustLease?=nil) {
         self.path = path
         watch = ViewerLimitWatch(started: started)
-        self.calibration = calibration
+        self.calibration = calibration;self.desktopTrust=desktopTrust
     }
 
     /// Whether the person's keyboard and pointer go to B now.
-    public var sendsInput: Bool { ViewerInputGate.allows(state, pausedHere: pausedHere, calibration: calibration) }
+    public var sendsInput: Bool { ViewerInputGate.allows(state, pausedHere: pausedHere, calibration: calibration,desktopTrust:desktopTrust) }
 
     /// Input stopped going to B while something is still held there: the caller lets it go (`releaseHeld`).
     public var needsRelease: Bool { !sendsInput && !held.isEmpty }
@@ -431,7 +436,7 @@ public struct ViewerSessionModel: Equatable, Sendable {
     }
 
     public var bandLines: [String] {
-        var lines = ScreenTargetText.band(state, pausedHere: pausedHere, calibration: calibration)
+        var lines = ScreenTargetText.band(state, pausedHere: pausedHere, calibration: calibration,desktopTrust:desktopTrust)
         if limitWarningShown { lines.insert(ScreenTargetText.limitWarning, at: 0) }
         if droppedInputTold { lines.append(ScreenInputOriginText.droppedInput) }
         if let storeFailure { lines.append(storeFailure) }
@@ -605,10 +610,10 @@ public enum ScreenTargetText {
     }
 
     /// The band outside the picture: what limits input now, most specific first.
-    public static func band(_ state: ScreenMacState, pausedHere: Bool, calibration: ScreenInputCalibration = .current) -> [String] {
+    public static func band(_ state: ScreenMacState, pausedHere: Bool, calibration: ScreenInputCalibration = .current,desktopTrust:CommunityDesktopTrustLease?=nil) -> [String] {
         var lines: [String] = []
         if state.inputHeldAtMac { lines.append(inputHeldAtMac) }
-        if !calibration.allowsControl {
+        if !calibration.allowsControl && desktopTrust?.current() == nil {
             lines.append(viewOnlyByBuild)
         } else if state.grant != .control || state.inputAvailability == .viewOnly {
             lines.append(viewOnly)

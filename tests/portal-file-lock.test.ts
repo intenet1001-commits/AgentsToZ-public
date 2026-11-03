@@ -93,14 +93,15 @@ describe('owned portal file lock', () => {
       LET_ACQUIRER_RELEASE: letAcquirerRelease,
     };
     const staleReleaser = Bun.spawn([process.execPath, '-e', `
-      import { writeFileSync } from 'node:fs';
+      import { renameSync, writeFileSync } from 'node:fs';
       import { releasePortalFileLockIfOwned } from ${JSON.stringify(moduleUrl)};
       writeFileSync(process.env.RELEASE_READY, 'ready');
       const released = releasePortalFileLockIfOwned(process.env.LOCK_PATH, process.env.OLD_OWNER);
-      writeFileSync(process.env.RELEASE_RESULT, String(released));
+      writeFileSync(process.env.RELEASE_RESULT + '.tmp', String(released));
+      renameSync(process.env.RELEASE_RESULT + '.tmp', process.env.RELEASE_RESULT);
     `], { env: childEnvironment, stdout: 'pipe', stderr: 'pipe' });
     const replacementAcquirer = Bun.spawn([process.execPath, '-e', `
-      import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+      import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
       import { acquireOwnedFileLock } from ${JSON.stringify(moduleUrl)};
       writeFileSync(process.env.ACQUIRE_READY, 'ready');
       const release = await acquireOwnedFileLock(process.env.LOCK_PATH, {
@@ -109,7 +110,8 @@ describe('owned portal file lock', () => {
         staleAfterMs: 10,
         deadOwnerGraceMs: 0,
       });
-      writeFileSync(process.env.ACQUIRE_RESULT, readFileSync(process.env.LOCK_PATH, 'utf8'));
+      writeFileSync(process.env.ACQUIRE_RESULT + '.tmp', readFileSync(process.env.LOCK_PATH, 'utf8'));
+      renameSync(process.env.ACQUIRE_RESULT + '.tmp', process.env.ACQUIRE_RESULT);
       while (!existsSync(process.env.LET_ACQUIRER_RELEASE)) await Bun.sleep(5);
       release();
     `], { env: childEnvironment, stdout: 'pipe', stderr: 'pipe' });

@@ -793,7 +793,8 @@ final class ScreenViewerModel {
             defer { notices.cancel() }
             connectionPhase = .firstFrame
             status = connectionPhase.progressMessage
-            for try await picture in viewer.pictures() {
+            // Authentication succeeded; silence must end only this attempt, never prompt or reconnect automatically.
+            for try await picture in viewer.pictures(firstFrameTimeout: .seconds(20)) {
                 // The view went away mid-stream: stop rendering into a layer nobody shows and let `end()` close it.
                 guard gate.owns(attempt), !Task.isCancelled else { return }
                 if let format = CMSampleBufferGetFormatDescription(picture.sample) {

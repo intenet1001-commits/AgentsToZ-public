@@ -27,7 +27,7 @@ function fixture(){
   };
   const run=(envelope:AccessEnvelope)=>{const result=service().handle(envelope,'fixture');return {...result,body:verifyAccessEnvelope(result.envelope,issuerPublic)};};
   const payload=(envelope:AccessEnvelope)=>run(envelope).body[4] as any;
-  const plan:AccessPlan={version:1,profileId:profile,deviceId:device,name:'Mac3',kind:'desktop',hostKey:keyString(host.publicKey),biometricKey:keyString(bio.publicKey),operationKey:keyString(operation.publicKey),controlKey:keyString(control.publicKey),agentDeviceId:randomUUID(),capabilities:[...CAPABILITIES]};
+  const plan:AccessPlan={version:1,profileId:profile,deviceId:device,name:'Mac3',kind:'desktop',hostKey:keyString(host.publicKey),biometricKey:keyString(bio.publicKey),operationKey:keyString(operation.publicKey),controlKey:keyString(control.publicKey),agentDeviceId:randomUUID(),capabilities:CAPABILITIES.filter(cap=>cap!=='screen.desktop-trust'&&cap!=='screen.owner-delegation')};
   function enroll(value=plan,signer=host.privateKey){
     const staged=payload(request('prepare',[value],signer,null));
     const review=payload(request('review',[community,staged.planId]));
@@ -57,7 +57,7 @@ describe('community-wide enrollment and shared authentication authority',()=>{
     expect(createHash('sha256').update(accessPlanBytes(vector.plan as AccessPlan)).digest('hex')).toBe(vector.digest);
   });
   test('one approved capability bundle persists across service restarts; ordinary desktop use needs its operation key only',()=>{
-    const f=fixture(),credential=f.enroll();expect(credential.capabilities).toEqual(CAPABILITIES);expect(credential.deviceKind).toBe('desktop');
+    const f=fixture(),credential=f.enroll();expect(credential.capabilities).toEqual(CAPABILITIES.filter(cap=>cap!=='screen.desktop-trust'&&cap!=='screen.owner-delegation'));expect(credential.deviceKind).toBe('desktop');
     f.advance(3_600_000);
     const renewed=f.run(f.request('authorization',[f.community],f.operation.privateKey));expect(renewed.body[1]).toBe('authorization');
     expect((renewed.body[4] as any).enrollmentId).toBe(f.admin);
@@ -96,6 +96,21 @@ describe('community-wide enrollment and shared authentication authority',()=>{
     expect(f.run(f.request('approve',[f.community,prepared.planId,'0'.repeat(64),reviewed.challenge,reviewed.revision],f.bio.privateKey)).body[4]).toEqual({code:'INVALID_APPROVAL'});
     const community=f.store.get<any>(`community:${f.community}`);community.revision++;f.store.put(`community:${f.community}`,community);
     expect(f.run(f.request('approve',[f.community,prepared.planId,reviewed.digest,reviewed.challenge,reviewed.revision],f.bio.privateKey)).body[4]).toEqual({code:'STALE_APPROVAL'});
+  });
+  test('expired registration requires a new request, while an expired review can be refreshed',()=>{
+    const f=fixture(),first=f.payload(f.request('prepare',[f.plan],f.host.privateKey,null));
+    const review=f.payload(f.request('review',[f.community,first.planId]));
+    f.advance(120_000);
+    expect(f.run(f.request('approve',[f.community,first.planId,review.digest,review.challenge,review.revision],f.bio.privateKey)).body[4]).toEqual({code:'STALE_APPROVAL'});
+    const refreshed=f.payload(f.request('review',[f.community,first.planId]));
+    expect(refreshed.challenge).not.toBe(review.challenge);
+    f.advance(480_000);
+    expect(f.run(f.request('status',[first.planId],f.host.privateKey,null)).body[4]).toEqual({code:'REQUEST_EXPIRED'});
+    expect(f.run(f.request('review',[f.community,first.planId])).body[4]).toEqual({code:'REQUEST_EXPIRED'});
+    const next=f.payload(f.request('prepare',[f.plan],f.host.privateKey,null));
+    expect(next.planId).not.toBe(first.planId);
+    const nextReview=f.payload(f.request('review',[f.community,next.planId]));
+    expect(f.run(f.request('approve',[f.community,next.planId,nextReview.digest,nextReview.challenge,nextReview.revision],f.bio.privateKey)).body[1]).toBe('authorization');
   });
   test('a registered mobile cannot claim desktop trust with the same keys',()=>{
     const f=fixture();const member=f.store.get<any>(`member:${f.admin}`);member.platform='ios';member.grant='none';f.store.put(`member:${f.admin}`,member);

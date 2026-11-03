@@ -268,3 +268,6 @@ try{for(const [name,engine] of Object.entries({chromium,webkit})){
   console.log(`${name}: presets, always-on, custom bounds, screen option, closed-lid grant, AgentsToZ Screen status and open (panel and QR remote dialog), AgentsToZ Viewer status and open, failure, stop, native events, Escape, narrow dock and main sidebar passed`);
  }finally{await browser.close();}
 }}finally{server.stop(true);}
+
+// The same normal check covers the sidebar's direct Screen/Viewer entries and purpose groups.
+await import('./workspace-tools-ui.mjs');

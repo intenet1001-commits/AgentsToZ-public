@@ -29,6 +29,7 @@ export function ComputerUseScopeForm({mode,state,applications,request,refresh,bu
   const supported=supportsComputerScopes(state),permissionsMissing=state?.scoped?.native?.accessibility!==true||state?.scoped?.native?.screenRecording!==true,permissionsReady=state?.restartRequired!==true&&!permissionsMissing&&state?.scoped?.native?.secureInput!==true,activeLegacy=!!state?.grants?.some((g:any)=>!g.halted);
   const onScope=on?(access.scope?.kind==='desktop'?'전체 Mac':applications.find(a=>a.application.pid===access.scope?.application?.pid&&a.application.processStart===access.scope?.application?.processStart)?.name??access.scope?.application?.bundleId):'';
   const title=mode==='desktop'?'이 Mac 전체를 AI에 맡기기':'선택한 앱을 AI에 맡기기',remote=computerUseRemoteView(state);
+  if(!supported)return <section className="mt-5" aria-label={title}><h3 className="font-semibold">{title}</h3><p role="status" className="mt-2 text-sm">현재 범위의 연결 상태를 확인하지 못했습니다. 상태를 다시 확인하거나 Control을 열어 주세요.</p></section>;
   const blocked=!supported||!permissionsReady||(mode==='application'&&!selected)||activeLegacy;
   return <section className="mt-5" aria-label={title}><h3 className="font-semibold">{title}</h3>
     <p className="mt-2 text-sm text-[var(--text-muted)]">{mode==='desktop'?'켜 두면 AI가 이 Mac의 여러 화면과 앱에서 화면 보기·마우스·키보드 작업을 요청할 수 있습니다.':'켜 두면 AI가 선택한 앱의 여러 창에서 화면 보기·마우스·키보드 작업을 요청할 수 있습니다. 앱을 다시 실행하거나 업데이트하면 다시 켜야 합니다.'}</p>
@@ -86,7 +87,7 @@ type RemoteSet=Omit<Extract<ComputerUseManagementRequest,{operation:'scope-remot
 export type ComputerUseRemoteGrantState='agent'|'person'|'halted';
 export interface ComputerUseRemoteRow {connectionId:string;code:string;deviceId:string;deviceName:string;deviceCode:string;connection:string;grant:{id:string;state:ComputerUseRemoteGrantState}|null}
 export interface ComputerUseRemoteView {
-  nativeAuthorized:boolean|null;restorationSupported:boolean;receptionReview:string|null;accepting:boolean;allowRemote:boolean;unreadable:boolean;profileReady:boolean|null;noticeShown:boolean;standing:boolean;appScope:boolean;
+  permissionsReady:boolean|null;nativeAuthorized:boolean|null;restorationSupported:boolean;receptionReview:string|null;accepting:boolean;allowRemote:boolean;unreadable:boolean;profileReady:boolean|null;noticeShown:boolean;standing:boolean;appScope:boolean;
   rows:ComputerUseRemoteRow[];blockedDevices:{deviceId:string;name:string;since:number|null}[];
   /** Connections cut with 「끊기」, grouped by a device that is not blocked as a whole. */
   blockedConnections:{deviceId:string;name:string|null;count:number;until:number}[];
@@ -98,7 +99,7 @@ export interface ComputerUseRemoteView {
  * another Mac with the grant it holds. Null for a host from before remote computer use (no `remote`). A row without a
  * valid device or connection tag is left out: its buttons could not name what to cut or block.
  */
-export function computerUseRemoteView(state:Record<string,any>|null):ComputerUseRemoteView|null{
+export function computerUseRemoteView(state:Record<string,any>|null,now=Date.now()):ComputerUseRemoteView|null{
   const r=state?.remote;if(!r||typeof r!=='object'||typeof r.allowRemote!=='boolean')return null;
   const grants:any[]=Array.isArray(state?.scoped?.grants)?state!.scoped.grants:[],rows:ComputerUseRemoteRow[]=[];
   for(const c of Array.isArray(state?.connections)?state!.connections:[]){
@@ -118,27 +119,34 @@ export function computerUseRemoteView(state:Record<string,any>|null):ComputerUse
     cut.set(b.deviceId,{deviceId:b.deviceId,name:seen?.name??rows.find(x=>x.deviceId===b.deviceId)?.deviceName??null,count:(seen?.count??0)+1,until:Math.max(seen?.until??0,until)});
   }
   const access=state?.access,accepting=r.accepting===true,unreadable=r.settingsUnreadable===true,noticeShown=r.noticeShown===true;
-  return {nativeAuthorized:typeof r.nativeAuthorized==='boolean'?r.nativeAuthorized:null,restorationSupported:r.restorationSupported===true,receptionReview:typeof r.receptionReview?.state==='string'?r.receptionReview.state:null,accepting,allowRemote:r.allowRemote,unreadable,profileReady:typeof r.profileReady==='boolean'?r.profileReady:null,noticeShown,
-    standing:Number.isSafeInteger(access?.standing?.since),appScope:access?.enabled===true&&access.scope?.kind==='application',
+  const scoped=state?.scoped?.native,permissionsReady=typeof scoped?.accessibility==='boolean'&&typeof scoped?.screenRecording==='boolean'&&typeof state?.native?.success==='boolean'?state.native.success===true&&state.native.accessibility===true&&state.native.secureInput!==true&&supportsComputerScopes(state)&&scoped.accessibility&&scoped.screenRecording&&scoped.secureInput!==true&&state?.restartRequired!==true:null;
+  return {permissionsReady,nativeAuthorized:typeof r.nativeAuthorized==='boolean'?r.nativeAuthorized:null,restorationSupported:r.restorationSupported===true,receptionReview:typeof r.receptionReview?.state==='string'?r.receptionReview.state:null,accepting,allowRemote:r.allowRemote,unreadable,profileReady:typeof r.profileReady==='boolean'?r.profileReady:null,noticeShown,
+    standing:Number.isSafeInteger(access?.standing?.since)&&access.standing.since>=0&&access.standing.since<=now,appScope:access?.enabled===true&&access.scope?.kind==='application',
     rows,blockedDevices,blockedConnections:[...cut.values()],noticeDue:accepting&&!unreadable&&r.allowRemote&&!noticeShown};
 }
+export function computerUseRemotePrepared(v:ComputerUseRemoteView|null):boolean{return !!v&&v.allowRemote&&v.accepting&&!v.unreadable&&v.profileReady===true&&v.nativeAuthorized===true&&v.permissionsReady===true&&v.standing&&!v.appScope&&v.receptionReview!=='pending';}
 /** Who the standing allowance lets in, as D1 decided (2026-11-01): this Mac's AIs, and other Macs' AIs while received. */
 export function computerUseStandingWho(remote:ComputerUseRemoteView|null){
   if(!remote||!remote.accepting)return '이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 씁니다.';
-  return remote.allowRemote&&!remote.unreadable
+  if(!remote.allowRemote&&!remote.unreadable)return '이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 씁니다. 다른 Mac의 AI는 막아 두었습니다.';
+  return computerUseRemotePrepared(remote)
     ?'이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티 다른 Mac의 AI가 다시 묻지 않고 전체 Mac을 씁니다(다른 Mac의 AI는 아래 「다른 Mac의 AI 받기」로 막을 수 있습니다).'
-    :'이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 씁니다. 다른 Mac의 AI는 막아 두었습니다.';
+    :'이 Mac의 모든 AgentsToZ AI가 다시 묻지 않고 전체 Mac을 씁니다. 다른 Mac의 AI는 아래 수신 준비 상태를 확인하세요.';
 }
 /** The receiving switch's state line: why nothing of another Mac arrives, or that it does. */
 export function computerUseRemoteStateText(v:ComputerUseRemoteView){
-  if(v.nativeAuthorized===false)return '받을 수 없음 · 현재 공통 등록의 AI 통신 동의와 Control의 기존 전체 Mac 상시 허용을 확인하세요. Native 권한 확인 전에는 다른 Mac의 AI를 받지 않습니다.';
-  if(!v.accepting)return '받을 수 없음 · 이 앱은 다른 Mac의 AI를 받지 않습니다(서명된 macOS 설치 앱에서만 받습니다).';
-  if(v.unreadable)return '꺼짐 · 설정 파일을 읽지 못해 다른 Mac의 AI를 받지 않습니다. 공통 등록·권한관리에서 Native 수신 상태를 확인하세요.';
+  if(v.unreadable)return '확인 필요 · 수신 설정을 읽지 못했습니다. 공통 등록·권한관리에서 현재 수신 상태를 확인하세요.';
   if(!v.allowRemote)return '꺼짐 · 다른 Mac의 AI를 받지 않습니다. 이 Mac의 AI는 그대로 씁니다.';
-  if(v.profileReady===false)return '받을 수 없음 · 공유 총괄 폴더 연결이 필요합니다(아젠투지 설정). 연결이 없으면 다른 Mac의 요청이 이 Mac에 닿지 않습니다.';
-  if(!v.standing)return '켜짐 · 상시 허용이 꺼져 있어 아직 받지 않습니다. 메뉴 막대 Control의 「상시 허용 켜기…」로 켜면 받습니다. 여기에 승인 요청이 뜨지는 않습니다.';
-  if(v.appScope)return '켜짐 · 지금은 한 앱만 허용돼 있어 다른 Mac의 AI는 거절합니다.';
-  return '켜짐 · 같은 커뮤니티 다른 Mac의 AI가 상시 허용 아래 이 Mac 전체를 씁니다. 여기서 다시 묻지 않습니다.';
+  if(v.receptionReview==='pending')return '승인 대기 · 공통 권한관리의 수신 복구 인증을 기다립니다.';
+  if(!v.accepting&&v.nativeAuthorized!==false)return '켜짐 · 받을 준비 필요 · 서명된 Mac 앱의 수신 연결을 확인하세요.';
+  if(v.profileReady===false)return '켜짐 · 받을 준비 필요 · 아젠투지 설정에서 공유 총괄 폴더 연결을 확인하세요.';
+  if(!v.standing)return '켜짐 · 받을 준비 필요 · Control 메뉴의 「상시 허용 켜기…」를 직접 확인하세요. 이 상태에서는 아직 받지 않습니다.';
+  if(v.appScope)return '켜짐 · 받을 준비 필요 · 지금은 한 앱 범위입니다. 다른 Mac의 AI에는 전체 Mac 상시 허용이 필요합니다.';
+  if(v.nativeAuthorized===false)return '켜짐 · 받을 준비 필요 · 현재 공통 기능 동의와 이 Mac의 수신 권한을 확인하세요.';
+  if(!v.accepting)return '켜짐 · 받을 준비 필요 · 서명된 Mac 앱의 수신 연결을 확인하세요.';
+  if(v.nativeAuthorized!==true||v.profileReady!==true||v.permissionsReady===null)return '확인 필요 · 설정은 켜져 있지만 현재 수신 동의·공유 연결·Control 권한을 모두 확인하지 못했습니다.';
+  if(!v.permissionsReady)return '켜짐 · 받을 준비 필요 · Control의 현재 권한과 보안 입력 상태를 확인하세요.';
+  return '받을 준비됨 · 현재 수신 동의·공유 연결·전체 Mac 상시 허용이 확인됐습니다.';
 }
 const GRANT_TEXT:Record<ComputerUseRemoteGrantState,string>={agent:'AI가 사용 중 · 전체 Mac',person:'직접 사용 중 · Control 막대에서 「AI에게 넘기기」',halted:'중지됨'};
 function remoteSet(p:RemoteRun,body:RemoteSet,notice:string){
@@ -149,10 +157,10 @@ function remoteSet(p:RemoteRun,body:RemoteSet,notice:string){
  * the person answers it — 「확인」 or 「막기」 — so closing the panel does not count as having read it.
  */
 export function ComputerUseRemoteNotice({state,...p}:{state:Record<string,any>|null}&RemoteRun){
-  const v=computerUseRemoteView(state);if(!v?.noticeDue)return null;
+  const v=computerUseRemoteView(state);if(!v?.noticeDue)return null;const prepared=computerUseRemotePrepared(v);
   return <section className="mt-4 rounded-xl border border-[var(--accent)] bg-[var(--accent-soft)] p-3" aria-label="다른 Mac의 AI 안내" data-testid="computer-use-remote-notice">
-    <h3 className="font-semibold">{v.standing?'이제 다른 Mac의 AI도 받습니다':'이제 다른 Mac의 AI도 받을 수 있습니다'}</h3>
-    <p className="mt-1 text-sm">{v.standing?'상시 허용이 켜져 있어 같은 커뮤니티 다른 Mac의 AI가 묻지 않고 이 Mac 전체를 씁니다.':'Control에서 상시 허용을 켜면 같은 커뮤니티 다른 Mac의 AI가 묻지 않고 이 Mac 전체를 씁니다.'} 쓰기 시작하면 커뮤니티 방에 알림 글이 올라오고 Control 막대에 「AI가 사용 중」이 보입니다. 원하지 않으면 막으세요. 이 Mac의 AI는 그대로 씁니다.</p>
+    <h3 className="font-semibold">{prepared?'다른 Mac의 AI 수신 준비를 확인했습니다':'다른 Mac의 AI 수신 설정을 확인하세요'}</h3>
+    <p className="mt-1 text-sm">{prepared?'현재 동의 범위에서 같은 커뮤니티 다른 Mac의 AI 요청을 받습니다.':'수신 설정만으로 준비가 끝나지는 않습니다. 아래에서 상시 허용·공유 연결·수신 동의를 각각 확인하세요.'} 쓰기 시작하면 커뮤니티 방에 알림 글이 올라오고 Control 막대에 「AI가 사용 중」이 보입니다. 원하지 않으면 막으세요. 이 Mac의 AI는 그대로 씁니다.</p>
     <div className="mt-2 flex flex-wrap gap-2">
       <button type="button" className={button} data-testid="computer-use-remote-notice-block" disabled={p.busy} onClick={()=>void remoteSet(p,{allowRemote:false,noticeShown:true},'다른 Mac의 AI를 막았습니다. 공통 권한관리에서 명시적으로 복구할 수 있습니다.')}>막기</button>
       <button type="button" className={button} data-testid="computer-use-remote-notice-ok" disabled={p.busy} onClick={()=>void remoteSet(p,{noticeShown:true},'확인했습니다. 아래 「다른 Mac의 AI」에서 언제든 막을 수 있습니다.')}>확인</button>
@@ -175,8 +183,8 @@ export function ComputerUseRemoteReceive({state,...p}:{state:Record<string,any>|
       {v.receptionReview&&<p role="status">권한 복구: {v.receptionReview==='pending'?'사람의 기기 인증을 기다리는 중':v.receptionReview==='approved'?'인증 후 현재 Native 정책 적용됨':'적용을 확인하지 못했습니다. 현재 상태를 다시 확인하세요.'}</p>}
       <button type="button" role="switch" aria-checked={on} aria-label="다른 Mac의 AI 받기" data-testid="computer-use-remote-switch" disabled={p.busy||!v.accepting||!on&&!v.restorationSupported||v.receptionReview==='pending'}
         className={button+' flex items-center justify-between gap-3 '+(on?'border-[var(--accent)] bg-[var(--accent-soft)]':'')}
-        onClick={()=>void remoteSet(p,{allowRemote:!on},on?'다른 Mac의 AI를 막았습니다. 쓰던 연결은 모두 끝났습니다. 이 Mac의 AI는 그대로 씁니다.':'다른 Mac의 AI를 다시 받습니다. 상시 허용이 켜져 있을 때만 씁니다.')}>
-        <span>다른 Mac의 AI 받기</span><span className="font-semibold">{on?'켜짐':'꺼짐'}</span></button>
+        onClick={()=>void remoteSet(p,{allowRemote:!on},on?'다른 Mac의 AI를 막았습니다. 쓰던 연결은 모두 끝났습니다. 이 Mac의 AI는 그대로 씁니다.':'다른 Mac의 AI 수신 설정을 변경했습니다. 아래 현재 준비 상태를 확인하세요.')}>
+        <span>다른 Mac의 AI 받기</span><span className="font-semibold">{v.unreadable?'확인 필요':on?(computerUseRemotePrepared(v)?'켜짐 · 받을 준비됨':'켜짐 · 받을 준비 필요'):'꺼짐'}</span></button>
       <p className="text-xs text-[var(--text-muted)]" data-testid="computer-use-remote-state">{computerUseRemoteStateText(v)}</p>
       <p className="text-xs text-[var(--text-muted)]">공통 권한관리: 처음 등록한 기존 전체 Mac 상시 허용은 추가 인증 없이 적용합니다. 꺼 두거나 막은 권한을 복구할 때만 이곳에서 사람이 인증합니다. 연결할 때 다시 인증하지 않습니다.</p>
     </div>

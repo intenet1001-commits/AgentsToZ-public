@@ -9,7 +9,7 @@ export interface CommunityComponentAuthorizationBody {
  hostPublicKey:string;publicKey:string;biometricPublicKey:string;controlKey:string;agentDeviceId:string;
  capabilities:readonly string[];revision:number;keyEpoch:number;issuedAt:number;expiresAt:number;
 }
-const capOrder=['screen.view','screen.control','screen.receive.view','screen.receive.control','agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser'];
+const capOrder=['screen.view','screen.control','screen.receive.view','screen.receive.control','agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser','screen.desktop-trust','screen.owner-delegation'];
 const capability=(purpose:CommunityComponentPurpose)=>purpose==='agent'?'agent.communicate':'teams.run';
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const integer=(value:unknown):value is number=>Number.isSafeInteger(value)&&(value as number)>=0;
@@ -34,7 +34,8 @@ export class CommunityComponentAuthorization {
    ||/[\p{Cc}\p{Cf}]/u.test(value.name)||!integer(value.revision)||value.revision<1||!integer(value.keyEpoch)||value.keyEpoch<1
    ||value.issuedAt!==reply.issuedAt||!integer(value.expiresAt)||value.expiresAt<=now||value.expiresAt>reply.issuedAt+90_000
    ||!Array.isArray(caps)||!caps.length||JSON.stringify(caps)!==JSON.stringify(capOrder.filter(c=>caps.includes(c))))throw Error('invalid component authorization');
-  if(caps.includes('screen.control')&&!caps.includes('screen.view')||caps.includes('screen.receive.control')&&!caps.includes('screen.receive.view'))throw Error('invalid paired capability');
+  if(caps.includes('screen.control')&&!caps.includes('screen.view')||caps.includes('screen.receive.control')&&!caps.includes('screen.receive.view')||caps.includes('screen.desktop-trust')&&!caps.includes('screen.view')&&!caps.includes('screen.receive.view'))throw Error('invalid paired capability');
+  if(caps.includes('screen.owner-delegation')&&(!caps.includes('screen.desktop-trust')||!caps.includes('screen.receive.control')||!caps.includes('screen.receive.view')))throw Error('invalid paired capability');
   const keys=['hostPublicKey','publicKey','biometricPublicKey','controlKey'].map(k=>value[k]);
   if(new Set(keys).size!==4)throw Error('duplicate component key');
   for(const key of keys){const bytes=communityBytes(key,65);if(bytes.length!==65||bytes[0]!==4)throw Error('invalid component public key');await crypto.subtle.importKey('raw',new Uint8Array(bytes),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);}

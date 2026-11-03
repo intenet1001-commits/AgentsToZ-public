@@ -136,6 +136,20 @@ final class ScreenPushCenter {
         guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) else { throw URLError(.userAuthenticationRequired) }
         return try await deviceToken()
     }
+    /// Background/status refresh never requests OS consent. Only the explicit common UI may request it once.
+    func commonSafetyDeviceToken(requestPermission:Bool) async throws -> Data? {
+        var settings=await UNUserNotificationCenter.current().notificationSettings()
+        if settings.authorizationStatus == .notDetermined,requestPermission {
+            _ = try await UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound])
+            settings=await UNUserNotificationCenter.current().notificationSettings()
+        }
+        guard settings.authorizationStatus == .authorized,settings.alertSetting == .enabled else { return nil }
+        return try await deviceToken()
+    }
+    func commonSafetyPermissionDenied() async -> Bool {
+        let settings=await UNUserNotificationCenter.current().notificationSettings()
+        return settings.authorizationStatus == .denied || (settings.authorizationStatus == .authorized && settings.alertSetting != .enabled)
+    }
 
     // MARK: Notifications
 
@@ -308,6 +322,9 @@ extension SavedScreenMac {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
+        if let notice=userInfo["communityScreenSafety"] as? [String:Any],let payload=notice["payload"] as? String,let signature=notice["signature"] as? String,payload.utf8.count<=4096,signature.utf8.count==86 {
+            await MobileScreenCommunity.shared.receiveSafetyNotice(.init(payload:payload,signature:signature));return
+        }
         // A community notification opens a verified review only; a tap never registers or connects a device.
         if let notice = userInfo["communityEnrollment"] as? [String: Any],
            let payload = notice["payload"] as? String, let signature = notice["signature"] as? String,

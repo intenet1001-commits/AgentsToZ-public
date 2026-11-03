@@ -3,6 +3,24 @@
 > CLAUDE.md에서 옮긴 상세 노트다(2026-10-24, 원문 그대로 · 제목 수준만 한 단계 올림). 이 영역의 코드를 고치기 전에 읽는다.
 > 새 결정·함정은 이 파일에 적고, CLAUDE.md에는 색인 한 줄(필요하면 절대 규칙 한 줄)만 더한다. 「위/아래 절」이라는 말은 옮기기 전 CLAUDE.md 안의 위치를 가리킬 수 있다 — 색인에서 찾을 것.
 
+## 커뮤니티의 기기 등록·기능 승인 진입 (2026-11-03)
+
+커뮤니티 업무 화면 상단과 「기기 간 대화」의 커뮤니티 영역에 `CommunityDeviceRegistration`을 둔다.
+공개된 대화 대상이 없어도 안내가 보인다. 대화 참여를 원격 기능 등록 완료로 표시하지 않는다.
+버튼은 기존 `useViewerHelper`의 인자 없는 `open_viewer_helper`만 사용해 Viewer 창을 연다.
+등록·승인 시트로 직접 들어가는 새 명령이나 세션 시작 경로가 아니다. 열린 Viewer의
+「커뮤니티 기기 등록·승인…」을 본인이 누르고 기능을 선택하도록 다음 단계를 명시한다.
+
+브라우저·모바일 포털에는 이 데스크톱 진입 안내를 표시하지 않는다. 숨긴 업무 화면도 네이티브 훅을
+마운트하지 않고, 문서가 숨겨지면 기존 훅이 상태 조회를 건너뛴다.
+조회 실패·실행 위치 미확인·다른 위치의 Viewer는 열기를 막는다. 실행 중인 구버전은 사용자가
+연결을 마친 뒤 완전히 종료하도록 안내하고, 종료된 업데이트 대기 상태는 기존 네이티브 열기에서
+다시 검사한다. `verified`는 앱 실행 확인이며 등록·승인·화면 연결 성공이 아니다.
+
+회귀: `community-device-registration.test.ts`와 `community-device-registration-ui.mjs`의 순수 DTO·
+가짜 네이티브 브리지. 기존 `community-desktop-ux.e2e.mjs`도 같은 렌더 검사를 이어서 수행한다.
+실제 앱·Viewer 세션·설치된 포트·OS 인증을 사용하지 않는다.
+
 ## 기기 간 대화 — 커뮤니티가 기본이다 (2026-10-04)
 
 「누가 누구를 부른다」를 버리고 **각자 단체방에 입장**하는 모델로 바꿨다. 쌍 단위는 기기 3대면 3쌍,
@@ -396,3 +414,7 @@ pending→taken→done **정확히 한 번**이 있어야 한다(`judgeDialogueD
 PGlite 대역 우편함을 연결하고 B의 합성 화면·가짜 Control에서 단일 클릭 영수증과 우편함 행을 대조한다. MCP 주소는 A의 임시
 loopback 포트에 명시한다. 3001은 거부 정책에 포함되며 직접 접속하지 않는다. 두 픽스처의 설치·서명 입장 사실, 승인, Control 키는
 대역이므로 이 레인의 통과는 설치 사이드카·서명된 Control·실제 화면이나 두 Mac의 동작을 증명하지 않는다.
+
+### 화면 공통 등록의 명시 관리 역할·v2 알림 (2026-11-03)
+
+CF 화면/모바일 일괄 등록의 관리 역할은 전체 기능 선택과 별개다. 기본 approve는 기존 역할을 보존하고 새 모바일을 adminfalse로 등록한다. 명시 관리 선택만 별도 `review-management` / BIO `approve-management` domain으로 plan·상대 키·현재 역할·revision·keyEpoch·nonce·challenge를 함께 승인한다. Auth17·Plan11·v1/phone4 바이트는 불변이다. push는 별도 v2 notice에서 fresh v2 review로만 이어지고 승인 권한을 전달하지 않는다. 통합 outbox는 v1/v2 총4개/회·동시성, 남은 수신자는 durable alarm, 발송 직전 현재 구독/자격 재검증을 유지한다. 역할 UI는 유효한 예전 self cert를 그대로 쓰지 않고 host-signed fresh recover로 갱신한다. 만료/unknown prepare는 정확한 원래 서명과 수락 60초 종료를 결속한 issuer absence로만 fence를 풀며 자동 재요청은 없다. 계약·제약·검증은 [ACCESS-MANAGEMENT-NOTICES.md](../design/mac-to-mac-2026-11-01/ACCESS-MANAGEMENT-NOTICES.md)를 따른다.

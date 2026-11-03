@@ -76,6 +76,19 @@ public struct ScreenStore: Sendable {
 
     func write(_ account: String, _ data: Data) throws { try items.write(account, data) }
 
+    func inputHoldData() throws -> Data? {
+        let data=try read("input-hold-v1");guard data==nil || data!.count<=4096 else { throw ScreenStoreError.corrupt };return data
+    }
+    func replaceInputHold(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        guard data.count<=4096,UUID(uuidString:generation)?.uuidString.lowercased()==generation,
+              let backend=items as? any ScreenInputHoldAtomicItems else { throw ScreenStoreError.corrupt }
+        return try backend.replaceInputHold(expectedGeneration:expectedGeneration,data:data,generation:generation)
+    }
+    func ownerRecoveryData()throws->Data? { let data=try read("owner-recovery-v1");guard data==nil || data!.count<=524_288 else {throw ScreenStoreError.corrupt};return data }
+    func replaceOwnerRecovery(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        guard data.count<=524_288,UUID(uuidString:generation)?.uuidString.lowercased()==generation,let backend=items as? any ScreenOwnerRecoveryAtomicItems else {throw ScreenStoreError.corrupt}
+        return try backend.replaceOwnerRecovery(expectedGeneration:expectedGeneration,data:data,generation:generation)
+    }
     /// The Mac identity key, made once in the Secure Enclave. Only its blob is stored; it works on this Mac only.
     public func identity() throws -> SecureEnclaveTranscriptSigner {
         if let blob = try read("identity") { return try SecureEnclaveTranscriptSigner(dataRepresentation: blob) }
@@ -134,7 +147,7 @@ public struct ScreenStore: Sendable {
 }
 
 /// The app's keychain items: generic passwords of `ScreenStore.service` in its access group, never synchronized.
-struct KeychainScreenStoreItems: ScreenStoreItems {
+struct KeychainScreenStoreItems: ScreenStoreItems,ScreenInputHoldAtomicItems,ScreenOwnerRecoveryAtomicItems {
     private func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: ScreenStore.service,
@@ -144,6 +157,24 @@ struct KeychainScreenStoreItems: ScreenStoreItems {
          kSecAttrSynchronizable as String: false]
     }
 
+    func replaceInputHold(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        try replaceFixed("input-hold-v1",expectedGeneration:expectedGeneration,data:data,generation:generation)
+    }
+    func replaceOwnerRecovery(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        try replaceFixed("owner-recovery-v1",expectedGeneration:expectedGeneration,data:data,generation:generation)
+    }
+    private func replaceFixed(_ account:String,expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        var request=query(account)
+        if let expectedGeneration {
+            request[kSecAttrGeneric as String]=Data(expectedGeneration.utf8)
+            let result=SecItemUpdate(request as CFDictionary,[kSecValueData as String:data,kSecAttrGeneric as String:Data(generation.utf8)] as CFDictionary)
+            if result==errSecItemNotFound { return false };guard result==errSecSuccess else { throw ScreenStoreError.keychain(result) };return true
+        }
+        request[kSecValueData as String]=data;request[kSecAttrGeneric as String]=Data(generation.utf8)
+        request[kSecAttrAccessible as String]=kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let result=SecItemAdd(request as CFDictionary,nil)
+        if result==errSecDuplicateItem { return false };guard result==errSecSuccess else { throw ScreenStoreError.keychain(result) };return true
+    }
     func read(_ account: String) throws -> Data? {
         var request = query(account)
         request[kSecReturnData as String] = true

@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { isModalLayerTarget } from '../dialogEscape';
 import { cornerFloatBoxes, popoverPlacement } from '../cornerFloatClearance';
+
+const ToolsVisibility = createContext(false);
+/** Native status readers mount only while their actual containing tools disclosure is open. */
+export function useWorkspaceToolsOpen() { return useContext(ToolsVisibility); }
 
 /** Native disclosure keeps less frequent actions together without removing them. */
 export function WorkspaceTools({ label, compact = false, children }: {
   label: string; compact?: boolean; children: ReactNode;
 }) {
   const root = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
   const fitPanel = useCallback(() => {
     if (!root.current?.open) return;
     const panel = root.current.querySelector<HTMLElement>(':scope > .workspace-tools-panel');
@@ -52,7 +57,7 @@ export function WorkspaceTools({ label, compact = false, children }: {
     };
   }, [fitPanel]);
   return <details ref={root} className={`workspace-tools${compact ? ' workspace-tools--compact' : ''}`}
-    onToggle={event => { if (event.target === event.currentTarget) fitPanel(); }}
+    onToggle={event => { if (event.target === event.currentTarget) { setOpen(event.currentTarget.open); fitPanel(); } }}
     onKeyDown={event => {
       if (event.key === 'Escape') {
         event.stopPropagation(); event.currentTarget.open = false;
@@ -60,6 +65,6 @@ export function WorkspaceTools({ label, compact = false, children }: {
       }
     }}>
     <summary><SlidersHorizontal aria-hidden="true" /><span>{label}</span><ChevronDown aria-hidden="true" /></summary>
-    <div className="workspace-tools-panel" aria-label={label}>{children}</div>
+    <div className="workspace-tools-panel" aria-label={label}><ToolsVisibility.Provider value={open}>{children}</ToolsVisibility.Provider></div>
   </details>;
 }

@@ -71,7 +71,7 @@ public struct CommunityPurposeSigner: TranscriptSigner {
         case .teams: bodyIsMobile ? "mobile-teams" : "teams"
         case .agentSettings: bodyIsMobile ? "mobile-agent-settings" : "agent-settings"
         case .browser: bodyIsMobile ? "mobile-browser" : "browser"
-        case .receiveView, .receiveControl: "invalid" // The separately signed host broker owns receiving.
+        case .receiveView, .receiveControl, .desktopTrust,.ownerDelegation: "invalid" // No enrollment flag is a signing/delegated-effect credential.
         }
     }
     private var bodyIsMobile: Bool { authorization.body.deviceKind == .mobile }

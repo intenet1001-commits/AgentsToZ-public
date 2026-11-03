@@ -1,5 +1,5 @@
 /** Public-key-only client. All private signing stays in the purpose-limited native broker. */
-export const COMMUNITY_ACCESS_OPERATIONS = ['prepare', 'status', 'receipt', 'list', 'review', 'approve',
+export const COMMUNITY_ACCESS_OPERATIONS = ['owner-delegation-set', 'owner-recovery-request', 'owner-recovery-poll', 'owner-recovery-publish', 'owner-recovery-list', 'owner-recovery-approve', 'owner-recovery-result', 'owner-recovery-status', 'screen-safety-subscribe', 'receiver-safety-poll', 'screen-safety-stop', 'screen-safety-result', 'receiver-safety-event', 'screen-safety-state', 'prepare', 'recover-registration', 'status', 'receipt', 'list', 'review', 'approve', 'review-management', 'approve-management',
   'authorization', 'directory', 'session-open', 'session-status', 'activity', 'session-close', 'relay-ticket',
   'receiver-status', 'receiver-directory', 'receiver-ticket', 'receiver-session',
   'component-status', 'component-directory', 'component-ticket', 'component-session'] as const;
@@ -130,7 +130,7 @@ export function communityAuthority(origin: string): URL {
 export function communityRequestBytes(r: Readonly<CommunityAccessRequest>): Uint8Array {
   if (!COMMUNITY_ACCESS_OPERATIONS.includes(r.operation) || !communityId(r.requestId) || !integer(r.observedAt)
     || !(r.actor === null || communityId(r.actor)) || communityBytes(r.nonce, 32).length !== 32
-    || !Array.isArray(r.args) || r.args.length > 5) return fail('INVALID_REQUEST');
+    || !Array.isArray(r.args) || r.args.length > (r.operation === 'approve-management' ? 6 : 5)) return fail('INVALID_REQUEST');
   const result = encoder.encode(JSON.stringify([2, r.operation, r.requestId, r.observedAt, r.nonce, r.actor, r.args]));
   if (result.length > 24_000) return fail('REQUEST_TOO_LARGE'); return result;
 }
@@ -178,7 +178,12 @@ export class CommunityAccessClient {
         throw rejection;
       }
       const kinds: Record<CommunityAccessOperation, readonly string[]> = {
+        'owner-delegation-set':['owner-delegation'],'owner-recovery-request':['owner-recovery'],'owner-recovery-poll':['owner-recovery-round'],
+        'owner-recovery-publish':['owner-recovery'],'owner-recovery-list':['owner-recovery-list'],'owner-recovery-approve':['owner-recovery'],
+        'owner-recovery-result':['owner-recovery'],'owner-recovery-status':['owner-recovery','owner-recovery-absent'],
+        'screen-safety-subscribe':['safety-subscribed'],'receiver-safety-poll':['safety-round'],'screen-safety-stop':['safety-result'],'screen-safety-result':['safety-result'],'receiver-safety-event':['safety-event'],'screen-safety-state':['safety-state'],
         prepare: ['prepared'], status: ['prepared', 'authorization'], receipt: ['receipt'], list: ['pending-list'], review: ['review'], approve: ['authorization'],
+        'recover-registration': ['prepared', 'authorization', 'registration-absent'], 'review-management': ['management-review'], 'approve-management': ['authorization'],
         authorization: ['authorization'], directory: ['directory'], 'session-open': ['session'], 'session-status': ['session'], activity: ['session'],
         'session-close': ['session-closed'], 'relay-ticket': ['ticket'],
         'receiver-status': ['authorization'], 'receiver-directory': ['directory'], 'receiver-ticket': ['ticket'],

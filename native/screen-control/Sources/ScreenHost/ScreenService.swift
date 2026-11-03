@@ -124,6 +124,13 @@ public final class ScreenService {
     /// Whether notifications and remote stop reach the phones now (DESIGN 9절): the release gate. Needs a round that
     /// reached the relay with a phone in it within 30 minutes and a phone still in use (`ScreenPeerKeys.pushGateOpen`).
     public private(set) var pushLive = false
+    public private(set) var unifiedSafetyNotice = "공통 수신 안전 연결 준비 전"
+    @ObservationIgnored private var safetyPoller: ScreenCommunitySafetyPoller?
+    @ObservationIgnored private var safetyActivation: ScreenCommunityBroker.SafetyActivation?
+    @ObservationIgnored private var unifiedSafetyOwn: CommunityAuthorization?
+    @ObservationIgnored private var unifiedReceivingHeld = false
+    @ObservationIgnored private var safetySequence: Int64 = 0
+    @ObservationIgnored private let communityRenewalScope=ScreenCommunityRenewalScope()
     /// What this build may open (S-M3, D-2, D-3).
     public let flags: ScreenBuildFlags
     /// Whether 「조작」 may be offered for a controller at all: hidden while the build has not passed S-M3 (D-10). The
@@ -172,6 +179,22 @@ public final class ScreenService {
     private var active: Active?
     /// 「직접 하기」·「보기만」 across sessions: every session's hold comes from here (ScreenSessionInputHold.swift).
     @ObservationIgnored private var macHold = ScreenMacHold()
+    @ObservationIgnored private var handBackInProgress=false
+    @ObservationIgnored private var persistentInputHold:ScreenPersistentInputHold?
+    public private(set) var inputProtectionNotice:String?
+    public private(set) var ownerDelegationNotice="다른 Mac의 입력 보류 해제 위임 · 상태 확인 전"
+    public private(set) var ownerDelegationEnabled:Bool?
+    @ObservationIgnored private var ownerLifecycleGeneration=UUID().uuidString.lowercased()
+    @ObservationIgnored private var ownerRecoveryTask:Task<Void,Never>?
+    @ObservationIgnored private var ownerLockTask:Task<Void,Never>?
+    public struct CommunityDesktopDestination:Identifiable,Sendable {
+        public let id:String,name:String,deviceId:String,ready:Bool
+    }
+    public private(set) var communityDesktops:[CommunityDesktopDestination]=[]
+    public private(set) var communityDesktopNotice="목록 준비 전 · 커뮤니티 등록 뒤 Viewer에서 현재 기기 목록을 불러옵니다."
+    @ObservationIgnored private var desktopSelections:[String:CommunityDesktopScreenTrust]=[:]
+    @ObservationIgnored private var desktopListExpiry:Task<Void,Never>?
+    public var needsTrustedInputOwnerConfirmation:Bool { persistentInputHold?.held == true && offersTrustedCommunityTurnOn && !quitting }
     private var registrationListener: RegistrationListener?
     private var registrationTask: Task<Void, Never>?
     private var pending: PendingRegistration?
@@ -276,12 +299,17 @@ public final class ScreenService {
             _ = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.stop(reason: nil, releasingKeepOn: false)
+                    self?.closeInputAndSeal()
                     // Last: the main app then shows the helper as not running instead of an old state.
                     self?.quitting = true
                     ScreenStatusFile.remove()
                 }
             }
         }
+        // A prior opted-in instance's negative remains effective even before its community lease is refreshed.
+        // Missing legacy storage alone does not opt a device into the new policy.
+        do { if try store.inputHoldData() != nil { preparePersistentInputHold() } }
+        catch { preparePersistentInputHold() }
         push = environment.push(liveness) // push hook
         publishStatus()
         if environment.resumesKeptOn { Task { await resumeKeptOn() } }
@@ -298,6 +326,12 @@ public final class ScreenService {
             })
             let server = try ScreenCommunitySocketServer { await broker.handle($0) }
             communityBroker = broker; communityServer = server
+            startOwnerRecovery(broker)
+            safetyPoller = ScreenCommunitySafetyPoller { [weak self] ready,notice in
+                guard let self else { return }
+                self.unifiedSafetyNotice=notice
+                if !ready,self.unifiedAdmission != nil { self.endSession(.revoked) }
+            }
             Task { await server.run() }
             communityTask = Task { [weak self] in
                 while !Task.isCancelled {
@@ -344,13 +378,36 @@ public final class ScreenService {
         unifiedGeneration = UUID(); unifiedOpening?.cancel(); unifiedOpening = nil
         unifiedMux?.cancel(); unifiedMux = nil
     }
-    private func unifiedAccessChanged(_ own: CommunityAuthorization?, peers: [CommunityAuthorization], held: Bool) {
+    /// Native broker callback; internal so software checks can deliver a policy change through the real lifecycle.
+    /// No public command or IPC accepts these values.
+    func unifiedAccessChanged(_ own: CommunityAuthorization?, peers: [CommunityAuthorization], held: Bool) {
+        let previousPolicy=unifiedSafetyOwn.flatMap{try? CommunityMobileControlPolicy.authorizationDigest($0)},nextPolicy=own.flatMap{try? CommunityMobileControlPolicy.authorizationDigest($0)}
+        if held || previousPolicy != nextPolicy {ownerLifecycleGeneration=UUID().uuidString.lowercased()}
+        updateCommunityDesktops(own,peers:peers)
+        unifiedSafetyOwn=own;unifiedReceivingHeld=held
+        if own?.isCurrent() == true,own?.body.capabilities.contains(.desktopTrust) == true { preparePersistentInputHold() }
         unifiedReceivingRegistered = own?.isCurrent() == true && own?.body.capabilities.contains(.receiveView) == true
         guard let own, unifiedReceivingRegistered, !held, canReceiveUnified, let broker = communityBroker,
               let authority = ScreenCommunityAuthority.configured else {
             stopUnifiedListener()
+            safetyPoller?.stop()
             if unifiedAdmission != nil { endSession(.revoked) }
             return
+        }
+        if let activation=safetyActivation,let safetyPoller {
+            let binding=activation.id + ":" + ((try? CommunityMobileControlPolicy.authorizationDigest(own)) ?? "invalid")
+            safetyPoller.start(binding:binding,poll:{ [weak self] in
+                guard let self,self.canReceiveUnified,!self.unifiedReceivingHeld,self.safetyActivation==activation else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+                let round=try await broker.safetyPoll(activation:activation,afterSequence:self.safetySequence,snapshot:self.safetySnapshot())
+                guard self.canReceiveUnified,!self.unifiedReceivingHeld,self.safetyActivation==activation else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+                self.safetySequence=round.nextSequence;return round // Paging may wrap; the durable observation counter orders polls.
+            },apply:{ [weak self] command in
+                guard let self else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+                try await broker.performSafetyCommand(command,activation:activation) { [weak self] in
+                    guard let self else { return .superseded }
+                    return try await self.applySafetyCommand(command,activation:activation,broker:broker)
+                }
+            })
         }
         // Restoring an outbound receiver socket is not restoring a person session. Every new stream still needs
         // current issuer admission and the protocol6 key exchange; an interrupted screen session is never replayed.
@@ -376,7 +433,7 @@ public final class ScreenService {
         }
     }
     private func receiveUnified(_ stream: CommunityRelayFrameTransport, broker: ScreenCommunityBroker, generation: UUID) async {
-        guard unifiedGeneration == generation, canReceiveUnified, peerKeys.pushGateOpen, let authority = ScreenCommunityAuthority.configured else { return stream.cancel() }
+        guard unifiedGeneration == generation, canReceiveUnified, safetyPoller?.isReady == true, let authority = ScreenCommunityAuthority.configured else { return stream.cancel() }
         do {
             let handshake = try await broker.receiverHandshake(replay: unifiedReplay)
             let incoming = try await CommunityScreenConnector.accept(over: stream, handshake: handshake,
@@ -385,8 +442,36 @@ public final class ScreenService {
             accept(incoming.session, access: incoming.admission)
         } catch { stream.cancel() }
     }
+    @ObservationIgnored private var unifiedDesktopTrust:CommunityDesktopTrustLease?
     private func clearUnifiedSession() {
+        unifiedDesktopTrust?.invalidate();unifiedDesktopTrust=nil
+        communityRenewalScope.cancel()
         unifiedAdmission = nil; unifiedRenewal?.cancel(); unifiedRenewal = nil; unifiedDeadline?.cancel(); unifiedDeadline = nil
+    }
+    private func safetySnapshot() -> CommunitySafetyHostState {
+        let power:CommunitySafetyHostState.Power = isOn ? .on : (isWaiting ? .waiting : .off)
+        var current:CommunitySafetyHostState.Session?
+        if let admission=unifiedAdmission,let session {
+            current=try? .init(channelId:admission.binding.channelId,controllerEnrollmentId:admission.controller.body.enrollmentId,since:Int64(session.since.timeIntervalSince1970*1000))
+        }
+        return .init(power:power,held:unifiedReceivingHeld,session:power == .off ? nil : current)
+    }
+    private func applySafetyCommand(_ command:CommunitySafetyCommand,activation:ScreenCommunityBroker.SafetyActivation,broker:ScreenCommunityBroker) async throws -> CommunitySafetyOutcome {
+        guard canReceiveUnified,!unifiedReceivingHeld,safetyActivation==activation,command.acceptedAt>=activation.since,command.expiresAt>Int64(environment.now().timeIntervalSince1970*1000),
+              safetyPoller?.isReady == true,let own=unifiedSafetyOwn,own.isCurrent(),
+              (try? CommunityMobileControlPolicy.authorizationDigest(own))==command.receiverPolicyDigest else { return .superseded }
+        switch command.command.action {
+        case .end:
+            guard let admission=unifiedAdmission,admission.binding.channelId==command.command.expectedSessionId else { return .superseded }
+            _ = endSession(.turnedOff);return .ended
+        case .turnOff:
+            turnOff(reason:"관리 모바일에서 공통 화면 수신을 껐습니다. 다시 켜려면 이 Mac에서 켜 주세요.");return .turnedOff
+        case .revoke:
+            guard let target=command.command.targetEnrollmentId else { return .refused }
+            try await broker.denySafetyPeer(target,activationId:activation.id)
+            if unifiedAdmission?.controller.body.enrollmentId==target { _ = endSession(.revoked) }
+            return .revoked
+        }
     }
     private func scheduleUnifiedDeadline(_ date: Date, connection: SecureConnection) {
         unifiedDeadline?.cancel()
@@ -396,8 +481,9 @@ public final class ScreenService {
             self.endSession(.revoked)
         }
     }
-    private func watchUnifiedSession(_ admission: CommunityScreenAdmission, connection: SecureConnection) {
-        clearUnifiedSession(); unifiedAdmission = admission
+    private func watchUnifiedSession(_ admission: CommunityScreenAdmission, connection: SecureConnection,desktopTrust:CommunityDesktopTrustLease?) {
+        clearUnifiedSession(); unifiedAdmission = admission;unifiedDesktopTrust=desktopTrust
+        let renewalToken=communityRenewalScope.begin()
         scheduleUnifiedDeadline(admission.expiresAt, connection: connection)
         unifiedRenewal = Task { [weak self] in
             while !Task.isCancelled {
@@ -405,16 +491,23 @@ public final class ScreenService {
                 guard !Task.isCancelled, let self, self.active?.session.connection === connection, let broker = self.communityBroker else { return }
                 do {
                     try await broker.refreshAccess()
+                    guard self.communityRenewalScope.permits(renewalToken),self.active?.session.connection === connection else { return }
                     let (own, controller, session) = try await broker.admitted(admission.controller, session: admission.useSession)
-                    guard own.body.enrollmentId == admission.receiver.body.enrollmentId, own.body.revision == admission.receiver.body.revision,
+                    guard self.communityRenewalScope.permits(renewalToken),self.active?.session.connection === connection else { return }
+                    guard self.safetyPoller?.isReady == true,own.body.enrollmentId == admission.receiver.body.enrollmentId, own.body.revision == admission.receiver.body.revision,
                           own.body.hostPublicKey == admission.receiver.body.hostPublicKey, controller.body.revision == admission.controller.body.revision,
                           session?.body.sessionId == admission.useSession?.body.sessionId,
                           session?.body.publicKey == admission.useSession?.body.publicKey else { throw ScreenCommunityError.wrongCommunity }
+                    try desktopTrust?.renew(controller:controller,receiver:own,now:self.environment.now())
                     let expiry = min(own.body.expiresAt, controller.body.expiresAt, session?.body.expiresAt ?? Int64.max)
-                    self.scheduleUnifiedDeadline(Date(timeIntervalSince1970: Double(expiry) / 1000), connection: connection)
-                } catch is URLError { /* Existing short lease expires independently if the authority stays unreachable. */ }
-                catch ScreenCommunityError.service(let code) where ["UNAVAILABLE", "SERVICE_UNAVAILABLE"].contains(code) { }
-                catch { self.endSession(.revoked); return }
+                    self.communityRenewalScope.perform(renewalToken) { self.scheduleUnifiedDeadline(Date(timeIntervalSince1970:Double(expiry)/1000),connection:connection) }
+                } catch {
+                    guard self.communityRenewalScope.permits(renewalToken),self.active?.session.connection === connection else { return }
+                    self.communityRenewalScope.perform(renewalToken) {
+                        self.safetyPoller?.invalidate("등록 유지 · 공통 화면의 현재 수신 권한을 확인하지 못해 연결을 종료했습니다.")
+                        if self.active?.session.connection === connection { self.endSession(.revoked) }
+                    };return
+                }
             }
         }
     }
@@ -482,16 +575,24 @@ public final class ScreenService {
     /// Touch ID or the password, then it listens wherever this Mac is on an approved network. On a network that is not
     /// approved yet, the same prompt approves it too: the person approves the network the prompt names.
     public func turnOn() async {
-        guard case .off = power else { return }
+        guard !quitting,case .off = power else { return }
         power = .starting
         let powerEpoch = epoch
+        let protectedGeneration=persistentInputHold?.record?.generation,holdGeneration=macHold.generation
         problem = nil
         do {
             guard try await authenticate("근거리에서 등록한 기기로 Mac 화면 제어를 켭니다", policy: ScreenAuthentication.turningOn)
             else { return power = .off(reason: nil) }
             guard epoch == powerEpoch, case .starting = power else { return }
             // Proven at this Mac: input a person here took back from the session bar is not held into the next turning on.
-            macHold.reset()
+            if let value=persistentInputHold {
+                // Preserve the old explicit authenticated-ON recovery, using that same fresh OS-owner check.
+                // A newer negative/migration while the OS sheet was open cannot be cleared by the older result.
+                if let protectedGeneration,value.record?.generation==protectedGeneration,macHold.generation==holdGeneration {
+                    do { try value.clearAfterOwnerConfirmation(expectedGeneration:protectedGeneration);macHold.reset() }
+                    catch { macHold.restoreHeld();inputProtectionNotice=value.issue }
+                }
+            } else { macHold.reset() }
             let identity = try self.identity ?? environment.identity(store)
             self.identity = identity
             // The person turned it on here: what keeping on held back may go (SR-27), once the store says it is off.
@@ -509,6 +610,7 @@ public final class ScreenService {
     /// One-time community consent replaces repeat application BIO, but never the person's explicit hardware action
     /// at Screen, the OS recording/input grants, local stop, push gate or calibrated Mac input gate.
     public func turnOnFromCommunity(click: ScreenInputRefusal?) async {
+        guard !quitting else { return }
         guard click == nil else { problem = ScreenInputOriginText.notInFront; return }
         guard case .off = power else { return }
         guard unifiedReceivingRegistered, let broker = communityBroker else { await turnOn(); return }
@@ -516,7 +618,7 @@ public final class ScreenService {
         do {
             _ = try await broker.consentForTurningOn()
             guard epoch == powerEpoch, case .off = power else { return }
-            power = .starting; problem = nil; macHold.reset(); try await broker.hold(false)
+            power = .starting; problem = nil;if persistentInputHold == nil { macHold.reset() }; try await broker.hold(false)
             let identity = try self.identity ?? environment.identity(store); self.identity = identity
             keptOnBySelf = false; settleHold(); try await startListening(identity: identity)
             guard listener != nil else { return }
@@ -525,6 +627,38 @@ public final class ScreenService {
         } catch { stopListening(); power = .off(reason: "커뮤니티 수신 권한을 확인하지 못했습니다. \(Self.describe(error))") }
     }
 
+    public var offersTrustedCommunityTurnOn:Bool { unifiedReceivingRegistered && unifiedSafetyOwn?.isCurrent() == true && unifiedSafetyOwn?.body.capabilities.contains(.desktopTrust) == true }
+    /// Explicit device-trust ON only. Neither persistent receive hold nor the person's input hold is cleared.
+    public func turnOnFromTrustedCommunity() async {
+        guard let broker=communityBroker else { return }
+        await turnOnFromTrustedCommunity(consent:{ try await broker.trustedConsentForTurningOn() },refresh:{ try await broker.refreshAccess() })
+    }
+    /// The actual startup lifecycle, with typed native authority. Software checks replace only the network awaits.
+    func turnOnFromTrustedCommunity(consent: @MainActor () async throws -> CommunityDesktopReceiveTrust,
+                                   refresh: @MainActor () async throws -> Void) async {
+        guard !quitting,case .off=power,!unifiedReceivingHeld else { return }
+        let powerEpoch=epoch
+        // Claim before the first await: another ON cannot share this epoch. OFF invalidates this entire attempt.
+        power = .starting;problem=nil
+        do {
+            let consent=try await consent()
+            guard !quitting,epoch==powerEpoch,case .starting=power else { return }
+            guard consent.isCurrent(),!unifiedReceivingHeld else { throw ScreenCommunityError.expired }
+            preparePersistentInputHold()
+            let identity=try self.identity ?? environment.identity(store);self.identity=identity
+            keptOnBySelf=false;settleHold();try await startListening(identity:identity)
+            guard !quitting,epoch==powerEpoch else { return }
+            guard !unifiedReceivingHeld,listener != nil else { throw ScreenCommunityError.expired }
+            push?.started(service:self,identity:identity,keys:peerKeys.phones)
+            try await refresh()
+            guard !quitting,epoch==powerEpoch else { return }
+            guard !unifiedReceivingHeld,listener != nil else { throw ScreenCommunityError.expired }
+            await readPresentNetwork()
+        } catch {
+            guard !quitting,epoch==powerEpoch else { return }
+            stopListening();power = .off(reason:"기기 신뢰 수신 권한을 확인하지 못했습니다. 보류·OS 권한은 유지됩니다. \(Self.describe(error))")
+        }
+    }
     /// Reads the network this Mac is on into `presentNetwork`. The app calls it when a menu or the status window opens,
     /// and now and then while kept on, so 「이 네트워크도 켜 두기」 follows a move to another network.
     public func refreshPresentNetwork() async { await readPresentNetwork() }
@@ -551,6 +685,15 @@ public final class ScreenService {
         guard epoch == startEpoch, case .starting = power, listener == nil else { nearby.stop(); return }
         listener = nearby
         power = .on(address: Self.nearbyAddress)
+        if let broker=communityBroker {
+            if safetyActivation==nil {
+                let activation=try await broker.beginSafetyActivation(resuming:keptOnBySelf)
+                guard epoch==startEpoch,listener===nearby,isOn else { try? await broker.endSafetyActivation(activation.id);return }
+                safetyActivation=activation;safetySequence=0
+            }
+            try? await broker.refreshAccess()
+            guard epoch==startEpoch,listener===nearby,isOn else { return }
+        }
         listening = Task { [weak self] in
             for await incoming in nearby.sessions {
                 guard let self, self.listener === nearby else { incoming.connection.close(); continue }
@@ -578,12 +721,27 @@ public final class ScreenService {
     /// For the quit button: turns off and waits, about a second at most, until the phone has heard why. 「끄고 끝내기」
     /// (the default) lets keeping on go; 「켜 둔 채 끝내기」 (`keepingOn`) keeps it, and screen control turns on by
     /// itself at the next login on a saved network (`keepOnQuitNotice`).
-    public func quit(keepingOn: Bool = false) async { await stop(reason: nil, releasingKeepOn: !keepingOn)?.value }
+    public func quit(keepingOn: Bool = false) async {
+        let ending=stop(reason:nil,releasingKeepOn:!keepingOn)
+        closeInputAndSeal()
+        await ending?.value
+    }
+
+    /// Terminal barrier first; a queued connection, hold or owner-auth result cannot run after the clean seal.
+    private func closeInputAndSeal() {
+        guard !quitting else { return };quitting=true
+        ownerLifecycleGeneration=UUID().uuidString.lowercased();ownerRecoveryTask?.cancel();ownerLockTask?.cancel();desktopListExpiry?.cancel()
+        active?.hold.lowerToView();endSession(.turnedOff)
+        persistentInputHold?.sealAfterClosingInput();inputProtectionNotice=persistentInputHold?.issue
+    }
 
     @discardableResult
     private func stop(reason: String?, releasingKeepOn: Bool = true) -> Task<Void, Never>? {
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
         // First, so a stop because something could not be saved never leaves keeping on behind it.
         if releasingKeepOn { releaseKeepOn() } else { stopFollowingKeptOnNetwork() }
+        if releasingKeepOn,let activation=safetyActivation,let broker=communityBroker { Task { try? await broker.endSafetyActivation(activation.id) } }
+        safetyActivation=nil;safetySequence=0
         cancelRegistration()
         let ending = endSession(.turnedOff)
         stopListening()
@@ -771,6 +929,7 @@ public final class ScreenService {
 
     private func stopListening() {
         stopUnifiedListener()
+        safetyPoller?.stop()
         internetTask?.cancel(); internetTask = nil
         internetAttempt = nil; internetConnection = .off
         epoch += 1
@@ -981,6 +1140,7 @@ public final class ScreenService {
     /// A completed key exchange (DESIGN 6.4 5): the registries looked up again, then one session at a time (6.5), then
     /// what the session may do and for how long.
     func accept(_ incoming: MacSession, access: CommunityScreenAdmission? = nil) {
+        guard !quitting else { return incoming.connection.close() }
         let id = Self.hex(incoming.deviceID)
         let now = environment.now()
         let route = ControllerLogEntry.route(of: incoming.peer)
@@ -989,7 +1149,7 @@ public final class ScreenService {
         let name: String
         if let access {
             guard canReceiveUnified, unifiedReceivingRegistered, access.expiresAt > now,
-                  access.peerClass == incoming.peerClass, peerKeys.pushGateOpen else { return incoming.connection.close() }
+                  access.peerClass == incoming.peerClass, safetyPoller?.isReady == true else { return incoming.connection.close() }
             name = access.controller.body.name
         } else { switch incoming.peerClass {
         case .phone:
@@ -1027,16 +1187,20 @@ public final class ScreenService {
         // A QR must never travel in the stream (SR-18), nor a controller enrollment's codes and approval (SR-37).
         cancelRegistration()
         closeControllerPairing?()
-        let pushLive = peerKeys.pushGateOpen
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
+        let desktopTrust:CommunityDesktopTrustLease?
+        do { desktopTrust=try access?.desktopTrust.map { try CommunityDesktopTrustLease($0,now:now) } } catch { return incoming.connection.close() }
+        if desktopTrust != nil { preparePersistentInputHold() }
+        let pushLive = access != nil ? safetyPoller?.isReady == true : peerKeys.pushGateOpen
         // Input protection is started only for a session that may control: a phone, or a controller granted control
         // while the control gate is open.
         let wantsInput = switch incoming.peerClass {
         case .phone: access?.canControl ?? (communityPeer == nil || communityPeer?.receivingGrant == .control)
-        case .controller: controllerGrant == .control && ReleaseGate.controlOpen(flags: flags, pushLive: pushLive)
+        case .controller: controllerGrant == .control && ReleaseGate.controlOpen(flags: flags, pushLive: pushLive,desktopTrust:desktopTrust)
         }
         let probe = wantsInput ? environment.sessions.inputMonitor() : nil
         let plan: HostSessionPlan = if let controllerGrant {
-            .controller(grant: controllerGrant, inputMonitorAvailable: probe != nil, pushLive: pushLive, flags: flags)
+            .controller(grant: controllerGrant, inputMonitorAvailable: probe != nil, pushLive: pushLive, flags: flags,desktopTrust:desktopTrust)
         } else {
             .phone(inputMonitorAvailable: probe != nil, controlGranted: access?.canControl ?? (communityPeer == nil || communityPeer?.receivingGrant == .control))
         }
@@ -1089,9 +1253,11 @@ public final class ScreenService {
         }
         activeCommunityPeer = communityPeer != nil
         active = Active(session: incoming, task: task, streamer: streamer, name: name, route: route, marker: marker, hold: hold)
-        if let access { watchUnifiedSession(access, connection: incoming.connection) }
+        if let access { watchUnifiedSession(access, connection: incoming.connection,desktopTrust:desktopTrust) }
         if let access {
-            push?.notify(access, among: devices, at: now)
+            if let broker=communityBroker,let activation=safetyActivation {
+                Task { try? await broker.safetyEvent(activationId:activation.id,kind:"connection",actor:access.controller.body.enrollmentId) }
+            }
         } else if let controller {
             touchController(id)
             record(.connected, controller, route: route)
@@ -1121,6 +1287,7 @@ public final class ScreenService {
     /// Only a session that ended by itself is still active here; one the Mac ended was let go in `endSession`.
     private func sessionEnded(_ ended: MacSession, reason: SessionEndReason?) {
         guard let active, active.session.connection === ended.connection else { return }
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
         clearUnifiedSession()
         self.active = nil
         session = nil
@@ -1133,6 +1300,7 @@ public final class ScreenService {
     @discardableResult
     private func endSession(_ reason: SessionEndReason) -> Task<Void, Never>? {
         guard let current = active else { return nil }
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
         clearUnifiedSession()
         active = nil
         session = nil
@@ -1155,33 +1323,189 @@ public final class ScreenService {
 
     /// The bar's hold on the current session's remote input.
     public var sessionInput: ScreenSessionInputHold? { active?.hold }
+    public var usesTrustedInputOwnerConfirmation:Bool { unifiedDesktopTrust?.current() != nil }
     /// When a session limit ends the current session, and which; nil until its stream runs.
     public var sessionDeadline: (at: ContinuousClock.Instant, reason: SessionEndReason)? { active?.streamer.deadline }
 
     /// 「직접 하기」: remote input waits until a person at this Mac hands it back, in this session or a later one from any
     /// device (ScreenMacHold). Any click may take input away.
     public func pauseRemoteInput() {
-        guard let active else { return }
+        guard !quitting,let active else { return }
         macHold.pause(active.hold)
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
+        persistInputHold()
     }
 
     /// 「다시 넘기기」: only with no `refusal` (ScreenSessionBarClick: a hardware click at this Mac). False when refused
     /// or when there was nothing to hand back.
     @discardableResult
-    public func resumeRemoteInput(refusal: ScreenSessionBarClick.Refusal?) -> Bool {
-        guard refusal == nil, let active else { return false }
-        return macHold.resume(active.hold)
+    public func resumeRemoteInput(refusal: ScreenSessionBarClick.Refusal?) async -> Bool {
+        if usesTrustedInputOwnerConfirmation {
+            guard refusal != .screenInjected else { return false }
+            return await confirmTrustedInputOwner()
+        }
+        guard refusal == nil,!handBackInProgress,let original=active,macHold.held,original.hold.mode == .paused else { return false }
+        // Never-opted-in legacy behavior remains its original accepted-hardware action, without a new BIO prompt.
+        if persistentInputHold == nil { return macHold.resume(original.hold) }
+        handBackInProgress=true;defer { handBackInProgress=false }
+        let generation=macHold.generation
+        let protectedGeneration=persistentInputHold?.record?.generation
+        do {
+            guard try await authenticate("이 Mac에서 보류한 원격 입력을 다시 허용할 계정 소유자를 확인합니다. 연결할 때마다 요구하는 인증이 아닙니다.",policy:ScreenAuthentication.trustedHoldRecovery),
+                  let current=active,current.session.connection === original.session.connection,current.hold === original.hold,
+                  macHold.generation==generation,current.hold.mode == .paused,isOn else { return false }
+            // A prior opted-in negative uses fresh OS-owner confirmation, without silently clearing a newer hold.
+            guard !quitting else { return false }
+            if let value=persistentInputHold {
+                guard let protectedGeneration,value.record?.generation==protectedGeneration else { return false }
+                try value.clearAfterOwnerConfirmation(expectedGeneration:protectedGeneration);inputProtectionNotice=value.issue
+            }
+            return macHold.resume(current.hold)
+        } catch { problem="보류 해제 확인을 완료하지 못했습니다. 입력 보류를 유지합니다.";return false }
     }
 
     /// 「보기만」: the rest of this session only shows the picture, and the next session starts paused until a person at
     /// this Mac hands input back (ScreenMacHold).
     public func lowerSessionToView() {
-        guard let active, let current = session else { return }
+        guard !quitting,let active, let current = session else { return }
         macHold.lowerToView(active.hold)
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
+        persistInputHold()
         guard current.canControl else { return }
         session = Session(deviceID: current.deviceID, deviceName: current.deviceName, since: current.since,
                           canControl: false, peerClass: current.peerClass, grant: current.grant,
                           viewOnlyCause: current.viewOnlyCause, deviceModel: current.deviceModel)
+    }
+
+    /// Negative-only preparation: observing an opted-in grant cannot clear a prior hold or grant input authority.
+    private func preparePersistentInputHold() {
+        guard !quitting else { return }
+        if persistentInputHold == nil {
+            let value=ScreenPersistentInputHold(store:store);persistentInputHold=value;value.arm()
+        }
+        guard let value=persistentInputHold else { return }
+        if value.held { if !macHold.held { macHold.restoreHeld() };active?.hold.pause() }
+        inputProtectionNotice=value.issue
+    }
+    private func persistInputHold() {
+        persistentInputHold?.engage();inputProtectionNotice=persistentInputHold?.issue
+    }
+
+    /// A normal explicit UI action. No CG-event-origin heuristic is a prerequisite in device-trust mode;
+    /// the final authority is a fresh OS-owned authentication sheet, never an application password field.
+    @discardableResult public func confirmTrustedInputOwner() async -> Bool {
+        guard !quitting,!handBackInProgress,!unifiedReceivingHeld,let broker=communityBroker else { return false }
+        do {
+            let original=active?.session.connection,epoch=epoch
+            let consent=try await broker.trustedConsentForTurningOn()
+            guard !quitting,self.epoch==epoch,active?.session.connection === original else { return false }
+            return await confirmTrustedInputOwner(consent:consent,refreshConsent:{ try await broker.trustedConsentForTurningOn() })
+        } catch { problem="기기 신뢰 권한을 새로 확인하지 못해 입력 보류를 유지합니다.";return false }
+    }
+
+    /// Internal typed seam shared by production and software lifecycle checks. No raw claims/Boolean consent.
+    @discardableResult func confirmTrustedInputOwner(consent:CommunityDesktopReceiveTrust,refreshConsent:(@MainActor () async throws -> CommunityDesktopReceiveTrust)?=nil) async -> Bool {
+        guard !quitting,!handBackInProgress,!unifiedReceivingHeld,consent.isCurrent(at:environment.now()) else { return false }
+        preparePersistentInputHold()
+        guard let value=persistentInputHold else { return false }
+        if !value.armed { value.arm() }
+        guard value.held,let record=value.record else { inputProtectionNotice=value.issue;return false }
+        let original=active,holdGeneration=macHold.generation,powerEpoch=epoch
+        handBackInProgress=true;defer { handBackInProgress=false }
+        do {
+            guard try await authenticate("이 Mac의 입력 보류를 해제할 계정 소유자를 확인합니다. 가능한 생체·Apple Watch 또는 macOS 암호를 OS 창에 직접 입력해 주세요.",policy:ScreenAuthentication.trustedHoldRecovery) else { return false }
+            let fresh=try await refreshConsent?() ?? consent
+            guard !quitting,consent.hasSamePolicy(as:fresh),fresh.isCurrent(at:environment.now()),!unifiedReceivingHeld,self.epoch==powerEpoch,
+                  active?.session.connection === original?.session.connection,active?.hold === original?.hold,
+                  macHold.generation==holdGeneration,value.record?.generation==record.generation else { return false }
+            try value.clearAfterOwnerConfirmation(expectedGeneration:record.generation)
+            // There is no await between CAS and the live state change. View-only sessions remain view-only.
+            if let hold=active?.hold,hold.mode == .paused { _=macHold.resume(hold) } else { macHold.reset() }
+            inputProtectionNotice=value.issue;return true
+        } catch { inputProtectionNotice=value.issue;problem="계정 소유자 확인 또는 보류 저장을 완료하지 못했습니다. 입력 보류를 유지합니다.";return false }
+    }
+
+    private func startOwnerRecovery(_ broker:ScreenCommunityBroker) {
+        ownerRecoveryTask=Task { [weak self] in
+            let target:ScreenOwnerRecoveryTarget
+            do {target=try await broker.ownerRecoveryTarget()}
+            catch {self?.ownerDelegationNotice="위임 보호 상태를 읽지 못했습니다. 자동으로 초기화하거나 승인하지 않습니다.";return}
+            while !Task.isCancelled {
+                guard let self,!self.quitting else {return}
+                if self.communityBroker != nil {
+                    do {
+                        let result=try await target.tick(snapshot:{ [weak self] in await self?.ownerRecoverySnapshot() },apply:{ [weak self] permit in
+                            guard let self else {return false};return try await self.applyDelegatedInput(permit)
+                        })
+                        guard !self.quitting,!Task.isCancelled else {return}
+                        self.ownerDelegationEnabled=result.enabled;self.ownerDelegationNotice=result.notice
+                    } catch {self.ownerDelegationEnabled=nil;self.ownerDelegationNotice="위임 상태·원래 처리 결과 확인이 필요합니다. 입력 보류는 자동으로 해제하지 않습니다."}
+                }
+                try? await Task.sleep(for:.seconds(15))
+            }
+        }
+        if let lockStates=environment.sessions.lockStates {
+            ownerLockTask=Task { [weak self] in
+                for await locked in lockStates() {
+                    guard !Task.isCancelled,let self,!self.quitting else {return}
+                    if locked {self.ownerLifecycleGeneration=UUID().uuidString.lowercased()}
+                }
+            }
+        }
+    }
+    private func ownerRecoverySnapshot()->ScreenOwnerRecoveryTarget.Snapshot? {
+        guard !quitting,isOn,!unifiedReceivingHeld,environment.sessions.isUnlocked(),let value=persistentInputHold,value.armed,value.held,let record=value.record else {return nil}
+        if active != nil,unifiedAdmission==nil {return nil} // Legacy sessions retain their original local-owner path.
+        return .init(instance:ownerLifecycleGeneration,holdGeneration:record.generation,connectionId:unifiedAdmission?.binding.channelId)
+    }
+    private func applyDelegatedInput(_ permit:ScreenDelegatedInputPermit)throws->Bool {
+        let p=permit.publication
+        return try permit.perform {
+            guard let snapshot=ownerRecoverySnapshot(),snapshot.instance==p.instance,snapshot.holdGeneration==p.holdGeneration,snapshot.connectionId==p.connectionId,let value=persistentInputHold else {return false}
+            do {try value.clearAfterDelegatedConfirmation(permit.proof,expectedGeneration:p.holdGeneration)}
+            catch {inputProtectionNotice=value.issue;return false}
+            if let hold=active?.hold,hold.mode == .paused {_=macHold.resume(hold)} else {macHold.reset()}
+            ownerLifecycleGeneration=UUID().uuidString.lowercased();inputProtectionNotice=value.issue
+            return true
+        }
+    }
+    public func disableOwnerDelegation()async {
+        ownerLifecycleGeneration=UUID().uuidString.lowercased()
+        guard let broker=communityBroker else {ownerDelegationNotice="등록 서비스가 준비되지 않아 위임 해제 상태를 확인하지 못했습니다.";return}
+        do {try await broker.ownerRecoveryTarget().disable();ownerDelegationEnabled=false;ownerDelegationNotice="이 Mac의 입력 보류 해제 위임을 껐습니다."}
+        catch {ownerDelegationEnabled=nil;ownerDelegationNotice="이 실행에서는 위임 승인을 차단했습니다. 지속 저장·서버 해제 결과는 확인이 필요합니다."}
+    }
+    private func updateCommunityDesktops(_ own:CommunityAuthorization?,peers:[CommunityAuthorization]) {
+        desktopListExpiry?.cancel();desktopSelections=[:];communityDesktops=[]
+        guard let own,own.isCurrent(at:environment.now()),let authority=environment.communityDirectoryAuthority else {communityDesktopNotice="현재 기기 목록 준비 전 · 목록 불러오기로 Viewer를 열어 주세요.";return}
+        for peer in peers where peer.isCurrent(at:environment.now()) && peer.body.deviceKind == .desktop && peer.body.deviceId != own.body.deviceId && peer.body.capabilities.contains(.receiveView) {
+            let selection=try? CommunityDesktopScreenTrust.verified(authority:authority,controller:own,receiver:peer,now:environment.now())
+            if let selection {desktopSelections[peer.body.enrollmentId]=selection}
+            communityDesktops.append(.init(id:peer.body.enrollmentId,name:peer.body.name,deviceId:peer.body.deviceId,ready:selection != nil))
+        }
+        communityDesktopNotice=communityDesktops.isEmpty ? "현재 등록된 다른 Mac이 없습니다. 커뮤니티에서 한 번 등록·기능 승인하면 여기에 표시됩니다.":"현재 서명된 커뮤니티 기기 목록 · 기기 신뢰를 함께 승인한 Mac에 연결합니다."
+        let until=min(own.body.expiresAt,peers.map{$0.body.expiresAt}.min() ?? own.body.expiresAt)
+        desktopListExpiry=Task { [weak self] in
+            try? await Task.sleep(for:.milliseconds(max(0,until-Int64(Date().timeIntervalSince1970*1000))))
+            guard !Task.isCancelled,let self else {return};self.desktopSelections=[:];self.communityDesktops=[];self.communityDesktopNotice="기기 목록 확인이 만료됐습니다. 목록 불러오기로 갱신해 주세요."
+        }
+    }
+    public func prepareCommunityDesktopList()async {
+        do {try await environment.openViewer(false);communityDesktopNotice="Viewer에 현재 커뮤니티 목록 준비를 요청했습니다. 연결은 시작하지 않았습니다."}
+        catch {communityDesktopNotice="정식 Viewer를 준비하지 못했습니다. 메인 앱의 ‘다른 Mac 화면 보기’를 확인해 주세요."}
+    }
+    public func openCommunityApprovals()async {
+        if let broker=communityBroker {await broker.cancelViewerTargetHint()}
+        do {try await environment.openViewer(true);communityDesktopNotice="Viewer의 ‘커뮤니티 기기 등록·승인…’에서 기능 선택·입력 보류 위임을 관리하세요."}
+        catch {communityDesktopNotice="정식 Viewer를 열지 못했습니다. 메인 앱에서 Viewer 설치 상태를 확인해 주세요."}
+    }
+    public func openCommunityDesktop(_ id:String)async {
+        guard let selection=desktopSelections[id],selection.isCurrent(),let broker=communityBroker else {communityDesktopNotice="현재 기기 신뢰·목록을 다시 확인해 주세요.";return}
+        do {
+            let nonce=try await broker.chooseViewerTarget(selection)
+            do {try await environment.openViewer(true);communityDesktopNotice="선택한 Mac을 Viewer에서 여는 중입니다. 실제 연결 결과는 Viewer에서 확인합니다."}
+            catch {await broker.cancelViewerTarget(nonce);throw error}
+        } catch {communityDesktopNotice="선택한 Mac을 열지 못했습니다. 현재 권한과 정식 Viewer 상태를 확인해 주세요."}
     }
 
     /// The phone of the current session turned screen control off over the session (version 2), after Face ID on it.

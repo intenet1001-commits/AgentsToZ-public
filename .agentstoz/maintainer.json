@@ -443,7 +443,8 @@
         "./tests/model-effort-advice-policy.test.ts",
         "./tests/external-cli-effort.test.ts",
         "./tests/ai-terminal-submit.test.ts",
-        "./tests/desktop-session-effort.test.ts"
+        "./tests/desktop-session-effort.test.ts",
+        "./tests/workroom-effort-choice.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -470,7 +471,10 @@
         "src/computerUse*.ts",
         "src/desktopSessionEffort.ts",
         "native/computer-use/*",
-        "tests/desktop-session-effort.test.ts"
+        "tests/desktop-session-effort.test.ts",
+        "src/workroomEffortChoice*",
+        "src/agentstozUseWorkroomEffort.ts",
+        "tests/workroom-effort-choice.test.ts"
       ],
       "covers": [
         "First request chooses supported low medium high effort without changing models",
@@ -493,7 +497,8 @@
         "Hermes · Claude and Hermes · Codex are separate launch items whose model and provider come from one preset list, gated by provider name only",
         "External desktop Auto requires explicit bound-session consent and verified native effective effort without changing model account defaults or other sessions",
         "Pinned Max and xhigh minimum remain fixed and unsupported adapters only recommend",
-        "External desktop Auto keeps the session's effective Max or xhigh read at consent unless lowering is explicitly allowed"
+        "External desktop Auto keeps the session's effective Max or xhigh read at consent unless lowering is explicitly allowed",
+        "A real client selection changes only the bound other Workroom CLI session, preserves model and account, and uncertain delivery cannot replay."
       ],
       "evidence": "deterministic-policy-fake-pty-and-transport-no-live-provider"
     },
@@ -612,7 +617,7 @@
         "프로젝트·폴더 페이지에서 두 테스트 세트 구성 보기",
         "모바일에서도 역할·상황·여정·성공 기준 확인",
         "구성 화면을 열 때 테스트나 AI가 실행되지 않음",
-        "전수 클릭 카드: 포트가 있으면 켜기·기준선 만들기, 없으면 대상 아님"
+        "전수 클릭 카드: 웹·실제 데스크톱·fixture 범위를 구분하고, 포트가 없어도 데스크톱 하네스 구성 필요 상태를 표시한다. 하네스가 없으면 실앱 검증 통과로 표시하지 않는다."
       ],
       "evidence": "production-desktop-and-mobile-chromium"
     },
@@ -626,7 +631,9 @@
         "./tests/tester-agent-api.test.ts",
         "./tests/tester-agent-client.test.ts",
         "./tests/tester-sets.test.ts",
-        "./tests/tester-click-sweep-enable.test.ts"
+        "./tests/tester-click-sweep-enable.test.ts",
+        "./tests/click-sweep-compare.test.ts",
+        "./tests/click-sweep-engine.test.ts"
       ],
       "timeoutSeconds": 180,
       "requires": [
@@ -640,14 +647,21 @@
         "scripts/agentstoz-maintainer.py",
         "tests/maintainer/test_persona*",
         "tests/maintainer/test_contextual_personas.py",
-        "tests/personas/**"
+        "tests/personas/**",
+        "scripts/agentstoz-click-sweep.mjs",
+        "scripts/agentstoz-maintainer.py",
+        "src/testerSetsReader.ts",
+        "src/testerClickSweepScope.ts",
+        "src/ProjectTesterSets.tsx",
+        "docs/click-sweep-targets.md"
       ],
       "covers": [
         "공통 페르소나에서 프로젝트 여정과 실제 검사 연결",
         "공통 업데이트 뒤 프로젝트 설정 보존과 재검사",
         "등록 응답 유실의 동일 요청 복구",
         "같은 목표의 서로 다른 역할 보존과 검사 없는 후보 구분",
-        "프로젝트별 일반·페르소나 구성의 제한된 읽기"
+        "프로젝트별 일반·페르소나 구성의 제한된 읽기",
+        "Click sweep keeps web, native desktop, fixture and legacy scopes distinct; project commands require matching completion evidence and empty adapters are unavailable"
       ],
       "evidence": "real-python-project-persona-contracts"
     },
@@ -789,6 +803,9 @@
         "emulator-screen-viewer-lane.test.ts",
         "emulator-wp13-contracts.test.ts",
         "community-access-registry.test.ts",
+        "community-access-management.test.ts",
+        "community-management-client.test.ts",
+        "community-access-notifications-worker.test.ts",
         "community-relay-sdk.test.ts",
         "community-adapter-authorization.test.ts",
         "workroom-browser-community.test.ts",
@@ -811,7 +828,18 @@
         "tests/community-mobile-runtime.test.ts",
         "tests/admitted-ops-effort-fallback.test.ts",
         "tests/ios-community-build.test.ts",
-        "tests/community-mobile-data-key.test.ts"
+        "tests/community-mobile-data-key.test.ts",
+        "community-screen-safety.test.ts",
+        "community-screen-safety-sdk.test.ts",
+        "community-screen-safety-golden.test.ts",
+        "community-screen-safety-worker.test.ts",
+        "community-desktop-trust.test.ts",
+        "community-desktop-trust-worker.test.ts",
+        "community-owner-recovery.test.ts",
+        "community-owner-recovery-worker.test.ts",
+        "team-question-relay.test.ts",
+        "team-question-integration.test.ts",
+        "computer-use-entry-state.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -836,11 +864,36 @@
         "One reviewed enrollment binds desktop and mobile purposes, native component keys and portal identity without legacy downgrade",
         "Mobile use expires after sixty minutes of actual-user inactivity; replay and heartbeat cannot extend it",
         "Computer-use peers verify both native device proofs and key confirmation before runtime admission",
-        "동일 모바일 사용 인증으로 OPS·Teams·CLI 에포트·브라우저를 쓰고, 원래 작업 ID·영수증과 철회 경계를 보존한다."
+        "동일 모바일 사용 인증으로 OPS·Teams·CLI 에포트·브라우저를 쓰고, 원래 작업 ID·영수증과 철회 경계를 보존한다.",
+        "Feature selection preserves existing administrator roles; only explicit bound management BIO approval changes a mobile role",
+        "Actual workerd advisory notifications reach five subscribers without follow-up traffic, stay within four concurrent jobs and preserve newer tokens during dead-token cleanup",
+        "Expired and unknown registration requests recover exact prior outcomes without automatic mutation replay",
+        "공통 등록만 한 Mac의 화면 안전 준비는 현재 관리 모바일·검증된 실제 수신 poll과 음의권한 명령 경로에 결속하며, 늦은 구독·상태 응답·원본 영수증이 새 상태나 권한을 되돌리지 않는다.",
+        "Actual workerd, SQLite and a local APNs service validate original signed stop-result recovery, ordered subscription/state writes and the same public safety/paging vectors as Swift.",
+        "명시적 desktop trust는 양쪽 데스크톱의 기존 화면 권한에만 추가되며, 기존8cap·모바일·관리 권한을 바꾸지 않고 키 보존·미확정 승인 갱신·원래 결과 복구를 검증한다.",
+        "명시적 대상 위임은 현재 신뢰 Mac의 요청별 BIO와 정확한 보류·연결·challenge에 결속하고, 글로벌 관리자·OS 인증 권한을 늘리지 않으며 7일 원문 영수증과 수락 구간이 닫힌 원본의 부재 증거를 보존한다.",
+        "Team questions are separate from instructions and stale observations, unverified answers and unknown submissions never become confirmed user choices.",
+        "Computer Use distinguishes local access, standing allowance, remote reception and enrollment; expired or failed reads cannot claim readiness."
       ],
       "memoryQueries": [
         "workroom remote session regression",
         "워크룸 저장"
+      ],
+      "paths": [
+        "cloud/screen-community/src/screenSafety.ts",
+        "src/communityScreenSafetyClient.ts",
+        "tests/community-screen-safety*",
+        "tests/fixtures/community-screen-safety.ts",
+        "cloud/screen-community/tests/screen-safety-worker.mjs",
+        "tests/community-desktop-trust*",
+        "cloud/screen-community/tests/desktop-trust-worker.mjs",
+        "cloud/screen-community/src/ownerRecovery.ts",
+        "tests/community-owner-recovery.test.ts",
+        "cloud/screen-community/tests/owner-recovery-worker.mjs",
+        "src/teamQuestion*.ts",
+        "tests/team-question*.test.ts",
+        "src/computerUseEntryState.ts",
+        "tests/computer-use-entry-state.test.ts"
       ]
     },
     {
@@ -1082,10 +1135,25 @@
         "Mac screen session controls",
         "Mac controller enrollment",
         "Viewer registration guidance starts nearby discovery only on request, ends a search within its deadline, and preserves guarded enrollment while allowing dismissal",
-        "Viewer discovery files reject expired, shared, linked and malformed hints without creating enrollment keys"
+        "Viewer discovery files reject expired, shared, linked and malformed hints without creating enrollment keys",
+        "Shared management and notice golden bytes match the issuer, and a foreign-authority absence cannot release an unknown prepare fence",
+        "Fresh signed mobile roles replace still-valid stale certificates, deferred native reads cannot revive closed reviews, and polling preserves form controls",
+        "공통 안전 poll의 만료·실패와 오래된 세션 응답은 정확한 현재 연결만 닫고, 사용 중단·원본 결과 복구·OS 알림 철회가 추가 기기별 생체 인증이나 legacy 등록을 요구하지 않는다.",
+        "첫 유효 영상의 20초 대기는 원래 연결에만 결속하고, 안내·delta·취소된 이전 timer가 새 연결을 연장하거나 닫지 않는다."
       ],
       "memoryQueries": [
         "native transport resume session"
+      ],
+      "paths": [
+        "native/screen-control/Sources/ScreenControlCore/CommunityScreenSafety*",
+        "native/screen-control/Sources/ScreenHost/ScreenCommunitySafetyPoller.swift",
+        "native/screen-control/Sources/ScreenHost/ScreenCommunityBroker.swift",
+        "native/screen-control/Sources/ScreenHost/ScreenService.swift",
+        "mobile/ios/App/ScreenUnifiedEnrollment.swift",
+        "mobile/ios/App/ScreenCommunityDevices.swift",
+        "native/screen-control/Sources/ScreenControlCore/CommunitySafetySubscriptionJournal.swift",
+        "native/screen-control/Sources/ScreenControlCore/Viewer.swift",
+        "native/screen-control/Tests/ScreenControlCoreTests/ViewerFirstFrameDeadlineTests.swift"
       ]
     },
     {
@@ -1473,7 +1541,8 @@
         "./tests/agent-dialogue-control.test.ts",
         "./tests/workroom-conversation-history.test.ts",
         "./tests/ai-terminal-activity.test.ts",
-        "./tests/workroom-composer-keys.test.ts"
+        "./tests/workroom-composer-keys.test.ts",
+        "./tests/community-device-registration.test.ts"
       ],
       "requires": [
         "node_modules"
@@ -1487,7 +1556,10 @@
         "src/aiTerminalService.ts",
         "src/mobileWorkspace*",
         "src/workroomConversationService.ts",
-        "src/WorkroomTerminalKeys.tsx"
+        "src/WorkroomTerminalKeys.tsx",
+        "src/CommunityDeviceRegistration*",
+        "src/useViewerHelper.ts",
+        "tests/community-device-registration.test.ts"
       ],
       "covers": [
         "A device channel creates one project-bound Workroom per task",
@@ -1503,7 +1575,8 @@
         "A selected project receives each follow-up; phone control IDs never expose runtime target IDs",
         "Mac-created task journals share replies with approved phones without granting raw Workroom history",
         "Every participant grant is required and internal child IDs cannot bypass shared-task authorization",
-        "An earlier MCP result never suppresses a different native final answer; identical text deduplicates only within its request and project"
+        "An earlier MCP result never suppresses a different native final answer; identical text deduplicates only within its request and project",
+        "Desktop community enrollment remains discoverable without published chat targets and never grants authority or starts a Viewer session"
       ]
     },
     {
@@ -1555,7 +1628,12 @@
         "tests/fixtures/community-desktop/*",
         "src/aiTerminalScheduling.ts",
         "src/AiTerminalPanel.tsx",
-        "src/WorkroomSessionFooter.tsx"
+        "src/WorkroomSessionFooter.tsx",
+        "src/CommunityDeviceRegistration*",
+        "src/AgentDialoguePanel.tsx",
+        "src/useViewerHelper.ts",
+        "tests/community-device-registration-ui.mjs",
+        "tests/fixtures/community-registration-entry/*"
       ],
       "covers": [
         "Mac channels, task list and conversation retain selected task and draft identity",
@@ -1566,7 +1644,8 @@
         "The idle OPS dock leaves the phone keyboard task composer usable, preserves its draft and keeps active call controls",
         "Light and dark desktop layouts, enlarged text and phone widths keep actions visible",
         "Session directory and work threads remain accessible from one mode switch",
-        "LAN WebViews without crypto.randomUUID can list work sessions and submit requests"
+        "LAN WebViews without crypto.randomUUID can list work sessions and submit requests",
+        "Desktop registration entry obeys fresh native helper guards, preserves IME drafts, and stays absent in mobile and hidden workspaces"
       ]
     },
     {
@@ -2830,7 +2909,14 @@
         "src-tauri/src/work_mode/**",
         "src/workModeScreenHelper.ts",
         "src-tauri/src/screen_helper.rs",
-        "src/useViewerHelper.ts"
+        "src/useViewerHelper.ts",
+        "src/App.tsx",
+        "src/components/WorkspaceTools.tsx",
+        "src/components/WorkspaceToolGroup.tsx",
+        "src/WorkspaceScreenEntries.tsx",
+        "src/workspaceDesign.css",
+        "tests/workspace-tools*",
+        "tests/fixtures/workspace-tools.tsx"
       ],
       "evidence": "chromium-webkit-component-native-ipc-fixture",
       "covers": [
@@ -2841,7 +2927,9 @@
         "Closed-lid work (Mac) stays behind a cancellable one-time grant, is requested only when chosen, never on stop, and reports waiting for power",
         "The panel shows where AgentsToZ Screen is (missing, stopped, off, on with devices, viewed, permission needed) and opens it with a failed or unconfirmed open said plainly",
         "While AgentsToZ Screen is on but off an approved network the panel says it is not accepting connections, never a count of devices that can connect",
-        "The operator can open the Mac Viewer without naming a target or starting a person-to-person screen session"
+        "The operator can open the Mac Viewer without naming a target or starting a person-to-person screen session",
+        "Workspace tools group device connections, AI collaboration, and settings/support while preserving pinned project and existing action handlers.",
+        "Screen and Viewer helper UI entries remain truthful after failed/unsupported/other-instance status, and closing tools unmounts status pollers; Chromium and WebKit cover 1100px and 390px."
       ]
     },
     {
@@ -3407,7 +3495,7 @@
         "scripts/agentstoz-click-sweep.mjs"
       ],
       "covers": [
-        "데스크톱 앱 화면에서 보이는 모든 버튼·탭·링크·클릭 가능한 행을 깊이 2까지 한 번씩 누른다(쓰기 요청은 가로채 실제로 실행되지 않는다).",
+        "웹 화면(데스크톱 크기)에서 보이는 모든 버튼·탭·링크·클릭 가능한 행을 깊이 2까지 한 번씩 누른다(쓰기 요청은 가로채 실제로 실행되지 않는다).",
         "누른 뒤 처리되지 않은 예외·앱 오류 화면·console.error가 새로 생기면 실패한다.",
         "기준선에서 반응하던 대상이 무반응·못 누름·비활성이 되거나 사라지면 실패한다.",
         "버튼 목록은 tests/click-sweep/desktop.json에 커밋되고 실행 요약은 .agentstoz/maintainer/click-sweep/history.jsonl에 쌓인다."

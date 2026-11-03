@@ -2,7 +2,7 @@
 import Foundation
 
 public struct ScreenCommunityCommand: Codable, Sendable {
-    public enum Operation: String, Codable, Sendable { case identity, bind, prepare, commit, status, withdraw, accessCommit, accessStatus }
+    public enum Operation: String, Codable, Sendable { case identity, bind, prepare, commit, status, withdraw, accessCommit, accessStatus, ownerDelegationStatus, ownerDelegationCommit, ownerDelegationDisable, viewerDirectoryCommit, viewerTargetConsume }
     public let operation: Operation
     public let arguments: [ScreenCommunityValue]
     public let certificate: ScreenCommunityEnvelope?

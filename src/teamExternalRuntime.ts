@@ -1,4 +1,5 @@
 /** Host-only external team execution. No shell, account environment, desktop automation or CLI is run here. */
+import {normalizeTeamQuestionObservation,type TeamQuestionObservation} from './teamQuestionProtocol';
 import {createHash} from 'node:crypto';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import type {WorkroomEffortLevel} from './workroomEffortPolicy';
@@ -65,7 +66,7 @@ function reasonAfterIdentityRecovery(receipt: TeamExternalReceipt): string | nul
     : receipt.reason;
 }
 export interface TeamExternalReadResult {
-  receipt: TeamExternalReceipt; outcome: 'read' | 'unavailable' | 'unconfirmed'; text: string; cursor?: string;
+  receipt: TeamExternalReceipt; outcome: 'read' | 'unavailable' | 'unconfirmed'; text: string; cursor?: string; question?:TeamQuestionObservation|null;
 }
 export type TeamExternalOperationKind = 'launch' | 'submit' | 'reveal' | 'close' | 'keys';
 export interface TeamExternalOperation {
@@ -132,7 +133,7 @@ export interface TeamExternalRuntimeDeps {
     native?: TeamExternalNativeRef; opened: boolean; instruction: 'not-sent' | 'unknown' | 'prefill-requested' | 'manual-transfer-ready';
   }>;
   probe(ref: TeamExternalRef): Promise<TeamExternalProbe>;
-  read(plan: TeamExternalTargetPlan & {cursor?: string; limit: number}): Promise<{native: TeamExternalNativeRef; text: string; cursor?: string}>;
+  read(plan: TeamExternalTargetPlan & {cursor?: string; limit: number}): Promise<{native: TeamExternalNativeRef; text: string; cursor?: string;question?:TeamQuestionObservation|null}>;
   submit(plan: TeamExternalTargetPlan & {text: string}): Promise<TeamExternalDelivery>;
   reveal(plan: TeamExternalTargetPlan): Promise<void>;
   close(plan: TeamExternalTargetPlan): Promise<{closed: boolean}>;
@@ -364,7 +365,7 @@ export function createTeamExternalRuntime(deps: TeamExternalRuntimeDeps) {
       const latest = await load(ref);
       if (!current(ref)) return {receipt: {...receiptOf(latest), state: 'unknown', retainWorktree: true, reason: 'EXTERNAL_GENERATION_STALE'}, outcome: 'unconfirmed', text: ''};
       if (latest.revision !== record.revision) return {receipt: {...receiptOf(latest), reason: 'EXTERNAL_READ_SUPERSEDED'}, outcome: 'unconfirmed', text: ''};
-      return {receipt: readReceipt(), outcome: 'read', text: result.text.slice(-limit), ...(result.cursor !== undefined ? {cursor: result.cursor} : {})};
+      return {receipt: readReceipt(), outcome: 'read', text: result.text.slice(-limit), ...(evidence.agentVerified&&result.question!==undefined?{question:result.question===null?null:normalizeTeamQuestionObservation(result.question)}:{}), ...(result.cursor !== undefined ? {cursor: result.cursor} : {})};
     } catch {return {receipt: {...receiptOf(record), state: 'unknown', retainWorktree: true, reason: 'EXTERNAL_READ_UNKNOWN'}, outcome: 'unconfirmed', text: ''};}
   }
   async function mutate(ref: TeamExternalRef, operationId: string, kind: 'submit' | 'reveal' | 'close', text?: string): Promise<TeamExternalReceipt> {

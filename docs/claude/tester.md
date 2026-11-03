@@ -159,7 +159,7 @@
   `CLICK_SWEEP_ENGINE` 문자열로 **바이트 그대로** 싣는다(마커 사이 블록 — `bun scripts/embed-click-sweep-engine.ts`가 다시 쓰고
   `--check`가 어긋남을 잡는다. 러너 안의 사본을 손으로 고치지 말 것). 엔진을 고치면 다시 싣고 러너 `VERSION`을 올린다.
   - 설정은 프로젝트의 `.agentstoz/click-sweep.json`(`schemaVersion: 1`, 화면 1~8개). 화면은 둘 중 하나다:
-    `command`(프로젝트가 자기 하네스를 돌린다 — 이 저장소의 `desktop`, `updateArgs` 기본 `["--update"]`) 또는
+    `command`(프로젝트가 자기 하네스를 돌린다 — 이 저장소의 웹 크기 id `desktop`, `updateArgs` 기본 `["--update"]`) 또는
     `url`(엔진이 직접 Playwright로 연다 — **loopback 주소만**, 선택 `serve.command`로 개발 서버를 띄웠다 끈다, `ready`는 CSS 선택자).
     기준선 기본값은 `.agentstoz/click-sweep/<id>.json`이고 `..`·절대경로는 거절한다.
   - `url` 화면의 요청 정책: **쓰기 요청과 다른 origin 요청은 503으로 막고 기록**, 같은 origin의 GET/HEAD만 통과시킨다 —
@@ -175,14 +175,14 @@
   - **앱에서 켜기(2026-11-01)**: 공통 계층은 설정을 만들지 않는다 — 어느 주소를 누를지는 프로젝트마다 다르다. 그래서 다른
     프로젝트는 전부 「구성 전」에 머물렀다(사람이 JSON을 직접 써야 했다). 이제 `sets`가 구성 전 프로젝트에
     `enableUrl`(ports.json의 등록 포트 → `http://127.0.0.1:<port>/`, 워크트리 대상은 null)을 싣는다.
-    문자열이면 카드에 「켜기 · 127.0.0.1:<port>」, null이면 **「대상 아님」**(누를 화면이 없음 — 실패도 통과도 아님),
+    문자열이면 카드에 「켜기 · 127.0.0.1:<port>」, null이면 웹 주소 미등록이며 **데스크톱 프로젝트 command 하네스를 별도로 구성할 수 있음**으로 표시하고,
     칸이 없으면 옛 호스트라 버튼이 없다. 켜기(`sweep-enable`)는 리스 안에서 `sweep install`로 엔진을 깔고
     설정을 `wx`로 **없을 때만** 쓴다(손으로 고친 설정·엔진은 덮어쓰지 않는다). 「기준선 만들기」(`sweep-baseline`)는
     기준선이 없는 화면이 있을 때만 보이고 `sweep run --update`를 리스를 잡은 채 백그라운드로 한 번 돌린다.
     상태(`job`)는 메모리에만 있고 도는 동안만 카드가 4초마다 다시 읽는다. 종료 코드 3(서버 안 뜸·Playwright 없음)은
     「실행하지 못했습니다(통과 아님)」로 보인다. 둘 다 커밋하지 않고, MCP 도구·휴대폰에는 열지 않았다(앱 화면 전용).
     검증: `tests/tester-click-sweep-enable.test.ts`(실제 러너로 설정·엔진·덮어쓰기 거절·실행 불가),
-    `tests/project-tester-sets-ui.mjs`(1440 켜기→기준선, 390 대상 아님).
+    `tests/project-tester-sets-ui.mjs`(1440 켜기→기준선, 390 포트 없는 데스크톱 구성 안내).
   - ⚠️ 앱은 등록 폴더(주 체크아웃)의 **작업 트리**를 읽는다. 2026-11-01 아젠투지 카드가 「구성 전」이던 원인은 주 체크아웃이
     다른 세션의 옛 브랜치(main보다 95커밋 뒤)에 머물러 설정 파일이 없던 것이었다 — 카드를 고치기 전에 그 폴더의 HEAD부터 본다.
   - 검증: `tests/click-sweep-engine.test.ts`(AgentsToZ가 아닌 작은 정적 페이지에 CLI로 — 기준선 없음 실패 → `--update` →
@@ -191,6 +191,17 @@
     `tests/tester-sets.test.ts`(세 번째 카드 읽기).
 - ⚠️ 이것은 **격리 빌드의 증거**다 — 설치 앱·TCC·실제 CLI는 증명하지 않는다. 그쪽은 실기 세트(설치 앱에서 기록한 단계를
   재생, 컴퓨터 유즈 지속 승인과 아젠투지 자기 대상 허용이 정해진 뒤)의 몫이다.
+
+#### 대상 범위 분리 — 러너 1.9.0 / 엔진 1.1.0
+
+정확한 schema2·하네스 결과·범위별 기본 경로는 [웹·데스크톱 대상 계약](../click-sweep-targets.md)을 따른다.
+새 구성은 target(web/desktop)을 명시한다. desktop은 프로젝트 command와 native/fixture·platform을 요구하고 URL로 통과하지 않는다.
+프로젝트 하네스가 없거나 현재 runId와 일치하는 완료 보고·기준선이 없거나 대상/클릭이 0이면 unavailable이다. 실제 네이티브 드라이버를 공통 테스터가 제공하지 않는다.
+각 대상의 기준선·최근 결과·실행 환경을 따로 보여 주며 fixture는 실제 앱 미검증으로 표시한다. 하네스 보고를 OS 실행 attestation으로 말하지 않는다.
+이전 v1 URL/웹 기준선과 결과는 보존한다. 무표기 command는 legacy/unknown이다. 포트 없음은 프로젝트가 대상이 아니라는 뜻이 아니다.
+이 저장소의 desktop id/기준선은 웹 크기 fixture를 뜻하며 파일을 재생성하지 않고 target=web과 정확한 라벨을 붙였다.
+공식 이전 엔진만 해시로 인식해 갱신하고 프로젝트 설정·기준선·결과·커스텀 엔진은 보존하는 업그레이드 회귀가 있다.
+검증은 임시 fixture 하네스·브라우저이며 실제 데스크톱 앱 입력/캡처/TCC 검증은 별도다.
 
 ### 프로젝트 테스터는 자연어로 시작된다 (`/api/project-tester/ensure`)
 

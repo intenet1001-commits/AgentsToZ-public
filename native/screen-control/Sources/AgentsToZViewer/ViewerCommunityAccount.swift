@@ -7,10 +7,10 @@ import ScreenControlCore
 final class ViewerCommunityAccount {
     struct Account: Codable, Sendable { let keyBlob: Data; var displayName: String?; var enrollment: ScreenCommunityEnrollmentState? }
     private var model: ScreenCommunityEnrollment?
-    private(set) var unified: ViewerUnifiedEnrollment? = ScreenCommunityAuthority.configured.map { ViewerUnifiedEnrollment(authority: $0) }
+    private(set) var unified: ViewerUnifiedEnrollment?
     private(set) var controlReady = false
     private var componentGeneration = 0
-    init() { unified?.changed = { [weak self] in self?.publish() } }
+    init(unifiedStore: ViewerUnifiedStore = ViewerUnifiedStore()) { unified = ScreenCommunityAuthority.configured.map { ViewerUnifiedEnrollment(authority: $0, store: unifiedStore) }; unified?.changed = { [weak self] in self?.publish() } }
     var commonTargets: [ViewerTarget] { unified?.targets ?? [] }
     func commonPeer(_ id: String) -> CommunityAuthorization? { unified?.peerAuthorizations[id] }
     var selectedCapabilities: [CommunityCapability] { unified?.selected ?? [] }
@@ -24,6 +24,7 @@ final class ViewerCommunityAccount {
     }
     private var blob: Data?
     private var adminEpoch = 0
+    private let reviewLifecycle = CommunityReviewLifecycle()
     private var actionMessageLocked = false
     var requestedName = ""
     var prepareControlKey: (@MainActor () async throws -> CommunityEnrollmentTransport.ControlCandidate)? = {
@@ -31,7 +32,8 @@ final class ViewerCommunityAccount {
         return try await CommunityEnrollmentTransport.prepareControlKey(profileID: identity.profileID, deviceID: identity.deviceID)
     }
     var supported: Bool { ScreenCommunityAuthority.configured != nil }
-    func cancelAdministratorAction() { adminEpoch &+= 1; unified?.resetConfirmation() }
+    func cancelAdministratorAction() { reviewLifecycle.cancel(); adminEpoch &+= 1; unified?.dismissReview();ownerRecovery?.cancel() }
+    let ownerRecovery:ViewerOwnerRecovery?=ScreenCommunityAuthority.configured.map{ViewerOwnerRecovery(authority:$0)}
     func confirmUnifiedRegistration(digest: String, confirmed: Bool) { unified?.confirmRegistration(digest: digest, confirmed: confirmed); publish() }
     func refreshRegistration() async { cancelAdministratorAction(); publish(); await refresh() }
     private var polling: Task<Void, Never>?
@@ -109,20 +111,35 @@ final class ViewerCommunityAccount {
             let biometricSigner = try SecureEnclaveTranscriptSigner(dataRepresentation: blob)
             let saved = try backend.read().map { try JSONDecoder().decode(Account.self, from: $0) }
             let controlKey: Data?, agentDeviceId: String?
+            var verifiedControlCandidate:CommunityEnrollmentTransport.ControlCandidate?
             if unified.selected.contains(where: { $0 == .communicate || $0 == .teams || $0 == .agentSettings || $0 == .browser }) {
                 guard let prepareControlKey else { throw ScreenCommunityError.service("CONTROL_KEY_NOT_READY") }
-                do { let candidate = try await prepareControlKey(); controlKey = candidate.publicKey; agentDeviceId = candidate.agentDeviceId }
+                do { let candidate = try await prepareControlKey();verifiedControlCandidate=candidate;controlKey = candidate.publicKey; agentDeviceId = candidate.agentDeviceId }
                 catch { throw ScreenCommunityError.service("CONTROL_KEY_NOT_READY") }
             } else { controlKey = nil; agentDeviceId = nil }
-            try await unified.request(identity: identity, biometricKey: biometricSigner.publicKey.x963Representation, name: saved?.displayName ?? identity.name, controlKey: controlKey, agentDeviceId: agentDeviceId)
+            try await unified.request(identity: identity, biometricKey: biometricSigner.publicKey.x963Representation, name: saved?.displayName ?? identity.name, controlKey: controlKey, agentDeviceId: agentDeviceId,controlCandidate:verifiedControlCandidate)
             message = "선택한 기능을 한 번에 등록 요청했습니다. 관리 기기에서 선택 목록을 확인하고 한 번 승인해 주세요."
             resume()
         } catch { actionMessageLocked = true; message = Self.describe(error) }
     }
-    func loadUnifiedReview(_ id: String) async {
+    func loadUnifiedReview(_ id: String, choice: CommunityManagementChoice = .unchanged) async {
         guard !busy, let certificate, certificate.member.admin, let unified else { return }
         busy = true; publish(); defer { busy = false; publish() }
-        do { try await unified.loadReview(id, identity: ScreenCommunityHostIdentity.load(), legacy: certificate) }
+        do {
+            guard let model else { throw ScreenCommunityError.service("NOT_ENROLLED") }
+            let (current, identity) = try await reviewLifecycle.prepare {
+                let current = try await model.refreshSelfCertificate()
+                let identity = try await ScreenCommunityHostIdentity.load()
+                return (current, identity)
+            }
+            guard identity.profileID == current.profileID, identity.deviceID == current.member.deviceID,
+                  identity.publicKey.x963Representation == current.member.hostKey, identity.boundViewerKey == current.member.viewerKey,
+                  current.communityID == certificate.communityID, current.member.enrollmentID == certificate.member.enrollmentID,
+                  current.member.hostKey == certificate.member.hostKey, current.member.viewerKey == certificate.member.viewerKey,
+                  current.member.keyEpoch == certificate.member.keyEpoch else { throw ScreenCommunityError.service("REVIEW_CONTEXT_CHANGED") }
+            self.certificate = current
+            try await unified.loadReview(id, identity: identity, legacy: current, choice: choice)
+        }
         catch { message = Self.describe(error) }
     }
     func approveUnified(_ proof: HumanProof, confirmedDigest: String) async {
@@ -132,7 +149,7 @@ final class ViewerCommunityAccount {
         adminEpoch &+= 1; let epoch = adminEpoch
         do {
             guard !unified.hasPendingMutation else { throw ScreenCommunityError.service("RECOVER_EXISTING_REQUEST") }
-            let signer = try await FaceIDApprovedSigner.approve(dataRepresentation: blob, reason: "‘\(review.plan.name)’의 선택한 기능을 한 번에 승인합니다")
+            let signer = try await FaceIDApprovedSigner.approve(dataRepresentation: blob, reason: "‘\(review.plan.name)’의 선택 기능과 \(unified.managementChoice.title)을 함께 확인합니다")
             guard epoch == adminEpoch, unified.review?.digest == confirmedDigest, unified.confirmation.isConfirmed(for: review), !Task.isCancelled else { return }
             try await unified.approve(signer: signer, legacy: certificate, confirmedDigest: confirmedDigest)
             message = "선택한 기능 등록을 승인했습니다. 각 기기의 OS 권한과 기능 준비 상태를 확인하세요."
@@ -193,6 +210,52 @@ final class ViewerCommunityAccount {
             resume()
         } catch { actionMessageLocked = true; message = Self.describe(error) }
     }
+    func refreshOwnerRecovery()async {
+        guard let ownerRecovery,let unified,let own=unified.authorization else {return}
+        ownerRecovery.changed={ [weak self] in self?.publish() }
+        do {let identity=try await ScreenCommunityHostIdentity.load();await ownerRecovery.refresh(own:own,peers:Array(unified.peerAuthorizations.values),operation:try? unified.ownerOperationSigner(),host:identity.signer)}
+        catch {ownerRecovery.failed("원래 위임 상태 조회가 필요합니다. 새 승인을 자동으로 보내지 않습니다.")}
+    }
+    private func ownerBiometricSigner(_ reason:String,expected:CommunityAuthorization)async throws->any TranscriptSigner {
+        guard let blob else {throw ScreenCommunityError.service("DEVICE_KEY_MISSING")}
+        let signer=try await FaceIDApprovedSigner.approve(dataRepresentation:blob,reason:reason)
+        let fresh=try await currentAuthorization()
+        guard try CommunityMobileControlPolicy.authorizationDigest(fresh)==CommunityMobileControlPolicy.authorizationDigest(expected),ScreenCommunityRequest.base64(signer.publicKey.x963Representation)==fresh.body.biometricPublicKey else {throw ScreenCommunityError.staleRevision}
+        return signer
+    }
+    func requestInputRecovery(_ targetId:String)async {
+        guard !busy,let ownerRecovery,let unified else {return}
+        do {
+            let own=try await currentAuthorization()
+            guard let target=unified.peerAuthorizations.values.first(where:{$0.body.enrollmentId==targetId}) else {throw ScreenCommunityError.expired}
+            await ownerRecovery.request(target:target,own:own,signer:try unified.ownerOperationSigner())
+        } catch {ownerRecovery.failed("대상 Mac·현재 기기 신뢰를 확인하지 못했습니다. 원래 요청은 보존합니다.")}
+        publish()
+    }
+    func enableInputDelegation()async {
+        guard !busy,let ownerRecovery else {return}
+        do {
+            let own=try await currentAuthorization();await refreshOwnerRecovery()
+            await ownerRecovery.enable(own:own,biometric:{ [weak self] reason in guard let self else {throw ScreenCommunityError.expired};return try await self.ownerBiometricSigner(reason,expected:own) })
+        } catch {ownerRecovery.failed("위임 설정을 시작하지 못했습니다. 이 Mac에서 등록한 생체 키를 확인해 주세요.")}
+        publish()
+    }
+    func approveInputRecovery(_ id:String)async {
+        guard !busy,let ownerRecovery,let selected=ownerRecovery.records.first(where:{$0.body.requestId==id}) else {return}
+        do {
+            let own=try await currentAuthorization();await refreshOwnerRecovery()
+            guard ownerRecovery.records.contains(where:{$0.reviewBinding==selected.reviewBinding}) else {throw ScreenCommunityError.staleRevision}
+            await ownerRecovery.approve(selected,own:own,biometric:{ [weak self] reason in guard let self else {throw ScreenCommunityError.expired};return try await self.ownerBiometricSigner(reason,expected:own) })
+        } catch {ownerRecovery.failed("검토할 요청·권한이 바뀌었습니다. 최신 대상과 범위를 다시 확인해 주세요.")}
+        publish()
+    }
+    func disableInputDelegation()async {
+        ownerRecovery?.cancel()
+        do {_ = try await ScreenCommunityCommand(.ownerDelegationDisable).call();ownerRecovery?.failed("이 Mac의 입력 보류 해제 위임을 껐습니다. 이미 열린 화면·OS 권한은 바꾸지 않았습니다.")}
+        catch {ownerRecovery?.failed("이 실행의 위임 승인은 차단합니다. 지속 저장·서버 해제 결과는 조회가 필요합니다.")}
+        await refreshOwnerRecovery();publish()
+    }
+
     /// Root provisioning asks for a fresh local biometric approval; never invoked by polling or discovery.
     func createCommunity(_ proof: HumanProof) async {
         guard !busy else { return }; busy = true; actionMessageLocked = false; message = "관리 Mac 등록을 준비하는 중…"; publish()
@@ -218,10 +281,9 @@ final class ViewerCommunityAccount {
             let identity = try await ScreenCommunityHostIdentity.load()
             let original = await model.snapshot()
             if original.uncertainMutation { try await model.recover() }
-            else if (try? await model.certificate()) == nil {
-                do { try await model.recover() }
-                catch ScreenCommunityError.service(let code) where ["NOT_ENROLLED", "COMMUNITY_NOT_READY"].contains(code) { }
-            }
+            do { certificate = try await model.refreshSelfCertificate() }
+            catch ScreenCommunityError.service(let code) where ["NOT_ENROLLED", "COMMUNITY_NOT_READY"].contains(code) { certificate = nil }
+            unified?.validateReviewContext(certificate: certificate)
             if let recovered = try? await model.certificate() { certificate = recovered }
             do { try await unified?.refresh(identity: identity, legacy: certificate) }
             catch { if unified?.prepared != nil || unified?.hasPendingMutation == true { throw error } }
@@ -230,8 +292,10 @@ final class ViewerCommunityAccount {
                 throw ScreenCommunityError.service("LOCALLY_LEFT")
             }
             await syncNativeComponents()
+            await refreshOwnerRecovery()
             let snapshot = await model.snapshot()
-            if (try? await model.certificate()) == nil || snapshot.uncertainMutation { try await model.recover() }
+            if (try? await model.certificate()) == nil { certificate = try await model.refreshSelfCertificate() }
+            if snapshot.uncertainMutation { try await model.recover() }
             let directory = try await model.directory(prepareHost: { certificate in
                 _ = try await ScreenCommunityCommand(.commit, certificate: certificate.envelope).call()
             }), certificate = try await model.certificate()
@@ -240,6 +304,8 @@ final class ViewerCommunityAccount {
             let targets = try directory.viewerTargets(controllerKeyBlob: blob, controllerPublicKey: signer.publicKey).map {
                 try preferences.applying(to: $0, communityID: directory.communityID)
             }
+            guard directory.members.first(where: { $0.enrollmentID == directory.selfEnrollmentID })?.admin == certificate.member.admin else { throw ScreenCommunityError.staleRevision }
+            unified?.validateReviewContext(certificate: certificate, revision: directory.revision)
             self.certificate = certificate; self.directory = directory; self.targets = targets
             actionMessageLocked = false; message = "\(certificate.member.name) 등록 완료 · \(directory.name) · 연결할 다른 Mac \(unified?.hasEnrollmentPlan == true ? commonTargets.count : targets.count)대 · 기기마다 다시 등록하지 않습니다."
             expiry?.cancel()
@@ -257,8 +323,10 @@ final class ViewerCommunityAccount {
                           let name = r[1].string, RegistrationInvite.isShowableName(name), let platform = r[5].string else { return nil }
                     return (id, name, platform)
                 }
-            }
+            } else { pending = [] }
         } catch {
+            unified?.validateReviewContext(certificate: nil)
+            unified?.pendingUnavailable()
             if case ScreenCommunityError.service(let code) = error, ["NOT_ENROLLED", "REGISTRATION_REVOKED"].contains(code) {
                 targets = []; certificate = nil; directory = nil; removing = nil; pending = []; expiry?.cancel(); unified?.endLocally()
             }
@@ -335,6 +403,8 @@ final class ViewerCommunityAccount {
             case "COMMUNITY_NOT_READY": return "첫 관리 Mac을 아직 등록하지 않았습니다. 이 Mac에서 커뮤니티를 만들거나 기존 관리 기기의 등록을 마쳐 주세요."
             case "BOOTSTRAP_REQUIRES_DEVICE_BINDING": return "관리 Mac의 공개키 설정을 확인해야 합니다. 준비된 기기 키를 서비스에 연결한 뒤 다시 시도하세요."
             case "RECOVER_EXISTING_REQUEST": return "이전 등록 요청의 결과를 확인 중입니다. 새 요청을 중복해서 보내지 않습니다."
+            case "REQUEST_STILL_POSSIBLE": return "이전 요청이 아직 도착할 수 있어 결과를 확인 중입니다. 새 요청을 보내지 않습니다."
+            case "REVIEW_CONTEXT_CHANGED": return "검토 정보가 바뀌었습니다. 요청과 관리 역할을 다시 선택해 주세요."
             case "BUSY": return "현재 등록 요청을 처리 중입니다. 잠시 뒤 다시 확인합니다."
             case "LAST_ADMIN": return "마지막 관리 기기는 나갈 수 없습니다. 다른 승인 기기를 먼저 등록해 주세요."
             case "LOCALLY_LEFT": return "이 기기의 접근을 중단했습니다. 이전 나가기 요청의 결과를 먼저 확인해 주세요."

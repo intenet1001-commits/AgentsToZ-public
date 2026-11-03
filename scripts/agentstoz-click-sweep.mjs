@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// agentstoz-click-sweep 1.0.0
+// agentstoz-click-sweep 1.1.0
 /**
  * AgentsToZ 전수 클릭 세트 — 공통 엔진. 화면의 버튼·탭·링크를 하나씩 다 눌러 보고, 그 목록을 이력으로 남긴다.
  *
@@ -25,7 +25,7 @@ import {createRequire} from 'node:module';
 import {dirname, isAbsolute, join, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-export const ENGINE_VERSION = '1.0.0';
+export const ENGINE_VERSION = '1.1.0';
 export const CONFIG_PATH = '.agentstoz/click-sweep.json';
 export const EVIDENCE_ROOT = '.agentstoz/maintainer/click-sweep';
 
@@ -58,6 +58,7 @@ export function compareSweep(baseline, current, run) {
     failures.push('기준선이 없습니다 — 처음 한 번 --update로 만들고 그 파일을 커밋하세요');
     return {failures, notes};
   }
+  if ((baseline.target ?? 'web') !== (current.target ?? 'web') || (baseline.environment ?? 'browser') !== (current.environment ?? 'browser')) failures.push('기준선 대상·실행 환경이 다릅니다 — 웹과 데스크톱 기준선은 공유하지 않습니다');
   if (baseline.maxDepth !== current.maxDepth) failures.push(`기준선 깊이(${baseline.maxDepth})와 실행 깊이(${current.maxDepth})가 다릅니다`);
   if (baseline.viewport !== current.viewport) failures.push(`기준선 화면 크기(${baseline.viewport})와 실행 화면 크기(${current.viewport})가 다릅니다`);
   for (const [key, now] of Object.entries(current.elements)) {
@@ -83,12 +84,20 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 /** .agentstoz/click-sweep.json을 읽어 검사한다. 모르는 키도 받되(앞으로의 확장) 쓰는 키의 형식은 엄격히 본다. */
 export function parseSweepConfig(text) {
   const config = JSON.parse(text);
-  if (!config || typeof config !== 'object' || config.schemaVersion !== 1 || !Array.isArray(config.surfaces) || !config.surfaces.length || config.surfaces.length > 8)
-    throw new Error('전수 클릭 설정은 schemaVersion 1과 화면(surfaces) 1~8개가 필요합니다');
-  const ids = new Set();
+  if (!config || typeof config !== 'object' || ![1, 2].includes(config.schemaVersion) || !Array.isArray(config.surfaces) || !config.surfaces.length || config.surfaces.length > 8)
+    throw new Error('전수 클릭 설정은 schemaVersion 1 또는 2와 화면(surfaces) 1~8개가 필요합니다');
+  const ids = new Set(), baselines = new Set();
   for (const s of config.surfaces) {
     if (!s || typeof s.id !== 'string' || !SURFACE_ID.test(s.id) || ids.has(s.id)) throw new Error('화면 id 형식 또는 중복을 확인하세요');
     ids.add(s.id);
+    const target = surfaceTarget(s);
+    if (config.schemaVersion === 2 && !['web', 'desktop'].includes(s.target)) throw new Error(`화면 ${s.id}: target은 web 또는 desktop이어야 합니다`);
+    if (target === 'desktop') {
+      if (s.url !== undefined || s.serve !== undefined || !['native', 'fixture'].includes(s.environment) || !['darwin', 'win32', 'linux'].includes(s.platform) || s.command === undefined) throw new Error(`화면 ${s.id}: desktop은 프로젝트 command와 native/fixture 환경·플랫폼이 필요하며 url을 쓸 수 없습니다`);
+    } else if ((config.schemaVersion === 2 || ['web', 'desktop'].includes(s.target)) && s.environment !== undefined && s.environment !== 'browser') throw new Error(`화면 ${s.id}: web/legacy 실행 환경을 확인하세요`);
+    const path = surfaceBaseline(s);
+    if (config.schemaVersion === 2 && baselines.has(path)) throw new Error('화면별 기준선 경로를 분리하세요');
+    baselines.add(path);
     const argv = v => Array.isArray(v) && v.length > 0 && v.length <= 64 && v.every(a => typeof a === 'string' && a.length <= 4096);
     if (s.command !== undefined) {
       if (!argv(s.command) || s.url !== undefined) throw new Error(`화면 ${s.id}: command는 인자 배열이고 url과 함께 쓸 수 없습니다`);
@@ -109,8 +118,11 @@ export function parseSweepConfig(text) {
   return config;
 }
 
-export const surfaceBaseline = surface => surface.baseline ?? `.agentstoz/click-sweep/${surface.id}.json`;
-export const surfaceEvidence = surface => `${EVIDENCE_ROOT}/${surface.id}`;
+export const surfaceTarget = surface => ['web', 'desktop'].includes(surface.target) ? surface.target : surface.url !== undefined ? 'web' : 'legacy';
+export const surfaceBaseline = surface => surface.baseline ?? (surfaceTarget(surface) === 'desktop'
+  ? `.agentstoz/click-sweep/desktop/${surface.environment}/${surface.platform}/${surface.id}.json` : `.agentstoz/click-sweep/${surface.id}.json`);
+export const surfaceEvidence = surface => surfaceTarget(surface) === 'desktop'
+  ? `${EVIDENCE_ROOT}/desktop/${surface.environment}/${surface.platform}/${surface.id}` : `${EVIDENCE_ROOT}/${surface.id}`;
 
 // ── 페이지 안에서 도는 코드 ─────────────────────────────────────────────────
 function installProbes(preset) {
@@ -458,6 +470,7 @@ class Explorer {
  * mock(url, method, request): {status, json|body, contentType} → 합성 응답, 'block' → 503, 'continue' → 통과, null → 기본 규칙.
  */
 export async function runClickSweep(options) {
+  if (options.target !== undefined && options.target !== 'web') throw new Error('이 Playwright 엔진은 web/browser만 검사합니다. desktop은 별도 프로젝트 하네스로 구성하세요');
   const root = resolve(options.root ?? process.cwd());
   const surface = options.surface ?? 'web';
   const [width, height] = String(options.viewport ?? '1440x900').split('x').map(Number);
@@ -524,22 +537,24 @@ export async function runClickSweep(options) {
     withErrors: all.filter(r => r.errors.length).map(r => r.key),
     unreachable, budgetHit,
   };
-  const inventory = {schemaVersion: 1, surface, viewport: `${width}x${height}`, maxDepth: run.maxDepth, elements};
+  const inventory = {schemaVersion: 1, target: 'web', environment: 'browser', surface, viewport: `${width}x${height}`, maxDepth: run.maxDepth, elements};
   const baseline = existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, 'utf8')) : null;
   const {failures, notes} = compareSweep(baseline, inventory, {budgetHit});
   // --update는 비교 결과를 보여 준 뒤 기준선을 다시 쓴다. 예산에 걸린(전수가 아닌) 목록은 기준선이 될 수 없다.
-  const accepted = !!options.update && !budgetHit;
+  const scopeMatches = !baseline || (baseline.target ?? 'web') === 'web' && (baseline.environment ?? 'browser') === 'browser';
+  const accepted = !!options.update && !budgetHit && scopeMatches;
+  if (options.update && !scopeMatches) failures.unshift('다른 대상·실행 환경의 기준선은 갱신하지 않았습니다');
   if (options.update && budgetHit) failures.unshift('예산에 걸린 실행이라 기준선을 갱신하지 않았습니다');
   const shown = accepted ? [] : failures;
   const passed = shown.length === 0;
 
   mkdirSync(evidence, {recursive: true, mode: 0o700});
   const at = new Date().toISOString();
-  const report = {at, engineVersion: ENGINE_VERSION, surface, commit, baseline: baseline ? 'present' : 'absent', updated: accepted, passed, summary, failures, notes,
+  const report = {at, target: 'web', environment: 'browser', platform: process.platform, engineVersion: ENGINE_VERSION, surface, commit, baseline: baseline ? 'present' : 'absent', updated: accepted, passed, summary, failures, notes,
     unmockedGet: Object.fromEntries([...run.unmocked].sort()), interceptedWrites: Object.fromEntries([...run.intercepted].sort())};
   writeFileSync(join(evidence, 'latest.json'), JSON.stringify({...report, inventory}, null, 2) + '\n');
   // 앱의 테스트 세트 카드는 이 작은 요약만 읽는다(latest.json은 수백 KB다).
-  const brief = {schemaVersion: 1, at, engineVersion: ENGINE_VERSION, surface, commit, passed, updated: accepted, elements: summary.elements, clicked: clicks,
+  const brief = {schemaVersion: 2, target: 'web', environment: 'browser', platform: process.platform, completed: true, state: passed ? 'passed' : 'failed', baselinePath: options.baseline ?? `.agentstoz/click-sweep/${surface}.json`, at, engineVersion: ENGINE_VERSION, surface, commit, passed, updated: accepted, elements: summary.elements, clicked: clicks,
     reacting: summary.reacting, none: summary.none.length, notClickable: summary.notClickable.length, errors: summary.withErrors.length,
     failures: shown.length, notes: notes.length, budgetHit, baselinePresent: !!baseline || accepted};
   writeFileSync(join(evidence, 'summary.json'), JSON.stringify(brief) + '\n');

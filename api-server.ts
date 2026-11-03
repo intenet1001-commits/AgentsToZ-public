@@ -58,6 +58,7 @@ import {createWorkroomScheduleAdapter} from './src/workroomScheduleIntegration';
 import {WORKROOM_SCHEDULE_PATH} from './src/workroomScheduleProtocol';
 import {handleWorkroomSchedules} from './src/workroomScheduleApi';
 import {DesktopEffortHost} from './src/desktopEffortHost';
+import {agentsToZUseWorkroomEffort} from './src/agentstozUseWorkroomEffort';
 import {DESKTOP_EFFORT_PATH} from './src/desktopEffortProtocol';
 import {handleDesktopEffort} from './src/desktopEffortApi';
 import {recallProjectMemoryWithCommon} from './project-memory-server';
@@ -20192,6 +20193,7 @@ const server = Bun.serve({
           || request.action === 'list-workroom-accounts' || request.action === 'select-workroom-account'
           || request.action === "read-workroom-session" || request.action === "send-workroom-instruction"
           || request.action === "send-workroom-keys" || request.action === "wait-workroom-session" || request.action === "close-workroom-session"
+          || request.action === 'set-workroom-effort'
           || request.action === 'read-shared-shell' || request.action === 'send-shared-shell-command';
         const caller = isWorkroomAction ? agentsToZUseCallerSession(callerHint) : null;
         if (request.action === 'list-workroom-accounts' || request.action === 'select-workroom-account') {
@@ -20332,7 +20334,8 @@ const server = Bun.serve({
           }), { status: reused ? 200 : 201, headers: { ...headers, "Cache-Control": "no-store" } });
         }
         if (request.action === "list-workroom-sessions" || request.action === "read-workroom-session" || request.action === "send-workroom-instruction"
-          || request.action === "send-workroom-keys" || request.action === "wait-workroom-session" || request.action === "close-workroom-session") {
+          || request.action === "send-workroom-keys" || request.action === "wait-workroom-session" || request.action === "close-workroom-session"
+          || request.action === 'set-workroom-effort') {
           const inventory = await loadAgentRuntimeTargetInventory();
           const targetIds = new Set(inventory.targets
             .filter(target => request.target === 'ops' ? target.targetId === project.projectId : target.projectTargetId === project.projectId)
@@ -20423,6 +20426,12 @@ const server = Bun.serve({
             success: true, performed: true, action: request.action, effect, ...targetResult,
             projectId: project.projectId, projectName: project.projectName, ...body,
           }), { headers: { ...headers, "Cache-Control": "no-store" } });
+          if (request.action === 'set-workroom-effort') {
+            // A person's session-only effort choice (src/agentstozUseWorkroomEffort.ts): never the caller's own session.
+            const {effect, body} = await agentsToZUseWorkroomEffort(aiTerminalService, {session: selected, callerSessionId: caller?.id ?? null,
+              ...(request.effortLevel ? {level: request.effortLevel, binding: request.effortBinding, requestId: request.requestId} : {})});
+            return reply(effect, body);
+          }
           if (request.action === "send-workroom-keys") {
             // Keep the entire attempt, including a partial refusal, so concurrent calls and retries cannot
             // resume a stopped key sequence against a different screen.

@@ -8,7 +8,8 @@ import Security
 struct SavedScreenMac: Codable, Identifiable, Hashable {
     /// Hex of the Mac fingerprint.
     let id: String
-    let macName: String
+    /// The signed or registered name in storage; a viewing copy may use a local display alias.
+    var macName: String
     let macPublicKey: Data
     let hostName: String
     var address: String

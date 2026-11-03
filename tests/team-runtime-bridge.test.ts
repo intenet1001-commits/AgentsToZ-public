@@ -2,8 +2,21 @@ import {test,expect} from 'bun:test';
 import {createTeamRuntimeBridge,type TeamRuntimeBinding} from '../src/teamRuntimeBridge';
 import type {TeamExternalJournal,TeamExternalReceipt,TeamExternalRuntime,TeamExternalJournalRecord} from '../src/teamExternalRuntime';
 import {teamPanelActionRequest} from '../src/workroomTeamPanelActions';
-import {parseWorkroomTeamRequest} from '../src/workroomTeam';
+import {parseWorkroomTeamRequest, WorkroomTeamService, WorkroomTeamStore, type Team, type WorkroomTeamHost} from '../src/workroomTeam';
 import {runTeamMemberOperation} from '../src/workroomTeamMemberOperation';
+import {teamQuestionGeneration} from '../src/teamQuestionService';
+
+/** Real observation/invalidation logic; this fixture has no user-answer source or write authority. */
+function readOnlyTeamService(team: Team) {
+  const store = new WorkroomTeamStore(null); store.save(team);
+  const forbidden = (): never => { throw new Error('No Workroom or Git effects in the member read fixture'); };
+  const host: WorkroomTeamHost = {resolveProject: forbidden, primary: forbidden, addWorktree: forbidden, worktreeTargetId: forbidden,
+    start: forbidden, session: forbidden, sessionForTarget: forbidden, attachable: forbidden, instruct: forbidden,
+    close: forbidden, branchGit: forbidden, removeWorktree: forbidden, deleteMergedBranch: forbidden};
+  return new WorkroomTeamService(host, store);
+}
+const questionBinding = (ref: TeamExternalReceipt['executionRef']) => ({teamId: ref.teamId, memberId: ref.memberId, executionId: ref.executionId,
+  generation: teamQuestionGeneration([ref.hostInstanceId, ref.generation, ref.targetId, ref.agent, ref.surface, ref.native])});
 
 function fixture(){
   let binding:TeamRuntimeBinding|null={targetId:'wt-owned',cwd:'/owned/member',agent:'claude',surface:'orca-worktree',generation:1,active:true};
@@ -15,7 +28,7 @@ function fixture(){
   const runtime={async launch(input:any){calls.push({kind:'launch',input});return structuredClone(receipt);},async probe(input:any){calls.push({kind:'probe',input});return structuredClone(receipt);},async submit(input:any,value:any){calls.push({kind:'submit',input:value});return structuredClone(receipt);},async closeOwned(input:any){calls.push({kind:'close',input});return structuredClone(receipt);},async read(input:any,value:any){calls.push({kind:'read',input:value});return {receipt:structuredClone(receipt),text:'member output',cursor:'next',outcome:'read' as const};},async reveal(input:any){calls.push({kind:'reveal',input});return structuredClone(receipt);},async keys(input:any,id:string,keys:readonly string[]){calls.push({kind:'keys',input:{id,keys}});return structuredClone(receipt);}} as TeamExternalRuntime;
   const bridge=createTeamRuntimeBridge({journal,runtime,hostInstanceId:'host-one',binding:()=>binding});
   const input={teamId:'team_123456789abc',memberId:'m1',memberName:'worker',agent:'claude' as const,plan:{surface:'orca-worktree' as const,options:{tmuxMode:false,reuse:'new' as const}},cwd:'/owned/member',targetId:'wt-owned',prompt:'the exact member brief',requestId:'initial-request',effort:{requestText:'task'}};
-  return {bridge,input,calls,receipt,records,save,setBinding:(value:TeamRuntimeBinding|null)=>{binding=value;}};
+  return {bridge,runtime,input,calls,receipt,records,save,setBinding:(value:TeamRuntimeBinding|null)=>{binding=value;}};
 }
 test('the selected surface, explicit false and durable binding reach the runtime once without exposing native handles',async()=>{
   const f=fixture(),result=await f.bridge.start(f.input);
@@ -112,7 +125,8 @@ test('an earlier written receipt never labels a refused follow-up as newly sent'
 test('unknown lifetime never authorizes worktree cleanup and read preserves agent identity uncertainty',async()=>{
   const f=fixture(),started=await f.bridge.start(f.input);
   expect(await f.bridge.close!(started.ref)).toEqual({closed:'unknown'});
-  expect(await f.bridge.read(started.ref,{limit:400})).toEqual({text:'member output',cursor:'next',agentVerified:false,outcome:'read',reason:null});
+  expect(await f.bridge.read(started.ref,{limit:400})).toEqual({text:'member output',cursor:'next',agentVerified:false,outcome:'read',reason:null,
+    question:{binding:questionBinding(f.receipt.executionRef),sequence:1,available:false,observation:null}});
   await expect(f.bridge.read({...started.ref,owned:false},{limit:400})).rejects.toThrow('기록이 일치하지');
 });
 test('local human actions use the same strict core requests and cannot smuggle agent input or account settings',()=>{
@@ -147,15 +161,33 @@ test('reveal uses its persisted operation outcome, including after probe recover
 });
 test('member output distinguishes a verified empty read from unsupported and interrupted reads',async()=>{
   const f=fixture(),started=await f.bridge.start(f.input);
-  const team={state:'active',leader:{sessionId:'leader_session'},members:[{id:'m1',execution:started.ref}]};
+  const team:Team={id:f.input.teamId,requestId:'create-member-read',fingerprint:'software-fixture',projectId:'project-one',projectName:'Software fixture',
+    primaryPath:'/owned',baseCheckout:'/owned',title:'Member reads',goal:'Distinguish evidence from authority',baseCommit:'a'.repeat(40),baseBranch:'main',
+    state:'active',createdAt:new Date(0).toISOString(),updatedAt:new Date(0).toISOString(),leader:{sessionId:'leader_session',agent:'codex'},
+    members:[{id:'m1',name:'worker',agent:'claude',task:'Read evidence',execution:started.ref,surface:'orca-worktree',branch:'member-one',
+      worktreePath:f.input.cwd,targetId:f.input.targetId,sessionId:null,state:'awaiting-ack'}]};
   let outcome:'read'|'unavailable'|'unconfirmed'='unavailable';
-  const host={service:{store:{get:()=>team}},external:{async read(){return {text:'',agentVerified:false,outcome,reason:outcome==='unavailable'?'EXTERNAL_CAPABILITY_UNAVAILABLE':null};}}} as any;
+  f.runtime.read=async(_ref,input)=>{f.calls.push({kind:'read',input});return {receipt:{...f.receipt,reason:outcome==='unavailable'?'EXTERNAL_CAPABILITY_UNAVAILABLE':null},text:'',outcome};};
+  const service=readOnlyTeamService(team);
+  const host={service,external:f.bridge,readWorkroom:async()=>{throw Error('not an internal member');}} satisfies Parameters<typeof runTeamMemberOperation>[0];
   const request={op:'member',teamId:f.input.teamId,memberId:'m1',operation:'read',limit:4000} as const;
-  expect(await runTeamMemberOperation(host,request,null)).toMatchObject({success:false,performed:false,effect:'read-unavailable',text:''});
+  const journalBefore=structuredClone(f.records.get(started.ref.handle));
+  const unavailable=await runTeamMemberOperation(host,request,null);
+  expect(unavailable).toMatchObject({success:false,performed:false,effect:'read-unavailable',text:''});
+  expect(unavailable.question).toEqual({binding:questionBinding(f.receipt.executionRef),sequence:1,available:false,observation:null});
   outcome='unconfirmed';
-  expect(await runTeamMemberOperation(host,request,null)).toMatchObject({success:false,performed:false,effect:'read-unconfirmed'});
+  const unconfirmed=await runTeamMemberOperation(host,request,null);
+  expect(unconfirmed).toMatchObject({success:false,performed:false,effect:'read-unconfirmed'});
+  expect(unconfirmed.question).toEqual({binding:questionBinding(f.receipt.executionRef),sequence:2,available:false,observation:null});
   outcome='read';
-  expect(await runTeamMemberOperation(host,request,null)).toMatchObject({success:true,performed:true,effect:'read-only',agentVerified:false,text:''});
+  const read=await runTeamMemberOperation(host,request,null);
+  expect(read).toMatchObject({success:true,performed:true,effect:'read-only',agentVerified:false,text:''});
+  expect(read.question).toEqual({binding:questionBinding(f.receipt.executionRef),sequence:3,available:false,observation:null});
+  expect(service.questions.list(team.id).questions).toEqual([]);
+  expect(service.questions.submissionAvailable).toBe(false);
+  expect(f.records.get(started.ref.handle)).toEqual(journalBefore);
+  expect(f.calls.map(c=>c.kind)).toEqual(['launch','read','read','read']);
+  expect(JSON.stringify(read.question)).not.toContain('private-native-handle');
 });
 test('a known unrelated Workroom cannot read a member or reveal its external window',async()=>{
   const f=fixture(),started=await f.bridge.start(f.input);let reads=0;

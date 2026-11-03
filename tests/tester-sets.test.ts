@@ -82,7 +82,7 @@ test('cache admission remains bounded even if every row subscribes at once',asyn
 test('the third set (click sweep) reports configuration, baselines and the last run summary without reading the baseline itself',async()=>{
  const {root,save}=fixture();const read=()=>readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n));
  // Not configured: an explicit 「구성 전」, never a pass.
- let sweep=(await read()).clickSweep!;expect(sweep).toEqual({state:'none',engine:'absent',surfaces:[]});
+ let sweep=(await read()).clickSweep!;expect(sweep).toEqual({state:'none',engine:'absent',scopeVersion:2,surfaces:[]});
  save('.agentstoz/click-sweep.json',{schemaVersion:1,surfaces:[{id:'desktop',label:'데스크톱',command:['bun','private-harness.ts'],baseline:'tests/click-sweep/desktop.json'},{id:'web',url:'http://127.0.0.1:5173/'}]});
  mkdirSync(join(root,'tests/click-sweep'),{recursive:true});writeFileSync(join(root,'tests/click-sweep/desktop.json'),'x'.repeat(900_000)); // larger than any read budget: only its existence is checked
  mkdirSync(join(root,'scripts'));writeFileSync(join(root,'scripts/agentstoz-click-sweep.mjs'),'// engine');
@@ -91,8 +91,8 @@ test('the third set (click sweep) reports configuration, baselines and the last 
  const sets=await read();sweep=sets.clickSweep!;
  expect(sweep.state).toBe('configured');expect(sweep.engine).toBe('present');
  expect(sweep.surfaces).toEqual([
-  {id:'desktop',label:'데스크톱',kind:'command',baselinePresent:true,last:{at:'2026-11-01T02:00:00.000Z',passed:false,elements:476,clicked:441,failures:2,updated:false}},
-  {id:'web',label:'web',kind:'url',baselinePresent:false,last:null},
+  {id:'desktop',label:'데스크톱',kind:'command',target:'legacy',environment:'unknown',baselinePresent:true,last:{at:'2026-11-01T02:00:00.000Z',passed:false,elements:476,clicked:441,failures:2,updated:false,state:'failed',completed:false,legacy:true}},
+  {id:'web',label:'web',kind:'url',target:'web',environment:'browser',baselinePresent:false,last:null},
  ]);
  expect(JSON.stringify(sets)).not.toContain('private-harness');
  const revision=sets.revision;
@@ -100,5 +100,45 @@ test('the third set (click sweep) reports configuration, baselines and the last 
  expect((await read()).revision).not.toBe(revision); // a new run refreshes cached rows
  for(const bad of [{schemaVersion:1,surfaces:[]},{schemaVersion:1,surfaces:[{id:'Bad Id',url:'x'}]},{schemaVersion:1,surfaces:[{id:'a'}]},{schemaVersion:1,surfaces:[{id:'a',url:'x',baseline:'../out.json'}]}]){
   save('.agentstoz/click-sweep.json',bad);const invalid=(await read()).clickSweep!;expect(invalid.state).toBe('invalid');expect(invalid.surfaces).toEqual([]);expect(invalid.problem).toBeTruthy();
+ }
+});
+
+test('desktop rows read only their target/environment/platform result while retaining old web evidence',async()=>{
+ const {root,save}=fixture();const read=()=>readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n));
+ for(const directory of ['app','web','desktop/fixture/darwin/app'])mkdirSync(join(root,'.agentstoz/maintainer/click-sweep',directory),{recursive:true});
+ const surface={id:'app',target:'desktop',environment:'fixture',platform:'darwin',command:['private-owned-driver']};
+ save('.agentstoz/click-sweep.json',{schemaVersion:2,surfaces:[surface,{id:'web',target:'web',url:'http://127.0.0.1:1/'}]});
+ save('.agentstoz/maintainer/click-sweep/app/summary.json',{schemaVersion:1,at:'2026-11-03T00:00:00Z',passed:true,elements:99,clicked:99,failures:0});
+ save('.agentstoz/maintainer/click-sweep/web/summary.json',{schemaVersion:1,at:'2026-11-03T00:00:00Z',passed:true,elements:9,clicked:9,failures:0});
+ let rows=(await read()).clickSweep!.surfaces;expect(rows[0]?.last).toBeNull();expect(rows[1]?.last).toMatchObject({passed:true,legacy:true});
+ const evidence='.agentstoz/maintainer/click-sweep/desktop/fixture/darwin/app/summary.json';
+ const summary={schemaVersion:2,at:'2026-11-03T00:00:00Z',surface:'app',target:'desktop',environment:'fixture',platform:'darwin',baselinePath:'.agentstoz/click-sweep/desktop/fixture/darwin/app.json',passed:true,state:'passed',completed:true,updated:false,elements:2,clicked:2,failures:0};
+ save(evidence,summary);rows=(await read()).clickSweep!.surfaces;expect(rows[0]).toMatchObject({target:'desktop',environment:'fixture',platform:'darwin',last:{passed:true,completed:true}});
+ expect(JSON.stringify(rows)).not.toContain('private-owned-driver');
+ for(const patch of [{target:'web'},{environment:'native'},{platform:'win32'},{surface:'other'},{baselinePath:'tests/web.json'}]){save(evidence,{...summary,...patch});expect((await read()).clickSweep!.surfaces[0]?.last).toBeNull();}
+ for(const bad of [{...surface,url:'http://127.0.0.1:1/'},{...surface,command:[]},{...surface,environment:undefined}]){save('.agentstoz/click-sweep.json',{schemaVersion:2,surfaces:[bad]});expect((await read()).clickSweep!.state).toBe('invalid');}
+});
+
+test('reader rejects explicit bad baseline values instead of advertising a default path',async()=>{
+ const {root,save}=fixture();
+ for(const schemaVersion of [1,2])for(const baseline of ['',0,false,null,[],{}]){
+  save('.agentstoz/click-sweep.json',{schemaVersion,surfaces:[{id:'web',target:'web',url:'http://127.0.0.1:1/',baseline}]});
+  expect((await readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n))).clickSweep!.state).toBe('invalid');
+ }
+});
+
+test('desktop completion summaries need exact flags, nonzero bounded counts and consistent state',async()=>{
+ const {root,save}=fixture();const read=()=>readProjectTesterSets(root,(v,n)=>String(v??'').slice(0,n));
+ mkdirSync(join(root,'.agentstoz/maintainer/click-sweep/desktop/native/darwin/app'),{recursive:true});
+ save('.agentstoz/click-sweep.json',{schemaVersion:2,surfaces:[{id:'app',target:'desktop',environment:'native',platform:'darwin',command:['project-owned']}]});
+ const file='.agentstoz/maintainer/click-sweep/desktop/native/darwin/app/summary.json';
+ const summary={schemaVersion:2,at:'2026-11-03T00:00:00Z',surface:'app',target:'desktop',environment:'native',platform:'darwin',baselinePath:'.agentstoz/click-sweep/desktop/native/darwin/app.json',passed:true,state:'passed',completed:true,updated:false,elements:2,clicked:2,failures:0};
+ for(const delta of [{elements:0},{elements:-1},{clicked:0},{clicked:undefined},{elements:undefined},{elements:1_000_001},{elements:true},{completed:'true'},{passed:1},{updated:0},{state:'failed'},{failures:1},{state:'failed',passed:false,failures:0}]){
+  save(file,{...summary,...delta});const last=(await read()).clickSweep!.surfaces[0]?.last;
+  expect(last).toMatchObject({state:'unverified',passed:false,completed:false,updated:false,elements:0,clicked:0,failures:0});
+ }
+ for(const delta of [{},{state:'failed',passed:false,failures:1},{state:'unavailable',passed:false,completed:false,elements:0,clicked:0}]){
+  const value={...summary,...delta};save(file,value);
+  expect((await read()).clickSweep!.surfaces[0]?.last).toMatchObject({state:value.state,passed:value.passed,completed:value.completed,elements:value.elements,clicked:value.clicked,failures:value.failures,updated:value.updated});
  }
 });

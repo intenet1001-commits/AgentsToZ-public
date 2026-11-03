@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {chromium,webkit} from 'playwright';
-const origin=process.argv[2];
+const origin=process.argv[2],entryOnly=process.argv.includes('--entry-only');
 const DEV1='3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a',DEV2='7c1f2e3d-4b5a-4968-8776-5a4b3c2d1e0f',DEV3='5e6f7a8b-1c2d-4e3f-8a9b-0c1d2e3f4a5b';
 if(!origin||new URL(origin).hostname!=='127.0.0.1'||new URL(origin).port==='3001')throw Error('Owned fixture origin required');
 const module=await fetch(origin+'/src/ComputerUsePanel.tsx').then(r=>r.text()),main=await fetch(origin+'/src/main.tsx').then(r=>r.text());
@@ -12,17 +12,20 @@ const html=`<!doctype html><meta charset="utf-8"><meta name="viewport" content="
 import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;
 import React from ${JSON.stringify(react)};import ReactDOM from ${JSON.stringify(dom)};import '/src/index.css';
 const{ComputerUsePanel}=await import('/src/ComputerUsePanel.tsx');const{WorkspaceTools}=await import('/src/components/WorkspaceTools.tsx');const kind=new URLSearchParams(location.search).get('kind');
+window.fixtureClockOffset=0;window.fixtureFailStatus=false;window.fixtureHangStatus=false;const fixtureRealNow=Date.now.bind(Date);Date.now=()=>fixtureRealNow()+window.fixtureClockOffset;
 const target={bundleId:'com.example.document',teamId:'A1B2C3D4E5',codeHash:'a'.repeat(40),pid:123,processStart:'12345',windowId:11};
 const app={bundleId:'com.example.orca',teamId:'A1B2C3D4E5',codeHash:'b'.repeat(40),pid:321,processStart:'54321'};
-const scopeNative={success:true,scopeProtocolVersion:2,accessibility:true,screenRecording:kind!=='scope-permissions',secureInput:false,operations:['scope-observe','scope-capture','scope-click','scope-type-text','scope-key','scope-scroll','scope-drag','scope-focus-app']};
+const scopeNative={success:true,scopeProtocolVersion:2,standing:null,accessibility:true,screenRecording:kind!=='scope-permissions',secureInput:false,operations:['scope-observe','scope-capture','scope-click','scope-type-text','scope-key','scope-scroll','scope-drag','scope-focus-app']};
 let scoped=kind.startsWith('scope')?{native:scopeNative,grants:[],pending:[],recovery:kind==='scope-recovery'?[{id:'scope_recovery1',scopeKind:'application',bundleId:app.bundleId,operation:'scope-click'}]:[]}:null;
 window.fixtureCalls=[];let access={enabled:false};let pending=[],grants=[],recovery=kind==='recovery'?[{id:'recovery1',bundleId:target.bundleId,operation:'set-value'}]:[];
 // Another Mac's AI on this Mac (receiving) and this Mac's AI on another Mac (outgoing), as the management status carries them.
 const DEV1='3a9d0c1e-5b7f-4e2a-9c3d-1f2e3d4c5b6a',DEV2='7c1f2e3d-4b5a-4968-8776-5a4b3c2d1e0f',DEV3='5e6f7a8b-1c2d-4e3f-8a9b-0c1d2e3f4a5b';
-let remote=['scope-remote','scope-outgoing-late','scope-remote-unreadable'].includes(kind)?{accepting:true,allowRemote:kind!=='scope-remote-unreadable',blockedDevices:[],blockedConnections:[],noticeShown:false,profileReady:true,...(kind==='scope-remote-unreadable'?{settingsUnreadable:true}:{})}:null;
+let remote=['scope-remote','scope-outgoing-late','scope-remote-unreadable'].includes(kind)?{accepting:true,allowRemote:kind!=='scope-remote-unreadable',blockedDevices:[],blockedConnections:[],noticeShown:false,profileReady:true,nativeAuthorized:true,...(kind==='scope-remote-unreadable'?{settingsUnreadable:true}:{})}:null;
 let remoteConnections=kind==='scope-remote'?[{id:'rcu_one',code:'11111111-0000-4000-8000-000000000001',label:'원격 1호 (3a9d)',scope:'remote-connection',expiresAt:Date.now()+75000,remote:{deviceId:DEV1,deviceName:'1호',deviceCode:'3a9d',connection:'a'.repeat(32)}},{id:'rcu_two',code:'22222222-0000-4000-8000-000000000002',label:'원격 2호 (7c1f)',scope:'remote-connection',expiresAt:Date.now()+75000,remote:{deviceId:DEV2,deviceName:'2호',deviceCode:'7c1f',connection:'b'.repeat(32)}}]:[];
 let outgoing=kind==='scope-remote'?[{deviceId:DEV3,deviceName:'3호',connection:'cccccccc',client:'codex-mcp-client',since:Date.now()-60000,lastCallAt:Date.now()-5000,active:true}]:[];
 if(kind==='scope-remote'){access={enabled:true,scope:{kind:'desktop'},standing:{since:Date.now()-3600000}};scoped.grants=[{id:'scope_remote1',label:'원격 1호 (3a9d) / 연결 11111111 · 전체 Mac',scope:{kind:'desktop'},caller:{sessionId:'rcu_one',lane:'remote'},halted:false,owner:'agent'}];}
+if(kind.startsWith('scope-entry')){access={enabled:true,scope:{kind:'desktop'},...(kind!=='scope-entry-standing'?{standing:{since:Date.now()-3600000}}:{})};scopeNative.standing=access.standing??null;remote={accepting:kind!=='scope-entry-native',allowRemote:true,blockedDevices:[],blockedConnections:[],noticeShown:true,profileReady:kind!=='scope-entry-profile',nativeAuthorized:kind!=='scope-entry-native',...(kind==='scope-entry-review'?{receptionReview:{state:'pending'}}:{})};}
+if(kind==='scope-remote')scopeNative.standing=access.standing;
 window.fixtureStartOutgoing=()=>{outgoing=[{deviceId:DEV3,deviceName:'3호',connection:'cccccccc',client:'codex-mcp-client',since:Date.now(),lastCallAt:Date.now(),active:true}];};
 const remoteSet=body=>{const ends=gone=>{remoteConnections=remoteConnections.filter(c=>!gone(c));scoped.grants=scoped.grants.filter(g=>!String(g.caller?.sessionId).startsWith('rcu_')||remoteConnections.some(c=>c.id===g.caller.sessionId));};
  if(body.allowRemote===true||body.unblock)throw Error('This fixture refuses enabling receive and unblocking until Control authentication is available');
@@ -30,7 +33,7 @@ const remoteSet=body=>{const ends=gone=>{remoteConnections=remoteConnections.fil
  if(body.noticeShown===true)remote={...remote,noticeShown:true};
  const b=body.block;if(b&&b.connection){remote={...remote,blockedConnections:[...remote.blockedConnections,{deviceId:b.deviceId,instance:b.connection,until:Date.now()+b.minutes*60000}]};ends(c=>c.remote.deviceId===b.deviceId&&c.remote.connection===b.connection);}
  else if(b){remote={...remote,blockedDevices:[...remote.blockedDevices,{deviceId:b.deviceId,name:b.name,since:Date.now()}],blockedConnections:remote.blockedConnections.filter(x=>x.deviceId!==b.deviceId)};ends(c=>c.remote.deviceId===b.deviceId);}};
-const request=async body=>{window.fixtureCalls.push(body);if(body.operation==='scope-remote-set'&&remote)remoteSet(body);if(body.operation==='scope-remote-outgoing-close')outgoing=outgoing.filter(s=>s.deviceId!==body.deviceId);if(body.operation==='scope-access-set'){access=body.enabled?{enabled:true,scope:body.scope}:{enabled:false};if(!body.enabled&&scoped){scoped.grants=[];scoped.pending=[];}}if(body.operation==='scope-request-approval')scoped.pending=[{approvalId:'scope_p1',connectionId:body.connectionId,label:body.label,scope:body.scope,expiresAt:Date.now()+120000}];if(body.operation==='scope-revoke')scoped.grants=[];if(body.operation==='scope-review-recovery')scoped.recovery=[];if(body.operation==='request-approval')pending=[{approvalId:'p1',connectionId:body.connectionId,label:body.label,target,expiresAt:Date.now()+120000}];if(body.operation==='revoke')grants=[];if(body.operation==='review-recovery')recovery=[];return {success:true,restartRequired:kind==='disconnected'||kind==='retired-ready',native:kind==='disconnected'?{success:false,code:'helper-unavailable'}:kind==='unsupported'?{success:false,code:'signed-main-required'}:{success:true,accessibility:true,secureInput:false},connections:[{id:'connection-one',code:'00000000-0000-4000-8000-000000000001',label:'codex'},{id:'connection-two',code:'00000000-0000-4000-8000-000000000002',label:'00000000-0000-4000-8000-000000000001'},...remoteConnections],pending,grants,recovery,access,...(scoped?{scoped}: {}),...(remote?{remote,outgoing}:{})};};
+const request=async body=>{window.fixtureCalls.push(body);if(['status','scope-status'].includes(body.operation)){if(window.fixtureFailStatus)throw Error('상태 조회 실패 대역');if(window.fixtureHangStatus)await new Promise(()=>{});}if(body.operation==='scope-remote-set'&&remote)remoteSet(body);if(body.operation==='scope-remote-outgoing-close')outgoing=outgoing.filter(s=>s.deviceId!==body.deviceId);if(body.operation==='scope-access-set'){access=body.enabled?{enabled:true,scope:body.scope}:{enabled:false};if(!body.enabled&&scoped){scoped.grants=[];scoped.pending=[];scoped.native.standing=null;}}if(body.operation==='scope-request-approval')scoped.pending=[{approvalId:'scope_p1',connectionId:body.connectionId,label:body.label,scope:body.scope,expiresAt:Date.now()+120000}];if(body.operation==='scope-revoke')scoped.grants=[];if(body.operation==='scope-review-recovery')scoped.recovery=[];if(body.operation==='request-approval')pending=[{approvalId:'p1',connectionId:body.connectionId,label:body.label,target,expiresAt:Date.now()+120000}];if(body.operation==='revoke')grants=[];if(body.operation==='review-recovery')recovery=[];return {success:true,restartRequired:kind==='disconnected'||kind==='retired-ready',native:kind==='disconnected'?{success:false,code:'helper-unavailable'}:kind==='unsupported'?{success:false,code:'signed-main-required'}:{success:true,accessibility:true,secureInput:false},connections:[{id:'connection-one',code:'00000000-0000-4000-8000-000000000001',label:'codex'},{id:'connection-two',code:'00000000-0000-4000-8000-000000000002',label:'00000000-0000-4000-8000-000000000001'},...remoteConnections],pending,grants,recovery,access,...(scoped?{scoped}: {}),...(remote?{remote,outgoing}:{})};};
 window.fixtureAiAsks=()=>{scoped.pending=[{approvalId:'scope_p1',connectionId:'connection-one',label:'연결 00000000 / codex · Orca · 전체 Mac',scope:access.scope,expiresAt:Date.now()+120000}];};
 window.fixtureExpireSoon=()=>{const at=Date.now()+1500;pending=pending.map(p=>({...p,expiresAt:at}));if(scoped)scoped.pending=scoped.pending.map(p=>({...p,expiresAt:at}));};
 window.fixtureApproved=()=>{pending=[];grants=[{id:'grant1',label:'fixture edit',target,halted:false}];};
@@ -38,7 +41,7 @@ window.fixtureScopeApproved=()=>{const p=scoped.pending[0];scoped.pending=[];sco
 window.fixtureReviewRecovered=false;const native=async op=>{window.fixtureCalls.push({native:op});if(kind==='scope-delayed-catalog'&&op==='catalog')await new Promise(resolve=>{window.fixtureReleaseCatalog=resolve});if(kind==='review-unconfirmed'&&op==='review'&&!window.fixtureReviewRecovered)return {success:false,code:'review-visibility-unconfirmed'};if(kind==='review-legacy'&&op==='review')return {success:true,opened:true};return kind==='unsupported'?{success:false,code:'signed-main-required'}:{success:true,...(op==='scope-catalog'?{applications:[{name:'Orca Test',application:app}]}:op==='catalog'?{windows:[{...target,appName:'Fixture Documents',title:'Owned test document'}]}:{opened:true,visibilityConfirmed:true})};};
 function App(){const[open,setOpen]=React.useState(false),opener=React.useRef(null);return React.createElement(React.Fragment,null,React.createElement(WorkspaceTools,{label:'도구 및 설정'},React.createElement('button',{id:'opener',ref:opener,onClick:()=>setOpen(true)},'Open computer use')),open&&React.createElement(React.StrictMode,null,React.createElement(ComputerUsePanel,{onClose:()=>setOpen(false),request,native,returnFocusTo:opener.current})));}
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));</script>`;
-const evidence=process.env.COMPUTER_USE_UI_OUT??'/tmp/agentstoz-computer-use-panel-20261027';mkdirSync(evidence,{recursive:true});
+const evidence=process.env.COMPUTER_USE_UI_OUT??'.agentstoz/maintainer/manual/computer-use-entry-20261103/ui';mkdirSync(evidence,{recursive:true});
 for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
  const browser=await engine.launch({headless:true});
  try{for(const width of [1100,390]){
@@ -46,8 +49,40 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin!==origin)return route.abort();if(url.pathname.startsWith('/api/'))throw Error('fixture must not reach an API');return route.continue();});
   await page.route('**/__computer_use_fixture__*',route=>route.fulfill({status:200,contentType:'text/html',body:html}));
-  const load=async kind=>{await page.goto(origin+'/__computer_use_fixture__?kind='+kind);await page.locator('.workspace-tools > summary').click();await page.locator('#opener').click();await page.getByRole('button',{name:'상태 다시 확인'}).waitFor();};
+  // Existing helper/approval targets use exact names or their existing region, separate from next-step cards.
+  const load=async kind=>{await page.goto(origin+'/__computer_use_fixture__?kind='+kind);await page.locator('.workspace-tools > summary').click();await page.locator('#opener').click();await page.getByRole('button',{name:'상태 다시 확인',exact:true}).waitFor();};
   const dialog=page.getByRole('dialog');
+  // Next-step controls are display/navigation only, with deterministic status failure and software clock expiry.
+  await load('scope-entry-ready');await page.getByTestId('computer-use-entry-remote').getByText('받을 준비됨',{exact:true}).waitFor();
+  await page.screenshot({path:evidence+'/'+name+'-'+width+'-entry-ready.png',fullPage:true});
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-access-set'||c.operation==='scope-remote-set'||c.native==='review'||c.native==='open')),false,'opening the overview never turns on permission or opens approval');
+  await page.getByTestId('computer-use-entry-standing').getByRole('button').click();
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.filter(c=>c.native==='open').length),1,'standing next step opens Control once without enabling standing');
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-access-set'||c.operation==='scope-remote-set')),false);
+  await page.getByTestId('computer-use-entry-registration').getByRole('button').click();
+  await page.getByTestId('computer-use-registration-guide').waitFor();
+  assert.equal(await page.getByTestId('computer-use-entry-registration').getByText('등록 창에서 확인',{exact:true}).count(),1,'community membership is not inferred as feature enrollment');
+  for(const kind of ['scope-entry-standing','scope-entry-profile','scope-entry-native']){
+    await load(kind);await page.getByTestId('computer-use-entry-remote').getByText('켜짐 · 받을 준비 필요',{exact:true}).waitFor();
+    assert.equal(await page.getByTestId('computer-use-entry-remote').getByText('받을 준비됨',{exact:true}).count(),0,kind+' never advertises receiving readiness');
+    if(kind==='scope-entry-standing')await page.screenshot({path:evidence+'/'+name+'-'+width+'-entry-settings-only.png',fullPage:true});
+    assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-access-set'||c.operation==='scope-remote-set'||c.native==='review'||c.native==='open')),false,kind+' does not repair consent automatically');
+  }
+  await load('scope-entry-review');await page.getByTestId('computer-use-entry-remote').getByText('승인 대기',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.native==='review')),false,'pending review waits for a deliberate person action');
+  await load('scope-entry-ready');await page.getByTestId('computer-use-entry-remote').getByText('받을 준비됨',{exact:true}).waitFor();
+  await page.evaluate(()=>{window.fixtureFailStatus=true;});await page.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
+  await page.getByTestId('computer-use-entry-remote').getByText('현재 상태 확인 필요',{exact:true}).waitFor();
+  assert.equal(await page.getByText('도우미 연결됨',{exact:true}).count(),0,'failed status cannot reuse the last green helper status');
+  assert.equal(await page.getByRole('switch',{name:'컴퓨터 유즈',exact:true}).count(),0,'failed status does not show a cached enabled switch');
+  await page.screenshot({path:evidence+'/'+name+'-'+width+'-entry-failed.png',fullPage:true});
+  await load('scope-entry-ready');await page.getByTestId('computer-use-entry-remote').getByText('받을 준비됨',{exact:true}).waitFor();
+  await page.evaluate(()=>{window.fixtureHangStatus=true;window.fixtureClockOffset=16000;});
+  await page.getByTestId('computer-use-entry-remote').getByText('현재 상태 확인 필요',{exact:true}).waitFor();
+  assert.equal(await page.getByText('도우미 연결됨',{exact:true}).count(),0,'a hung refresh expires positive state by the software clock');
+  assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-access-set'||c.operation==='scope-remote-set'||c.native==='review')),false,'failure or age never triggers a permission mutation');
+  await page.screenshot({path:evidence+'/'+name+'-'+width+'-entry-stale.png',fullPage:true});
+  if(entryOnly){assert.deepEqual(errors,[]);await page.close();console.log(name+' '+width+': entry readiness/next-step/failure/stale PASS');continue;}
   await load('scope-ready');const toggle=page.getByRole('switch',{name:'컴퓨터 유즈',exact:true});await toggle.waitFor();
   assert.equal(await page.getByText('승인은 끌 때까지 유지됩니다(앱·Control을 다시 실행하거나 그 AI 연결이 끝나도 끝납니다)',{exact:false}).count(),1,'a switched-on approval lasts until switched off');
   assert.equal(await page.getByRole('dialog').evaluate(e=>e.textContent.includes('한 번 승인은 최대 10분')),false,'the switch names no 10-minute limit');
@@ -90,8 +125,8 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   const request=await page.evaluate(()=>window.fixtureCalls.find(c=>c.operation==='request-approval'));
   assert.equal(request.connectionId,'connection-two');assert.equal(request.label,'00000000-0000-4000-8000-000000000001 · Fixture Documents · Owned test document','label = connection name and the chosen window');assert.deepEqual(Object.keys(request.target).sort(),['bundleId','teamId','codeHash','pid','processStart','windowId'].sort());
   assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0);
-  await page.getByRole('button',{name:'승인 검토 열기'}).click();assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.native==='review')),true);assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0,'opening helper never approves');
-  await page.evaluate(()=>window.fixtureApproved());await page.getByRole('button',{name:'상태 다시 확인'}).click();await page.getByRole('button',{name:'허용 종료'}).waitFor();
+  await page.getByRole('button',{name:'승인 검토 열기',exact:true}).click();assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.native==='review')),true);assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0,'opening helper never approves');
+  await page.evaluate(()=>window.fixtureApproved());await page.getByRole('button',{name:'상태 다시 확인',exact:true}).click();await page.getByRole('button',{name:'허용 종료'}).waitFor();
   assert.equal(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+1),true,'real connection code keeps the form inside the narrow dialog');
   const close=page.getByRole('button',{name:'닫기',exact:true});
   const bounds=await close.boundingBox();assert(bounds&&bounds.width>=44&&bounds.height>=44&&bounds.y>=0&&bounds.y+bounds.height<=850,'close stays visible above the scrolling form');
@@ -100,11 +135,11 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   await page.getByRole('button',{name:'허용 종료'}).click();await page.waitForFunction(()=>window.fixtureCalls.some(c=>c.operation==='revoke'&&c.id==='grant1'));
   await dialog.dispatchEvent('keydown',{key:'Escape',isComposing:true,keyCode:229,bubbles:true});assert.equal(await dialog.count(),1,'IME cancellation keeps panel');
   await page.keyboard.press('Escape');assert.equal(await dialog.count(),0);assert.equal(await page.locator('#opener').evaluate(e=>e===document.activeElement),true,'the tools disclosure stays open and the visible opener regains focus');
-  await page.locator('#opener').click();await page.getByRole('button',{name:'상태 다시 확인'}).waitFor();
+  await page.locator('#opener').click();await page.getByRole('button',{name:'상태 다시 확인',exact:true}).waitFor();
   await page.locator('.workspace-tools').evaluate(e=>{e.open=false});
   await page.keyboard.press('Escape');assert.equal(await dialog.count(),0);assert.equal(await page.locator('.workspace-tools > summary').evaluate(e=>e===document.activeElement),true,'a disclosure closed while the modal was open restores focus to its visible summary');
   await load('review-unconfirmed');await page.getByLabel('AI 연결',{exact:true}).selectOption('connection-one');await page.getByLabel('맡길 창',{exact:true}).selectOption('123/12345/11');await allow.click();
-  await page.getByRole('button',{name:'승인 검토 열기'}).click();const visibilityAlert=page.getByRole('alert').filter({hasText:'승인 검토 창이 현재 화면에 보이는지 확인하지 못했습니다.'});await visibilityAlert.waitFor();
+  await page.getByRole('button',{name:'승인 검토 열기',exact:true}).click();const visibilityAlert=page.getByRole('alert').filter({hasText:'승인 검토 창이 현재 화면에 보이는지 확인하지 못했습니다.'});await visibilityAlert.waitFor();
   assert.equal(await page.getByRole('region',{name:'승인 대기',exact:true}).getByRole('alert').count(),1,'the review problem shows beside its button, not above a scrolled form');
   await page.waitForTimeout(2300);assert.equal(await visibilityAlert.isVisible(),true,'automatic status refresh must not erase visibility warning');assert.equal(await page.getByRole('region',{name:'승인 대기',exact:true}).count(),1);assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0,'unconfirmed visibility never approves');
   await page.setViewportSize({width,height:520});
@@ -116,14 +151,14 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0,'opening Control through the fallback never approves');
   assert.equal(await page.evaluate(()=>window.fixtureCalls.filter(c=>c.operation==='request-approval').length),1,'opening Control does not create another approval request');
   await page.setViewportSize({width,height:850});
-  await page.evaluate(()=>{window.fixtureReviewRecovered=true});await page.getByRole('button',{name:'승인 검토 열기'}).click();await page.getByRole('region',{name:'승인 대기',exact:true}).getByRole('alert').waitFor({state:'detached'});assert.equal(await page.getByRole('region',{name:'승인 대기',exact:true}).count(),1,'opening review keeps approval pending');
+  await page.evaluate(()=>{window.fixtureReviewRecovered=true});await page.getByRole('button',{name:'승인 검토 열기',exact:true}).click();await page.getByRole('region',{name:'승인 대기',exact:true}).getByRole('alert').waitFor({state:'detached'});assert.equal(await page.getByRole('region',{name:'승인 대기',exact:true}).count(),1,'opening review keeps approval pending');
   await page.evaluate(()=>window.fixtureExpireSoon());await page.getByRole('region',{name:'승인 대기',exact:true}).waitFor({state:'detached',timeout:8000});
-  assert.equal(await page.getByRole('button',{name:'승인 검토 열기'}).count(),0,'a request past its expiry leaves with its review button, even while status still lists it');
-  await load('review-legacy');await page.getByLabel('AI 연결',{exact:true}).selectOption('connection-one');await page.getByLabel('맡길 창',{exact:true}).selectOption('123/12345/11');await allow.click();await page.getByRole('button',{name:'승인 검토 열기'}).click();
+  assert.equal(await page.getByRole('button',{name:'승인 검토 열기',exact:true}).count(),0,'a request past its expiry leaves with its review button, even while status still lists it');
+  await load('review-legacy');await page.getByLabel('AI 연결',{exact:true}).selectOption('connection-one');await page.getByLabel('맡길 창',{exact:true}).selectOption('123/12345/11');await allow.click();await page.getByRole('button',{name:'승인 검토 열기',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'승인 검토 창이 현재 화면에 보이는지 확인하지 못했습니다.'}).waitFor();assert.equal(await page.getByRole('region',{name:'승인 대기',exact:true}).count(),1,'legacy opened:true is not visibility proof');assert.equal(await page.getByRole('button',{name:'허용 종료'}).count(),0,'legacy helper never approves');
   await load('unsupported');await page.getByText('컴퓨터 유즈를 지원하는 최신 Mac 앱으로 업데이트해 주세요.',{exact:true}).waitFor();assert.equal(await allow.isEnabled(),false);
   await load('disconnected');await page.getByText('제어 연결이 안전하게 종료됐습니다. 결과가 불명인 작업을 확인하고 진행 중인 작업을 저장한 뒤 AgentsToZ를 다시 실행해 주세요.',{exact:true}).waitFor();assert.equal(await allow.isEnabled(),false);
-  await load('retired-ready');await page.getByText('연결 다시 시작 필요',{exact:true}).waitFor();
+  await load('retired-ready');await page.getByRole('region',{name:'도우미 연결 상태',exact:true}).getByText('연결 다시 시작 필요',{exact:true}).waitFor();
   await page.getByLabel('AI 연결',{exact:true}).selectOption('connection-one');await page.getByLabel('맡길 창',{exact:true}).selectOption('123/12345/11');
   assert.equal(await allow.isEnabled(),false,'retired link stays disabled even with a previous ready helper status and complete form');
   await load('recovery');const review=page.getByRole('button',{name:'검토 완료'});assert.equal(await review.isEnabled(),false);await page.getByRole('checkbox').check();await review.click();await page.waitForFunction(()=>window.fixtureCalls.some(c=>c.operation==='review-recovery'&&c.confirmed===true));
@@ -148,7 +183,7 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   assert.equal(await page.evaluate(()=>window.fixtureCalls.some(c=>c.operation==='scope-request-approval'||c.operation==='scope-access-set')),false,'enabling permissions requests no control');
   await load('scope-recovery');const scopeReview=page.getByRole('button',{name:'범위 작업 검토 완료',exact:true});assert.equal(await scopeReview.isEnabled(),false);await page.getByRole('checkbox').check();await scopeReview.click();await page.waitForFunction(()=>window.fixtureCalls.some(c=>c.operation==='scope-review-recovery'&&c.id==='scope_recovery1'&&c.confirmed===true));
   await load('scope-ready');await page.getByRole('switch',{name:'컴퓨터 유즈',exact:true}).waitFor();
-  await page.getByRole('button',{name:'상태 다시 확인'}).click();
+  await page.getByRole('button',{name:'상태 다시 확인',exact:true}).click();
   await page.waitForFunction(()=>window.fixtureCalls.filter(c=>c.operation==='status').length>=2);
   assert.deepEqual(await page.evaluate(()=>window.fixtureCalls.filter(c=>c.native==='catalog'||c.native==='scope-catalog')),[], 'desktop refresh performs no target enumeration');
   await page.getByRole('radio',{name:'한 창',exact:true}).check();
@@ -182,7 +217,7 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
    await page.waitForFunction(n=>window.fixtureCalls.filter(c=>typeof c.operation==='string'&&c.operation.startsWith('scope-remote')).length>n,before);
    const calls=await remoteCalls();assert.equal(calls.length,before+1,label+': one request');assert.deepEqual(calls.at(-1),expected,label);};
   assert.deepEqual(await remoteCalls(),[],'opening the panel changes none of the person\'s remote switches');
-  assert.equal(await remoteNotice.getByRole('heading').textContent(),'이제 다른 Mac의 AI도 받습니다');
+  assert.equal(await remoteNotice.getByRole('heading').textContent(),'다른 Mac의 AI 수신 준비를 확인했습니다');
   assert.match(await page.getByTestId('computer-use-standing').textContent(),/이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티 다른 Mac의 AI가 다시 묻지 않고 전체 Mac을 씁니다/,'the standing allowance names who it lets in');
   const remoteRows=page.getByTestId('computer-use-remote-row');assert.equal(await remoteRows.count(),2);
   assert.equal(await remoteRows.nth(0).locator('p').nth(0).textContent(),'원격 · 1호 (3a9d)');
@@ -224,7 +259,7 @@ for(const[name,engine]of[['chromium',chromium],['webkit',webkit]]){
   await load('scope-remote-unreadable');
   const unreadableSwitch=page.getByTestId('computer-use-remote-switch');await unreadableSwitch.waitFor();
   assert.equal(await unreadableSwitch.isDisabled(),true,'unreadable remote settings cannot be re-enabled');
-  assert.match(await page.getByTestId('computer-use-remote-state').textContent(),/설정 파일을 읽지 못해.*이 버전에서는 다시 켤 수 없습니다/);
+  assert.match(await page.getByTestId('computer-use-remote-state').textContent(),/수신 설정을 읽지 못했습니다/);
   assert.equal(await page.getByTestId('computer-use-remote-notice').count(),0,'unreadable settings cannot show a receive notice');
   await unreadableSwitch.evaluate(button=>button.click());
   assert.deepEqual(await remoteCalls(),[],'the unreadable state sends no remote setting mutation');

@@ -75,6 +75,10 @@ real evidence — `{"check": "<manifest check id>"}` or `{"argv": [...], "kind":
 label alone never passes. `personas list`, `personas run` (the verdict is only the tests' exit code) and
 `personas brief <id>` (a draft for exploratory testing; its findings are `exploratory/observed`, never
 PASS/FAIL — turn each confirmed defect into a deterministic test in that persona's `tests`).
+
+Read the click-sweep target/harness contract without running or installing anything:
+`python3 scripts/agentstoz-maintainer.py sweep contract --root . --json`.
+Web, native desktop and fixture results have separate scopes; an absent desktop harness is unconfigured, never a pass.
 <!-- AgentsToZ tester:end -->
 
 ## AgentsToZ scenarios

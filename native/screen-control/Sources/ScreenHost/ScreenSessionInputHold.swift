@@ -75,6 +75,7 @@ public final class ScreenSessionInputHold: Sendable {
 public struct ScreenMacHold: Equatable, Sendable {
     /// A person at this Mac took remote input back and has not handed it back.
     public private(set) var held = false
+    public private(set) var generation=UUID()
 
     public init() {}
 
@@ -83,13 +84,13 @@ public struct ScreenMacHold: Equatable, Sendable {
 
     /// 「직접 하기」 on the current session's hold.
     public mutating func pause(_ hold: ScreenSessionInputHold) {
-        hold.pause()
+        hold.pause();generation=UUID()
         held = true
     }
 
     /// 「보기만」: the current session only shows the picture, and the next one starts paused.
     public mutating func lowerToView(_ hold: ScreenSessionInputHold) {
-        hold.lowerToView()
+        hold.lowerToView();generation=UUID()
         held = true
     }
 
@@ -97,12 +98,15 @@ public struct ScreenMacHold: Equatable, Sendable {
     @discardableResult
     public mutating func resume(_ hold: ScreenSessionInputHold) -> Bool {
         guard hold.resume() else { return false }
-        held = false
+        held = false;generation=UUID()
         return true
     }
 
     /// Screen control was turned on again at this Mac, after Touch ID or the password.
-    public mutating func reset() { held = false }
+    public mutating func reset() { held = false;generation=UUID() }
+
+    /// A protected negative survives sessions and process restarts. This never lifts a session's view-only mode.
+    mutating func restoreHeld() { held=true;generation=UUID() }
 }
 
 extension ScreenSessionAccess {

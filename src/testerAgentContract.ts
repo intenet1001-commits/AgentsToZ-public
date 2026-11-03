@@ -67,11 +67,11 @@ export interface TesterSets {
   clickSweep?:TesterClickSweepSet;
 }
 export interface TesterClickSweepSet {
-  state:'none'|'configured'|'invalid';problem?:string;engine:'present'|'absent';
-  surfaces:{id:string;label:string;kind:'command'|'url';baselinePresent:boolean;last:{at:string;passed:boolean;elements:number;clicked:number;failures:number;updated:boolean}|null}[];
+  state:'none'|'configured'|'invalid';problem?:string;engine:'present'|'absent';scopeVersion?:2;
+  surfaces:{id:string;label:string;kind:'command'|'url';target?:'web'|'desktop'|'legacy';environment?:'browser'|'native'|'fixture'|'unknown';platform?:string;baselinePresent:boolean;last:{at:string;passed:boolean;elements:number;clicked:number;failures:number;updated:boolean;state?:'passed'|'failed'|'unavailable'|'unconfigured'|'unverified';completed?:boolean;legacy?:boolean}|null}[];
   /**
-   * 구성 전일 때만: 「켜기」가 쓸 이 Mac의 loopback 주소(등록된 포트에서 만든다). `null`은 등록된 포트가 없어 누를 화면을
-   * 정할 수 없다는 뜻이다(대상 아님). 칸이 없으면 옛 호스트다 — 그때는 버튼을 그리지 않는다.
+   * 구성 전일 때만: 웹 자동 설정이 쓸 loopback 주소(등록된 포트에서 만든다). `null`은 웹 주소가 없다는 뜻이다.
+   * 데스크톱 프로젝트 하네스는 포트 없이 별도로 구성할 수 있다. 칸이 없으면 옛 호스트다 — 그때는 버튼을 그리지 않는다.
    */
   enableUrl?:string|null;
   /** 이 앱이 시작한 기준선 만들기(`sweep run --update`)의 마지막 상태. 앱이 다시 시작되면 사라진다(결과는 summary.json에 남는다). */

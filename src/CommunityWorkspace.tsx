@@ -28,6 +28,7 @@ import type {CliAccountAgent} from './cliAccountProtocol';
 import {useAppLanguage} from './useAppLanguage';
 import type {WorkroomUseCatalog} from './workroomThreadProtocol';
 import {validateAppUseAction} from './appUseCatalog';
+import {CommunityDeviceRegistration} from './CommunityDeviceRegistration';
 
 export interface CommunityWorkspaceChannel {
  id:string;label:string;projectRevision?:string;projects():Promise<WorkroomMentionProject[]>;transport:WorkroomTransport;projectState?:ProjectStateRequester;
@@ -79,6 +80,7 @@ export function CommunityWorkspace({channels,visible=true,online=true,onOpenWork
  const choice=rows.find(p=>projectMentionKey(p)===target);
  return <section className="community-workspace" data-testid="community-workspace">
   <header className="community-heading"><div><span className="community-eyebrow">기기별 프로젝트 업무</span><h2>커뮤니티</h2><p>프로젝트에 업무를 맡기고, 질문과 결과를 한 스레드에서 이어가세요.</p></div><span className="community-channel-count"><Monitor size={15} aria-hidden="true"/>{channels.length}개 채널</span></header>
+  <CommunityDeviceRegistration visible={visible}/>
   <div className="community-layout">
    <aside className="community-sidebar">
     <div className="community-sidebar-heading"><Monitor size={14} aria-hidden="true"/>기기 채널</div>

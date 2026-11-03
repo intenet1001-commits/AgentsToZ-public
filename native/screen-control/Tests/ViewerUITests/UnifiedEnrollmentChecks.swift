@@ -5,6 +5,11 @@ import XCTest
 import ScreenControlCore
 @testable import AgentsToZViewer
 
+/// Pure in-memory fixture; presentation checks never read an installed account or Keychain item.
+final class EmptyUnifiedStoreBackend: ViewerTargetsBackend, @unchecked Sendable {
+    func read() throws -> Data? { nil }
+    func write(_ data: Data) throws { XCTFail("Rendering must not persist or create a device key") }
+}
 final class UnifiedEnrollmentChecks: XCTestCase {
     func testDependenciesFollowViewChoiceWithoutGrantingUnselectedFeatures() {
         var selection = ViewerFeatureSelection()
@@ -14,7 +19,7 @@ final class UnifiedEnrollmentChecks: XCTestCase {
         XCTAssertTrue(selection.capabilities.contains(.receiveView))
         XCTAssertFalse(selection.capabilities.contains(.teams))
         selection.selectAll()
-        XCTAssertEqual(selection.capabilities, CommunityCapability.allCases)
+        XCTAssertEqual(selection.capabilities, CommunityCapability.allCases.filter{$0 != .desktopTrust && $0 != .ownerDelegation})
         selection.set(.receiveView, selected: false)
         XCTAssertFalse(selection.capabilities.contains(.receiveControl))
     }
@@ -69,7 +74,7 @@ final class UnifiedEnrollmentChecks: XCTestCase {
     }
     @MainActor func testUnifiedSheetIsPresentationOnlyUntilActualOwnerApproval() throws {
         _ = NSApplication.shared
-        let account = ViewerCommunityAccount(), sheet = ViewerCommunitySheet(account: ViewerCommunityAccount())
+        let account = ViewerCommunityAccount(unifiedStore: ViewerUnifiedStore(backend: EmptyUnifiedStoreBackend())), sheet = ViewerCommunitySheet(account: ViewerCommunityAccount(unifiedStore: ViewerUnifiedStore(backend: EmptyUnifiedStoreBackend())))
         defer { sheet.close() }
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let views = descendants(try XCTUnwrap(sheet.window.contentView))
@@ -80,5 +85,33 @@ final class UnifiedEnrollmentChecks: XCTestCase {
         XCTAssertFalse(sheet.window.isVisible)
         XCTAssertNil(account.unified?.authorization)
     }
+    @MainActor func testStatusPollingPreservesFormObjectsTextAndComparisonUntilSemanticContextChanges() throws {
+        _ = NSApplication.shared
+        let body = ViewerCommunityStableBody()
+        XCTAssertTrue(body.beginUpdate(key: "same-plan-same-role-same-revision"))
+        let text = NSTextField(string: "아젠투지 3호 / 입력 중"), comparison = NSButton(checkboxWithTitle: "코드 확인", target: nil, action: nil)
+        comparison.state = .on; body.addArrangedSubview(text); body.addArrangedSubview(comparison)
+        for _ in 0..<10 { XCTAssertFalse(body.beginUpdate(key: "same-plan-same-role-same-revision")) }
+        XCTAssertTrue(body.arrangedSubviews.first === text); XCTAssertTrue(body.arrangedSubviews.last === comparison)
+        XCTAssertEqual(text.stringValue, "아젠투지 3호 / 입력 중"); XCTAssertEqual(comparison.state, .on)
+        XCTAssertTrue(body.beginUpdate(key: "new-role-new-management-digest")); XCTAssertTrue(body.arrangedSubviews.isEmpty)
+    }
+    @MainActor func testApprovalQueueAndRefreshPrecedeFeatureSelectionWithoutStartingAnySession() throws {
+        _ = NSApplication.shared
+        let account = ViewerCommunityAccount(unifiedStore: ViewerUnifiedStore(backend: EmptyUnifiedStoreBackend()))
+        let sheet = ViewerCommunitySheet(account: account); defer { sheet.close() }
+        let scroll = try XCTUnwrap(sheet.window.contentView as? NSScrollView)
+        scroll.layoutSubtreeIfNeeded()
+        func descendants(_ view:NSView)->[NSView] { [view]+view.subviews.flatMap(descendants) }
+        let views=descendants(try XCTUnwrap(scroll.documentView))
+        let queue=try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue=="관리 역할·승인 요청" })
+        let features=try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue=="이 기기에서 사용할 기능" })
+        let doc=try XCTUnwrap(scroll.documentView)
+        XCTAssertLessThan(queue.convert(queue.bounds,to:doc).minY,features.convert(features.bounds,to:doc).minY)
+        XCTAssertTrue(views.contains { ($0 as? PresentationButton)?.title=="등록 상태 새로 고침" })
+        XCTAssertFalse(sheet.window.isVisible);XCTAssertNil(account.unified?.authorization)
+        XCTAssertEqual(CommunityManagementChoice.allCases.first,.unchanged)
+    }
+
 }
 #endif

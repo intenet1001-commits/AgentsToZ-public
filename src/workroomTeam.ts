@@ -1,3 +1,5 @@
+import {TeamQuestionService} from './teamQuestionService';
+import {normalizeTeamQuestionAnswerRequest,normalizeTeamQuestionBinding,type TeamQuestionAnswerRequest,type TeamQuestionBinding,type TeamQuestionObservation,type TeamQuestionSnapshot,type TeamQuestionNotice} from './teamQuestionProtocol';
 /**
  * 팀 작전 (team operation): any Workroom AI leads, splits its plan, and runs each member — another AI, optionally
  * on a chosen model — in its own git worktree and branch, then reviews, merges and closes. The host owns only what
@@ -59,6 +61,9 @@ export interface TeamMemberInput {
  */
 export type WorkroomTeamMemberRequest = {op: 'member'; teamId: string; memberId: string} & (
   | {operation: 'read'; cursor?: string; limit: number}
+  | {operation:'question'}
+  | {operation:'answer';answer:TeamQuestionAnswerRequest}
+  | {operation:'answer-receipt';requestId:string;binding:TeamQuestionBinding}
   | {operation: 'send'; requestId: string; text: string}
   | {operation: 'reveal'; requestId: string}
   | {operation: 'keys'; requestId: string; keys: WorkroomKey[]}
@@ -74,7 +79,7 @@ export type WorkroomTeamRequest =
    * afterCursor: the `settledCursor` of the view the leader last saw — its own place in the settle events, which no other
    * caller's read or wait moves. Either, both or neither may be given.
    */
-  | {op: 'wait'; teamId: string; timeoutMs: number; until: 'any' | 'all'; afterSettled?: number; afterCursor?: string}
+  | {op: 'wait'; teamId: string; timeoutMs: number; until: 'any' | 'all'; afterSettled?: number; afterCursor?: string;afterQuestionCursor?:string}
   | {op: 'report'; teamId: string; memberId: string; status: 'done' | 'blocked'; summary: string; manual?: true}
   /**
    * The leader's own confirmation for a member on a surface the host cannot read: `started` says the user saw it
@@ -172,6 +177,8 @@ export interface TeamCloseOutcome {
 
 /** The machine side, injected so the rules are tested without Git, PTYs or the app. */
 export interface WorkroomTeamHost {
+  /** A host must supply real user-response provenance and a durable journal before answers are supported. */
+  questions?:TeamQuestionService;
   resolveProject(portId: string): Promise<{projectId: string; projectName: string; canonicalPath: string}>;
   /**
    * The repository's primary checkout (where member worktrees live) and the base checkout: the leader's own checkout when
@@ -295,14 +302,15 @@ export function parseWorkroomTeamRequest(input: unknown): WorkroomTeamRequest {
       if ((value.teamId === undefined) === (value.portId === undefined)) throw invalid('teamId 또는 portId 중 하나로 읽습니다.');
       return value.teamId !== undefined ? {op: 'read', teamId: id(value.teamId, 'teamId', TEAM_ID)} : {op: 'read', portId: id(value.portId, 'portId', /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)};
     case 'wait': {
-      exact(value, ['op', 'teamId', 'timeoutMs', 'until', 'afterSettled', 'afterCursor']);
+      exact(value, ['op', 'teamId', 'timeoutMs', 'until', 'afterSettled', 'afterCursor','afterQuestionCursor']);
       const timeoutMs = value.timeoutMs === undefined ? 45_000 : Number(value.timeoutMs);
       if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > TEAM_WAIT_MAX_MS) throw invalid(`timeoutMs는 1000–${TEAM_WAIT_MAX_MS}입니다.`);
       if (value.until !== undefined && value.until !== 'any' && value.until !== 'all') throw invalid("until은 'any' 또는 'all'입니다.");
       if (value.afterSettled !== undefined && (!Number.isInteger(value.afterSettled) || (value.afterSettled as number) < 0 || (value.afterSettled as number) > TEAM_MAX_MEMBERS)) throw invalid(`afterSettled는 0–${TEAM_MAX_MEMBERS}입니다.`);
       if (value.afterCursor !== undefined) id(value.afterCursor, 'afterCursor', SETTLED_CURSOR);
+      if(value.afterQuestionCursor!==undefined)id(value.afterQuestionCursor,'afterQuestionCursor',/^[0-9a-f]{64}$/);
       return {op: 'wait', teamId: id(value.teamId, 'teamId', TEAM_ID), timeoutMs, until: (value.until as 'any' | 'all' | undefined) ?? 'any',
-        ...(value.afterSettled !== undefined ? {afterSettled: value.afterSettled as number} : {}), ...(value.afterCursor !== undefined ? {afterCursor: value.afterCursor as string} : {})};
+        ...(value.afterSettled !== undefined ? {afterSettled: value.afterSettled as number} : {}), ...(value.afterCursor !== undefined ? {afterCursor: value.afterCursor as string} : {}),...(value.afterQuestionCursor!==undefined?{afterQuestionCursor:value.afterQuestionCursor as string}:{})};
     }
     case 'report':
       exact(value, ['op', 'teamId', 'memberId', 'status', 'summary', 'manual']);
@@ -333,13 +341,16 @@ export function parseWorkroomTeamRequest(input: unknown): WorkroomTeamRequest {
         exact(value, ['op', 'teamId', 'memberId', 'operation', 'requestId']);
         return {...base, operation: 'reveal', requestId: id(value.requestId, 'requestId', /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)};
       }
+      if(value.operation==='question'){exact(value,['op','teamId','memberId','operation']);return {...base,operation:'question'};}
+      if(value.operation==='answer'){exact(value,['op','teamId','memberId','operation','answer']);return {...base,operation:'answer',answer:normalizeTeamQuestionAnswerRequest(value.answer)};}
+      if(value.operation==='answer-receipt'){exact(value,['op','teamId','memberId','operation','requestId','binding']);return {...base,operation:'answer-receipt',requestId:id(value.requestId,'requestId',/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/),binding:normalizeTeamQuestionBinding(value.binding)};}
       if (value.operation === 'keys') {
         exact(value, ['op', 'teamId', 'memberId', 'operation', 'requestId', 'keys']);
         let keys: WorkroomKey[];
         try { keys = normalizeWorkroomKeys(value.keys); } catch (error) { throw invalid(error instanceof Error ? error.message : 'keys를 확인하세요.'); }
         return {...base, operation: 'keys', requestId: id(value.requestId, 'requestId', /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/), keys};
       }
-      throw invalid('operation은 read·send·reveal·keys 중 하나입니다.');
+      throw invalid('operation은 read·send·reveal·keys·question·answer·answer-receipt 중 하나입니다.');
     }
     case 'close':
       exact(value, ['op', 'teamId', 'deleteMergedBranches']);
@@ -499,6 +510,7 @@ export interface TeamView extends Omit<Team, 'members' | 'fingerprint'> {
    * never covers an event the view might not show: at worst the next wait answers once more.
    */
   settledCursor: string;
+  questions:TeamQuestionSnapshot[];questionCursor:string;questionRelay:{submissionSupported:boolean;code:'HOST_USER_ANSWER_REQUIRED'|'READY'};
 }
 const settledState = (member: TeamMember) =>
   member.state === 'reported' || member.state === 'blocked' || member.state === 'failed' || member.state === 'exited' || member.state === 'unknown' || member.state === 'closed';
@@ -530,7 +542,26 @@ export class WorkroomTeamService {
    * an event from each other there — only `afterCursor` is each caller's own.
    */
   #settles = new WeakMap<Team, {nonce: string; seq: number; seen: Map<string, string>; handed: Map<number, number>}>();
-  constructor(readonly host: WorkroomTeamHost, readonly store: WorkroomTeamStore, readonly now: () => number = Date.now, readonly pollMs = 1_000) {}
+  readonly questions:TeamQuestionService;
+  readonly #questionOwners=new Map<string,{team:Team;member:TeamMember;execution:TeamExecutionRef|undefined;binding:TeamQuestionBinding;sequence:number;available:boolean}>();
+  constructor(readonly host: WorkroomTeamHost, readonly store: WorkroomTeamStore, readonly now: () => number = Date.now, readonly pollMs = 1_000) {
+    this.questions=host.questions??new TeamQuestionService({now,current:b=>{const owner=this.#questionOwners.get(b.teamId+':'+b.memberId);return !!owner&&owner.available&&owner.team.state==='active'&&this.store.get(b.teamId)===owner.team&&owner.team.members.includes(owner.member)&&!['reported','closed','exited','failed'].includes(owner.member.state)&&owner.member.execution===owner.execution&&owner.binding.generation===b.generation&&owner.binding.executionId===b.executionId;}});
+    this.questions.subscribe(()=>{for(const wake of [...this.#waiters])wake();});
+  }
+  /** Called only with a fresh adapter observation. Unknown reads invalidate, never prove absence or accept an answer. */
+  recordQuestion(teamId:string,memberId:string,notice:TeamQuestionNotice|null):void {
+    for(const [id,owner] of this.#questionOwners)if(owner.team.state!=='active'||this.store.get(owner.team.id)!==owner.team||owner.member.execution!==owner.execution)this.#questionOwners.delete(id);
+    const key=teamId+':'+memberId,team=this.store.get(teamId),member=team?.members.find(m=>m.id===memberId);
+    if(!team||!member||team.state!=='active'){this.#questionOwners.delete(key);return;}
+    if(!notice)return;
+    const b=normalizeTeamQuestionBinding(notice.binding),execution=member.execution;
+    if(!Number.isSafeInteger(notice.sequence)||notice.sequence<1||typeof notice.available!=='boolean')throw new WorkroomTeamError('질문 관찰 순서가 올바르지 않습니다.','WORKROOM_TEAM_QUESTION_STALE',409);
+    if(b.teamId!==teamId||b.memberId!==memberId||execution?.kind!=='external'||execution.handle!==b.executionId)throw new WorkroomTeamError('질문과 현재 팀원 실행이 일치하지 않습니다.','WORKROOM_TEAM_QUESTION_STALE',409);
+    const prior=this.#questionOwners.get(key);
+    if(prior&&(prior.binding.generation===b.generation?notice.sequence<=prior.sequence:!notice.available))return;
+    this.#questionOwners.set(key,{team,member,execution,binding:b,sequence:notice.sequence,available:notice.available});
+    if(notice.available)this.questions.observe(b,notice.observation);else this.questions.invalidate(b);
+  }
   /** Ledger writes run one at a time so a report never overwrites a member start that finished meanwhile. */
   #serial<T>(work: () => Promise<T>): Promise<T> { const run = this.#chain.then(work, work); this.#chain = run.catch(() => {}); return run; }
   #touch(team: Team) { this.#revision.set(team, (this.#revision.get(team) ?? 0) + 1); team.updatedAt = new Date(this.now()).toISOString(); this.store.save(team); for (const wake of [...this.#waiters]) wake(); }
@@ -553,7 +584,8 @@ export class WorkroomTeamService {
       return {...member, session: live?.state ?? null, lastOutputAt: live?.lastOutputAt ?? member.observedOutputAt ?? null, git} satisfies TeamMemberView;
     }));
     const {fingerprint: _fingerprint, ...rest} = team;
-    return {...rest, members, settled: members.filter(member => settledState(member)).length, settledCursor};
+    const q=this.questions.list(team.id);
+    return {...rest,members,settled:members.filter(member=>settledState(member)).length,settledCursor,questions:q.questions,questionCursor:q.cursor,questionRelay:{submissionSupported:this.questions.submissionAvailable,code:this.questions.submissionAvailable?'READY':'HOST_USER_ANSWER_REQUIRED'}};
   }
 
   /**
@@ -821,6 +853,7 @@ export class WorkroomTeamService {
     snapshots.forEach(({member, ref, state, manual, report}, index) => {
       if (!team.members.includes(member) || member.execution !== ref || member.state !== state || member.manual !== manual || member.report !== report) return;
       const seen = results[index];
+      if(ref.kind==='external')this.recordQuestion(team.id,member.id,seen&&'question'in seen?seen.question??null:null);
       if (!seen) {
         // No observer in this run preserves the manual state; a failed/timed-out probe cannot claim ongoing work.
         if ((seen === null || earlier && !manual) && member.state !== 'unknown') { member.state = 'unknown'; changed = true; }
@@ -865,7 +898,7 @@ export class WorkroomTeamService {
     return view;
   }
   /** Returns when a member settles (`any`) or all have (`all`), or at the timeout — never later than the MCP bound. */
-  async wait(request: Extract<WorkroomTeamRequest, {op: 'wait'}>): Promise<{team: TeamView; timedOut: boolean}> {
+  async wait(request: Extract<WorkroomTeamRequest, {op: 'wait'}>): Promise<{team: TeamView; timedOut: boolean;reason?:'question'}> {
     const deadline = this.now() + request.timeoutMs;
     const team = this.#team(request.teamId), total = team.members.length, first = request.afterSettled ?? await this.#settled(team, Math.max(0, deadline - this.now()));
     // Events after the caller's own view (afterCursor). One from another run or team cannot say what it saw, so it is
@@ -873,7 +906,10 @@ export class WorkroomTeamService {
     const record = this.#settleRecord(team), [nonce, at] = request.afterCursor?.split('.') ?? [];
     const since = request.afterCursor !== undefined ? (nonce === record.nonce ? Math.min(Number(at), this.#settleSeq(team)) : -1)
       : (request.afterSettled === undefined ? undefined : record.handed.get(request.afterSettled)) ?? this.#settleSeq(team);
-    const done = (settled: number) => settled === total || request.until === 'any' && (settled > first || this.#settleSeq(this.#team(request.teamId)) > since);
+    const initialQuestions=this.questions.list(team.id);
+    const questionCursor=request.afterQuestionCursor??(initialQuestions.questions.length?'':initialQuestions.cursor);
+    const questionChanged=()=>this.questions.list(team.id).cursor!==questionCursor;
+    const done = (settled: number) => questionChanged() || settled === total || request.until === 'any' && (settled > first || this.#settleSeq(this.#team(request.teamId)) > since);
     let timedOut = false;
     while (!done(await this.#settled(this.#team(request.teamId), Math.max(0, deadline - this.now())))) {
       const remaining = deadline - this.now();
@@ -884,7 +920,7 @@ export class WorkroomTeamService {
       });
     }
     const waited = this.#team(request.teamId);
-    return {team: this.#handOut(waited, await this.view(waited, {observeTimeoutMs: Math.max(0, deadline - this.now())}), true), timedOut};
+    return {team:this.#handOut(waited,await this.view(waited,{observeTimeoutMs:Math.max(0,deadline-this.now())}),true),timedOut,...(questionChanged()?{reason:'question' as const}:{})};
   }
 
   /**

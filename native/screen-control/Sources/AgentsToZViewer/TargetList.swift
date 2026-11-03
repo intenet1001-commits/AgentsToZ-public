@@ -24,6 +24,7 @@ final class TargetListController: NSObject {
     /// the ticket it started with, so one that finished after this Mac locked or slept, or after its Mac was removed here,
     /// closes instead.
     private var ticket = 0
+    private let screenSelectionLifecycle=CommunityReviewLifecycle()
     /// The session in progress, if any: one at a time.
     private(set) var active: (session: ViewerSession, window: SessionWindowController)?
     /// The 「Mac 추가」 sheet while it is open.
@@ -76,8 +77,10 @@ final class TargetListController: NSObject {
         document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
         status.textColor = .secondaryLabelColor
         let community = PresentationButton(title: "커뮤니티 기기 등록·승인…") { [weak self] in self?.presentCommunity() }
-        let actions = NSStackView(views: [community, add, reload])
-        let column = NSStackView(views: [title, note, scroll, status, actions])
+        let legacy=NSStackView(views:[NSTextField(labelWithString:"이전 직접 등록·발견 정보"),communityRows,add]);legacy.orientation = .vertical;legacy.alignment = .leading;legacy.isHidden=true
+        let advanced=PresentationButton(title:"고급 · 이전 직접 등록 관리"){[weak legacy] in if let legacy {legacy.isHidden = !legacy.isHidden}}
+        let actions = NSStackView(views: [community,reload,advanced])
+        let column = NSStackView(views: [title, note, scroll, status, actions,legacy])
         column.orientation = .vertical
         column.alignment = .leading
         column.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
@@ -88,7 +91,31 @@ final class TargetListController: NSObject {
         return column
     }
 
-    func show() { communityAccount?.resume(); refreshCommunity(); window.makeKeyAndOrderFront(nil) }
+    func show() {
+        communityAccount?.resume();refreshCommunity();window.makeKeyAndOrderFront(nil)
+        Task { [weak self] in await self?.consumeScreenSelection() }
+    }
+
+    /// Shared asynchronous intent fence. No caller receives a session or authority from this read preparation.
+    func prepareScreenSelection<Value:Sendable>(using read:@MainActor ()async throws->Value)async throws->Value {
+        try await screenSelectionLifecycle.prepare(using:read)
+    }
+    private func consumeScreenSelection()async {
+        do {
+            let selected:String?=try await prepareScreenSelection { [self] in
+                let values=try await ScreenCommunityCommand(.viewerTargetConsume).call().values
+                guard values.count==1,let encoded=values[0].string else {return nil}
+                guard connecting==nil,active==nil,let account=communityAccount,let unified=account.unified else {throw ScreenCommunityError.expired}
+                let raw=try ScreenCommunityRequest.decodeBase64(encoded,max:4_096),hint=try JSONDecoder().decode(CommunityViewerHandoff.self,from:raw)
+                let own=try await account.currentAuthorization()
+                guard connecting==nil,active==nil,let target=account.commonTargets.first(where:{$0.id==hint.targetEnrollmentId || account.commonPeer($0.id)?.body.enrollmentId==hint.targetEnrollmentId}),let peer=account.commonPeer(target.id) else {throw ScreenCommunityError.expired}
+                try hint.validate(authority:unified.authority,own:own,target:peer)
+                return target.id
+            }
+            guard let selected,connecting==nil,active==nil else {return}
+            connectTrusted(selected)
+        } catch {say("Screen에서 선택한 Mac의 현재 기기 신뢰를 확인하지 못했습니다. 목록을 갱신해 다시 선택하세요.")}
+    }
 
     func say(_ text: String) { status.stringValue = text }
 
@@ -103,7 +130,7 @@ final class TargetListController: NSObject {
             rows.addArrangedSubview(NSTextField(wrappingLabelWithString: "\(ScreenTargetText.storeUnreadable)\n\(reason)"))
         case .loaded(let decoded):
             if decoded.targets.isEmpty && communityAccount?.targets.isEmpty != false && communityAccount?.commonTargets.isEmpty != false {
-                rows.addArrangedSubview(NSTextField(wrappingLabelWithString: "화면을 등록한 Mac이 없습니다. 아래 커뮤니티 기기를 확인하거나 「Mac 추가…」로 등록 안내를 여세요."))
+                rows.addArrangedSubview(NSTextField(wrappingLabelWithString: "등록된 다른 Mac이 없습니다. 「커뮤니티 기기 등록·승인…」에서 한 번 등록·기능 승인을 마쳐 주세요. 기존 직접 등록은 고급 관리에 있습니다."))
             }
             let commonIDs = Set(communityAccount?.commonTargets.map(\.id) ?? [])
             for target in decoded.targets where !commonIDs.contains(target.id) { rows.addArrangedSubview(row(for: target)) }
@@ -120,11 +147,6 @@ final class TargetListController: NSObject {
             let paired = Set(ledger.targets?.map(\.id) ?? [])
             for target in account.targets where account.unified?.hasEnrollmentPlan != true && !paired.contains(target.id) && !commonIDs.contains(target.id) { rows.addArrangedSubview(row(for: target, community: true)) }
         }
-        let heading = NSTextField(labelWithString: "기존 커뮤니티 발견 정보")
-        heading.font = .boldSystemFont(ofSize: 15)
-        rows.addArrangedSubview(heading)
-        rows.addArrangedSubview(communityRows)
-        communityRows.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         refreshCommunity()
     }
 
@@ -179,7 +201,10 @@ final class TargetListController: NSObject {
             }
             return button as NSView
         }
-        let connect = HumanButton(title: "연결") { [weak self] proof in self?.connect(target.id, proof) }
+        let connect:NSButton
+        if desktopTrustSelection(target.id) != nil {
+            connect=PresentationButton(title:"기기 신뢰로 연결") { [weak self] in self?.connectTrusted(target.id) }
+        } else { connect = HumanButton(title: "연결") { [weak self] proof in self?.connect(target.id, proof) } }
         let remove = HumanButton(title: "이 Mac에서 삭제", guarded: { false }) { [weak self] proof in self?.remove(target.id, proof) }
         let address = PresentationButton(title: "사설망 주소 설정…") { [weak self] in self?.editCommunityAddress(target) }
         let actions = NSStackView(views: common ? [connect] : (community ? routeButtons + [connect, address] : routeButtons + [connect, remove]))
@@ -195,12 +220,20 @@ final class TargetListController: NSObject {
     private func stored(_ id: String) -> ViewerTarget? {
         communityAccount?.commonTargets.first { $0.id == id } ?? ledger.targets?.first { $0.id == id } ?? (communityAccount?.unified?.hasEnrollmentPlan == true ? nil : communityAccount?.targets.first { $0.id == id })
     }
+    private func desktopTrustSelection(_ id:String)->CommunityDesktopScreenTrust? {
+        guard let unified=communityAccount?.unified,let own=unified.authorization,let peer=communityAccount?.commonPeer(id) else { return nil }
+        return try? CommunityDesktopScreenTrust.verified(authority:unified.authority,controller:own,receiver:peer)
+    }
     private func communityChanged() {
+        if let active,active.session.isTrustedDeviceSession,let own=communityAccount?.unified?.authorization,let peer=communityAccount?.commonPeer(active.session.target.id) {
+            active.session.renewDesktopTrust(controller:own,receiver:peer)
+        }
         if let pending = connecting, stored(pending.id) == nil { callOffConnecting("커뮤니티 등록 확인이 만료되어 연결을 중단했습니다.") }
         if let active, stored(active.session.target.id) == nil { active.session.end(.here, text: "커뮤니티 등록이 해제되었거나 연결 확인이 만료되었습니다.") }
         refresh()
     }
     private func presentCommunity() {
+        screenSelectionLifecycle.cancel()
         guard communitySheet == nil, let account = communityAccount else { return }
         let sheet = ViewerCommunitySheet(account: account)
         sheet.closed = { [weak self] in self?.communitySheet = nil }
@@ -227,10 +260,15 @@ final class TargetListController: NSObject {
     }
 
     private func connect(_ id: String, _ proof: HumanProof) {
+        screenSelectionLifecycle.cancel();connectInternal(id,trusted:false) }
+    private func connectTrusted(_ id:String) {
+        screenSelectionLifecycle.cancel();guard desktopTrustSelection(id) != nil else { say("현재 기기 신뢰 권한을 확인한 뒤 다시 연결하세요.");return };connectInternal(id,trusted:true) }
+    private func connectInternal(_ id:String,trusted:Bool) {
         guard connecting == nil, active == nil, let target = stored(id) else { return }
         ticket &+= 1
         let mine = ticket
         let common = communityAccount?.commonPeer(id) != nil
+        guard !trusted || common else { return }
         say(common ? "공통 기기 권한과 Cloudflare 경로를 확인하는 중…" : "생체 인증을 기다리는 중…")
         let task = Task { [weak self] in
             do {
@@ -239,6 +277,7 @@ final class TargetListController: NSObject {
                     guard let account = self?.communityAccount, let unified = account.unified else { throw ScreenCommunityError.notConfigured }
                     let own = try await account.currentAuthorization()
                     guard let peer = account.commonPeer(id), peer.isCurrent() else { throw ScreenCommunityError.service("NOT_ENROLLED") }
+                    if trusted { _ = try CommunityDesktopScreenTrust.verified(authority:unified.authority,controller:own,receiver:peer) }
                     let signer = try await account.operationSigner(for: .screenView)
                     connected = try await CommunityScreenConnector.connect(authority: unified.authority, own: own, target: peer, signer: signer,
                         ticketProvider: { [weak account] connectionID in
@@ -387,6 +426,7 @@ final class TargetListController: NSObject {
     /// This Mac locked, slept or switched users: the session ends at once and is never resumed by itself, and a
     /// connection still in progress never opens.
     func guardTripped() {
+        screenSelectionLifecycle.cancel() // Also invalidates IPC/auth reads before connecting is reserved.
         callOffConnecting(ScreenTargetText.connectGuardTripped)
         active?.session.end(.guardTripped)
         // A registration in progress ends too, and K_A with it: the person registers again in front of both Macs.

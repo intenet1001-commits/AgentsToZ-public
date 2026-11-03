@@ -3,6 +3,7 @@ import {lstat,open,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import type {TesterClickSweepSet,TesterSets} from './testerAgentContract';
+import {desktopSweepCompletionIsConsistent} from './testerClickSweepScope';
 
 const name=/^[a-z0-9][a-z0-9-]{0,63}$/;
 const commonScenarios=['conflict-markers','json-valid','python-syntax'];
@@ -91,7 +92,7 @@ export async function readProjectTesterSets(root:string,clean:(value:unknown,lim
     if(drafts){const value=object(drafts);if(value.schemaVersion!==1||!Array.isArray(value.candidates)||value.candidates.length>64)throw Error('페르소나 후보 형식을 확인하세요.');result.personas.candidates=value.candidates.length;result.personas.needsChecks=value.candidates.filter((c:any)=>Array.isArray(c?.checkIds)&&!c.checkIds.length).length;result.personas.candidateRoles=value.candidates.slice(0,12).map((c:any)=>clean(c.profile?.role??c.goal,120));}
   }catch(e){result.personas.state='invalid';result.personas.problem=clean(e instanceof Error?e.message:e,160);}
   // 세 번째 세트(전수 클릭): 설정과 실행마다 남는 작은 요약만 읽는다. 기준선(수백 KB)은 있는지만 본다.
-  const sweep:TesterClickSweepSet={state:'none',engine:'absent',surfaces:[]};
+  const sweep:TesterClickSweepSet={state:'none',engine:'absent',scopeVersion:2,surfaces:[]};
   result.clickSweep=sweep;
   const exists=async(relative:string)=>{try{const st=await lstat(join(root,relative));return st.isFile()&&!st.isSymbolicLink();}catch(e:any){if(e.code==='ENOENT')return false;throw e;}};
   const count=(v:unknown)=>typeof v==='number'&&Number.isInteger(v)&&v>=0?Math.min(v,1_000_000):0;
@@ -100,19 +101,36 @@ export async function readProjectTesterSets(root:string,clean:(value:unknown,lim
     const raw=await read('.agentstoz/click-sweep.json',64_000);
     if(raw){
       const config=object(raw);
-      if(config.schemaVersion!==1||!Array.isArray(config.surfaces)||!config.surfaces.length||config.surfaces.length>8)throw Error('전수 클릭 설정 형식을 확인하세요.');
-      const ids=new Set<string>();
+      if(![1,2].includes(config.schemaVersion)||!Array.isArray(config.surfaces)||!config.surfaces.length||config.surfaces.length>8)throw Error('전수 클릭 설정 형식을 확인하세요.');
+      const ids=new Set<string>(),baselines=new Set<string>();
       for(const s of config.surfaces){
         if(!s||typeof s.id!=='string'||!name.test(s.id)||ids.has(s.id))throw Error('전수 클릭 화면 ID를 확인하세요.');
         ids.add(s.id);
         const kind=Array.isArray(s.command)?'command':typeof s.url==='string'?'url':null;
-        if(!kind)throw Error('전수 클릭 화면의 실행 방법(url 또는 command)을 확인하세요.');
-        const baseline=typeof s.baseline==='string'?s.baseline:`.agentstoz/click-sweep/${s.id}.json`;
-        if(baseline.startsWith('/')||baseline.split(/[\\/]/).includes('..'))throw Error('전수 클릭 기준선 경로를 확인하세요.');
+        if(!kind||kind==='command'&&(!s.command.length||s.command.length>64||s.command.some((v:unknown)=>typeof v!=='string'||!v||v.length>4096)||s.url!==undefined))throw Error('전수 클릭 실행 방법(url 또는 command)을 확인하세요.');
+        if(config.schemaVersion===2&&!['web','desktop'].includes(s.target))throw Error('전수 클릭 target은 web 또는 desktop이어야 합니다.');
+        const target:'web'|'desktop'|'legacy'=['web','desktop'].includes(s.target)?s.target:kind==='url'?'web':'legacy';
+        if(target==='desktop'&&(kind!=='command'||s.url!==undefined||s.serve!==undefined||!['native','fixture'].includes(s.environment)||!['darwin','win32','linux'].includes(s.platform)))throw Error('데스크톱 대상은 command와 native/fixture 환경·플랫폼이 필요하며 URL을 쓸 수 없습니다.');
+        if(target!=='desktop'&&(config.schemaVersion===2||['web','desktop'].includes(s.target))&&s.environment!==undefined&&s.environment!=='browser')throw Error('웹/이전 하네스 환경을 확인하세요.');
+        const environment=target==='desktop'?s.environment:target==='web'?'browser':'unknown';
+        const prefix=target==='desktop'?`desktop/${environment}/${s.platform}/`:'';
+        if(s.baseline!==undefined&&(typeof s.baseline!=='string'||!s.baseline||s.baseline.length>400))throw Error('전수 클릭 기준선 경로 형식을 확인하세요.');
+        const baseline=s.baseline??`.agentstoz/click-sweep/${prefix}${s.id}.json`;
+        if(baseline.startsWith('/')||baseline.split(/[\\/]/).includes('..')||config.schemaVersion===2&&baselines.has(baseline))throw Error('전수 클릭 기준선은 대상별 프로젝트 상대 경로로 분리하세요.');
+        baselines.add(baseline);
         let last:TesterClickSweepSet['surfaces'][number]['last']=null;
-        const summary=await read(`.agentstoz/maintainer/click-sweep/${s.id}/summary.json`,16_000);
-        if(summary){try{const v=object(summary);if(v.schemaVersion===1&&typeof v.at==='string')last={at:clean(v.at,40),passed:v.passed===true,elements:count(v.elements),clicked:count(v.clicked),failures:count(v.failures),updated:v.updated===true};}catch{}}
-        sweep.surfaces.push({id:s.id,label:clean(s.label??s.id,80),kind,baselinePresent:await exists(baseline),last});
+        const summary=await read(`.agentstoz/maintainer/click-sweep/${prefix}${s.id}/summary.json`,16_000);
+        if(summary){try{
+          const v=object(summary),scoped=v.schemaVersion===2;
+          const matches=target==='desktop'?scoped&&v.surface===s.id&&v.target===target&&v.environment===environment&&v.platform===s.platform&&v.baselinePath===baseline
+            :target==='web'?v.schemaVersion===1||scoped&&v.surface===s.id&&v.target==='web'&&v.environment==='browser'&&v.baselinePath===baseline:v.schemaVersion===1||scoped;
+          if(matches&&typeof v.at==='string'){
+            const invalid=target==='desktop'&&!desktopSweepCompletionIsConsistent(v);
+            last={at:clean(v.at,40),passed:!invalid&&v.passed===true,elements:invalid?0:count(v.elements),clicked:invalid?0:count(v.clicked),failures:invalid?0:count(v.failures),updated:!invalid&&v.updated===true,
+              state:invalid?'unverified':['passed','failed','unavailable','unconfigured'].includes(v.state)?v.state:v.passed===true?'passed':'failed',completed:!invalid&&(scoped?v.completed===true:target==='web'),legacy:!scoped};
+          }
+        }catch{}}
+        sweep.surfaces.push({id:s.id,label:clean(s.label??s.id,80),kind,target,environment,...(target==='desktop'?{platform:s.platform}:{}),baselinePresent:await exists(baseline),last});
       }
       sweep.state='configured';
     }

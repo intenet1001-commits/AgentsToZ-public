@@ -1,3 +1,4 @@
+import type {TeamQuestionNotice} from './teamQuestionProtocol';
 /**
  * 팀 작전 — the launch surface and options a team member is started on, and the binding its execution is read back
  * through. One canonical core contract for 팀 UI and MCP: a member keeps the surface and options the user chose
@@ -82,6 +83,8 @@ export interface TeamExternalStarted {
   note?: string;
 }
 export interface TeamExternalObserved {
+  /** A fresh, generation-bound observation; never an execution or permission grant. */
+  question?:TeamQuestionNotice;
   state: 'working' | 'exited' | 'unknown' | TeamAwaitingState;
   lastOutputAt?: number | null;
   delivery?: TeamDelivery;

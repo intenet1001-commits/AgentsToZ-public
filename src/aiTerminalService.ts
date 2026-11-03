@@ -39,6 +39,7 @@ import {normalizeWorkroomEffortRequest,type WorkroomEffortSettingStore} from './
 import {hermesVariantOf,type HermesVariant} from './hermesVariants';
 import {noteWorkroomEffortRequest,observeWorkroomEffortScreen,planWorkroomEffort,workroomEffortInputIsManual,workroomEffortRecord,type WorkroomEffortRecord,type WorkroomEffortState,type WorkroomLaunchEffort} from './workroomEffortSession';
 import {workroomEffortView,type WorkroomEffortView} from './workroomEffortView';
+import {WorkroomEffortChoiceError,holdWorkroomEffortChoice,releaseWorkroomEffortChoice,workroomEffortChoiceView,workroomEffortRestartBase,type WorkroomEffortChoiceLevel,type WorkroomEffortChoiceResult,type WorkroomEffortChoiceView} from './workroomEffortChoice';
 import {WORKROOM_CONTEXT_SAVE_REFUSALS,type WorkroomSavedPurpose} from './workroomSavedReceipt';
 import {reconcileAgyCliUnfinishedWork} from './agentstozInvocationInstaller';
 
@@ -256,6 +257,8 @@ interface Session {
   firstRequest?: boolean;
   /** Host-only 「에포트 자동」 state (src/workroomEffortSession.ts); never on the wire summary. */
   effort?: WorkroomEffortState;
+  /** Host-only: a person's effort choice typed keys without a confirmed result (its requestId). No further choice for this CLI process. */
+  effortChoiceUnknown?: string;
 }
 /** An exited session pruned from the live list; a late read or wait still answers `exited` with its last output. */
 interface RetiredSession {
@@ -339,6 +342,8 @@ export class AiTerminalService {
   #grantEpoch = new Map<string, number>();
   #closed = false;
   #queues = new Map<string,Promise<unknown>>();
+  /** agentstoz_use_set_workroom_effort requests: one result per requestId, never replayed (bounded, settled ones evicted first). */
+  #effortChoices = new Map<string,{fingerprint:string;promise:Promise<WorkroomEffortChoiceResult>;settled:boolean}>();
   #pendingMutations = 0;
   #submissions:WorkroomSubmissions|undefined;
   readonly #now:()=>number;
@@ -780,7 +785,8 @@ export class AiTerminalService {
   async #adjustEffort(session: Session, text: string, active: () => boolean,owner='local',effortPolicy?:AiTerminalEffortPolicy) {
     const state=session.effort;
     // A level the person pinned for this session (a team member) is never changed by auto.
-    if(!state||state.pinned||!this.dependencies.effortAuto?.getMode||session.launchProfile)return;
+    // A person's agentstoz_use choice (src/workroomEffortChoice.ts) holds like a pin while the CLI shows it.
+    if(!state||state.pinned||state.chosen||!this.dependencies.effortAuto?.getMode||session.launchProfile)return;
     const policy=await this.#requestEffortPolicy(owner,effortPolicy),mode=policy.mode;
     if(mode==='off'){state.advice=undefined;state.runtimeStatus=undefined;return;}
     const decision=classifyWorkroomEffort(workroomEffortRequestText(text));if(!decision)return;
@@ -882,6 +888,124 @@ export class AiTerminalService {
     });
     this.#queues.set(key,work);
     try{return await work;}finally{this.#pendingMutations--;if(this.#queues.get(key)===work)this.#queues.delete(key);}
+  }
+  /**
+   * agentstoz_use_set_workroom_effort, read side: what the person may choose for this running session and the binding to
+   * pass back. No path, transcript or prompt; the model and effort are what the CLI's own screen shows.
+   */
+  async effortChoice(sessionId:string,targetId:string):Promise<WorkroomEffortChoiceView>{
+    if(this.#closed)throw new Error('터미널 서버가 종료 중입니다.');
+    return this.#effortChoiceView(this.#session(sessionId,targetId));
+  }
+  #effortChoiceSupport(session:Session){
+    const agent=session.summary.agent,executable=agent==='agy'?null:this.dependencies.executable(agent);
+    return executable?(this.dependencies.effortRuntimeSupport??workroomEffortRuntimeSupport)(executable,agent,session.historyEnv??{},session.cwd):{claudeSessionPicker:false,codexDefaultKeys:false};
+  }
+  async #effortChoiceView(session:Session):Promise<WorkroomEffortChoiceView>{
+    const env=session.historyEnv??{};
+    let rows:string[]|null=null;
+    try{rows=session.screen?(await session.screen.plainRows())?.rows??null:null;}catch{rows=null;}
+    return workroomEffortChoiceView({sessionId:session.summary.id,agent:session.summary.agent,pid:session.child.pid,
+      ...(session.accountLaunch?.accountId?{accountId:session.accountLaunch.accountId}:{}),...(session.launchModel?{launchModel:session.launchModel}:{}),
+      inputRevision:session.inputRevision,running:session.summary.state==='running'&&!session.closing&&!this.#closed,rows,hasScreen:!!session.screen,
+      ...(session.effort?{state:session.effort}:{}),restricted:!!session.launchProfile,envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,
+      thinkingOff:env.CLAUDE_CODE_DISABLE_THINKING==='1'||env.MAX_THINKING_TOKENS==='0',support:this.#effortChoiceSupport(session),
+      ...(session.effortChoiceUnknown?{outcomeUnknown:session.effortChoiceUnknown}:{}),
+      ...(session.summary.agent==='codex'?{codexProof:this.#codexChoiceProof(session,env)}:{})});
+  }
+  /** The same read-only, bounded Codex config proof a launch uses; unproven answers nothing (low/medium/high only). */
+  #codexChoiceProof(session:Session,env:Record<string,string|undefined>){
+    try{
+      const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd:session.cwd,args:session.accountLaunch?.args??[],...(session.launchModel?{launchModel:session.launchModel.model}:{})});
+      return proof.ok?{model:proof.model,allowed:proof.allowed}:undefined;
+    }catch{return undefined;}
+  }
+  /**
+   * agentstoz_use_set_workroom_effort, write side: the level the person chose, applied to this CLI only through its own
+   * session-only control (never `/effort <level>`, a model/account switch, a global default or a new prompt), then read back.
+   * Refused before any key when the binding from the read changed, the level is not offered, or the CLI is not at an empty,
+   * idle composer within the ready wait. One result per requestId; a result-unknown change stops further choices here.
+   */
+  chooseEffort(input:{sessionId:string;targetId:string;level:WorkroomEffortChoiceLevel;binding:string;requestId:string}):Promise<WorkroomEffortChoiceResult>{
+    if(this.#closed)return Promise.reject(new Error('터미널 서버가 종료 중입니다.'));
+    const fingerprint=JSON.stringify([input.sessionId,input.targetId,input.level,input.binding]);
+    const known=this.#effortChoices.get(input.requestId);
+    if(known){
+      if(known.fingerprint!==fingerprint)return Promise.reject(new WorkroomEffortChoiceError('REQUEST_ID_CONFLICT','같은 요청 ID로 다른 에포트 선택을 보낼 수 없습니다. 새 요청 ID를 쓰세요.'));
+      return known.promise;
+    }
+    if(this.#effortChoices.size>=512){
+      return Promise.reject(new WorkroomEffortChoiceError('BUSY','에포트 선택의 원본 결과 보관 한도에 도달했습니다. 기존 요청은 결과만 조회하며 새 변경은 실행하지 않습니다.'));
+    }
+    let session:Session;
+    try{session=this.#session(input.sessionId,input.targetId);}catch(error){return Promise.reject(error);}
+    if(this.#pendingMutations>=AI_TERMINAL_MAX_PENDING_MUTATIONS)return Promise.reject(new WorkroomEffortChoiceError('BUSY','처리 중인 터미널 입력이 너무 많습니다.'));
+    const key=input.sessionId;this.#pendingMutations++;
+    const work=(this.#queues.get(key)??Promise.resolve()).catch(()=>{}).then(()=>this.#applyEffortChoice(session,input));
+    const entry={fingerprint,promise:work,settled:false};
+    this.#effortChoices.set(input.requestId,entry);
+    this.#queues.set(key,work);
+    const settled=()=>{entry.settled=true;this.#pendingMutations--;if(this.#queues.get(key)===work)this.#queues.delete(key);};
+    void work.then(settled,settled);
+    return work;
+  }
+  async #applyEffortChoice(session:Session,input:{level:WorkroomEffortChoiceLevel;binding:string;requestId:string}):Promise<WorkroomEffortChoiceResult>{
+    if(session.effortChoiceUnknown)throw new WorkroomEffortChoiceError('OUTCOME_UNKNOWN',`이전 에포트 선택(${session.effortChoiceUnknown})의 결과를 확인하지 못해 이 CLI에서는 더 바꾸지 않습니다. 원본 워크룸 화면을 확인하세요.`,false,session.effortChoiceUnknown);
+    const view=await this.#effortChoiceView(session);
+    if(view.binding!==input.binding)throw new WorkroomEffortChoiceError('BINDING_CHANGED','조회 뒤 세션의 프로세스·계정·모델·에포트·선택·입력 중 하나가 바뀌었습니다. 다시 조회한 뒤 고르세요. 아무 키도 입력하지 않았습니다.');
+    const state=session.effort??={manual:false};
+    const done=async(outcome:WorkroomEffortChoiceResult['outcome']):Promise<WorkroomEffortChoiceResult>=>{
+      const after=await this.#effortChoiceView(session);
+      // `applied` was proven on the CLI's screen by the runtime even if the effort row is gone again now.
+      const shown=outcome==='applied'?{readback:input.level,readbackFrom:'screen' as const}
+        :after.current?{readback:after.current,readbackFrom:after.currentFrom??'last-observed' as const}:{};
+      return {outcome,requested:input.level,...shown,view:after};
+    };
+    // `auto` types nothing: it ends a held choice (offered only then) and is answered as not-held otherwise.
+    if(input.level==='auto'){
+      if(!state.chosen)return done('not-held');
+      releaseWorkroomEffortChoice(state);return done('released');
+    }
+    if(!view.supported)throw new WorkroomEffortChoiceError('UNSUPPORTED',view.unsupportedText??'이 세션은 에포트 선택을 지원하지 않습니다.');
+    if(!view.choices.includes(input.level))throw new WorkroomEffortChoiceError('LEVEL_UNSUPPORTED',`이 세션이 받을 수 있는 강도가 아닙니다. 가능한 값: ${view.choices.join(', ')}`);
+    const level=input.level,at=new Date().toISOString();
+    if(view.current===level){holdWorkroomEffortChoice(state,level,input.requestId,at);return done('held');}
+    const agent=session.summary.agent,revision=session.inputRevision;
+    const allowed=()=>!this.#closed&&!session.closing&&session.summary.state==='running'&&session.inputRevision===revision;
+    let typed=false,outcome:'applied'|'unsupported'|'unchanged';
+    state.automaticPending=true;
+    try{
+      outcome=await (this.dependencies.effortRuntime??changeWorkroomEffort)({agent,level,...(view.current?{current:view.current}:{}),
+        read:()=>session.screen!.plainRows(),write:async data=>{
+          if(!allowed())throw Error('워크룸 입력이 변경되었습니다.');
+          let valid=false;
+          try{const binding=session.revalidate?await session.revalidate():await this.dependencies.resolveTarget(session.summary.targetId);valid=realpathSync(binding.cwd)===session.cwd&&allowed();}
+          catch{/* A resolver/filesystem failure must not expose a local path. */}
+          if(!valid)throw Error('워크룸 프로젝트 또는 입력 권한이 변경되었습니다.');
+          typed=true;session.child.terminal.write(data);
+        },active:allowed,
+        idle:()=>['idle','turn-finished'].includes(this.#board.tracker(session.summary.id)?.activity.state??''),timeoutMs:WORKROOM_EFFORT_READY_WAIT_MS,
+        cols:session.summary.cols,refusal:state.effortRefusal,refused:refusal=>{state.effortRefusal=refusal;},...this.#effortChoiceSupport(session)});
+    }catch(error){
+      const message=error instanceof Error?error.message:String(error);
+      if(!typed){
+        if(error instanceof WorkroomEffortNotReadyError)throw new WorkroomEffortChoiceError('NOT_READY','CLI가 응답 중이거나 입력칸·선택 화면이 사용 중입니다. 입력 대기 상태가 된 뒤 새 요청 ID로 다시 고르세요. 아무 키도 입력하지 않았습니다.');
+        throw new WorkroomEffortChoiceError('NOT_SENT',message+' 아무 키도 입력하지 않았습니다.');
+      }
+      state.runtimeStatus='unconfirmed';session.effortChoiceUnknown=input.requestId;
+      throw new WorkroomEffortChoiceError('OUTCOME_UNKNOWN','에포트 변경 키를 입력했지만 결과를 확인하지 못했습니다. 원본 워크룸 화면을 확인하세요. 같은 요청 ID로 결과만 다시 조회되며 재전송하지 않습니다.',true,input.requestId);
+    }finally{
+      // A new observation baseline, as after an automatic change: the CLI's own confirmation line is not a manual change.
+      let rows:string[]=[];try{rows=(await session.screen?.plainRows())?.rows??[];}catch{rows=[];}
+      const kept=typed?undefined:state.seen;
+      delete state.phraseLines;delete state.seen;state.automaticPending=false;
+      if(kept)state.seen=kept;
+      observeWorkroomEffortScreen(state,agent,rows);
+    }
+    if(outcome==='unsupported')throw new WorkroomEffortChoiceError('UNSUPPORTED','이 CLI 화면에서 세션 한정 에포트 제어를 확인하지 못했습니다. 아무 키도 입력하지 않았습니다.');
+    if(outcome==='unchanged')throw new WorkroomEffortChoiceError('NOT_APPLIED','CLI가 변경을 취소하거나 거절했고, 화면의 강도는 그대로입니다(이 모델의 선택 화면에 그 강도가 없을 수 있습니다).',typed);
+    holdWorkroomEffortChoice(state,level,input.requestId,at);
+    return done('applied');
   }
   /** One sweep (the 1 s timer calls this): rows at most once per running session, then bounded transcript tails. */
   sampleActivity(): Promise<void> {
@@ -1218,7 +1342,7 @@ export class AiTerminalService {
       // Hermes model and provider we chose against the levels its adapter carries (teamHermesEffortLevels).
       const effortPolicy=await this.#requestEffortPolicy(receiptOwner,effortPolicyOverride);
       const effortInput = {agent:r.agent!,...(r.prompt!==undefined?{prompt:r.prompt}:{}),auto:effortPolicy.mode==='auto',mode:effortPolicy.mode,restricted:!!profile,historyResume:!!historyResume,
-        ...(previous?{previous:previous.effort??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,...(r.agent==='hermes'&&model?{hermesModel:model}:{}),
+        ...(previous?{previous:workroomEffortRestartBase(previous.effort)??{manual:false}}:launchEffort&&'pinned' in launchEffort?{pinned:launchEffort.pinned}:launchEffort?{requestText:launchEffort.requestText}:{}),envOverride:!!env.CLAUDE_CODE_EFFORT_LEVEL,...(r.agent==='hermes'&&model?{hermesModel:model}:{}),
         codexAllowed:()=>{try{const proof=(this.dependencies.codexEffortModel??readCodexEffortModel)({env,cwd,args:accountLaunch?.args??[],...(model?{launchModel:model.model}:{})});return proof.ok?proof.allowed:null;}catch{return null;}}};
       let effort = planWorkroomEffort(effortInput);
       if (effort.pinned && !effort.level) throw new Error(`고정 에포트 ${effort.pinned}를 적용할 수 없어 시작하지 않았습니다 (${effort.skipped ?? 'unsupported'}).`);

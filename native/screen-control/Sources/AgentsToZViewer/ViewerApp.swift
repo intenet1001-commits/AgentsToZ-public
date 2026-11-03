@@ -19,10 +19,11 @@ final class ViewerAppDelegate: NSObject, NSApplicationDelegate {
         HumanActions.shared.refused = { [weak self] reason in self?.tellNotInFront(reason) }
         watchSessionGuards()
         list.show()
-        NSApp.activate()
+        // LaunchServices' activate choice is respected; Screen may prepare only the signed directory in the background.
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool)->Bool {list?.show();return false}
 
     func applicationWillTerminate(_ notification: Notification) {
         community.stop()

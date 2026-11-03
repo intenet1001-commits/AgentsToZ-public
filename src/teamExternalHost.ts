@@ -6,7 +6,7 @@ import {aiTerminalLaunchArgs} from './aiTerminalLaunchArgs';
 import {normalizeCodeAppTask, checkOpenCodeAppRequest, type OpenCodeAppMode} from './codeAppTask';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import {WORKROOM_KEY_INTERVAL_MS, workroomKeyChoosesExit, workroomKeySequence} from './workroomOrchestration';
-import {workroomScreenAwaitsAnswer} from './workroomRouteDelivery';
+import {teamQuestionFromScreen} from './teamQuestionProtocol';
 import {createTeamExternalRuntime, TeamExternalRuntimeError, type TeamExternalApplication, type TeamExternalCapabilities,
   type TeamExternalCreatePlan, type TeamExternalJournal, type TeamExternalJournalRecord, type TeamExternalLaunchInput,
   type TeamExternalNativeRef, type TeamExternalOption, type TeamExternalPreparedPlan, type TeamExternalProbe,
@@ -271,7 +271,7 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
       if (!terminal || terminal.handle !== command.terminalHandle || read.runtimeId !== evidence.shown.runtimeId
         || !Array.isArray(terminal.tail) || !terminal.tail.every(line => typeof line === 'string')) return error('EXTERNAL_ORCA_READ_UNVERIFIED');
       await inspect(command.executionRef); // A process restart during the read cannot lend its output to the old binding.
-      return {native: copy(command.executionRef.native!), text: terminal.tail.join('\n'), ...(typeof terminal.nextCursor === 'string' ? {cursor: terminal.nextCursor} : {})};
+      return {native: copy(command.executionRef.native!), text: terminal.tail.join('\n'), question:teamQuestionFromScreen(terminal.tail), ...(typeof terminal.nextCursor === 'string' ? {cursor: terminal.nextCursor} : {})};
     },
     async submit(command) {
       if (command.kind === 'cmux-target' && options.cmux) return options.cmux.submit(command);
@@ -290,7 +290,7 @@ export function createTeamExternalHost(options: TeamExternalHostOptions): TeamEx
           && terminal.tail.some(line => line.trim())) rows = terminal.tail as string[];
       } catch {/* no text has been sent */}
       if (!rows) return {outcome: 'not-sent', reason: 'EXTERNAL_SCREEN_UNAVAILABLE'};
-      if (workroomScreenAwaitsAnswer(rows)) return {outcome: 'not-sent', reason: 'EXTERNAL_PROMPT_AWAITS_ANSWER'};
+      if (teamQuestionFromScreen(rows)) return {outcome: 'not-sent', reason: 'EXTERNAL_PROMPT_AWAITS_ANSWER'};
       try {
         const current = await inspect(command.executionRef);
         if (!current.agentVerified || !current.shown.connected || !current.shown.writable) return {outcome: 'not-sent', reason: 'EXTERNAL_BINDING_UNVERIFIED'};

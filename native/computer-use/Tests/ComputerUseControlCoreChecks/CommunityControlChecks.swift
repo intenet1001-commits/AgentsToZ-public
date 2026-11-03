@@ -108,6 +108,14 @@ enum CommunityControlChecks {
     }
     static func testShapesAndLifetime() throws {
         let f = Fixture()
+        let recognized=try f.lease { $0["capabilities"]=["screen.view","computer-use.agent-settings","screen.desktop-trust"] }
+        try check(recognized.capabilities == [.agentSettings],"Screen trust recognition grants no general desktop, browser, Teams or agent capability")
+        try rejected { _=try f.lease { $0["capabilities"]=["screen.desktop-trust"] } }
+        let delegated=try f.lease { $0["capabilities"]=["screen.receive.view","screen.receive.control","computer-use.agent-settings","screen.desktop-trust","screen.owner-delegation"] }
+        try check(delegated.capabilities == [.agentSettings],"Target-scoped owner delegation recognition adds no Computer Use or desktop grant")
+        let screenOnly=try f.lease { $0["capabilities"]=["screen.receive.view","screen.receive.control","screen.desktop-trust","screen.owner-delegation"] }
+        try check(screenOnly.capabilities.isEmpty,"Screen-only delegation has no Control component capability")
+        try rejected { _=try f.lease { $0["capabilities"]=["screen.receive.view","screen.desktop-trust","screen.owner-delegation"] } }
         for edit: (inout [String: Any]) -> Void in [
             { $0["controlKey"] = NSNull() }, { $0["extra"] = true }, { $0["revision"] = true }, { $0["keyEpoch"] = 1.5 },
             { $0["deviceKind"] = "mobile" }, { $0["capabilities"] = ["computer-use.agent-settings", "agent.communicate"] },

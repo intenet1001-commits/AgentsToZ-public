@@ -161,19 +161,23 @@ public final class InputReceiver: Sendable {
     private let releaseInput: @Sendable (InputEvent) -> Void
     private let physicalInput: PhysicalInputProbe?
     private let compound: (@Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult)?
+    private let desktopTrust:CommunityDesktopTrustLease?
     public var observesPhysicalInput: Bool { physicalInput != nil }
 
     public init(localPriority: LocalPriority.Policy = .init(), physicalInput: PhysicalInputProbe? = nil,
                 release: (@Sendable (InputEvent) -> Void)? = nil,
-                compound: (@Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult)? = nil, inject: @escaping @Sendable (InputEvent) -> Void) {
+                compound: (@Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult)? = nil,desktopTrust:CommunityDesktopTrustLease?=nil, inject: @escaping @Sendable (InputEvent) -> Void) {
         self.localPriority = localPriority
         state = OSAllocatedUnfairLock(initialState: State(priority: LocalPriority(policy: localPriority)))
         self.inject = inject
         self.physicalInput = physicalInput
-        self.compound = compound
+        self.compound = compound;self.desktopTrust=desktopTrust
         self.releaseInput = release ?? inject
     }
 
+    private func performAuthorized(_ effect:()->Void)->Bool {
+        if let desktopTrust { return desktopTrust.performControl(effect) };effect();return true
+    }
     /// Whether remote input is paused because someone at the Mac is using it.
     public var isPaused: Bool { state.withLock { $0.priority.isPaused } }
     /// Whether the latest physical snapshot includes the Mac's explicit session-bar hold.
@@ -192,10 +196,9 @@ public final class InputReceiver: Sendable {
             }
             guard !state.finished, !state.priority.isPaused, state.controlLimiter.admit(at: now),
                   state.gate.admitAction(at: now) else { return false }
-            state.release(releaseInput, at: now)
-            operation()
-            state.priority.noteInjected(.key, at: now)
-            return true
+            return performAuthorized {
+                state.release(releaseInput, at: now);operation();state.priority.noteInjected(.key, at: now)
+            }
         }
     }
 
@@ -215,14 +218,14 @@ public final class InputReceiver: Sendable {
                 state.lastTextReturnID = id
                 guard !state.finished, !state.priority.isPaused, let physicalInput, let compound,
                       state.gate.admit(event, at: now) else { return (id, .blocked) }
-                state.release(releaseInput, at: now)
-                let result = compound(text, physicalInput)
-                state.priority.noteInjected(.key, at: now)
+                var result=ScreenTextReturnResult.blocked
+                _ = performAuthorized {
+                    state.release(releaseInput, at: now);result=compound(text, physicalInput);state.priority.noteInjected(.key, at: now)
+                }
                 return (id, result)
             }
             guard !state.finished, !state.priority.isPaused, state.gate.admit(event, at: now) else { return nil }
-            inject(event)
-            state.priority.noteInjected(event.localKind, at: now)
+            _ = performAuthorized { inject(event);state.priority.noteInjected(event.localKind, at: now) }
             return nil
         }
     }

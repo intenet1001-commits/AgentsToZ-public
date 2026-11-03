@@ -5,6 +5,7 @@ import {mkdtemp,mkdir,rm} from 'node:fs/promises';
 import {realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {checkCommunityDeviceRegistration} from './community-device-registration-ui.mjs';
 const root=resolve(import.meta.dirname,'..'),scratch=await mkdtemp(join(tmpdir(),'community-desktop-ux-'));
 for(const key of Object.keys(process.env))if(key.startsWith('VITE_'))delete process.env[key];
 process.env.VITE_SUPABASE_URL='https://fixture.supabase.co';process.env.VITE_SUPABASE_ANON_KEY='fixture-anon-key';
@@ -110,3 +111,4 @@ try{
   }finally{await browser.close();}
  }
 }finally{await vite.close();await rm(scratch,{recursive:true,force:true});}
+await checkCommunityDeviceRegistration();

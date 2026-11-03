@@ -10,6 +10,7 @@ import {agentDialoguePairingRows,agentDialoguePairingSummary,
 import {agentDialogueCommunityMemberLabel,agentDialogueCommunityView,
   type AgentDialogueCommunityStatus} from './agentDialogueCommunity';
 import {IncrementalListMore,useIncrementalRender} from './components/IncrementalListMore';
+import {CommunityDeviceRegistration} from './CommunityDeviceRegistration';
 
 interface Status {
   enabled:{target:string;kind:'ops'|'project';portId?:string;endpointId:string;displayName:string}[];
@@ -191,6 +192,7 @@ export function AgentDialoguePanel({projects,opsProjectId,deviceName,deviceId,on
       <section className="mt-5 rounded-xl border border-[var(--accent)] p-3" data-testid="agent-dialogue-community">
         <h3 className="m-0 font-semibold">아젠투지 단톡방 · 내 기기·프로젝트 단체방</h3>
         <p className="mb-0 mt-1 text-xs text-[var(--ink-2)]">부르는 것이 아니라 <strong>각자 한 번 입장</strong>합니다. 들어와 있는 대상끼리는 초대도 승인도 없이 주고받고, 나가지 않는 한 계속 참여합니다.</p>
+        <CommunityDeviceRegistration/>
         {enabledTargets.length===0?<p className="mt-2 text-sm text-[var(--ink-2)]">위에서 공개할 대상을 먼저 켜세요.</p>:(()=>{
           const view=agentDialogueCommunityView(communityStatus,activePairSource?.endpointId);
           return <>

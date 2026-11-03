@@ -13,7 +13,7 @@ private final class EmptyTargets: ViewerTargetsBackend, @unchecked Sendable {
 final class TargetListChecks: XCTestCase {
     @MainActor func testRefusedRegistrationActionIsVisibleInsideTheCommunitySheet() throws {
         _ = NSApplication.shared
-        let account = ViewerCommunityAccount()
+        let account = ViewerCommunityAccount(unifiedStore: ViewerUnifiedStore(backend: EmptyUnifiedStoreBackend()))
         let actual = ViewerCommunitySheet(account: account)
         let previous = HumanActions.shared.refused
         HumanActions.shared.refused = { account.inputRefused($0) }
@@ -27,7 +27,7 @@ final class TargetListChecks: XCTestCase {
     }
     @MainActor func testCommunityRegistrationSheetRendersOffscreenAndKeepsContentAtTheTop() throws {
         _ = NSApplication.shared
-        let sheet = ViewerCommunitySheet(account: ViewerCommunityAccount())
+        let sheet = ViewerCommunitySheet(account: ViewerCommunityAccount(unifiedStore: ViewerUnifiedStore(backend: EmptyUnifiedStoreBackend())))
         sheet.window.appearance = NSAppearance(named: .aqua)
         defer { sheet.close() }
         let scroll = try XCTUnwrap(sheet.window.contentView as? NSScrollView)

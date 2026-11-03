@@ -13,7 +13,7 @@ public enum CommunityAutomaticKey {
         return try SecureEnclave.P256.Signing.PrivateKey(accessControl: access).dataRepresentation
     }
 }
-public struct CommunityAccessJournal: Codable, Sendable {
+public struct CommunityAccessJournal: Codable, Equatable, Sendable {
     public let id: String
     public let operation: String
     public let actor: String?
@@ -50,9 +50,23 @@ public actor CommunityAccessCoordinator {
             throw ScreenCommunityError.service(code)
         }
     }
+    /// Only a fresh issuer proof tied to the exact old signed prepare can close an expired staging fence.
+    /// Approval/management/other unknown outcomes are never cleared here and no request is dispatched.
+    public func resolveExpiredPrepare(using absence:CommunityRegistrationAbsence,now:Date=Date()) throws {
+        guard let original=pending else { return }
+        guard original.operation==CommunityAccessRequest.Operation.prepare.rawValue,original.actor==nil else { throw ScreenCommunityError.service("RECOVER_EXISTING_REQUEST") }
+        let checked=try CommunityOriginalPrepare(original.envelope)
+        guard checked.id==original.id,absence.matches(checked.plan,authority:authority,now:now),absence.originalRequestId==checked.id,
+              absence.originalRequestHash==checked.envelopeHash,absence.originalIssuedAt==checked.issuedAt,absence.issuedAt>checked.issuedAt+60_000 else { throw ScreenCommunityError.wrongCommunity }
+        try save(nil);pending=nil
+    }
     public func acknowledge(_ requestId: String) throws {
         guard let pending, pending.id == requestId else { throw ScreenCommunityError.wrongRequest }
         try save(nil); self.pending = nil
+    }
+    public func resolveOwnerAbsence(_ absence:CommunityOwnerAbsence,now:Date=Date())throws {
+        guard let original=pending,absence.matches(original,authority:authority,now:now) else {throw ScreenCommunityError.wrongRequest}
+        try save(nil);pending=nil
     }
     public func recover(using host: any TranscriptSigner) async throws -> CommunityAccessReply {
         guard !busy, let original = pending else { throw ScreenCommunityError.service("NO_PENDING_REQUEST") }
@@ -65,7 +79,7 @@ public actor CommunityAccessCoordinator {
         guard object["originalRequestId"] as? String == original.id else { throw ScreenCommunityError.wrongRequest }
         let envelope = try JSONDecoder().decode(ScreenCommunityEnvelope.self, from: JSONSerialization.data(withJSONObject: object["result"] as Any))
         let result = try CommunityAccessReply.verify(envelope, authority: authority)
-        let expected: [String: String] = ["prepare": "prepared", "approve": "authorization", "session-open": "session", "activity": "session", "session-close": "session-closed"]
+        let expected: [String: String] = ["prepare": "prepared", "approve": "authorization", "approve-management": "authorization", "session-open": "session", "activity": "session", "session-close": "session-closed", "owner-delegation-set":"owner-delegation", "owner-recovery-request":"owner-recovery", "owner-recovery-publish":"owner-recovery", "owner-recovery-approve":"owner-recovery", "owner-recovery-result":"owner-recovery"]
         guard result.requestId == original.id, result.kind == expected[original.operation] else { throw ScreenCommunityError.wrongRequest }
         return result // Caller validates and commits the exact result, then acknowledges the original ID.
     }

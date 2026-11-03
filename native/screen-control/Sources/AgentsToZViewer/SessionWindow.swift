@@ -73,7 +73,7 @@ final class SessionWindowController: NSObject, NSWindowDelegate {
     private var awake: NSObjectProtocol?
     private var occlusionObserver: NSObjectProtocol?
     private var inputButtons: [NSButton] = []
-    private var pauseButton: HumanButton?
+    private var pauseButton: NSButton?
     private var forwarder: InputForwarder?
     private var closing = false
     /// The window closed or the session ended; the list takes over.
@@ -152,18 +152,21 @@ final class SessionWindowController: NSObject, NSWindowDelegate {
 
     private func makeContent() -> NSView {
         let toolbar = NSStackView(views: [
-            inputButton("⌘Tab") { [weak self] proof in self?.session.sendChord([0x30], modifiers: .command, proof: proof) },
-            inputButton("⌘Space") { [weak self] proof in self?.session.sendChord([0x31], modifiers: .command, proof: proof) },
-            inputButton("Mission Control") { [weak self] proof in self?.session.navigate(.missionControl, proof: proof) },
-            inputButton("◀ Spaces") { [weak self] proof in self?.session.navigate(.previous, proof: proof) },
-            inputButton("Spaces ▶") { [weak self] proof in self?.session.navigate(.next, proof: proof) },
+            inputButton("⌘Tab",trusted:.chord([0x30],.command)) { [weak self] proof in self?.session.sendChord([0x30], modifiers: .command, proof: proof) },
+            inputButton("⌘Space",trusted:.chord([0x31],.command)) { [weak self] proof in self?.session.sendChord([0x31], modifiers: .command, proof: proof) },
+            inputButton("Mission Control",trusted:.navigate(.missionControl)) { [weak self] proof in self?.session.navigate(.missionControl, proof: proof) },
+            inputButton("◀ Spaces",trusted:.navigate(.previous)) { [weak self] proof in self?.session.navigate(.previous, proof: proof) },
+            inputButton("Spaces ▶",trusted:.navigate(.next)) { [weak self] proof in self?.session.navigate(.next, proof: proof) },
         ])
-        let pause = HumanButton(title: "입력 일시 정지", guarded: { [weak self] in self?.session.pausedHere ?? true }) { [weak self] proof in
+        let pause:NSButton
+        if session.isTrustedDeviceSession {
+            pause=PresentationButton(title:"입력 일시 정지") { [weak self] in guard let self else { return };self.session.performTrusted(.pause(!self.session.pausedHere)) }
+        } else { pause = HumanButton(title: "입력 일시 정지", guarded: { [weak self] in self?.session.pausedHere ?? true }) { [weak self] proof in
             guard let self else { return }
             self.session.setPausedHere(!self.session.pausedHere, proof: proof)
-        }
+        } }
         pauseButton = pause
-        let end = HumanButton(title: "끊기", guarded: { false }) { [weak self] _ in self?.session.end(.here) }
+        let end:NSButton = session.isTrustedDeviceSession ? PresentationButton(title:"끊기") { [weak self] in self?.session.end(.here) } : HumanButton(title: "끊기", guarded: { false }) { [weak self] _ in self?.session.end(.here) }
         toolbar.addView(pause, in: .trailing)
         toolbar.addView(end, in: .trailing)
         toolbar.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -191,8 +194,8 @@ final class SessionWindowController: NSObject, NSWindowDelegate {
         return column
     }
 
-    private func inputButton(_ title: String, _ handler: @escaping (HumanProof) -> Void) -> HumanButton {
-        let button = HumanButton(title: title, handler: handler)
+    private func inputButton(_ title: String,trusted:ViewerSession.TrustedAction, _ handler: @escaping (HumanProof) -> Void) -> NSButton {
+        let button:NSButton = session.isTrustedDeviceSession ? PresentationButton(title:title) { [weak self] in self?.session.performTrusted(trusted) } : HumanButton(title: title, handler: handler)
         inputButtons.append(button)
         return button
     }

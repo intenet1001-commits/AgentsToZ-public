@@ -1,4 +1,5 @@
 import ScreenControlCore
+import AgentsToZCore
 import SwiftUI
 
 /// 「Mac 화면」 on the home screen: the Macs this device registered, each opening its screen after Face ID, and
@@ -32,6 +33,9 @@ struct ScreenMacsSection: View {
     @State private var notice: String?
     @State private var deleting: [SavedScreenMac] = []
     @State private var privateNetworkSetup: SavedScreenMac?
+    // Local display names are separate from the signed community directory and the pinned Mac identity.
+    @AppStorage("screenControl.macDisplayNames") private var displayNamesJSON = "{}"
+    @State private var renaming: ScreenMacRenameTarget?
     @State private var remoteStop: ScreenRemoteStopRequest? // push hook: remote stop (ScreenRemoteStopMenu.swift)
 
     var body: some View {
@@ -49,29 +53,40 @@ struct ScreenMacsSection: View {
                 Text("사설망 · Cloudflare").tag(ScreenConnectionRoute.privateNetwork)
             }
             .accessibilityIdentifier("screenConnectionRoute")
+            Text("이 경로 선택은 공통 등록 Mac에는 적용되지 않습니다. 공통 등록은 자동으로 연결합니다.")
+                .font(.caption).foregroundStyle(.secondary)
             ForEach(community.unified.screenTargets) { target in
-                Button { commonViewing = target } label: {
-                    Label {
-                        VStack(alignment: .leading) {
-                            Text(target.peer.body.name)
-                            Text("공통 등록 · Cloudflare · 사용 세션 인증 공유").font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: { Image(systemName: "display") }
-                }.accessibilityIdentifier("openCommonScreen")
+                HStack {
+                    Button { commonViewing = target } label: {
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(displayName(for: target.mac))
+                                Text("공통 등록 · Cloudflare · 사용 세션 인증 공유").font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "display") }
+                    }.accessibilityIdentifier("openCommonScreen")
+                    Spacer()
+                    renameMenu(for: target.mac, includeConnectionActions: false)
+                }.buttonStyle(.borderless)
             }
             ForEach(availableMacs) { mac in
-                Button { viewing = mac } label: {
-                    Label {
-                        VStack(alignment: .leading) {
-                            Text(mac.macName)
-                            Text("화면 보기 · 조작").font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: { Image(systemName: "display") }
-                }
-                .accessibilityIdentifier("openScreen")
+                HStack {
+                    Button { viewing = mac } label: {
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(displayName(for: mac))
+                                Text("화면 보기 · 조작").font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "display") }
+                    }
+                    .accessibilityIdentifier("openScreen")
+                    Spacer()
+                    renameMenu(for: mac, includeConnectionActions: true)
+                }.buttonStyle(.borderless)
                 .contextMenu {
+                    Button("이름 변경…", systemImage: "pencil") { beginRename(mac) }
                     Button("사설망 연결 설정…", systemImage: "network.badge.shield.half.filled") { privateNetworkSetup = mac }
-                    if mac.communityID == nil { ScreenRemoteStopMenu(mac: mac, ask: { remoteStop = $0 }, notice: { notice = $0 }) }
+                    if mac.communityID == nil { ScreenRemoteStopMenu(mac: displayMac(mac), ask: { remoteStop = $0 }, notice: { notice = $0 }) }
                 }
             }
             .onDelete { offsets in
@@ -123,11 +138,16 @@ struct ScreenMacsSection: View {
                     macs = latest
                 }
             }
+            .sheet(item: $renaming) { target in
+                ScreenMacRenameSheet(target: target) { name in
+                    displayNamesJSON = try ScreenMacDisplayNames.updating(json: displayNamesJSON, id: target.id, name: name)
+                }
+            }
             .fullScreenCover(item: $commonViewing) { target in
-                ScreenViewerView(mac: target.mac, route: .automatic, communityTarget: target.peer)
+                ScreenViewerView(mac: displayMac(target.mac), route: .automatic, communityTarget: target.peer)
             }
             .fullScreenCover(item: $viewing) { mac in
-                ScreenViewerView(mac: mac, route: connectionRoute)
+                ScreenViewerView(mac: displayMac(mac), route: connectionRoute)
             }
             .onChange(of: community.macs.map(\.id)) { _, ids in
                 if let current = viewing, current.communityID != nil, !ids.contains(current.id) { viewing = nil }
@@ -151,12 +171,40 @@ struct ScreenMacsSection: View {
         } header: {
             Text("Mac 화면")
         } footer: {
-            Text("Mac의 AgentsToZ에서 근무 모드 → 「AgentsToZ Screen 열기」(또는 메뉴 막대의 화면 아이콘)를 눌러 화면 제어를 켜고 「기기 등록…」을 누르면 QR이 뜹니다. 그 QR을 여기서 찍으세요(주소를 Safari에 입력하지 않습니다). 근거리에서는 두 기기의 Wi‑Fi를 켜세요. 밖에서는 Mac을 길게 눌러 「사설망 연결 설정…」을 저장하고 경로를 ‘사설망 · Cloudflare’로 고르세요. 목록에서 지워도 Mac 쪽 등록은 남으니, Mac에서도 해지하세요.")
+            Text("Mac의 AgentsToZ에서 근무 모드 → 「AgentsToZ Screen 열기」(또는 메뉴 막대의 화면 아이콘)를 눌러 화면 제어를 켜고 「기기 등록…」을 누르면 QR이 뜹니다. 그 QR을 여기서 찍으세요(주소를 Safari에 입력하지 않습니다). Mac 옆의 더 보기에서 이 기기에 표시할 이름을 바꿀 수 있습니다. 근거리에서는 두 기기의 Wi‑Fi를 켜세요. 밖에서는 Mac을 길게 눌러 「사설망 연결 설정…」을 저장하고 경로를 ‘사설망 · Cloudflare’로 고르세요. 목록에서 지워도 Mac 쪽 등록은 남으니, Mac에서도 해지하세요.")
             // push hook: only in a build with a push endpoint.
             if ScreenPushConfig.isEnabled {
                 Text("QR로 개별 등록한 Mac을 길게 누르면 알림·연결 끊기·화면 제어 끄기를 사용할 수 있습니다. 커뮤니티 기기의 접근 해제는 위의 ‘등록 기기 관리’에서 합니다. 화면 제어를 다시 켜는 것은 Mac에서만 됩니다.")
             }
         }
+    }
+
+    private func displayName(for mac: SavedScreenMac) -> String {
+        ScreenMacDisplayNames.displayName(json: displayNamesJSON, id: mac.id, fallback: mac.macName)
+    }
+
+    private func displayMac(_ mac: SavedScreenMac) -> SavedScreenMac {
+        var copy = mac
+        copy.macName = displayName(for: mac)
+        return copy
+    }
+
+    private func beginRename(_ mac: SavedScreenMac) {
+        renaming = ScreenMacRenameTarget(id: mac.id, originalName: mac.macName, currentName: displayName(for: mac))
+    }
+
+    private func renameMenu(for mac: SavedScreenMac, includeConnectionActions: Bool) -> some View {
+        Menu {
+            Button("이름 변경…", systemImage: "pencil") { beginRename(mac) }
+            if includeConnectionActions {
+                Button("사설망 연결 설정…", systemImage: "network.badge.shield.half.filled") { privateNetworkSetup = mac }
+                if mac.communityID == nil { ScreenRemoteStopMenu(mac: displayMac(mac), ask: { remoteStop = $0 }, notice: { notice = $0 }) }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("\(displayName(for: mac)) 더 보기")
+        .accessibilityIdentifier("screenMacMore")
     }
 
     private func removeFromThisDevice() {
@@ -214,6 +262,54 @@ struct ScreenMacsSection: View {
             return "Mac 컨트롤러 전용 QR은 이 화면에서 등록할 수 없습니다. Mac의 「기기 등록…」 QR을 사용해 주세요."
         }
         return "AgentsToZ Screen의 등록 QR이 아닙니다."
+    }
+}
+
+private struct ScreenMacRenameTarget: Identifiable {
+    let id: String
+    let originalName: String
+    let currentName: String
+}
+
+private struct ScreenMacRenameSheet: View {
+    let target: ScreenMacRenameTarget
+    let save: (String?) throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var problem: String?
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var validName: Bool {
+        ScreenMacDisplayNames.valid(name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("이 기기에 표시할 이름") {
+                    TextField("Mac 이름", text: $name)
+                        .accessibilityIdentifier("screenMacRenameField")
+                    Text("이 이름은 이 기기의 Mac 화면 목록과 화면 보기에 표시됩니다. 커뮤니티 기능의 Mac 선택에는 원래 이름이 표시되며 Mac의 이름과 등록 권한은 그대로 유지됩니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("원래 이름: \(target.originalName)").font(.caption).foregroundStyle(.secondary)
+                    if !validName { Text("이름은 1~64자로 입력하고 줄바꿈은 제외해 주세요.").font(.caption).foregroundStyle(.secondary) }
+                    Button("원래 이름으로 되돌리기") { update(nil) }
+                }
+                if let problem { Section { Text(problem).foregroundStyle(.red) } }
+            }
+            .navigationTitle("Mac 이름 변경")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("저장") { update(trimmedName) }.disabled(!validName) }
+            }
+            .onAppear { name = target.currentName }
+        }
+    }
+
+    private func update(_ value: String?) {
+        do { try save(value); dismiss() }
+        catch { problem = "이름을 저장하지 못했습니다. 기존 이름은 유지됩니다." }
     }
 }
 

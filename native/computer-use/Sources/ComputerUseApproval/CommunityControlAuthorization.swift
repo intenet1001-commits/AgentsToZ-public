@@ -82,9 +82,11 @@ public struct CommunityControlLease: Sendable {
         }
         guard Set(keys).count == keys.count else { throw ApprovalError.invalidPayload }
         let order = ["screen.view", "screen.control", "screen.receive.view", "screen.receive.control", "agent.communicate",
-                     "teams.run", "computer-use.agent-settings", "computer-use.browser"]
+                     "teams.run", "computer-use.agent-settings", "computer-use.browser", "screen.desktop-trust", "screen.owner-delegation"]
         guard caps == order.filter({ caps.contains($0) }), !caps.contains("screen.control") || caps.contains("screen.view"),
-              !caps.contains("screen.receive.control") || caps.contains("screen.receive.view") else { throw ApprovalError.invalidPayload }
+              !caps.contains("screen.receive.control") || caps.contains("screen.receive.view"),
+              !caps.contains("screen.desktop-trust") || caps.contains("screen.view") || caps.contains("screen.receive.view"),
+              !caps.contains("screen.owner-delegation") || (caps.contains("screen.desktop-trust") && caps.contains("screen.receive.view") && caps.contains("screen.receive.control")) else { throw ApprovalError.invalidPayload }
         let agentDeviceID = body["agentDeviceId"] as? String
         guard body["agentDeviceId"] is NSNull || agentDeviceID.map(validID) == true,
               !caps.contains("agent.communicate") && !caps.contains("teams.run") || agentDeviceID != nil else { throw ApprovalError.invalidPayload }

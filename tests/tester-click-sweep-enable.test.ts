@@ -7,7 +7,7 @@ import {TESTER_MCP_TOOLS} from '../src/testerAgentMcp';
 import {resolveSystemPython} from '../src/pythonExecutable';
 
 // 전수 클릭 「켜기」·「기준선 만들기」(2026-11-01). 다른 프로젝트에서는 사람이 JSON을 직접 써야 켜졌다 — 카드는 「구성 전」만
-// 보여 줬다. 등록된 포트가 있으면 앱이 설정과 엔진을 깔고, 없으면 「대상 아님」(null)이다.
+// 보여 줬다. 등록된 포트가 있으면 앱이 설정과 엔진을 깔고, 포트가 없더라도 데스크톱 프로젝트 하네스를 별도로 구성할 수 있다.
 const roots:string[]=[],hosts:TesterAgentHost[]=[];
 afterEach(async()=>{for(const h of hosts.splice(0)){await h.shutdown();h.store.close();}for(const r of roots.splice(0))rmSync(r,{recursive:true,force:true});});
 function host(urls:Record<string,string|null>){
@@ -18,19 +18,19 @@ function host(urls:Record<string,string|null>){
     lease:async()=>{leases++;return {release(){}};},localUrl:async(r:TesterTarget)=>urls[r.portId]??null});
   hosts.push(h);return {h,root,leases:()=>leases};
 }
-test('sets offer 켜기 only with a registered port, and say 대상 아님 without one',async()=>{
+test('sets offer 켜기 only with a registered port, and explain desktop configuration without one',async()=>{
   const withPort=host({web:'http://127.0.0.1:9/'});
   expect((await withPort.h.perform({portId:'web',operation:'sets'})).sets!.clickSweep).toMatchObject({state:'none',enableUrl:'http://127.0.0.1:9/'});
   const without=host({docs:null});
   expect((await without.h.perform({portId:'docs',operation:'sets'})).sets!.clickSweep).toMatchObject({state:'none',enableUrl:null});
-  await expect(without.h.perform({portId:'docs',operation:'sweep-enable'})).rejects.toThrow('등록된 로컬 포트가 없어');
+  await expect(without.h.perform({portId:'docs',operation:'sweep-enable'})).rejects.toThrow('데스크톱 앱은 포트 없이');
   expect(existsSync(join(without.root,'.agentstoz/click-sweep.json'))).toBe(false);
 });
 test('켜기 writes the loopback config once, installs the shared engine under the lease and never overwrites',async()=>{
   const {h,root,leases}=host({web:'http://127.0.0.1:9/'});
   const sweep=(await h.perform({portId:'web',operation:'sweep-enable'})).sets!.clickSweep!;
-  expect(sweep).toMatchObject({state:'configured',engine:'present'});expect(sweep.surfaces).toEqual([{id:'web',label:'로컬 화면',kind:'url',baselinePresent:false,last:null}]);
-  expect(JSON.parse(readFileSync(join(root,'.agentstoz/click-sweep.json'),'utf8'))).toEqual({schemaVersion:1,surfaces:[{id:'web',label:'로컬 화면',url:'http://127.0.0.1:9/'}]});
+  expect(sweep).toMatchObject({state:'configured',engine:'present'});expect(sweep.surfaces).toEqual([{id:'web',label:'로컬 웹 화면',kind:'url',target:'web',environment:'browser',baselinePresent:false,last:null}]);
+  expect(JSON.parse(readFileSync(join(root,'.agentstoz/click-sweep.json'),'utf8'))).toEqual({schemaVersion:2,surfaces:[{id:'web',label:'로컬 웹 화면',target:'web',environment:'browser',url:'http://127.0.0.1:9/'}]});
   expect(readFileSync(join(root,'scripts/agentstoz-click-sweep.mjs'),'utf8')).toStartWith('#!/usr/bin/env node\n// agentstoz-click-sweep ');
   expect(leases()).toBe(1);
   writeFileSync(join(root,'.agentstoz/click-sweep.json'),'{"hand":"edited"}');

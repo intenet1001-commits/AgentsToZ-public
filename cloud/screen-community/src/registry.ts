@@ -11,7 +11,7 @@ interface Pending {id:string;communityId:string;requestId:string;hostKey:string;
   mode:'code'|'entry';expiresAt:number;attempts:number;confirmationHash:string;confirmationCipher:string;enrollmentId:string|null}
 interface Approval {pendingId:string;actorId:string;revision:number;digest:string;challengeHash:string;expiresAt:number}
 interface PushSubscription {token:string;environment:'sandbox'|'production';topic:string}
-export interface CommunityNotification {pendingId:string;recipientId:string;token:string;environment:'sandbox'|'production';topic:string;expiresAt:number;notice:Envelope}
+export interface CommunityNotification {pendingId:string;recipientId:string;recipientKeyEpoch:number;token:string;environment:'sandbox'|'production';topic:string;expiresAt:number;notice:Envelope}
 interface Receipt {hash:string;hostKey:string;actor:string|null;cipher:string;pendingId:string|null;expiresAt:number}
 
 /** Private issuer and wrapping keys live only in the service. This registry never handles video or input. */
@@ -74,24 +74,51 @@ export class CommunityRegistry {
   }
   private pendingDigest(p:Pending):string{return hash(JSON.stringify([p.communityId,p.id,p.deviceId,p.hostKey,p.viewerKey,p.platform,p.grant,p.expiresAt]));}
   /** Claim an at-most-once advisory notification. Neither receiving nor tapping it grants membership. */
-  takeNotifications():CommunityNotification[]{
+  takeNotifications(limit=4):CommunityNotification[]{
+    demand(Number.isSafeInteger(limit)&&limit>=0&&limit<=4);if(limit===0)return [];
     return this.store.transaction(()=>{
       const now=this.clock(),jobs:CommunityNotification[]=[];
       for(const id of (this.store.get<string[]>('notification-queue')??[]).slice(-32)){
         const p=this.store.get<Pending>(`pending:${id}`);if(!p||p.expiresAt<=now||p.enrollmentId)continue;
         const c=this.community(p.communityId);
         for(const memberId of c.memberIds){
-          if(jobs.length===4)return jobs;
+          if(jobs.length===limit)return jobs;
           const m=this.store.get<Member>(`member:${memberId}`),key=`notified:${p.id}:${memberId}`,cipher=this.store.get<string>(`push:${memberId}`);
           if(!m||m.revokedAt!==null||!m.admin||!cipher||this.store.get(key))continue;
           const subscription=openSealed<PushSubscription>(cipher,this.stateKey,memberId);
           if(!this.allowedPushTopics.includes(subscription.topic))continue;
           this.store.put(key,true,p.expiresAt);
-          jobs.push({pendingId:p.id,recipientId:memberId,...subscription,expiresAt:p.expiresAt,
+          jobs.push({pendingId:p.id,recipientId:memberId,recipientKeyEpoch:m.keyEpoch,...subscription,expiresAt:p.expiresAt,
             notice:signed([1,'enrollment-notice',p.id,now,c.id,p.id,p.expiresAt,this.pendingDigest(p)],this.issuer)});
         }
       }
       return jobs;
+    });
+  }
+  hasNotifications():boolean {
+    const now=this.clock();
+    for(const id of (this.store.get<string[]>('notification-queue')??[]).slice(-32)){
+      const p=this.store.get<Pending>(`pending:${id}`);if(!p||p.expiresAt<=now||p.enrollmentId)continue;
+      const c=this.community(p.communityId);
+      for(const memberId of c.memberIds){
+        const m=this.store.get<Member>(`member:${memberId}`),cipher=this.store.get<string>(`push:${memberId}`);
+        if(!m||m.communityId!==c.id||m.revokedAt!==null||!m.admin||!cipher||this.store.get(`notified:${p.id}:${memberId}`))continue;
+        if(this.allowedPushTopics.includes(openSealed<PushSubscription>(cipher,this.stateKey,memberId).topic))return true;
+      }
+    }
+    return false;
+  }
+  notificationCurrent(job:CommunityNotification):boolean {
+    const p=this.store.get<Pending>(`pending:${job.pendingId}`),m=this.store.get<Member>(`member:${job.recipientId}`),cipher=this.store.get<string>(`push:${job.recipientId}`);
+    if(!p||p.enrollmentId||p.expiresAt<=this.clock()||!m||m.communityId!==p.communityId||m.revokedAt!==null||!m.admin||m.keyEpoch!==job.recipientKeyEpoch||!cipher||!this.allowedPushTopics.includes(job.topic))return false;
+    const current=openSealed<PushSubscription>(cipher,this.stateKey,job.recipientId);
+    return current.token===job.token&&current.environment===job.environment&&current.topic===job.topic;
+  }
+  removeDeadPush(job:CommunityNotification):void {
+    this.store.transaction(()=>{
+      const cipher=this.store.get<string>(`push:${job.recipientId}`);if(!cipher)return;
+      const current=openSealed<PushSubscription>(cipher,this.stateKey,job.recipientId);
+      if(current.token===job.token&&current.topic===job.topic&&current.environment===job.environment)this.store.remove(`push:${job.recipientId}`);
     });
   }
   private execute(r:Request):Envelope|Fault{

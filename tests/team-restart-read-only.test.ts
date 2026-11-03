@@ -18,11 +18,20 @@ import {createTeamExternalFileJournal, createTeamExternalHostRuntime, type TeamE
 import type {TeamExternalJournal, TeamExternalScope} from '../src/teamExternalRuntime';
 import {createTeamOrcaRecoveryRead} from '../src/teamOrcaRecoveryRead';
 import {createTeamRuntimeBridge, type TeamRuntimeBinding} from '../src/teamRuntimeBridge';
-import {WorkroomTeamError} from '../src/workroomTeam';
+import {WorkroomTeamError, WorkroomTeamService, WorkroomTeamStore, type Team, type WorkroomTeamHost} from '../src/workroomTeam';
 import {runTeamMemberOperation} from '../src/workroomTeamMemberOperation';
 
 const TEAM = 'team_0123456789ab', CWD = '/repo/member', TARGET = 'rwt-member-one';
 const dirs: string[] = [], servers: ReturnType<typeof Bun.serve>[] = [];
+/** Real question observation state, with every unrelated Workroom/Git effect forbidden. */
+function readOnlyTeamService(team: Team) {
+  const store = new WorkroomTeamStore(null); store.save(team);
+  const forbidden = (): never => { throw new Error('No Workroom or Git effects in the restart read-only fixture'); };
+  const host: WorkroomTeamHost = {resolveProject: forbidden, primary: forbidden, addWorktree: forbidden, worktreeTargetId: forbidden,
+    start: forbidden, session: forbidden, sessionForTarget: forbidden, attachable: forbidden, instruct: forbidden,
+    close: forbidden, branchGit: forbidden, removeWorktree: forbidden, deleteMergedBranch: forbidden};
+  return new WorkroomTeamService(host, store);
+}
 afterEach(() => {
   for (const server of servers.splice(0)) server.stop(true);
   for (const dir of dirs.splice(0)) rmSync(dir, {recursive: true, force: true});
@@ -72,11 +81,16 @@ async function fixture() {
   const before = appRun('host-before-restart', journal, cli, () => binding);
   const started = await before.start({teamId: TEAM, memberId: 'm1', memberName: 'worker', agent: 'claude', plan: {surface: 'orca-worktree'}, cwd: CWD, targetId: TARGET,
     prompt: 'Implement the member task.', requestId: 'launch-request-0001', effort: {requestText: 'Implement the member task.'}});
-  const team = {state: 'active', leader: {sessionId: 'leader_session'}, members: [{id: 'm1', surface: 'orca-worktree', execution: started.ref}]};
+  const team: Team = {id: TEAM, requestId: 'create-before-restart', fingerprint: 'software-fixture', projectId: 'project-one', projectName: 'Software fixture',
+    primaryPath: '/repo', baseCheckout: '/repo', title: 'Restart read-only', goal: 'Read the original member without granting authority',
+    baseCommit: 'a'.repeat(40), baseBranch: 'main', state: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+    leader: {sessionId: 'leader_session', agent: 'codex'}, members: [{id: 'm1', name: 'worker', agent: 'claude', task: 'Read-only recovery',
+      surface: 'orca-worktree', execution: started.ref, branch: 'member-one', worktreePath: CWD, targetId: TARGET, sessionId: null, state: 'awaiting-ack'}]};
   // The run after the restart: a new host instance id over the same journal file and team ledger.
   const after = appRun('host-after-restart', journal, cli, () => binding);
-  const host = {service: {store: {get: (id: string) => id === TEAM ? team : undefined}}, external: after,
-    readWorkroom: async () => { throw new Error('not a Workroom member'); }} as unknown as Parameters<typeof runTeamMemberOperation>[0];
+  const service = readOnlyTeamService(team);
+  const host = {service, external: after,
+    readWorkroom: async () => { throw new Error('not a Workroom member'); }} satisfies Parameters<typeof runTeamMemberOperation>[0];
   // A stand-in for the app's action endpoint: the same parser and member operation, and the response shape api-server.ts returns.
   const server = Bun.serve({hostname: '127.0.0.1', port: 0, fetch: async request => {
     if (new URL(request.url).pathname !== '/api/agentstoz-use/action') return new Response('not found', {status: 404});
@@ -99,7 +113,7 @@ async function fixture() {
     return {isError: result.isError as boolean, content: result.structuredContent ?? JSON.parse(result.content[0].text)};
   };
   const record = () => journal.read(`${TEAM}:m1`);
-  return {cli, call, record, started, setBinding: (value: TeamRuntimeBinding | null) => { binding = value; }, afterRestart: cli.calls.length};
+  return {cli, call, record, started, service, setBinding: (value: TeamRuntimeBinding | null) => { binding = value; }, afterRestart: cli.calls.length};
 }
 
 test('after a restart, agentstoz_use_team_member reads the earlier Orca member read-only, never verified, without writing anything', async () => {
@@ -112,6 +126,9 @@ test('after a restart, agentstoz_use_team_member reads the earlier Orca member r
   expect(read.isError).toBe(false);
   expect(read.content).toMatchObject({success: true, performed: true, effect: 'read-only', memberId: 'm1', surface: 'orca-worktree',
     text: 'member output\nnext line', cursor: '20', agentVerified: false, outcome: 'read', reason: 'EXTERNAL_HOST_RESTART_READ_ONLY'});
+  expect(read.content).not.toHaveProperty('question'); // Historical evidence cannot publish a current provider question.
+  expect(f.service.questions.list(TEAM).questions).toEqual([]);
+  expect(f.service.questions.submissionAvailable).toBe(false);
   // Checked on both sides of the read, on the recorded terminal only — no send, focus, close or create.
   expect(f.cli.calls.slice(launchCalls).map(args => args.slice(0, 2))).toEqual([['terminal', 'show'], ['terminal', 'read'], ['terminal', 'show']]);
   expect(f.cli.calls.slice(launchCalls).every(args => args.includes('term-exact'))).toBe(true);

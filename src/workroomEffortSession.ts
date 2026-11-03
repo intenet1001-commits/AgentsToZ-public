@@ -3,6 +3,7 @@ import type {AiTerminalAgent} from './aiTerminalProtocol';
 import type {EffortRefusal} from './workroomEffortRuntime';
 import {cliInfoFromScreen} from './workroomCliCommands';
 import {teamHermesEffortLevels} from './teamEffortCatalog';
+import {releaseWorkroomEffortChoice, type WorkroomEffortChosen} from './workroomEffortChoice';
 import {
   WORKROOM_EFFORT_SUPPORT,
   classifyWorkroomEffort,
@@ -62,8 +63,14 @@ export interface WorkroomEffortState {
    * shortcuts unavailable for this model). Auto types nothing there again; a larger screen or another model tries. Never reported.
    */
   effortRefusal?: EffortRefusal;
+  /**
+   * Host-only: a level the person chose for this running CLI through agentstoz_use_set_workroom_effort
+   * (src/workroomEffortChoice.ts). Auto neither changes nor advises while it holds; a native change, a release or the end
+   * of the CLI process ends it. Never reported — the record shows it as a level without a tier, like a pin.
+   */
+  chosen?: WorkroomEffortChosen;
 }
-export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending' | 'pinned' | 'effortRefusal'> & {sessionId: string; agent: AiTerminalAgent};
+export type WorkroomEffortRecord = Omit<WorkroomEffortState, 'phraseLines' | 'automaticPending' | 'pinned' | 'effortRefusal' | 'chosen'> & {sessionId: string; agent: AiTerminalAgent};
 /** A host-only launch choice (team members): a pinned level, or the text auto classifies instead of the launch prompt. */
 export type WorkroomLaunchEffort = {pinned: WorkroomEffortLevel} | {requestText: string};
 
@@ -180,6 +187,11 @@ export function observeWorkroomEffortScreen(state: WorkroomEffortState, agent: A
       state.seen = effort;
     }
   }
+  // A person's agentstoz_use choice holds while the CLI shows it; a different level they then pick natively wins.
+  if (state.chosen) {
+    if (state.seen !== undefined && state.seen !== state.chosen.level) { releaseWorkroomEffortChoice(state); state.manual = true; }
+    else state.manual = false;
+  }
   if (state.manual) state.advice = undefined;
 }
 
@@ -189,7 +201,7 @@ export function observeWorkroomEffortScreen(state: WorkroomEffortState, agent: A
  * clears it. Auto ON also re-evaluates a previous manual or higher level. Unknown current level: advise only low/high.
  */
 export function noteWorkroomEffortRequest(state: WorkroomEffortState, agent: AiTerminalAgent, text: string, auto: boolean, at: string): void {
-  if (WORKROOM_EFFORT_SUPPORT[agent] !== 'launch' || state.pinned) return;
+  if (WORKROOM_EFFORT_SUPPORT[agent] !== 'launch' || state.pinned || state.chosen) return;
   if (!auto) { state.advice = undefined; return; }
   const decision = classifyWorkroomEffort(workroomEffortRequestText(text));
   if (!decision) return;
@@ -201,6 +213,6 @@ export function noteWorkroomEffortRequest(state: WorkroomEffortState, agent: AiT
 }
 
 export function workroomEffortRecord(sessionId: string, agent: AiTerminalAgent, state: WorkroomEffortState | undefined): WorkroomEffortRecord {
-  const {phraseLines: _baseline, automaticPending: _pending, pinned: _pinned, effortRefusal: _refused, ...rest} = state ?? {manual: false};
+  const {phraseLines: _baseline, automaticPending: _pending, pinned: _pinned, effortRefusal: _refused, chosen: _chosen, ...rest} = state ?? {manual: false};
   return {sessionId, agent, ...rest, ...(rest.advice ? {advice: {...rest.advice}} : {})};
 }

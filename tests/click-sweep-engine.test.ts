@@ -6,7 +6,7 @@ import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {parseSweepConfig} from '../scripts/agentstoz-click-sweep.mjs';
+import {parseSweepConfig,runClickSweep} from '../scripts/agentstoz-click-sweep.mjs';
 
 const ENGINE = resolve(import.meta.dir, '../scripts/agentstoz-click-sweep.mjs');
 const PAGE = (withDialogButton: boolean) => `<!doctype html><html lang="ko"><body><main>
@@ -60,7 +60,7 @@ describe('click sweep engine on a project that is not AgentsToZ', () => {
     expect(again.code).toBe(0);
     expect(again.out).toContain('✓ 기준선과 비교해');
     const summary = JSON.parse(readFileSync(join(project, '.agentstoz/maintainer/click-sweep/web/summary.json'), 'utf8'));
-    expect(summary).toMatchObject({schemaVersion: 1, surface: 'web', passed: true, baselinePresent: true});
+    expect(summary).toMatchObject({schemaVersion: 2, target: 'web', environment: 'browser', surface: 'web', passed: true, baselinePresent: true});
     expect(readFileSync(join(project, '.agentstoz/maintainer/click-sweep/history.jsonl'), 'utf8').trim().split('\n').length).toBe(3);
   }, 120_000);
 
@@ -78,6 +78,22 @@ describe('click sweep engine on a project that is not AgentsToZ', () => {
     expect(result.out).toContain('설정 열기');
     html = PAGE(true);
   }, 120_000);
+
+  test('web update cannot replace a desktop baseline or claim a desktop execution', async () => {
+    const path=join(project,'.agentstoz/click-sweep/web.json'),previous=readFileSync(path,'utf8');
+    const other=JSON.stringify({...JSON.parse(previous),target:'desktop',environment:'native'});writeFileSync(path,other);
+    try{const result=await sweep('--update');expect(result.code).toBe(1);expect(readFileSync(path,'utf8')).toBe(other);}
+    finally{writeFileSync(path,previous);}
+    await expect(runClickSweep({root:project,target:'desktop',url:server.url.toString()})).rejects.toThrow('web/browser');
+  },120_000);
+
+  test('target declarations separate desktop commands, web URLs and legacy commands', () => {
+    expect(()=>parseSweepConfig(JSON.stringify({schemaVersion:2,surfaces:[{id:'app',target:'desktop',environment:'native',platform:'darwin',url:'http://127.0.0.1:1/'}]}))).toThrow('desktop');
+    expect(()=>parseSweepConfig(JSON.stringify({schemaVersion:2,surfaces:[{id:'app',command:['missing']}]}))).toThrow('target');
+    expect(parseSweepConfig(JSON.stringify({schemaVersion:2,surfaces:[{id:'app',target:'desktop',environment:'fixture',platform:'darwin',command:['owned-fixture']}]})).surfaces[0].environment).toBe('fixture');
+    expect(parseSweepConfig(JSON.stringify({schemaVersion:1,surfaces:[{id:'old',command:['legacy-harness']}]})).surfaces[0].target).toBeUndefined();
+    for(const schemaVersion of [1,2])for(const baseline of ['',0,false,null,[],{}])expect(()=>parseSweepConfig(JSON.stringify({schemaVersion,surfaces:[{id:'web',target:'web',url:'http://127.0.0.1:1/',baseline}]}))).toThrow('baseline');
+  });
 
   test('only loopback pages can be swept, and a missing config is not a pass', () => {
     expect(() => parseSweepConfig(JSON.stringify({schemaVersion: 1, surfaces: [{id: 'prod', url: 'https://example.com/'}]}))).toThrow('loopback');

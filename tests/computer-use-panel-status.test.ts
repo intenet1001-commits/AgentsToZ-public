@@ -163,7 +163,7 @@ test('the receiving switch, 「끊기」 and blocking change only through the ma
     await f.remote({operation: 'scope-status'}, {deviceId: DEVICE2, deviceName: '2호'}, '2'.repeat(32));
     await ui.load();
     let html = ui.html(ComputerUseRemoteReceive);
-    expect(html).toContain('aria-checked="true"');expect(html).toContain('받기</span><span class="font-semibold">켜짐');
+    expect(html).toContain('aria-checked="true"');expect(html).toContain('받기</span><span class="font-semibold">켜짐 · 받을 준비 필요');
     expect(count(html, 'computer-use-remote-row')).toBe(2);
     // The remote grant is in its row, not in the generic list where 「제어 종료」 alone would let that AI take it again.
     expect(html).toContain('AI가 사용 중 · 전체 Mac');expect(html).toContain('연결됨 · 아직 허용 없음');
@@ -240,7 +240,7 @@ test('a remote row shows the device name and code; the notice is shown once unti
     expect(html).toContain('오른쪽·두 번 클릭, 스크롤, 끌기도 받습니다');
 
     const notice = ui.html(ComputerUseRemoteNotice);
-    expect(count(notice, 'computer-use-remote-notice')).toBe(1);expect(notice).toContain('이제 다른 Mac의 AI도 받습니다');expect(notice).toContain('막기');
+    expect(count(notice, 'computer-use-remote-notice')).toBe(1);expect(notice).toContain('다른 Mac의 AI 수신 설정을 확인하세요');expect(notice).not.toContain('수신 준비를 확인했습니다');expect(notice).toContain('막기');
     await ui.press(ComputerUseRemoteNotice, 'computer-use-remote-notice-ok');
     expect(ui.sent.at(-1)).toEqual({operation: 'scope-remote-set', noticeShown: true});
     expect(ui.html(ComputerUseRemoteNotice)).toBe('');
@@ -264,14 +264,14 @@ test('a remote row shows the device name and code; the notice is shown once unti
   // Without the standing allowance it says that others' AIs could come in, not that they do.
   const off = fixture({standing: null});try {
     const ui = panel(off);await ui.load();const notice = ui.html(ComputerUseRemoteNotice);
-    expect(notice).toContain('이제 다른 Mac의 AI도 받을 수 있습니다');expect(notice).toContain('상시 허용을 켜면');
-    expect(ui.html(ComputerUseRemoteReceive)).toContain('켜짐 · 상시 허용이 꺼져 있어 아직 받지 않습니다');
+    expect(notice).toContain('다른 Mac의 AI 수신 설정을 확인하세요');expect(notice).toContain('상시 허용·공유 연결·수신 동의');
+    expect(ui.html(ComputerUseRemoteReceive)).toContain('켜짐 · 받을 준비 필요 · Control 메뉴의');
   } finally { off.close(); }
   // A host that cannot receive (an unsigned build) never shows the notice, and its switch cannot be pressed.
   const unsigned = fixture({acceptRemote: false});try {
     const ui = panel(unsigned);await ui.load();
     expect(ui.html(ComputerUseRemoteNotice)).toBe('');
-    const html = ui.html(ComputerUseRemoteReceive);expect(html).toContain('받을 수 없음 · 이 앱은 다른 Mac의 AI를 받지 않습니다');
+    const html = ui.html(ComputerUseRemoteReceive);expect(html).toContain('켜짐 · 받을 준비 필요 · 서명된 Mac 앱의 수신 연결을 확인하세요');
     const [remoteSwitch] = find(ComputerUseRemoteReceive({state: ui.state, busy: false, run: async () => {}, request: async () => ({}), refresh: async () => {}, onNotice: () => {}}), 'computer-use-remote-switch');
     expect(remoteSwitch?.props.disabled).toBe(true);
   } finally { unsigned.close(); }
@@ -333,7 +333,7 @@ test('without the shared control-folder link the receiving side says it cannot r
   const f = fixture({link: outgoingLink(false)});try {
     const ui = panel(f);await ui.load();
     expect(ui.state!.remote.profileReady).toBe(false);
-    expect(ui.html(ComputerUseRemoteReceive)).toContain('받을 수 없음 · 공유 총괄 폴더 연결이 필요합니다');
+    expect(ui.html(ComputerUseRemoteReceive)).toContain('켜짐 · 받을 준비 필요 · 아젠투지 설정에서 공유 총괄 폴더 연결을 확인하세요');
   } finally { f.close(); }
   const broken = fixture({link: {profileReady() { throw Error('unreadable'); }, usage() { throw Error('unreadable'); }, closeDevice: () => 0}});try {
     const ui = panel(broken);await ui.load();
@@ -349,7 +349,7 @@ test('the standing allowance text names who it lets in (D1), and the old 「맡�
       {mode: 'desktop', state, applications: [], request: async () => ({}), refresh: async () => {}, busy: false, run: async () => {}, onNotice: () => {}}));
     let html = form(ui.state);
     expect(html).toContain('computer-use-standing');
-    expect(html).toContain('이 Mac의 모든 AgentsToZ AI와 같은 커뮤니티 다른 Mac의 AI가 다시 묻지 않고 전체 Mac을 씁니다');
+    expect(html).toContain('다른 Mac의 AI는 아래 수신 준비 상태를 확인하세요');expect(html).not.toContain('같은 커뮤니티 다른 Mac의 AI가 다시 묻지 않고');
     expect(html).not.toContain('맡긴 작업도 이 Mac의 AI가');
     await f.runtime.manage({operation: 'scope-remote-set', allowRemote: false});await ui.load();
     html = form(ui.state);
@@ -363,7 +363,7 @@ test('the standing allowance text names who it lets in (D1), and the old 「맡�
 });
 
 test('the remote view keeps only rows it can act on, groups cut connections by device and is absent for an older host', () => {
-  const remote = {accepting: true, allowRemote: true, noticeShown: true,
+  const remote = {accepting: true, allowRemote: true, noticeShown: true,nativeAuthorized:true,profileReady:true,
     blockedDevices: [{deviceId: DEVICE2, name: '2호‮', since: STANDING}, {deviceId: 'nope', name: 'x', since: 1}],
     blockedConnections: [{deviceId: DEVICE, instance: TAG_A, until: STANDING + 1}, {deviceId: DEVICE, instance: TAG_B, until: STANDING + 9}, {deviceId: DEVICE2, instance: TAG_A, until: STANDING}]};
   const connections = [
@@ -372,14 +372,14 @@ test('the remote view keeps only rows it can act on, groups cut connections by d
     {id: 'mcp_1', code: 'y', scope: 'mcp-connection'},
   ];
   const grants = [{id: 'g1', caller: {sessionId: 'rcu_1'}, halted: true}, {id: 'g2', caller: {sessionId: 'rcu_1'}, owner: 'person'}, {id: 'g3', caller: {sessionId: 'mcp_1'}, label: '이 Mac', scope: {kind: 'desktop'}}];
-  const view = computerUseRemoteView({remote, connections, scoped: {grants}, access: {enabled: true, scope: {kind: 'desktop'}, standing: {since: STANDING}}})!;
+  const view = computerUseRemoteView({native:{success:true,accessibility:true,secureInput:false},remote, connections, scoped: {grants,native:{success:true,scopeProtocolVersion:2,accessibility:true,screenRecording:true,secureInput:false,operations:COMPUTER_USE_SCOPE_OPERATIONS}}, access: {enabled: true, scope: {kind: 'desktop'}, standing: {since: STANDING}}})!;
   expect(view.rows).toEqual([{connectionId: 'rcu_1', code: '12345678', deviceId: DEVICE, deviceName: '1호', deviceCode: '3a9d', connection: TAG_B, grant: {id: 'g2', state: 'person'}}]);
   // A device blocked as a whole is listed once, not again for its cut connections; a name cannot carry direction marks.
   expect(view.blockedDevices).toEqual([{deviceId: DEVICE2, name: '2호', since: STANDING}]);
   expect(view.blockedConnections).toEqual([{deviceId: DEVICE, name: '1호', count: 2, until: STANDING + 9}]);
-  expect(view.noticeDue).toBe(false);expect(computerUseRemoteStateText(view)).toContain('켜짐 · 같은 커뮤니티 다른 Mac의 AI가 상시 허용 아래 이 Mac 전체를 씁니다');
-  expect(computerUseRemoteStateText({...view, appScope: true})).toBe('켜짐 · 지금은 한 앱만 허용돼 있어 다른 Mac의 AI는 거절합니다.');
-  expect(computerUseRemoteStateText({...view, unreadable: true})).toBe('꺼짐 · 설정 파일을 읽지 못해 다른 Mac의 AI를 받지 않습니다. 공통 등록·권한관리에서 Native 수신 상태를 확인하세요.');
+  expect(view.noticeDue).toBe(false);expect(computerUseRemoteStateText(view)).toContain('받을 준비됨 · 현재 수신 동의·공유 연결·전체 Mac 상시 허용이 확인됐습니다');
+  expect(computerUseRemoteStateText({...view, appScope: true})).toBe('켜짐 · 받을 준비 필요 · 지금은 한 앱 범위입니다. 다른 Mac의 AI에는 전체 Mac 상시 허용이 필요합니다.');
+  expect(computerUseRemoteStateText({...view, unreadable: true})).toBe('확인 필요 · 수신 설정을 읽지 못했습니다. 공통 등록·권한관리에서 현재 수신 상태를 확인하세요.');
   const unreadableState={remote:{...remote,settingsUnreadable:true},connections,scoped:{grants},access:{enabled:true,scope:{kind:'desktop'},standing:{since:STANDING}}};
   const unreadableProps={state:unreadableState,busy:false,run:async()=>{},request:async()=>({}),refresh:async()=>{},onNotice:()=>{}};
   const unreadablePanel=ComputerUseRemoteReceive(unreadableProps);

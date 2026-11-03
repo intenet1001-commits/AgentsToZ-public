@@ -402,6 +402,49 @@ HTTP/MCP body로 native adapter를 등록할 수 없다. gateway의 CAS만으로
   실제 슬라이더 → 적용, 강도가 모자란 대화 행 → 슬라이더 행으로 화살표 수, 열리지 않은 슬라이더 → Esc 없음, Codex 인용 행 → 거절 아님,
   거절 뒤 하단줄이 바뀜 → 거절(부분 변경), 모델별 기억, 크기별 기억(더 넓으면 다시) — 수정 전 8개 모두 실패.
 
+### 사람이 고르는 세션 한정 에포트 — `agentstoz_use_set_workroom_effort` (MCP 1.81.0, 2026-11-03)
+
+다른 AI(Claude Code·Codex·Hermes·agy 어디서든)가 같은 프로젝트(또는 `target=ops`)의 **다른** 워크룸 세션 에포트를 사람에게 클릭으로 고르게 한다.
+정본: `src/workroomEffortChoice.ts`(선택지·binding·보유/해제), `aiTerminalService.ts`의 `effortChoice`/`chooseEffort`,
+`src/agentstozUseWorkroomEffort.ts`(self 거절·오류 코드), `agentstoz-use-mcp-server.ts`의 도구. 실행 표면은 **워크룸 CLI뿐**이다.
+- **사람이 고르는 길 두 가지**: ① `ask=true`만 보내면 MCP 서버가 **클라이언트의 MCP elicitation 폼**(`elicitation/create`, 2025-06-18)으로 사람에게 직접
+  choices를 보여 주고 고른 값만 적용한다 — 호출한 AI는 강도를 정할 수 없다(`ask`에 level·binding·requestId를 함께 주면 거절). 결과 `personChoice`:
+  `chosen`(서버가 만든 `ask-…` requestId 포함)·`declined`·`cancelled`·`timeout`(45초, 폼을 `notifications/cancelled`로 닫는다)·`ask-unavailable`·`unsupported`.
+  이 Mac의 Claude Code 2.1.317·Codex 0.166 바이너리에 `elicitation/create`가 있다(문자열 확인, 실제 폼 표시는 미실측). 폼 대기는 동시 읽기 칸에서 돌아
+  다른 호출을 막지 않는다 — 그사이 세션이 바뀌면 binding이 막는다. ② 폼을 못 쓰는 클라이언트: level 없이 읽은 choices를 AI가 단일 선택
+  질문(Claude Code: AskUserQuestion)으로 보여 주고 **사람의 답을 기다린 뒤** level + 받은 binding 그대로 + 새 requestId. 스스로 고르지 않는다.
+  ⚠️ 45초는 클라이언트 도구 한도(Codex `tool_timeout_sec`, 기본값 미확인)를 넘지 않게 잡았다 — 넘으면 도구 호출이 먼저 끊기고 사람의 선택만 나중에 적용될 수 있다.
+- **읽기 결과**: `current`와 `currentFrom`(`screen` 지금 화면 · `last-observed` 마지막으로 본 값 — Claude는 턴 뒤 에포트 줄을 숨긴다). 결과의
+  `readback`·`readbackFrom`도 같다(`applied`는 런타임이 화면에서 증명한 값이라 항상 `screen`).
+- **바꾸는 방법은 에포트 자동과 같은 CLI 자체 세션 한정 제어**(`changeWorkroomEffort`): Claude `/effort⏎` 슬라이더 → ←/→ → `s`, Codex `ESC ,`/`ESC .`,
+  Hermes `/reasoning <level>`(--global 없음). 전역 기본값·모델·계정·다른 대화·새 프롬프트로 대신하지 않는다. 결과는 CLI 화면에서 다시 읽는다(readback).
+- **binding** = 세션 id·**CLI pid**·agent·계정 id·모델(화면 표시, 없으면 launch)·provider·현재 강도·보유 중인 선택·`inputRevision`의 sha256 앞 32자.
+  하나라도 바뀌면 `BINDING_CHANGED`로 키 없이 거절 — 다시 읽고 다시 묻는다. 「다시 시작」은 pid가 바뀌어 옛 binding이 절대 맞지 않는다.
+- **선택지**: Claude는 화면 모델이 Opus/Sonnet/Haiku 5.5·Fable 5.1일 때 low…max, 그 밖·thinking 꺼짐은 low/medium/high. Codex는 **설정 증명**
+  (`codexEffortModel`, 읽기 전용)이 화면 모델과 같은 카탈로그 모델을 가리킬 때만 그 모델의 xhigh/max/ultra를 더하고, 아니면 low/medium/high
+  (provider·base URL·profile·세션 중 `/model` 전환은 미증명 — 모델에 없는 강도는 단축키를 반쯤 남긴다). Hermes는 `teamHermesEffortLevels`.
+  `auto`는 선택이 보유 중일 때만 보이지만 언제 보내도 키를 치지 않는다(`released`/`not-held`).
+- **거절(키 입력 전)**: 종료·종료 중, agy(에포트=모델 변형), 대직 제한 세션, 팀 고정 강도, Claude `CLAUDE_CODE_EFFORT_LEVEL`, 세션 한정 제어가 없는
+  CLI 버전, 강도를 받지 않는 모델(Hermes·anthropic Haiku), 화면 없음, **CLI가 강도를 아직 보여 준 적 없음**(`effort-not-shown` — 세는 기준도
+  readback도 없다), **이 CLI 프로세스의 이전 선택 결과 불명**(`previous-outcome-unknown` + originalRequestId — 사람에게 묻기 전 읽기에서 알린다),
+  제공하지 않는 강도(`LEVEL_UNSUPPORTED`), 4초 안에 빈·대기 작성칸이 아님
+  (`NOT_READY` — 사람이 입력 중이거나 선택 화면). 호출한 AI 자신의 워크룸은 api 처리기에서 `AGENTSTOZ_USE_WORKROOM_SELF_TARGET`, 다른 프로젝트·목록에
+  없는 세션은 기존 워크룸 세션 해석이 막는다. MCP 매핑은 `model`·`provider`·`accountId` 등 스키마 밖 인자를 **버리지 않고 거절**한다.
+- **결과 불명**: 키를 친 뒤 확인하지 못하면 `OUTCOME_UNKNOWN`(keysTyped, originalRequestId) — 기록은 `runtimeStatus: 'unconfirmed'`, 그 CLI 프로세스에서는
+  이후 선택을 모두 거절한다. 같은 requestId는 기록된 결과만 돌려준다(재전송 없음). 다른 내용에 같은 requestId는 `REQUEST_ID_CONFLICT`. 원장은 512개(끝난 것부터 비움).
+- **우선순위·수명**: 팀 고정 > 사람의 선택 > 에포트 자동. 선택이 보유되는 동안 `#adjustEffort`·`noteWorkroomEffortRequest`는 아무것도 하지 않는다(조언도 없음).
+  끝나는 경우는 셋: `auto`로 해제, **CLI에서 직접 다른 강도로 바꿈**(관측이 `seen ≠ chosen`을 보면 해제 + `manual`), CLI 프로세스 종료.
+  「다시 시작」은 `workroomEffortRestartBase`로 선택이 대신한 자동 결정에서 다시 계획한다. 맥의 auto/recommend/off 모드는 사람이 명시한 선택을 막지 않는다(팀 고정과 같음).
+- **기록·휴대폰**: `chosen`은 호스트 전용 — `WorkroomEffortRecord`에서 뺀다(엄격한 정규화기). 보유 중에는 tier 없는 level로 보여 「에포트 요청 · 높음 · CLI 표시 높음」.
+- **이것이 해결하지 않는 것**: Codex·Claude·Hermes·Antigravity **데스크톱 앱**은 여전히 연결이 없다(production에 `DesktopEffortHost.register`/`boundary`
+  호출자가 없다). Codex 앱(`com.openai.codex`) 접근은 도구가 안전상 거부했고 Shell·AX·다른 컴퓨터 유즈로 우회하지 않는다. Orca 등 외부 터미널의
+  CLI는 기존 `--agentstoz-effort-cli` 래퍼가 Enter 때 자동 조절하며 이 도구 대상이 아니다.
+- 검증: `tests/workroom-effort-choice.test.ts`(가짜 PTY + 실제 서비스·런타임: 적용·readback·재전송 없음·binding 변경·`NOT_READY`·`OUTCOME_UNKNOWN` 뒤 정지·
+  보유 중 자동 건너뜀·해제 뒤 자동 재개·CLI 직접 변경이 이김·다시 시작은 정책으로·Claude 슬라이더 `s`·숨은 에포트 줄은 `last-observed`·env 거절·다른 대상,
+  MCP 매핑·파서·self 거절; 실제 stdio MCP 프로세스로 폼 수락·거절·취소·없는 강도·폼 없는 클라이언트·대기 중 다른 호출 응답, 시간 초과).
+  ⚠️ 이 파일은 `.agentstoz/maintainer.json`(Root 소유)의 `workroom-effort` 검사 argv에 아직 없다 — 넣어야 테스터가 돈다.
+  ⚠️ 실제 CLI에서 이 도구로 적용·readback한 실측은 아직 없다 — 가짜 PTY 화면은 기존 실측 화면(Claude 2.1.314 슬라이더, Codex 0.166 하단줄)을 따른다.
+
 ## 「Hermes · Claude」·「Hermes · Codex」 — Hermes가 어느 모델로 뜨는지 고르기만 하면 된다 (2026-10-25)
 
 **사용자 요청(2026-10-25)**: 「헤르메스는 헤르메스에 코덱스, 클로드 둘다 적용할수있으니 별도버튼으로 만들어져야」 — 초보자가 Hermes를

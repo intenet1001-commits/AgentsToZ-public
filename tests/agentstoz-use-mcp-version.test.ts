@@ -57,7 +57,8 @@ describe('agentstoz_use MCP server version comes from the build', () => {
     // names the remote receipt states and error codes.
     // 1.79.0 adds certified remote Teams device/project discovery and bounded create_team remote members.
     // 1.80.0 preserves the public memory-relation and preference-explanation extensions alongside remote Teams.
-    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.80.0');
+    // 1.81.0 adds set_workroom_effort (a person's session-only effort choice, read then set with a binding).
+    expect(AGENTSTOZ_USE_MCP_CONTRACT_VERSION).toBe('1.81.0');
     expect(AGENTSTOZ_USE_MCP_SERVER_VERSION.startsWith(`${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.`)).toBe(true);
   });
 

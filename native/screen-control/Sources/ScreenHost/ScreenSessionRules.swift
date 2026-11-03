@@ -54,7 +54,7 @@ public enum ReleaseGate {
 
     /// Whether a controller granted control may control now: the build's calibration and the push gate. Otherwise the
     /// session starts view-only and the Viewer hears why from `viewOnly`.
-    public static func controlOpen(flags: ScreenBuildFlags, pushLive: Bool) -> Bool { flags.macControl && pushLive }
+    public static func controlOpen(flags: ScreenBuildFlags, pushLive: Bool,desktopTrust:CommunityDesktopTrustLease?=nil) -> Bool { (desktopTrust.map { $0.current()?.canControl == true } ?? flags.macControl) && pushLive }
 
     /// Whether the person at this Mac is offered 「이 네트워크에서 켜 두기」 (SR-27). Hidden otherwise.
     public static func keepOnOffered(flags: ScreenBuildFlags, pushLive: Bool) -> Bool { flags.keepOn && pushLive }
@@ -205,9 +205,9 @@ public enum ControllerViewOnlyCause: Equatable, Sendable {
 
     /// The cause for `grant`, or nil when the grant is view (the grant says it) or the session may control.
     public static func of(grant: ScreenControllerGrant, inputMonitorAvailable: Bool, pushLive: Bool,
-                          flags: ScreenBuildFlags) -> ControllerViewOnlyCause? {
+                          flags: ScreenBuildFlags,desktopTrust:CommunityDesktopTrustLease?=nil) -> ControllerViewOnlyCause? {
         guard grant == .control else { return nil }
-        if !flags.macControl { return .build }
+        if !(desktopTrust.map { $0.current()?.canControl == true } ?? flags.macControl) { return .build }
         if !pushLive { return .notifications }
         if !inputMonitorAvailable { return .inputProtection }
         return nil
@@ -227,25 +227,26 @@ public struct HostSessionPlan: Sendable, Equatable {
     public let viewOnlyCause: ControllerViewOnlyCause?
     /// A controller that may control may also type while this Mac is locked (D-3). Phones keep what they always did.
     public let lockedInputOpen: Bool
+    public let desktopTrust:CommunityDesktopTrustLease?
 
     /// A registered phone: as before Mac controllers.
     public static func phone(inputMonitorAvailable: Bool, controlGranted: Bool = true) -> HostSessionPlan {
         HostSessionPlan(peerClass: .phone, canControl: inputMonitorAvailable && controlGranted, limits: .standard, grant: nil,
-                        viewOnlyCause: nil, lockedInputOpen: true)
+                        viewOnlyCause: nil, lockedInputOpen: true,desktopTrust:nil)
     }
 
     /// A Mac controller with `grant`, the person's own input protection, the push gate and the build.
     public static func controller(grant: ScreenControllerGrant, inputMonitorAvailable: Bool, pushLive: Bool,
-                                  flags: ScreenBuildFlags) -> HostSessionPlan {
-        let open = ReleaseGate.controlOpen(flags: flags, pushLive: pushLive)
+                                  flags: ScreenBuildFlags,desktopTrust:CommunityDesktopTrustLease?=nil) -> HostSessionPlan {
+        let open = ReleaseGate.controlOpen(flags: flags, pushLive: pushLive,desktopTrust:desktopTrust)
         let effective: ScreenControllerGrant = grant == .control && open ? .control : .view
         let canControl = ScreenControllerPolicy.canControl(inputMonitorAvailable: inputMonitorAvailable, grant: effective)
         return HostSessionPlan(peerClass: .controller, canControl: canControl,
                                limits: ScreenControllerPolicy.sessionLimits(canControl: canControl),
                                grant: grant == .control ? .control : .view,
                                viewOnlyCause: ControllerViewOnlyCause.of(grant: grant, inputMonitorAvailable: inputMonitorAvailable,
-                                                                         pushLive: pushLive, flags: flags),
-                               lockedInputOpen: ReleaseGate.lockedInputOpen(canControl: canControl, flags: flags))
+                                                                         pushLive: pushLive, flags: flags,desktopTrust:desktopTrust),
+                               lockedInputOpen: ReleaseGate.lockedInputOpen(canControl: canControl, flags: flags),desktopTrust:desktopTrust)
     }
 }
 
@@ -278,13 +279,14 @@ public enum ControllerLockedInput {
 struct HostInputPath: Sendable {
     let controller: Bool
     let lockedInputOpen: Bool
+    let desktopTrust:CommunityDesktopTrustLease?
     /// Whether this Mac is locked now; nil when the system cannot tell.
     let locked: @Sendable () -> Bool?
     let marker: RemoteInputMarker
 
     init(plan: HostSessionPlan, marker: RemoteInputMarker, locked: @escaping @Sendable () -> Bool?) {
         controller = plan.peerClass == .controller
-        lockedInputOpen = plan.lockedInputOpen
+        lockedInputOpen = plan.lockedInputOpen;desktopTrust=plan.desktopTrust
         self.locked = locked
         self.marker = marker
     }
@@ -310,7 +312,7 @@ struct HostInputPath: Sendable {
                   release: @escaping @Sendable (InputEvent) -> Void,
                   type: @escaping @Sendable (String, PhysicalInputProbe) -> ScreenTextReturnResult) -> InputReceiver {
         InputReceiver(physicalInput: physicalInput, release: release,
-                      compound: { text, probe in self.type(text, physicalInput: probe, post: type) },
+                      compound: { text, probe in self.type(text, physicalInput: probe, post: type) },desktopTrust:desktopTrust,
                       inject: { event in self.inject(event, post: inject) })
     }
 }
@@ -355,5 +357,7 @@ public enum ScreenAddressHints {
 public enum ScreenAuthentication {
     public static let raising: LAPolicy = .deviceOwnerAuthenticationWithBiometricsOrWatch
     public static let turningOn: LAPolicy = .deviceOwnerAuthentication
+    /// Explicit trusted-device hold recovery only; OS owner confirmation, never a physical-input/biometric signature.
+    public static let trustedHoldRecovery:LAPolicy = .deviceOwnerAuthentication
 }
 #endif

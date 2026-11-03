@@ -17,6 +17,7 @@ struct ScreenSessionSystem {
     var streamer: @MainActor (_ incoming: MacSession, _ plan: HostSessionPlan, _ physicalInput: PhysicalInputProbe?,
                               _ marker: RemoteInputMarker) -> HostStreamer
     var lockStates: (@Sendable () -> AsyncStream<Bool>)?
+    var isUnlocked:@Sendable ()->Bool = {false}
 
     static var live: ScreenSessionSystem {
         ScreenSessionSystem(
@@ -37,7 +38,7 @@ struct ScreenSessionSystem {
                 return HostStreamer(connection: incoming.connection, input: input, onDisplay: { input?.releaseHeld(); injector.setDisplay($0.id) },
                                     limits: plan.limits, desktop: desktop, pointerPosition: { injector.currentPointerPosition() })
             },
-            lockStates: ScreenLock.states)
+            lockStates: ScreenLock.states,isUnlocked:{ScreenLock.isLocked == false})
     }
 }
 
@@ -78,6 +79,8 @@ struct ScreenServiceEnvironment {
     var remoteInputURL: URL
     var powerHoldURL: URL
     var now: @Sendable () -> Date
+    var communityDirectoryAuthority:ScreenCommunityAuthority? = ScreenCommunityAuthority.configured
+    var openViewer:@MainActor (_ activate:Bool)async throws->Void = {try await ScreenViewerLauncher.open(activate:$0)}
 
     @MainActor
     static func system() -> ScreenServiceEnvironment {
@@ -87,8 +90,11 @@ struct ScreenServiceEnvironment {
             push: { ScreenPush.fromBundle(liveness: $0) },
             identity: { try $0.identity() },
             authenticate: { reason, policy in
+                let context=LAContext()
+                context.touchIDAuthenticationAllowableReuseDuration=0
+                defer { context.invalidate() }
                 do {
-                    return try await LAContext().evaluatePolicy(policy, localizedReason: reason)
+                    return try await context.evaluatePolicy(policy, localizedReason: reason)
                 } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
                     return false
                 }

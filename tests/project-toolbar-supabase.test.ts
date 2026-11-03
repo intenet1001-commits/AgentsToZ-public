@@ -18,6 +18,6 @@ describe('project toolbar Supabase controls', () => {
     expect(app).toContain('data-testid="top-toolbar-project-actions"');
     expect(app).toContain('className="workspace-project-tools"');
     expect(design).toContain('display: flex; flex-wrap: wrap; align-items: center; gap: 8px');
-    expect(design).toContain('width: min(400px, calc(var(--ui-viewport-width, 100vw) - 256px))');
+    expect(design).toContain('width: min(400px, calc(var(--ui-viewport-width, 100vw) - 20px))');
   });
 });

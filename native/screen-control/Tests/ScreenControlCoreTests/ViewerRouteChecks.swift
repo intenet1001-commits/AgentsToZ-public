@@ -1140,7 +1140,7 @@ extension ScreenControlChecks {
         // The application delegate answers launch, last window and quit only: no open-URL or open-file entry.
         for (name, text) in sources {
             for function in viewerMatches(#"func (application\w*)\("#, in: text) {
-                try check(["applicationDidFinishLaunching", "applicationShouldTerminateAfterLastWindowClosed",
+                try check(["applicationDidFinishLaunching", "applicationShouldHandleReopen", "applicationShouldTerminateAfterLastWindowClosed",
                            "applicationWillTerminate"].contains(function[1]), "\(name): \(function[1])")
             }
         }
@@ -1166,8 +1166,21 @@ extension ScreenControlChecks {
                   && targetActions.contains("PresentationButton(title: \"커뮤니티 목록 새로 고침\")")
                   && targetActions.contains("PresentationButton(title: \"화면 등록 안내…\")")
                   && targetActions.contains("PresentationButton(title: \"사설망 주소 설정…\")")
-                  && targetActions.components(separatedBy: "PresentationButton(").count == 6
-                  && targetActions.contains("HumanButton(title: \"연결\")"), "only discovery/presentation are unguarded")
+                  && targetActions.contains("HumanButton(title: \"연결\")"), "legacy connection still uses its HumanProof control")
+        let trustSelection=String(viewerFunctionBody(targetActions,named:"private func desktopTrustSelection("))
+        let trustConnect=String(viewerFunctionBody(targetActions,named:"private func connectTrusted("))
+        let selectedHandoff=String(viewerFunctionBody(targetActions,named:"private func consumeScreenSelection("))
+        try check(targetActions.contains("if desktopTrustSelection(target.id) != nil") && targetActions.contains("PresentationButton(title:\"기기 신뢰로 연결\")") &&
+                  trustSelection.contains("CommunityDesktopScreenTrust.verified(") && trustSelection.contains("controller:own,receiver:peer") &&
+                  trustConnect.contains("guard desktopTrustSelection(id) != nil") && trustConnect.contains("connectInternal(id,trusted:true)"),
+                  "ordinary connection UI is bound to both signed current desktop-trust subjects, not a button count")
+        try check(selectedHandoff.contains("ScreenCommunityCommand(.viewerTargetConsume)") && selectedHandoff.contains("account.currentAuthorization()") &&
+                  selectedHandoff.contains("connecting==nil,active==nil") && selectedHandoff.contains("hint.validate(authority:unified.authority,own:own,target:peer)") &&
+                  selectedHandoff.contains("connectTrusted(selected)") && !selectedHandoff.contains("connectInternal("),
+                  "Screen handoff is single-consume, freshly revalidated and never falls back to legacy connection")
+        let handoffGuard=String(viewerFunctionBody(targetActions,named:"func guardTripped(")),handoffPrepare=String(viewerFunctionBody(targetActions,named:"func prepareScreenSelection<"))
+        try check(selectedHandoff.contains("prepareScreenSelection") && handoffPrepare.contains("screenSelectionLifecycle.prepare") &&
+                  handoffGuard.contains("screenSelectionLifecycle.cancel()"),"OS guard invalidates even a selection still awaiting IPC/auth before connecting exists")
         let communityRoutes = sources["CommunityRouteSheet.swift"] ?? ""
         try check(communityRoutes.contains("HumanButton(title: \"주소 저장\")")
                   && communityRoutes.contains("private func submit(_ proof: HumanProof)")
@@ -1234,11 +1247,28 @@ extension ScreenControlChecks {
                 try check(viewerRanges(of: "viewer.", in: String(body)).count == 1
                           && body.contains("for event in model.releaseHeld() { viewer.input(event) }"),
                           "releaseHeld sends only the model's releases: \(body)")
+            } else if declaration.contains("func sendTrusted(") {
+                let body=viewerFunctionBody(session,named:"func sendTrusted(")
+                try check(body.contains("desktopTrust?.current()?.canControl == true") && body.contains("model.admit(input,at:.now)"),"trusted input requires its live control lease and model admission")
+            } else if declaration.contains("func performTrusted(") {
+                let body=viewerFunctionBody(session,named:"func performTrusted(")
+                try check(body.contains("desktopTrust?.current() != nil") && body.contains("desktopTrust?.current()?.canControl == true") && body.contains("model.admitControl(at:.now)"),"trusted toolbar effects require the same current typed lease")
+            } else if declaration.contains("func sendChordEvents(") {
+                let body=viewerFunctionBody(session,named:"private func sendChordEvents(")
+                let callers=Set(viewerRanges(of:"sendChordEvents(",in:session).compactMap { use -> String? in
+                    let line=session[..<use.lowerBound].split(separator:"\n",omittingEmptySubsequences:false).last ?? ""
+                    if line.trimmingCharacters(in:.whitespaces)=="private func" {return nil}
+                    let owner=viewerEnclosingFunction(session,before:use.lowerBound)
+                    return String(owner.prefix{$0 != "{"}.split(separator:"(").first ?? "")
+                })
+                try check(session.contains("private func sendChordEvents(") && body.contains("guard !ended, model.sendsInput") &&
+                          callers==["func sendChord","func performTrusted"] &&
+                          session.contains("func sendChord(_ keys: [UInt16], modifiers: KeyModifiers, proof: HumanProof)"),"shared chord sender remains private, with legacy HumanProof or typed-trust callers only")
             } else {
                 try check(declaration.contains("proof: HumanProof"), "sent to B without a proof: \(declaration)")
             }
         }
-        try check(senders == ["func send", "func sendChord", "func navigate", "func sendLockedEntry", "func unenroll",
+        try check(senders == ["func send", "func sendTrusted", "func performTrusted", "func sendChordEvents", "func navigate", "func sendLockedEntry", "func unenroll",
                               "func releaseHeld"], "the functions that send to B: \(senders.sorted())")
         // The stored list changes on a hardware click, or on what B said inside its signed session (`hear`), and no write
         // fails silently: each failure is said (the band or the list's status line).
@@ -1246,8 +1276,24 @@ extension ScreenControlChecks {
             for token in ["ledger.replace(", "ledger.remove(", "ledger.update("] {
                 for range in viewerRanges(of: token, in: text) {
                     let declaration = viewerEnclosingFunction(text, before: range.lowerBound).prefix { $0 != "{" }
-                    try check(declaration.contains("HumanProof") || declaration.hasPrefix("func hear(_ notice: ScreenNotice)"),
-                              "\(name) changes the list in \(declaration)")
+                    if name=="TargetList.swift",declaration.hasPrefix("func connectInternal(") {
+                        let body=viewerFunctionBody(text,named:"private func connectInternal(")
+                        let callers=Set(viewerRanges(of:"connectInternal(",in:text).compactMap { use -> String? in
+                            let line=text[..<use.lowerBound].split(separator:"\n",omittingEmptySubsequences:false).last ?? ""
+                            if line.trimmingCharacters(in:.whitespaces)=="private func" {return nil}
+                            return String(viewerEnclosingFunction(text,before:use.lowerBound).prefix{$0 != "{"}.split(separator:"(").first ?? "")
+                        })
+                        try check(callers==["func connect","func connectTrusted"] &&
+                                  text.contains("private func connect(_ id: String, _ proof: HumanProof)") &&
+                                  viewerFunctionBody(text,named:"private func connectTrusted(").contains("guard desktopTrustSelection(id) != nil") &&
+                                  body.contains("guard !trusted || common") && body.contains("ViewerConnection.connect(target)") &&
+                                  body.contains("self.ticket == mine, !Task.isCancelled") && body.contains("if self.stored(id) == nil") &&
+                                  body.contains("if !common, let current") && body.contains("current.after(connecting: .success(Date()))"),
+                                  "shared connector updates only a legacy row after authenticated success, under its original human/trusted caller and lifecycle")
+                    } else {
+                        try check(declaration.contains("HumanProof") || declaration.hasPrefix("func hear(_ notice: ScreenNotice)"),
+                                  "\(name) changes the list in \(declaration)")
+                    }
                     let from = text.index(range.lowerBound, offsetBy: -24, limitedBy: text.startIndex) ?? text.startIndex
                     let before = text[from..<range.lowerBound]
                     try check(!before.contains("try?"), "\(name) drops a failed write: \(before)\(token)")
@@ -1332,9 +1378,10 @@ extension ScreenControlChecks {
                   "Secure Event Input only while the entry has the focus of the key window in the active app")
         // A connection called off (this Mac locked, slept or switched users; the Mac removed here) never opens a window.
         let list = sources["TargetList.swift"] ?? ""
-        let connect = viewerFunctionBody(list, named: "private func connect(")
+        let connect = viewerFunctionBody(list, named: "private func connectInternal(")
         try check(connect.contains("self.ticket == mine, !Task.isCancelled") && connect.contains("connecting = (id, mine, task)")
                   && viewerFunctionBody(list, named: "func guardTripped(").contains("callOffConnecting(")
+                  && viewerFunctionBody(list, named: "func guardTripped(").contains("screenSelectionLifecycle.cancel()")
                   && viewerFunctionBody(list, named: "private func remove(").contains("callOffConnecting("),
                   "the guards and removal call off a connection in progress")
         let forwarderStart = viewerFunctionBody(forwarder, named: "func start(")

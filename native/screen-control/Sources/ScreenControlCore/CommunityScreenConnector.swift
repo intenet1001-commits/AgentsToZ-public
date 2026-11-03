@@ -42,7 +42,7 @@ public enum CommunityScreenConnector {
                 try await transport.send(finish.message)
                 guard settled.claim() else { throw TransportError.timedOut }
                 let viewer = ScreenViewer(connection: SecureConnection(framed: transport, channel: finish.channel))
-                return ScreenTargetConnector.Connected(viewer: viewer, path: .communityCloudflare(deviceId: target.body.deviceId), unreachable: [])
+                return ScreenTargetConnector.Connected(viewer: viewer, path: .communityCloudflare(deviceId: target.body.deviceId), unreachable: [],desktopTrust:finish.admission.desktopTrust)
             } catch { transport.cancel(); throw settled.claim() ? error : TransportError.timedOut }
         } catch { mux.cancel(); throw error }
     }

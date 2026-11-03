@@ -80,6 +80,8 @@ import {workroomPopoutTitle} from './workroomPopout';
 import { openPreferredBrowser } from './openPreferredBrowser';
 import './workspaceDesign.css';
 import { WorkspaceTools } from './components/WorkspaceTools';
+import { WorkspaceToolGroup } from './components/WorkspaceToolGroup';
+import { WorkspaceScreenEntries } from './WorkspaceScreenEntries';
 import { AppearanceSettings } from './AppearanceSettings';
 import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
@@ -144,7 +146,7 @@ import { isUnknownApiEndpoint, unknownApiEndpointMessage } from './apiEndpointSu
 import { hermesCliAvailabilityFromStatus } from './hermesCliPresence';
 import { TitleTipHost } from './components/TitleTipHost';
 import { BuildInfoBadge } from './components/BuildInfoBadge';
-import { appLocale, formatLastRun as formatLocalizedLastRun, formatProjectCount, type Lang, t } from './i18n';
+import { appLocale, formatLastRun as formatLocalizedLastRun, formatProjectCount, workspaceToolsCopy, type Lang, t } from './i18n';
 import {useAppLanguage,AppLanguagePicker} from './useAppLanguage';
 import { type ProjectMemoryAgent } from './ProjectMemoryPanel';
 import { FolderDropZone } from './FolderDropZone';
@@ -14121,8 +14123,6 @@ function App() {
               </button>
             )}
           <WorkspaceTools label={t(lang,'tools')}>
-            <button ref={desktopEffortOpenerRef} type="button" data-testid="desktop-effort-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowDesktopEffort(true)}>외부 앱 에포트</button>
-          {isMacHelpdeskSurface(isTauri(),navigator.platform)&&<button type="button" data-testid="helpdesk-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm" onClick={()=>setShowHelpdesk(true)}>아젠투지 헬프데스크</button>}
           <div data-testid="top-toolbar-project-actions" className="workspace-project-tools">
             {primaryProject && (
               <div
@@ -14170,7 +14170,24 @@ function App() {
                 </button></>}
               </div>
             )}
-            <button ref={computerUseOpenerRef} type="button" data-testid="computer-use-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowComputerUse(true)}>컴퓨터 유즈</button>{isTauri()&&<button ref={remoteTeamsOpenerRef} type="button" data-testid="remote-teams-permissions-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowRemoteTeamsPermissions(true)}>Teams 원격 작업 허용 프로젝트</button>}<button type="button" data-testid="control-profile-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={event=>{event.currentTarget.focus();setShowControlProfile(true);}}>아젠투지 설정</button><button type="button" data-testid="agent-dialogue-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowAgentDialogue(true)}>기기 간 대화</button>{/* One 아젠투지 voice: this opens the root panel the dock uses (VOC 2026-09-30), not a second instance. */}<button type="button" data-testid="ops-voice-settings-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_OPS_VOICE_EVENT))}>아젠투지 음성 창</button>{/* The app's 「아젠투지 호출」 is its own window; once closed, this (and the floating button) brings it back (VOC 2026-10-15). */}{isTauri()&&<button type="button" data-testid="voice-dock-reopen-tools" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_VOICE_DOCK_EVENT))}>아젠투지 호출 열기</button>}
+            <WorkspaceToolGroup title={workspaceToolsCopy(lang).devices}>
+              <WorkspaceScreenEntries lang={lang}/>
+              <button ref={computerUseOpenerRef} type="button" data-testid="computer-use-open" title="이 Mac의 AI·다른 Mac의 AI 수신 준비와 기능 등록 경로 확인" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowComputerUse(true)}>컴퓨터 유즈</button>
+            </WorkspaceToolGroup>
+            <WorkspaceToolGroup title={workspaceToolsCopy(lang).collaboration}>
+              {isTauri()&&<button ref={remoteTeamsOpenerRef} type="button" data-testid="remote-teams-permissions-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowRemoteTeamsPermissions(true)}>Teams 원격 작업 허용 프로젝트</button>}
+              <button type="button" data-testid="agent-dialogue-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowAgentDialogue(true)}>기기 간 대화</button>
+              {/* Keep the existing shared voice window and invocation events. */}
+              <button type="button" data-testid="ops-voice-settings-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_OPS_VOICE_EVENT))}>아젠투지 음성 창</button>
+              {isTauri()&&<button type="button" data-testid="voice-dock-reopen-tools" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>window.dispatchEvent(new Event(OPEN_VOICE_DOCK_EVENT))}>아젠투지 호출 열기</button>}
+            </WorkspaceToolGroup>
+            <WorkspaceToolGroup title={workspaceToolsCopy(lang).support}>
+              <button ref={desktopEffortOpenerRef} type="button" data-testid="desktop-effort-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={()=>setShowDesktopEffort(true)}>외부 앱 에포트</button>
+              <button type="button" data-testid="control-profile-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm font-semibold" onClick={event=>{event.currentTarget.focus();setShowControlProfile(true);}}>아젠투지 설정</button>
+              {isMacHelpdeskSurface(isTauri(),navigator.platform)&&<button type="button" data-testid="helpdesk-open" className="min-h-11 rounded-xl border border-[var(--line)] px-3 text-sm" onClick={()=>setShowHelpdesk(true)}>아젠투지 헬프데스크</button>}
+              <details className="workspace-tools-advanced">
+                <summary>{workspaceToolsCopy(lang).advanced}</summary>
+                <div className="workspace-tools-advanced__body">
             {controlCenterProject ? <button
               type="button"
               data-testid="control-center-project-shortcut"
@@ -14206,6 +14223,9 @@ function App() {
                 <button type="button" disabled={controlCenterSetupBusy} className="min-h-11 rounded-lg border border-[var(--line)] px-3" onClick={() => void handleOnboardingControlCenter('create')}>처음 사용 · 아젠투지 준비</button>
               </div>
             </details>}
+                </div>
+              </details>
+            </WorkspaceToolGroup>
 
             {activeTab === 'memory' && (
               <button

@@ -73,6 +73,17 @@ import UIKit
         guard epoch == generation, isUsable else { throw ScreenCommunityError.service("SESSION_EXPIRED") }
         return signed.rawRepresentation
     }
+    /// Separate typed negative-control proof. No arbitrary bytes, operation key or RAM key leaves this owner.
+    func signSafety(_ proof: CommunitySafetyMobileRequest) async throws -> Data {
+        let epoch=generation
+        guard isUsable else { throw ScreenCommunityError.service("SESSION_EXPIRED") }
+        let current=try await currentSession(for:.screenView)
+        guard epoch==generation,isUsable,let authorization,let signer else { throw ScreenCommunityError.service("SESSION_EXPIRED") }
+        try proof.validate(currentAuthorization:authorization,currentSession:current)
+        let signature=try await signer.signature(for:proof.bytes)
+        guard epoch==generation,isUsable else { throw ScreenCommunityError.service("SESSION_EXPIRED") }
+        return signature.rawRepresentation
+    }
     func becameActive() {
         foreground = UIApplication.shared.applicationState == .active; protectedDataAvailable = UIApplication.shared.isProtectedDataAvailable
         signer?.setForeground(foreground && protectedDataAvailable)

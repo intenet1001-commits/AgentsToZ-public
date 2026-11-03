@@ -1,3 +1,4 @@
+import {WORKROOM_EFFORT_CHOICE_LEVELS, type WorkroomEffortChoiceLevel} from './workroomEffortChoiceLevels';
 import {AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE} from './agentstozMcpAgentChoice';
 import {userMemoryQuery, userMemoryRange, UserMemoryHistoryCursorError} from './userMemoryRecall';
 import {parseAgentMentionReference} from './agentstozMention';
@@ -51,6 +52,7 @@ export const AGENTSTOZ_USE_ACTIONS = [
   "start-workroom-session",
   "send-workroom-instruction",
   "send-workroom-keys",
+  "set-workroom-effort",
   "wait-workroom-session",
   "close-workroom-session",
   "read-shared-shell",
@@ -126,6 +128,10 @@ export type AgentsToZUseActionRequest = {
   /** close-workroom-session: run the normal session-end memory save (default skips it). */
   saveMemory?: boolean;
   keys?: WorkroomKey[];
+  /** set-workroom-effort: the level the person chose (`auto` releases a held choice); omitted reads the choices. */
+  effortLevel?: WorkroomEffortChoiceLevel;
+  /** set-workroom-effort: the binding that read returned, passed back unchanged. */
+  effortBinding?: string;
   idleMs?: number;
   timeoutMs?: number;
   afterEventId?: string | null;
@@ -189,7 +195,7 @@ export function parseAgentsToZUseCodeAppMode(agent: unknown, mode: unknown): Age
 
 /** Every tool that addresses one Workroom session of a project (or OPS). */
 const WORKROOM_SESSION_ACTIONS: readonly string[] = [
-  'read-workroom-session', 'send-workroom-instruction', 'send-workroom-keys', 'wait-workroom-session', 'close-workroom-session',
+  'read-workroom-session', 'send-workroom-instruction', 'send-workroom-keys', 'set-workroom-effort', 'wait-workroom-session', 'close-workroom-session',
   'read-shared-shell', 'send-shared-shell-command',
 ];
 const OPS_SURFACE_ACTIONS: readonly string[] = [
@@ -490,6 +496,22 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
   }
   if (body.accountId !== undefined && (action !== 'start-workroom-session' && action !== 'select-workroom-account' || !cliAccountId(body.accountId) || !cliAccountAgent(agent))
     || action === 'select-workroom-account' && !cliAccountId(body.accountId)) throw new AgentsToZUseControlError('등록된 CLI 계정 ID를 선택하세요.','AGENTSTOZ_USE_ACCOUNT_INVALID');
+  let effortLevel: WorkroomEffortChoiceLevel | undefined, effortBinding: string | undefined;
+  if (action === 'set-workroom-effort') {
+    if (body.level !== undefined) {
+      if (typeof body.level !== 'string' || !(['auto', ...WORKROOM_EFFORT_CHOICE_LEVELS] as readonly string[]).includes(body.level)) {
+        throw new AgentsToZUseControlError(`level은 auto, ${WORKROOM_EFFORT_CHOICE_LEVELS.join(', ')} 중 하나여야 합니다.`, 'AGENTSTOZ_USE_WORKROOM_EFFORT_INVALID');
+      }
+      if (typeof body.binding !== 'string' || !/^[a-f0-9]{32}$/.test(body.binding)) {
+        throw new AgentsToZUseControlError('먼저 level 없이 조회해 받은 binding을 그대로 함께 보내세요.', 'AGENTSTOZ_USE_WORKROOM_EFFORT_INVALID');
+      }
+      const candidateRequestId = oneLine(body.requestId);
+      if (!/^[A-Za-z0-9_-]{8,160}$/.test(candidateRequestId)) throw new AgentsToZUseControlError("requestId 형식이 올바르지 않습니다.", "AGENTSTOZ_USE_WORKROOM_REQUEST_ID_INVALID");
+      effortLevel = body.level as WorkroomEffortChoiceLevel; effortBinding = body.binding; requestId = candidateRequestId;
+    } else if (body.binding !== undefined || body.requestId !== undefined) {
+      throw new AgentsToZUseControlError('조회에는 binding·requestId를 넣지 않습니다. 강도를 바꿀 때만 level과 함께 보내세요.', 'AGENTSTOZ_USE_WORKROOM_EFFORT_INVALID');
+    }
+  }
   if (action === "send-workroom-keys") {
     try { keys = normalizeWorkroomKeys(body.keys); }
     catch (error) { throw new AgentsToZUseControlError((error as Error).message, "AGENTSTOZ_USE_WORKROOM_KEYS_INVALID"); }
@@ -620,6 +642,7 @@ export function parseAgentsToZUseActionRequest(input: unknown): AgentsToZUseActi
     ...(body.accountId !== undefined ? {accountId: body.accountId as string} : {}),
     ...(action === "close-workroom-session" ? { saveMemory: workroomFlag(body.saveMemory, "saveMemory", false) } : {}),
     ...(action === "send-workroom-keys" ? { keys } : {}),
+    ...(effortLevel ? { effortLevel, effortBinding } : {}),
     ...(action === "wait-workroom-session" ? {
       idleMs: workroomWaitBound(body.idleMs, WORKROOM_WAIT_LIMITS.idleMs, "idleMs"),
       timeoutMs: workroomWaitBound(body.timeoutMs, WORKROOM_WAIT_LIMITS.timeoutMs, "timeoutMs"),
@@ -656,7 +679,7 @@ export function agentsToZUseControlPromptLines(input: {
     `Fixed controllerPortId: ${controllerPortId}`,
     AGENTSTOZ_MCP_AGENT_CHOICE_GUIDANCE,
     "Execution calls repeat the settled choices: start_workroom_session uses surface=internal; open_code_app uses the selected app or Orca surface. Hermes also states hermesVariant: default/claude/codex in Workroom, or default for app/Orca current settings. Each fresh create_team member states its surface and, for Hermes, a variant or exact model/provider. Joined sessionId members keep their settings. A valid legacy v1 button block with omitted defaults already means internal and plain Hermes default: make those defaults explicit in the MCP call without asking again.",
-    "Use only the installed MCP tools named agentstoz_use_prepare_agent_launch, agentstoz_use_list_projects, agentstoz_use_platform_cli, agentstoz_use_list_workspace_roots, agentstoz_use_create_project, agentstoz_use_register_existing_project, agentstoz_use_connect_buzz_channel, agentstoz_use_create_github_repository, agentstoz_use_project_status, agentstoz_use_list_workroom_sessions, agentstoz_use_read_workroom_session, agentstoz_use_start_workroom_session, agentstoz_use_send_workroom_instruction, agentstoz_use_send_workroom_keys, agentstoz_use_wait_workroom_session, agentstoz_use_close_workroom_session, agentstoz_use_send_shared_shell_command, agentstoz_use_read_shared_shell, agentstoz_use_list_missions, agentstoz_use_create_mission, agentstoz_use_read_mission, agentstoz_use_transition_mission, agentstoz_use_link_mission_utterance, agentstoz_use_record_mission_project_result, agentstoz_use_open_dashboard, agentstoz_use_open_code_app, and agentstoz_use_open_buzz_dev. Do not call the local endpoint through curl, shell networking, or node_repl.",
+    "Use only the installed MCP tools named agentstoz_use_prepare_agent_launch, agentstoz_use_list_projects, agentstoz_use_platform_cli, agentstoz_use_list_workspace_roots, agentstoz_use_create_project, agentstoz_use_register_existing_project, agentstoz_use_connect_buzz_channel, agentstoz_use_create_github_repository, agentstoz_use_project_status, agentstoz_use_list_workroom_sessions, agentstoz_use_read_workroom_session, agentstoz_use_start_workroom_session, agentstoz_use_send_workroom_instruction, agentstoz_use_send_workroom_keys, agentstoz_use_set_workroom_effort, agentstoz_use_wait_workroom_session, agentstoz_use_close_workroom_session, agentstoz_use_send_shared_shell_command, agentstoz_use_read_shared_shell, agentstoz_use_list_missions, agentstoz_use_create_mission, agentstoz_use_read_mission, agentstoz_use_transition_mission, agentstoz_use_link_mission_utterance, agentstoz_use_record_mission_project_result, agentstoz_use_open_dashboard, agentstoz_use_open_code_app, and agentstoz_use_open_buzz_dev. Do not call the local endpoint through curl, shell networking, or node_repl.",
     "Use missions only for explicit durable orchestration or multi-project/multi-agent work. Listing projects and simply opening an app stay ephemeral. After interruption or restart, call resume only when the user explicitly asks to continue that mission.",
     "The bridge sends fixed credential-free JSON. Never provide a folder path, URL, private key, token, or credential to a control tool. Only agentstoz_use_send_shared_shell_command may receive a shell command, and only after this exact local Workroom's user has opened its bottom shell and enabled AI input. Ordinary Workroom instruction tools receive bounded natural language, not shell commands. For an explicit other-device task, the additional tools agentstoz_use_list_ops_devices, agentstoz_use_submit_ops_request, agentstoz_use_get_ops_request_result and agentstoz_use_wait_ops_request select an exact community device and return its configured OPS AI's result. Keep the same requestId on retry; admission is not completion. A receiving worker uses agentstoz_use_complete_ops_request with its task-only return capability; never expose it.",
     "For an existing project, first call agentstoz_use_list_projects and use only a portId returned by that tool. For a new project, first call agentstoz_use_list_workspace_roots and pass only a workspaceRootId returned by that tool. Never guess IDs and never call older path-based endpoints.",

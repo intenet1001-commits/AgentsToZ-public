@@ -34,6 +34,16 @@ export function subscribeAppLanguage(onChange:()=>void):()=>void {
  return()=>{window.removeEventListener(LANGUAGE_CHANGE_EVENT,onChange);window.removeEventListener('storage',storage);};
 }
 export function appLocale(lang:Lang):string {return APP_LANGUAGES.find(item=>item.id===lang)?.locale??'ko-KR';}
+const WORKSPACE_TOOLS_COPY={
+ ko:{devices:'기기 연결',collaboration:'AI 협업',support:'설정·지원',advanced:'고급 설정',currentMac:'이 Mac 화면 공유',otherMac:'다른 Mac 화면 보기'},
+ en:{devices:'Device connections',collaboration:'AI collaboration',support:'Settings & help',advanced:'Advanced settings',currentMac:'Share this Mac',otherMac:'View another Mac'},
+ ja:{devices:'デバイス接続',collaboration:'AI連携',support:'設定・サポート',advanced:'詳細設定',currentMac:'このMacの画面共有',otherMac:'別のMacの画面を見る'},
+ 'zh-CN':{devices:'设备连接',collaboration:'AI协作',support:'设置与帮助',advanced:'高级设置',currentMac:'共享本机Mac屏幕',otherMac:'查看其他Mac屏幕'},
+ es:{devices:'Conexión de dispositivos',collaboration:'Colaboración con IA',support:'Ajustes y ayuda',advanced:'Ajustes avanzados',currentMac:'Compartir este Mac',otherMac:'Ver otro Mac'},
+ fr:{devices:'Connexion des appareils',collaboration:'Collaboration IA',support:'Réglages et aide',advanced:'Réglages avancés',currentMac:'Partager ce Mac',otherMac:'Voir un autre Mac'},
+ de:{devices:'Geräte verbinden',collaboration:'KI-Zusammenarbeit',support:'Einstellungen und Hilfe',advanced:'Erweiterte Einstellungen',currentMac:'Diesen Mac freigeben',otherMac:'Anderen Mac anzeigen'},
+} satisfies Record<Lang,{devices:string;collaboration:string;support:string;advanced:string;currentMac:string;otherMac:string}>;
+export function workspaceToolsCopy(lang:Lang){return WORKSPACE_TOOLS_COPY[lang];}
 export const translations={
   "ko": {
     "appName": "AgentsToZ",

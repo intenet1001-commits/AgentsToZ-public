@@ -115,7 +115,7 @@ guard !FileManager.default.fileExists(atPath: own.path) else { exit(4) }
   // fake streams and offscreen views only, no Bonjour, Secure Enclave, keychain or desktop input.
   if (process.platform === 'darwin') {
     const host = Bun.spawnSync(['swift', 'test', '--package-path', packagePath, '--filter',
-      'CommunityAccessChecks|CommunityAccessRecoveryChecks|CommunityEnrollmentConfirmationTests|CommunityUseIdleDeadlineTests|CommunityMobileControlTests|CommunityMobileControlChoicesTests|CommunityMobileControlClientTests|CommunityMobileControlJournalTests|CommunityMobileControlSocketTests|CommunityScreenHandshakeChecks|CommunityRelayTransportChecks|CommunityRelaySocketChecks|CommunityScreenRelaySocketChecks|ViewerNoticeOverflowTests|LocalInputMonitorTests|ScreenControllerTests|WeeklyUsageOutboxTests|ControllerSessionTests|ScreenPowerTests|ControllerLogTests|ControllerStoreTests|PairingHostTests|ControllerSectionTests|ScreenSessionBarTests|ScreenCommunityRouteChecks|ScreenCommunityClientChecks|ScreenCommunityChecks|ViewerCommunityChecks|ViewerUITests'],
+      'CommunityOwnerRecoveryChecks|CommunityOwnerRecoveryHostTests|ViewerOwnerWorkflowChecks|CommunityDesktopTrustChecks|DesktopTrustHostTests|ScreenPersistentInputHoldTests|ViewerDesktopTrustChecks|ViewerFirstFrameDeadlineTests|CommunityScreenSafetyChecks|ScreenCommunitySafetyPollerTests|CommunityManagementChecks|CommunityRegistrationRecoveryChecks|CommunityAccessChecks|CommunityAccessRecoveryChecks|CommunityEnrollmentConfirmationTests|CommunityUseIdleDeadlineTests|CommunityMobileControlTests|CommunityMobileControlChoicesTests|CommunityMobileControlClientTests|CommunityMobileControlJournalTests|CommunityMobileControlSocketTests|CommunityScreenHandshakeChecks|CommunityRelayTransportChecks|CommunityRelaySocketChecks|CommunityScreenRelaySocketChecks|ViewerNoticeOverflowTests|LocalInputMonitorTests|ScreenControllerTests|WeeklyUsageOutboxTests|ControllerSessionTests|ScreenPowerTests|ControllerLogTests|ControllerStoreTests|PairingHostTests|ControllerSectionTests|ScreenSessionBarTests|ScreenCommunityRouteChecks|ScreenCommunityClientChecks|ScreenCommunityChecks|ViewerCommunityChecks|ViewerUITests'],
       {stdout: 'pipe', stderr: 'pipe', timeout: 180_000});
     if (host.exitCode !== 0) throw Error('Native local-input ledger checks failed:\n' + host.stdout.toString() + host.stderr.toString());
     console.log(host.stdout.toString().trim());
@@ -163,11 +163,17 @@ function checkSessionBar() {
   expect(!/sharingType\s*=/.test(bar + view), 'the bar stays in the picture the other side sees');
   const handBackAt = bar.indexOf('case .handBack:');
   const handBack = bar.slice(handBackAt, bar.indexOf('update()', handBackAt));
-  expect(handBackAt >= 0 && handBack.includes('handBackRefusal(NSApp.currentEvent, bar: panel, pill: sender)') && handBack.includes('resumeRemoteInput(refusal: refusal)'),
+  expect(handBackAt >= 0 && handBack.includes('handBackRefusal(NSApp.currentEvent, bar: panel, pill: sender)') && /await service\.resumeRemoteInput\(refusal:\s*refusal\)/.test(handBack),
     '다시 넘기기 reads the click that ran it and passes the verdict to the service');
   expect(bar.split('resumeRemoteInput(').length === 2 && !bar.includes('.resume()'), 'no other way to hand input back from the bar');
-  expect(/func resumeRemoteInput\(refusal: ScreenSessionBarClick\.Refusal\?\) -> Bool \{\s*guard refusal == nil/.test(service),
-    'the service hands back only an accepted click');
+  const resumeAt = service.indexOf('public func resumeRemoteInput(');
+  const resume = service.slice(resumeAt, service.indexOf('public func lowerSessionToView()', resumeAt));
+  expect(resumeAt >= 0 && /async -> Bool/.test(resume) && resume.includes('guard refusal == nil') &&
+    resume.includes('if persistentInputHold == nil { return macHold.resume(original.hold) }'),
+    'never-opted-in legacy hand-back still requires an accepted hardware click and adds no authentication');
+  expect(resume.includes('if usesTrustedInputOwnerConfirmation') && resume.includes('guard refusal != .screenInjected') &&
+    resume.includes('return await confirmTrustedInputOwner()'),
+    'trusted hand-back goes to owner confirmation and cannot accept our own injected event');
   expect(service.includes('hold.apply(probe())') && service.includes('hold.attach(streamer.input)'),
     'the hold sits between the local input monitor and the session receiver');
   expect(source('AgentsToZScreen', 'ScreenApp.swift').includes('ScreenSessionBar.shared.start()'), 'the app starts the bar');
@@ -189,28 +195,37 @@ function checkSessionBar() {
     model.includes('return clickCount == 1 ? nil : .repeatedClick'), 'the click rule refuses outside the control, posted events and repeated clicks');
 
   // Review F1: 「직접 하기」 and 「보기만」 outlast their session. Every session's hold comes from the one ScreenMacHold, the
-  // bar's presses go through it. Turning on here requires legacy BIO or a fresh native community consent plus
-  // this control's hardware action; a connection or receiver refresh never clears it.
+  // bar's presses go through it. Legacy ON and common ON preserve their existing gates. Explicit desktop-trust ON
+  // never clears either hold; owner confirmation and durable generation CAS have separate behavioral checks above.
   expect(!service.includes('ScreenSessionInputHold('), 'no session hold is made outside ScreenMacHold');
   const acceptAt = service.indexOf('func accept(');
   const accept = service.slice(acceptAt, service.indexOf('private static func refuse(', acceptAt));
   expect(acceptAt >= 0 && accept.includes('let hold = macHold.begin()'), 'a new session takes its hold from ScreenMacHold, paused while this Mac holds its input');
   expect(service.includes('macHold.pause(active.hold)') && service.includes('macHold.lowerToView(active.hold)') &&
-    service.includes('return macHold.resume(active.hold)') && !/\.hold\.(pause|resume|lowerToView)\(/.test(service),
+    resume.includes('return macHold.resume(original.hold)') &&
+    !/\.hold\.(pause|resume|lowerToView)\(/.test(resume),
     '직접 하기, 보기만 and 다시 넘기기 go through ScreenMacHold');
   const turnOnAt = service.indexOf('public func turnOn()');
   const commonOnAt = service.indexOf('public func turnOnFromCommunity(');
+  const trustedOnAt = service.indexOf('public func turnOnFromTrustedCommunity()');
   const turnOn = service.slice(turnOnAt, commonOnAt);
-  const communityOn = service.slice(commonOnAt, service.indexOf('public func refreshPresentNetwork()', commonOnAt));
+  const communityOn = service.slice(commonOnAt, trustedOnAt);
+  const trustedOn = service.slice(trustedOnAt, service.indexOf('public func refreshPresentNetwork()', trustedOnAt));
   const authenticated = turnOn.indexOf('guard try await authenticate(');
   const consent = communityOn.indexOf('try await broker.consentForTurningOn()');
-  expect(service.split('macHold.reset()').length === 3 && authenticated >= 0 && turnOn.indexOf('macHold.reset()') > authenticated,
-    'legacy turn-on clears the hold only after successful local authentication');
+  expect(authenticated >= 0 && turnOn.indexOf('macHold.reset()') > authenticated &&
+    turnOn.includes('clearAfterOwnerConfirmation(expectedGeneration:protectedGeneration)'),
+    'legacy authenticated turn-on retains recovery, with durable generation checks for a prior trusted hold');
   expect(commonOnAt >= 0 && communityOn.includes('guard click == nil') &&
     communityOn.includes('guard unifiedReceivingRegistered, let broker = communityBroker') && consent >= 0 &&
     communityOn.indexOf('guard epoch == powerEpoch, case .off = power else { return }', consent) > consent &&
-    communityOn.indexOf('macHold.reset()') > consent,
-    'common turn-on requires a hardware action, registered receiver consent and unchanged off-state epoch before clearing the hold');
+    communityOn.includes('if persistentInputHold == nil { macHold.reset() }'),
+    'legacy common turn-on retains hardware, receiver consent and epoch checks without clearing a persistent trusted hold');
+  expect(trustedOnAt >= 0 && trustedOn.includes('trustedConsentForTurningOn()') &&
+    trustedOn.includes('consent.isCurrent()') && trustedOn.includes('epoch==powerEpoch') &&
+    trustedOn.includes('!unifiedReceivingHeld') && trustedOn.includes('preparePersistentInputHold()') &&
+    !/macHold\.(reset|resume)\(|broker\.hold\(false\)|authenticate\(/.test(trustedOn),
+    'explicit trusted turn-on checks fresh receive authority and epoch, preserving receive and input holds without repeat authentication');
 
   // Review F4: the bar's hardware rule is a second copy until ScreenInputOrigin.humanClick (wp-input-origin) replaces it.
   // Its constants are held to the Control bar's and, once ScreenInputOrigin.swift is in the package, to its constants.
@@ -237,6 +252,6 @@ function checkSessionBar() {
       'the session bar click rule drifted from ScreenInputOrigin');
     expect(model.includes('ScreenInputOrigin.humanClick('), 'the session bar uses the shared hardware rule');
   }
-  console.log('session bar: panel contract holds (level order, Spaces, captured, hand-back only by a single tracked hardware click, ' +
-    'accessibility press refused, hold outlasts the session until a person here hands back, click rule equal to the Control bar\'s)');
+  console.log('session bar: panel contract holds (level order, Spaces, captured, legacy tracked-hardware hand-back, ' +
+    'trusted owner-confirmation recovery, accessibility press refused, persistent holds preserved, click rule equal to the Control bar\'s)');
 }

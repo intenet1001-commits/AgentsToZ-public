@@ -34,6 +34,13 @@ describe('click sweep baseline comparison', () => {
     expect(notes).toEqual(['오류 사라짐 — tab: console: gone']);
   });
 
+  test('old untagged web baselines still compare as web, while desktop and fixture scopes stay separate', () => {
+    const old=inventory({a:element(['ui'])});
+    expect(compareSweep(old,{...old,target:'web',environment:'browser'},ok).failures).toEqual([]);
+    expect(compareSweep({...old,target:'desktop',environment:'native'},{...old,target:'web',environment:'browser'},ok).failures).toContain('기준선 대상·실행 환경이 다릅니다 — 웹과 데스크톱 기준선은 공유하지 않습니다');
+    expect(compareSweep({...old,target:'desktop',environment:'fixture'},{...old,target:'desktop',environment:'native'},ok).failures.length).toBeGreaterThan(0);
+  });
+
   test('a baseline target that disappeared fails; a new target is only reported', () => {
     const {failures, notes} = compareSweep(inventory({old: element(['ui'])}), inventory({fresh: element(['dialog'])}), ok);
     expect(failures).toEqual(['사라짐 — old']);

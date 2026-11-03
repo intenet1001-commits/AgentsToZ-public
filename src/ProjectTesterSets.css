@@ -17,3 +17,7 @@
 .tester-sets-compact{font-size:10px;color:var(--ink-2);min-width:0}
 .tester-sets-compact button{font:inherit;color:inherit;background:transparent;border:none;padding:3px 0;cursor:pointer;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:600px){.tester-sets-grid{grid-template-columns:1fr}.tester-sets button,.tester-sets summary{min-height:44px}.tester-sets-heading{align-items:flex-start}.tester-sets-compact button{min-height:44px}.tester-set-composition{max-height:460px}}
+
+.tester-sweep-surfaces{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.tester-sweep-surfaces li{display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px;overflow-wrap:anywhere}
+.tester-sweep-surfaces span{display:block}

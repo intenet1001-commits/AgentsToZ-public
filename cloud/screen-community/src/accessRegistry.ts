@@ -2,21 +2,50 @@ import {randomUUID,type KeyObject} from 'node:crypto';
 import {Buffer} from 'node:buffer';
 import {Fault,demand,uuid,integer,hash,publicKey,fingerprint,seal,openSealed,type Member,MAX_MEMBERS} from './protocol';
 import {type RegistryStore} from './store';
-import {accessPlan,accessPlanBytes,accessChallenge,accessSigned,readAccessRequest,checkAccessProof,capabilities,verifyAccessEnvelope,exact,
+import {accessPlan,accessPlanBytes,accessChallenge,accessSigned,accessNoticeSigned,readAccessRequest,checkAccessProof,capabilities,verifyAccessEnvelope,exact,
   ACCESS_IDLE_MS,ACCESS_LEASE_MS,ACCESS_PLAN_MS,accessPurposeAllowed,accessRelayRoleAllowed,mobileRelayPurpose,RELAY_PURPOSES,type AccessPlan,type AccessRequest,type AccessEnvelope,
   type AccessAuthorization,type AccessUseSession,type AccessRelayTicket,type RelayPurpose} from './accessProtocol';
+
+import {CommunityScreenSafety,SAFETY_OPERATIONS,type SafetyNotification} from './screenSafety';
+import {accessManagementDigest,type AccessManagementIntent} from './accessManagement';
+import {CommunityOwnerRecovery,OWNER_RECOVERY_OPERATIONS} from './ownerRecovery';
 
 interface Community {id:string;profileId:string;name:string;revision:number;memberIds:string[]}
 interface PendingPlan {id:string;communityId:string;plan:AccessPlan;digest:string;expiresAt:number;enrollmentId:string|null}
 interface Policy {plan:AccessPlan;enrollmentId:string;revision:number}
-interface Review {admin:string;planId:string;digest:string;revision:number;challenge:string;expiresAt:number}
+interface Review {admin:string;planId:string;digest:string;revision:number;challenge:string;expiresAt:number;management?:AccessManagementIntent}
 interface Session {id:string;communityId:string;enrollmentId:string;publicKey:string;capabilities:AccessPlan['capabilities'];sequence:number;lastHumanAt:number;expiresAt:number;closed:boolean;revision:number}
+interface AccessPushSubscription {token:string;environment:'sandbox'|'production';topic:string}
+export interface CommunityAccessNotification extends AccessPushSubscription {planId:string;communityId:string;digest:string;recipientId:string;recipientKeyEpoch:number;subscriptionGeneration?:string;expiresAt:number;notice:AccessEnvelope}
 interface Receipt {key:string;recoveryKey:string;actor:string|null;hash:string;cipher:string;expiresAt:number}
+
+function desktopTrustUpdatePreservesIdentity(prior:AccessPlan,next:AccessPlan):boolean {
+  const combined=next.capabilities.some(cap=>cap==='computer-use.agent-settings'||cap==='computer-use.browser');
+  const addingControl=prior.controlKey===null&&next.controlKey!==null&&combined;
+  return prior.kind==='desktop'&&next.kind==='desktop'&&next.capabilities.includes('screen.desktop-trust')
+    &&prior.profileId===next.profileId&&prior.deviceId===next.deviceId&&prior.hostKey===next.hostKey&&prior.biometricKey===next.biometricKey&&prior.operationKey===next.operationKey
+    &&(prior.controlKey===next.controlKey||addingControl)
+    &&(prior.agentDeviceId===next.agentDeviceId||prior.agentDeviceId===null&&addingControl);
+}
 
 /** Shares only the existing issuer/member registry. Product memories, jobs and conversations are not moved here. */
 export class CommunityAccessRegistry {
   constructor(private readonly store:RegistryStore,private readonly issuer:KeyObject,private readonly issuerPublic:string,
-    private readonly stateKey:Buffer,private readonly clock=Date.now){demand(stateKey.length===32,'ISSUER_NOT_CONFIGURED');}
+    private readonly stateKey:Buffer,private readonly clock=Date.now,private readonly allowedPushTopics:readonly string[]=[],private readonly safetyPushConfigured=false){demand(stateKey.length===32,'ISSUER_NOT_CONFIGURED');}
+  screenSafety(now=this.clock()):CommunityScreenSafety {
+    return new CommunityScreenSafety({store:this.store,issuer:this.issuer,stateKey:this.stateKey,now,topics:this.allowedPushTopics,pushConfigured:this.safetyPushConfigured,
+      member:id=>this.member(id),policy:m=>this.policy(m),community:id=>this.community(id),authorization:(m,p,at)=>this.authorization(m,p,at),
+      liveSession:(id,m,p)=>this.liveSession(id,m,p),useSession:(session,at)=>this.useSession(session,at)});
+  }
+  private ownerRecovery(now=this.clock()):CommunityOwnerRecovery {
+    return new CommunityOwnerRecovery({store:this.store,issuer:this.issuer,stateKey:this.stateKey,now,
+      member:id=>this.member(id),policy:m=>this.policy(m),community:id=>this.community(id),authorization:(m,p,at)=>this.authorization(m,p,at)});
+  }
+  private pushSubscription(m:Member,now=this.clock()):(AccessPushSubscription&{subscriptionGeneration?:string})|undefined {
+    const safety=this.screenSafety(now).subscription(m);
+    if(safety)return {token:safety.token,environment:safety.environment,topic:safety.topic,subscriptionGeneration:safety.generation};
+    const cipher=this.store.get<string>('push:'+m.enrollmentId);return cipher?openSealed<AccessPushSubscription>(cipher,this.stateKey,m.enrollmentId):undefined;
+  }
   handle(value:unknown,bucket:string):{status:number;envelope:AccessEnvelope}{
     let r:AccessRequest|undefined;
     try{
@@ -27,6 +56,55 @@ export class CommunityAccessRegistry {
     }catch(error){const fault=error instanceof Fault?error:new Fault('SERVICE_UNAVAILABLE',503);
       return {status:fault.status,envelope:accessSigned('error',r?.id??null,this.clock(),{code:fault.code},this.issuer)};}
   }
+  /** The outbox is bounded and claimed once. Delivery failure never changes a committed registration result. */
+  takeNotifications(limit=4):CommunityAccessNotification[] {
+    demand(integer(limit)&&limit<=4);if(limit===0)return [];
+    return this.store.transaction(()=>{
+      const now=this.clock(),jobs:CommunityAccessNotification[]=[];
+      for(const id of (this.store.get<string[]>('access-notification-queue')??[]).slice(-32)){
+        const p=this.store.get<PendingPlan>(`access-plan:${id}`);if(!p||p.expiresAt<=now||p.enrollmentId)continue;
+        const c=this.community(p.communityId);
+        for(const recipientId of c.memberIds){
+          if(jobs.length===limit)return jobs;
+          const m=this.store.get<Member>(`member:${recipientId}`),claim=`access-notified:${p.id}:${recipientId}`;
+          if(!m||m.communityId!==c.id||m.revokedAt!==null||!m.admin||this.store.get(claim))continue;
+          const subscription=this.pushSubscription(m,now);if(!subscription)continue;
+          if(!this.allowedPushTopics.includes(subscription.topic))continue;
+          this.store.put(claim,true,p.expiresAt);
+          jobs.push({...subscription,planId:p.id,communityId:c.id,digest:p.digest,recipientId,recipientKeyEpoch:m.keyEpoch,expiresAt:p.expiresAt,
+            notice:accessNoticeSigned(p.id,c.id,c.profileId,p.digest,now,p.expiresAt,this.issuer)});
+        }
+      }
+      return jobs;
+    });
+  }
+  hasNotifications():boolean {
+    const now=this.clock();
+    for(const id of (this.store.get<string[]>('access-notification-queue')??[]).slice(-32)){
+      const p=this.store.get<PendingPlan>(`access-plan:${id}`);if(!p||p.expiresAt<=now||p.enrollmentId)continue;
+      const c=this.community(p.communityId);
+      for(const recipientId of c.memberIds){
+        const m=this.store.get<Member>(`member:${recipientId}`);
+        if(!m||m.communityId!==c.id||m.revokedAt!==null||!m.admin||this.store.get(`access-notified:${p.id}:${recipientId}`))continue;
+        const subscription=this.pushSubscription(m,now);if(subscription&&this.allowedPushTopics.includes(subscription.topic))return true;
+      }
+    }
+    return false;
+  }
+  notificationCurrent(job:CommunityAccessNotification):boolean {
+    const now=this.clock(),p=this.store.get<PendingPlan>(`access-plan:${job.planId}`),m=this.store.get<Member>(`member:${job.recipientId}`);
+    if(!p||p.enrollmentId||p.expiresAt<=now||p.communityId!==job.communityId||p.digest!==job.digest||!m||m.communityId!==job.communityId||m.revokedAt!==null||!m.admin||m.keyEpoch!==job.recipientKeyEpoch||!this.allowedPushTopics.includes(job.topic))return false;
+    const current=this.pushSubscription(m,now);if(!current||current.subscriptionGeneration!==job.subscriptionGeneration)return false;
+    return current.token===job.token&&current.topic===job.topic&&current.environment===job.environment;
+  }
+  removeDeadPush(job:CommunityAccessNotification):void {
+    this.store.transaction(()=>{
+      if(job.subscriptionGeneration){this.screenSafety().removeDeadPush({...job,subscriptionGeneration:job.subscriptionGeneration});return;}
+      const cipher=this.store.get<string>(`push:${job.recipientId}`);if(!cipher)return;
+      const current=openSealed<AccessPushSubscription>(cipher,this.stateKey,job.recipientId);
+      if(current.token===job.token&&current.topic===job.topic&&current.environment===job.environment)this.store.remove(`push:${job.recipientId}`);
+    });
+  }
   private reply(r:AccessRequest,kind:string,payload:unknown,now:number):AccessEnvelope{return accessSigned(kind,r.id,now,payload,this.issuer);}
   private community(id:unknown):Community{demand(uuid(id));const c=this.store.get<Community>(`community:${id}`);demand(c,'COMMUNITY_NOT_FOUND');return c;}
   private member(id:unknown):Member{demand(uuid(id),'NOT_ENROLLED');const m=this.store.get<Member>(`member:${id}`);demand(m&&m.revokedAt===null,'NOT_ENROLLED');return m;}
@@ -35,6 +113,13 @@ export class CommunityAccessRegistry {
     const c=this.community(m.communityId);
     return {version:1,communityId:c.id,profileId:c.profileId,enrollmentId:m.enrollmentId,deviceId:m.deviceId,deviceKind:p.plan.kind,
       name:p.plan.name,hostPublicKey:m.hostKey,publicKey:p.plan.operationKey,biometricPublicKey:m.viewerKey,controlKey:p.plan.controlKey,agentDeviceId:p.plan.agentDeviceId,capabilities:p.plan.capabilities,revision:p.revision,keyEpoch:m.keyEpoch,issuedAt:now,expiresAt:now+ACCESS_LEASE_MS};
+  }
+  private managementTarget(c:Community,plan:AccessPlan,actor:Member):Member|undefined {
+    demand(plan.deviceId!==actor.deviceId&&![plan.hostKey,plan.biometricKey].some(k=>k===actor.hostKey||k===actor.viewerKey),'SELF_MANAGEMENT_FORBIDDEN');
+    const target=c.memberIds.map(id=>this.store.get<Member>(`member:${id}`)).find(m=>m?.deviceId===plan.deviceId&&m.revokedAt===null);
+    if(target)demand(target.communityId===c.id&&target.platform==='ios'&&target.hostKey===plan.hostKey&&target.viewerKey===plan.biometricKey&&target.keyEpoch>0,'IDENTITY_CHANGED');
+    else demand(!c.memberIds.some(id=>{const old=this.store.get<Member>(`member:${id}`);return old?.deviceId===plan.deviceId&&old.revokedAt!==null;}),'REVOKED_IDENTITY');
+    return target;
   }
   private useSession(s:Session,now:number):AccessUseSession{return {version:1,communityId:s.communityId,enrollmentId:s.enrollmentId,sessionId:s.id,
     publicKey:s.publicKey,capabilities:s.capabilities,revision:s.revision,sequence:s.sequence,lastHumanAt:s.lastHumanAt,idleExpiresAt:s.expiresAt,issuedAt:now,expiresAt:Math.min(now+ACCESS_LEASE_MS,s.expiresAt)};}
@@ -45,8 +130,19 @@ export class CommunityAccessRegistry {
   }
   private record(r:AccessRequest,key:string,result:AccessEnvelope):AccessEnvelope{
     const recoveryKey=r.actor?this.member(r.actor).hostKey:key;
-    this.store.put(`access-receipt:${r.id}`,{key,recoveryKey,actor:r.actor,hash:hash(r.bytes),cipher:seal(result,this.stateKey,'access:'+r.id),expiresAt:this.clock()+ACCESS_PLAN_MS} satisfies Receipt,this.clock()+ACCESS_PLAN_MS);
-    this.store.put(`access-nonce:${fingerprint(key)}:${r.nonce}`,r.id,this.clock()+ACCESS_PLAN_MS);return result;
+    const ownerMutation=['owner-delegation-set','owner-recovery-request','owner-recovery-publish','owner-recovery-approve','owner-recovery-result'].includes(r.op);
+    const expiresAt=this.clock()+(ownerMutation?7*86400_000:ACCESS_PLAN_MS);
+    if(ownerMutation){
+      // Keep a bounded seven-day mutation fence; read-only polling retains its existing short receipt lifetime.
+      // A separate negative reserve lets OFF be reported even after the positive journal is full.
+      const negative=r.op==='owner-delegation-set'&&(r.args[1] as {enabled?:unknown})?.enabled===false;
+      const index=`owner-mutation-receipts:${String(r.args[0])}:${negative?'negative':'positive'}`;
+      const live=(this.store.get<{id:string;expiresAt:number}[]>(index)??[]).filter(v=>v.expiresAt>this.clock());
+      demand(live.length<(negative?128:1024),'OWNER_MUTATION_RECEIPTS_FULL');
+      this.store.put(index,[...live,{id:r.id,expiresAt}]);
+    }
+    this.store.put(`access-receipt:${r.id}`,{key,recoveryKey,actor:r.actor,hash:hash(r.bytes),cipher:seal(result,this.stateKey,'access:'+r.id),expiresAt} satisfies Receipt,expiresAt);
+    this.store.put(`access-nonce:${fingerprint(key)}:${r.nonce}`,r.id,expiresAt);return result;
   }
   private execute(r:AccessRequest):AccessEnvelope{
     const a=r.args,now=this.clock(),prior=this.store.get<Receipt>(`access-receipt:${r.id}`);
@@ -57,6 +153,40 @@ export class CommunityAccessRegistry {
       demand(a.length===1&&uuid(a[0]));const receipt=this.store.get<Receipt>(`access-receipt:${a[0]}`);
       demand(receipt&&receipt.actor===r.actor&&receipt.expiresAt>now,'RECEIPT_NOT_FOUND');checkAccessProof(r,receipt.recoveryKey);
       return this.reply(r,'receipt',{originalRequestId:a[0],result:openSealed<AccessEnvelope>(receipt.cipher,this.stateKey,'access:'+a[0])},now);
+    }else if(r.op==='recover-registration'){
+      demand(r.actor===null&&(a.length===1||a.length===2));const plan=accessPlan(a[0]);proofKey=plan.hostKey;checkAccessProof(r,proofKey);
+      let original:AccessRequest|undefined,originalRequestHash:string|null=null;
+      if(a.length===2){
+        exact(a[1],['payload','signature']);demand(typeof a[1].payload==='string');
+        let raw:unknown;try{raw=JSON.parse(Buffer.from(a[1].payload,'base64url').toString('utf8'));}catch{throw new Fault('INVALID_REQUEST');}
+        demand(Array.isArray(raw)&&integer(raw[3]));original=readAccessRequest(a[1],raw[3]);
+        demand(original.op==='prepare'&&original.actor===null&&original.args.length===1&&hash(accessPlanBytes(accessPlan(original.args[0])))===hash(accessPlanBytes(plan)),'RECOVERY_BINDING_MISMATCH');
+        checkAccessProof(original,proofKey);originalRequestHash=hash(Buffer.from(JSON.stringify([a[1].payload,a[1].signature])));
+        const receipt=this.store.get<Receipt>(`access-receipt:${original.id}`);if(receipt)demand(receipt.hash===hash(original.bytes)&&receipt.key===proofKey,'REQUEST_CONFLICT');
+      }
+      const c=this.community(this.store.get<string>('bootstrap-completed'));demand(c.profileId===plan.profileId,'OTHER_COMMUNITY');
+      const digest=hash(accessPlanBytes(plan)),members=c.memberIds.map(id=>this.store.get<Member>(`member:${id}`));
+      const target=members.find(m=>m?.deviceId===plan.deviceId&&m.revokedAt===null);
+      if(target){
+        demand(target.hostKey===plan.hostKey&&target.viewerKey===plan.biometricKey,'IDENTITY_CHANGED');
+        const policy=this.store.get<Policy>(`access-policy:${target.enrollmentId}`);
+        if(policy){
+          if(hash(accessPlanBytes(policy.plan))===digest){kind='authorization';payload=this.authorization(target,this.policy(target),now);return this.record(r,proofKey,this.reply(r,kind,payload,now));}
+          // An expired feature/name update must not be confused with the already-approved, different policy.
+          // Read only: preserve that policy; permit absence only for the same complete stable key identity.
+          demand(policy.plan.kind===plan.kind&&policy.plan.operationKey===plan.operationKey&&policy.plan.controlKey===plan.controlKey&&policy.plan.agentDeviceId===plan.agentDeviceId
+            ||desktopTrustUpdatePreservesIdentity(policy.plan,plan),'POLICY_CHANGED');
+        }
+      }else demand(!members.some(m=>m?.deviceId===plan.deviceId&&m.revokedAt!==null),'REGISTRATION_REVOKED');
+      const pending=(this.store.get<string[]>(`access-pending:${c.id}`)??[]).map(id=>this.store.get<PendingPlan>(`access-plan:${id}`))
+        .find(p=>p&&p.expiresAt>now&&!p.enrollmentId&&p.plan.deviceId===plan.deviceId);
+      if(pending){demand(pending.plan.hostKey===plan.hostKey&&pending.plan.biometricKey===plan.biometricKey&&pending.digest===digest,'RECOVER_EXISTING_REQUEST');kind='prepared';payload={planId:pending.id,communityId:c.id,digest:pending.digest,expiresAt:pending.expiresAt};}
+      else{
+        // A delayed original prepare remains admissible for 60 seconds. A current absence cannot close that fence.
+        if(original)demand(now>original.at+60_000,'REQUEST_STILL_POSSIBLE');
+        kind='registration-absent';payload={communityId:c.id,profileId:plan.profileId,deviceId:plan.deviceId,planDigest:digest,
+          originalRequestId:original?.id??null,originalRequestHash,originalIssuedAt:original?.at??null};
+      }
     }else if(r.op==='prepare'){
       demand(r.actor===null&&a.length===1);const plan=accessPlan(a[0]);proofKey=plan.hostKey;checkAccessProof(r,proofKey);
       const c=this.community(this.store.get<string>('bootstrap-completed'));demand(c.profileId===plan.profileId,'OTHER_COMMUNITY');
@@ -68,7 +198,11 @@ export class CommunityAccessRegistry {
       const existing=live.find(p=>p.plan.deviceId===plan.deviceId&&p.plan.hostKey===plan.hostKey);
       demand(!existing||existing.digest===digest,'RECOVER_EXISTING_REQUEST');
       const p=existing??{id:r.id,communityId:c.id,plan,digest,expiresAt:now+ACCESS_PLAN_MS,enrollmentId:null};
-      if(!existing){this.store.put(`access-plan:${p.id}`,p,p.expiresAt);this.store.put(`access-pending:${c.id}`,[...live.map(p=>p.id),p.id]);}
+      if(!existing){
+        this.store.put(`access-plan:${p.id}`,p,p.expiresAt);this.store.put(`access-pending:${c.id}`,[...live.map(p=>p.id),p.id]);
+        const queue=(this.store.get<string[]>('access-notification-queue')??[]).filter(id=>{const queued=this.store.get<PendingPlan>(`access-plan:${id}`);return !!queued&&queued.expiresAt>now&&!queued.enrollmentId;});
+        this.store.put('access-notification-queue',[...queue.filter(id=>id!==p.id),p.id].slice(-32));
+      }
       kind='prepared';payload={planId:p.id,communityId:c.id,digest:p.digest,expiresAt:p.expiresAt};
     }else if(r.op==='status'){
       demand(r.actor===null&&a.length===1&&uuid(a[0]));const p=this.store.get<PendingPlan>(`access-plan:${a[0]}`);demand(p,'REQUEST_EXPIRED');
@@ -77,25 +211,53 @@ export class CommunityAccessRegistry {
       else{demand(p.expiresAt>now,'REQUEST_EXPIRED');kind='prepared';payload={planId:p.id,communityId:p.communityId,digest:p.digest,expiresAt:p.expiresAt};}
     }else{
       const m=this.member(r.actor),c=this.community(m.communityId);demand(a[0]===c.id,'OTHER_COMMUNITY');
-      if(['list','review','approve'].includes(r.op)){
-        demand(m.admin,'ADMIN_REQUIRED');proofKey=r.op==='approve'?m.viewerKey:m.hostKey;checkAccessProof(r,proofKey);
+      if((OWNER_RECOVERY_OPERATIONS as readonly string[]).includes(r.op)){
+        const result=this.ownerRecovery(now).execute(r,m,c,this.policy(m));proofKey=result.key;kind=result.kind;payload=result.payload;
+      }else if((SAFETY_OPERATIONS as readonly string[]).includes(r.op)){
+        const result=this.screenSafety(now).execute(r,m,c,this.policy(m));proofKey=result.key;kind=result.kind;payload=result.payload;
+      }else if(['list','review','approve','review-management','approve-management'].includes(r.op)){
+        const managementOperation=r.op==='review-management'||r.op==='approve-management';
+        const approving=r.op==='approve'||r.op==='approve-management';
+        demand(m.admin,'ADMIN_REQUIRED');proofKey=approving?m.viewerKey:m.hostKey;checkAccessProof(r,proofKey);
         if(r.op==='list'){
           demand(a.length===1);kind='pending-list';payload=(this.store.get<string[]>(`access-pending:${c.id}`)??[])
             .map(id=>this.store.get<PendingPlan>(`access-plan:${id}`)).filter((p):p is PendingPlan=>!!p&&p.expiresAt>now&&!p.enrollmentId)
             .map(p=>({planId:p.id,name:p.plan.name,kind:p.plan.kind,expiresAt:p.expiresAt}));
         }else{
           demand(uuid(a[1]));const p=this.store.get<PendingPlan>(`access-plan:${a[1]}`);demand(p&&p.communityId===c.id&&p.expiresAt>now&&!p.enrollmentId,'REQUEST_EXPIRED');
-          if(r.op==='review'){
-            demand(a.length===2);const review:Review={admin:m.enrollmentId,planId:p.id,digest:p.digest,revision:c.revision,challenge:accessChallenge(),expiresAt:Math.min(p.expiresAt,now+120_000)};
-            this.store.put(`access-review:${m.enrollmentId}:${p.id}`,review,review.expiresAt);kind='review';payload={...review,plan:p.plan};
+          if(!approving){
+            demand(a.length===(managementOperation?3:2));const review:Review={admin:m.enrollmentId,planId:p.id,digest:p.digest,revision:c.revision,challenge:accessChallenge(),expiresAt:Math.min(p.expiresAt,now+120_000)};
+            if(managementOperation){
+              demand(typeof a[2]==='boolean'&&p.plan.kind==='mobile','INVALID_MANAGEMENT');
+              const target=this.managementTarget(c,p.plan,m);
+              demand(target?.admin!==a[2]&&(a[2]||target?.admin===true),'MANAGEMENT_ROLE_UNCHANGED');
+              const intent:Omit<AccessManagementIntent,'digest'>={version:1,communityId:c.id,targetEnrollmentId:target?.enrollmentId??null,targetKeyEpoch:target?.keyEpoch??1,
+                previousAdministrator:target?.admin??false,administrator:a[2],issuedAt:now,nonce:r.nonce};
+              review.management={...intent,digest:accessManagementDigest(review,p.plan,intent)};
+            }
+            this.store.put(`access-review:${m.enrollmentId}:${p.id}`,review,review.expiresAt);kind=managementOperation?'management-review':'review';payload={...review,plan:p.plan};
           }else{
-            demand(a.length===5&&a[2]===p.digest&&typeof a[3]==='string'&&integer(a[4]),'INVALID_APPROVAL');
+            demand(a.length===(managementOperation?6:5)&&a[2]===p.digest&&typeof a[3]==='string'&&integer(a[4]),'INVALID_APPROVAL');
             const review=this.store.get<Review>(`access-review:${m.enrollmentId}:${p.id}`);
             demand(review&&review.challenge===a[3]&&review.digest===p.digest&&review.revision===a[4]&&c.revision===a[4]&&review.expiresAt>now,'STALE_APPROVAL');
+            demand(!!review.management===managementOperation,'MANAGEMENT_REVIEW_REQUIRED');
+            if(review.management){
+              const intent=review.management,target=this.managementTarget(c,p.plan,m);
+              demand(p.plan.kind==='mobile'&&intent.communityId===c.id&&intent.targetEnrollmentId===(target?.enrollmentId??null)&&intent.targetKeyEpoch===(target?.keyEpoch??1)
+                &&intent.previousAdministrator===(target?.admin??false)&&intent.digest===a[5]&&intent.digest===accessManagementDigest(review,p.plan,intent),'STALE_MANAGEMENT');
+              if(!intent.administrator)demand(c.memberIds.some(id=>{const other=this.store.get<Member>(`member:${id}`);return !!other&&other.revokedAt===null&&other.admin&&other.enrollmentId!==target?.enrollmentId;}),'LAST_ADMIN_REQUIRED');
+            }
             const members=c.memberIds.map(id=>this.store.get<Member>(`member:${id}`)).filter((x):x is Member=>!!x&&x.revokedAt===null);
             let target=members.find(x=>x.deviceId===p.plan.deviceId);
             if(target){demand(target.hostKey===p.plan.hostKey&&target.viewerKey===p.plan.biometricKey,'IDENTITY_CHANGED');
-              demand(target.platform===(p.plan.kind==='mobile'?'ios':'mac'),'DEVICE_KIND_CHANGED');}
+              demand(target.platform===(p.plan.kind==='mobile'?'ios':'mac'),'DEVICE_KIND_CHANGED');
+              const old=this.store.get<Policy>(`access-policy:${target.enrollmentId}`);
+              if(old&&p.plan.capabilities.includes('screen.desktop-trust')){
+                // Component ownership is checked by the native audited candidate-binding flow before it signs this
+                // reviewed plan. The issuer enforces the explicit combined scope and preserves every existing key.
+                demand(desktopTrustUpdatePreservesIdentity(old.plan,p.plan),'DESKTOP_TRUST_KEYS_IMMUTABLE');
+              }
+            }
             else{
               demand(members.length<MAX_MEMBERS&&c.memberIds.length<1024,'COMMUNITY_FULL');
               target={enrollmentId:randomUUID(),communityId:c.id,profileId:c.profileId,deviceId:p.plan.deviceId,name:p.plan.name,hostKey:p.plan.hostKey,viewerKey:p.plan.biometricKey,
@@ -106,6 +268,8 @@ export class CommunityAccessRegistry {
             demand(existingPolicies.every(x=>!x||![x.plan.hostKey,x.plan.biometricKey,x.plan.operationKey,...(x.plan.controlKey?[x.plan.controlKey]:[])].some(k=>[p.plan.hostKey,p.plan.biometricKey,p.plan.operationKey,p.plan.controlKey].includes(k))),'KEY_CONFLICT');
             demand(p.plan.agentDeviceId===null||existingPolicies.every(x=>!x||x.plan.agentDeviceId!==p.plan.agentDeviceId),'AGENT_DEVICE_ID_CONFLICT');
             c.revision++;target.grant=p.plan.capabilities.includes('screen.receive.control')?'control':p.plan.capabilities.includes('screen.receive.view')?'view':'none';
+            // Only a freshly reviewed management-domain BIO proof can change this role. Normal approval preserves it.
+            if(review.management){target.admin=review.management.administrator;if(!target.admin){this.store.remove(`push:${target.enrollmentId}`);this.store.remove('safety-subscription:'+target.enrollmentId);}}
             const policy:Policy={plan:p.plan,enrollmentId:target.enrollmentId,revision:c.revision};p.enrollmentId=target.enrollmentId;
             this.store.put(`member:${target.enrollmentId}`,target);this.store.put(`community:${c.id}`,c);this.store.put(`access-policy:${target.enrollmentId}`,policy);
             this.store.put(`access-plan:${p.id}`,p,now+ACCESS_PLAN_MS);this.store.remove(`access-review:${m.enrollmentId}:${p.id}`);

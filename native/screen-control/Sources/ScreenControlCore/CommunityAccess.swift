@@ -5,6 +5,8 @@ import CoreFoundation
 public enum CommunityCapability: String, Codable, CaseIterable, Sendable {
     case screenView = "screen.view", screenControl = "screen.control", receiveView = "screen.receive.view", receiveControl = "screen.receive.control"
     case communicate = "agent.communicate", teams = "teams.run", agentSettings = "computer-use.agent-settings", browser = "computer-use.browser"
+    case desktopTrust = "screen.desktop-trust"
+    case ownerDelegation = "screen.owner-delegation"
     public var title: String {
         switch self {
         case .screenView: "다른 기기 화면 보기"
@@ -15,11 +17,15 @@ public enum CommunityCapability: String, Codable, CaseIterable, Sendable {
         case .teams: "Teams 작업"
         case .agentSettings: "에포트 변경"
         case .browser: "AgentsToZ 브라우저 제어"
+        case .desktopTrust: "등록 Mac 기기 신뢰 · 승인된 프로그램도 선택 범위에서 연결"
+        case .ownerDelegation: "이 Mac의 입력 보류 해제 위임 · 다른 승인 Mac에서 요청별 생체 확인"
         }
     }
     public static func normalized(_ values: [Self], kind: CommunityDeviceKind) throws -> [Self] {
         guard !values.isEmpty, Set(values).count == values.count,
-              kind != .mobile || !values.contains(where: { $0 == .receiveView || $0 == .receiveControl }),
+              kind != .mobile || !values.contains(where: { $0 == .receiveView || $0 == .receiveControl || $0 == .desktopTrust || $0 == .ownerDelegation }),
+              !values.contains(.desktopTrust) || values.contains(.screenView) || values.contains(.receiveView),
+              !values.contains(.ownerDelegation) || (values.contains(.desktopTrust) && values.contains(.receiveView) && values.contains(.receiveControl)),
               !values.contains(.screenControl) || values.contains(.screenView),
               !values.contains(.receiveControl) || values.contains(.receiveView) else { throw ScreenCommunityError.malformed }
         return allCases.filter { values.contains($0) }
@@ -99,6 +105,10 @@ public struct CommunityAccessReview: Sendable {
     public let plan: CommunityAccessPlan
     public let planId: String, admin: String, digest: String, challenge: String
     public let revision: Int64, expiresAt: Int64
+    public let management: CommunityManagementIntent?
+    init(plan: CommunityAccessPlan, planId: String, admin: String, digest: String, challenge: String, revision: Int64, expiresAt: Int64, management: CommunityManagementIntent? = nil) {
+        self.plan=plan;self.planId=planId;self.admin=admin;self.digest=digest;self.challenge=challenge;self.revision=revision;self.expiresAt=expiresAt;self.management=management
+    }
 }
 public struct CommunityAccessReply: @unchecked Sendable {
     public let kind: String, requestId: String
@@ -112,7 +122,7 @@ public struct CommunityAccessReply: @unchecked Sendable {
         guard data.count <= 48_000, authority.issuer.isValidSignature(signature, for: Data("agentstoz.community-access.response/v2\0".utf8) + data),
               let fields = try JSONSerialization.jsonObject(with: data) as? [Any], fields.count == 5,
               try AccessValue.integer(fields[0]) == 2, let kind = fields[1] as? String,
-              ["prepared", "pending-list", "review", "authorization", "directory", "session", "session-closed", "receipt", "ticket", "error"].contains(kind) else { throw ScreenCommunityError.invalidSignature }
+              ["prepared", "pending-list", "review", "management-review", "registration-absent", "authorization", "directory", "session", "session-closed", "receipt", "ticket", "safety-subscribed", "safety-round", "safety-result", "safety-event", "safety-state", "owner-delegation", "owner-recovery", "owner-recovery-round", "owner-recovery-list", "owner-recovery-absent", "error"].contains(kind) else { throw ScreenCommunityError.invalidSignature }
         let id = try AccessValue.id(fields[2]), at = try AccessValue.integer(fields[3]), clock = now.timeIntervalSince1970 * 1000
         guard Double(at) <= clock + 60_000 else { throw ScreenCommunityError.expired }
         if let requestId { guard id == requestId, Double(at) >= clock - 60_000 else { throw ScreenCommunityError.wrongRequest } }
@@ -181,6 +191,9 @@ public struct CommunityAccessReply: @unchecked Sendable {
 public struct CommunityAccessRequest: Sendable {
     public enum Operation: String, Sendable {
         case prepare, status, receipt, list, review, approve, authorization, directory, activity
+        case reviewManagement = "review-management", approveManagement = "approve-management", recoverRegistration = "recover-registration"
+        case safetySubscribe = "screen-safety-subscribe", safetyPoll = "receiver-safety-poll", safetyStop = "screen-safety-stop", safetyResult = "screen-safety-result", safetyEvent = "receiver-safety-event", safetyState = "screen-safety-state"
+        case ownerDelegationSet = "owner-delegation-set", ownerRequest = "owner-recovery-request", ownerPoll = "owner-recovery-poll", ownerPublish = "owner-recovery-publish", ownerList = "owner-recovery-list", ownerApprove = "owner-recovery-approve", ownerResult = "owner-recovery-result", ownerStatus = "owner-recovery-status"
         case componentStatus = "component-status", componentDirectory = "component-directory", componentTicket = "component-ticket"
         case receiverStatus = "receiver-status", receiverDirectory = "receiver-directory", receiverTicket = "receiver-ticket", receiverSession = "receiver-session"
         case sessionOpen = "session-open", sessionStatus = "session-status", sessionClose = "session-close", relayTicket = "relay-ticket"
@@ -188,7 +201,7 @@ public struct CommunityAccessRequest: Sendable {
     public let operation: Operation, id: String, bytes: Data
     public init(operation: Operation, actor: String?, argumentsJSON: Data, now: Date = Date(), id: UUID = UUID()) throws {
         let arguments = try JSONSerialization.jsonObject(with: argumentsJSON)
-        guard let arguments = arguments as? [Any], arguments.count <= 5, actor == nil || (try? AccessValue.id(actor!)) != nil else { throw ScreenCommunityError.malformed }
+        guard let arguments = arguments as? [Any], arguments.count <= (operation == .approveManagement ? 6 : 5), actor == nil || (try? AccessValue.id(actor!)) != nil else { throw ScreenCommunityError.malformed }
         let at = now.timeIntervalSince1970 * 1000
         guard at.isFinite, at >= 0, at < 9_007_199_254_740_991 else { throw ScreenCommunityError.malformed }
         self.operation = operation; self.id = id.uuidString.lowercased()
@@ -213,19 +226,25 @@ public struct CommunityAccessRequest: Sendable {
         guard abs(Double(at) - now.timeIntervalSince1970 * 1000) <= 60_000, let nonce = fields[4] as? String,
               try ScreenCommunityRequest.decodeBase64(nonce, max: 43).count == 32 else { throw ScreenCommunityError.expired }
         switch operation {
-        case .prepare:
-            guard fields[5] is NSNull, args.count == 1, let biometricKey else { throw ScreenCommunityError.wrongCommunity }
+        case .prepare, .recoverRegistration:
+            guard fields[5] is NSNull, (args.count == 1 || operation == .recoverRegistration && args.count == 2), let biometricKey else { throw ScreenCommunityError.wrongCommunity }
             let plan = try CommunityAccessPlan.checked(args[0])
             guard plan.profileId == profileId, plan.deviceId == deviceId, plan.kind == .desktop,
                   plan.hostKey == ScreenCommunityRequest.base64(hostKey), plan.biometricKey == ScreenCommunityRequest.base64(biometricKey) else { throw ScreenCommunityError.wrongCommunity }
+            if args.count==2 {
+                let raw=try AccessValue.object(args[1],["payload","signature"])
+                let original=try JSONDecoder().decode(ScreenCommunityEnvelope.self,from:JSONSerialization.data(withJSONObject:raw))
+                guard try CommunityOriginalPrepare(original).plan.digest==plan.digest else { throw ScreenCommunityError.wrongCommunity }
+            }
         case .status, .receipt:
             guard args.count == 1 else { throw ScreenCommunityError.malformed }; _ = try AccessValue.id(args[0])
             if !(fields[5] is NSNull) { guard let certificate, fields[5] as? String == certificate.member.enrollmentID else { throw ScreenCommunityError.wrongCommunity } }
             if operation == .status, !(fields[5] is NSNull) { throw ScreenCommunityError.wrongCommunity }
-        case .list, .review:
+        case .list, .review, .reviewManagement:
             guard let certificate, certificate.member.admin, fields[5] as? String == certificate.member.enrollmentID,
-                  args.first as? String == certificate.communityID, args.count == (operation == .list ? 1 : 2) else { throw ScreenCommunityError.wrongCommunity }
-            if operation == .review { _ = try AccessValue.id(args[1]) }
+                  args.first as? String == certificate.communityID, args.count == (operation == .list ? 1 : operation == .reviewManagement ? 3 : 2) else { throw ScreenCommunityError.wrongCommunity }
+            if operation != .list { _ = try AccessValue.id(args[1]) }
+            if operation == .reviewManagement { guard let role=args[2] as? NSNumber,CFGetTypeID(role)==CFBooleanGetTypeID() else { throw ScreenCommunityError.malformed } }
         case .receiverStatus, .receiverDirectory, .receiverTicket, .receiverSession:
             guard let authorization, authorization.body.deviceKind == .desktop, authorization.body.deviceId == deviceId,
                   authorization.body.profileId == profileId, authorization.body.hostPublicKey == ScreenCommunityRequest.base64(hostKey),

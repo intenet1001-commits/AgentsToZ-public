@@ -1,3 +1,5 @@
+import {teamQuestionGeneration} from './teamQuestionService';
+import type {TeamQuestionBinding,TeamQuestionNotice} from './teamQuestionProtocol';
 import type {AiTerminalAgent} from './aiTerminalProtocol';
 import type {TeamExternalRuntime as CoreRuntime,TeamExecutionRef,TeamDelivery,TeamExternalStarted,TeamExternalObserved,TeamExternalSurface} from './teamLaunchPlan';
 import type {TeamExternalJournal,TeamExternalReceipt,TeamExternalRuntime,TeamExternalScope} from './teamExternalRuntime';
@@ -23,16 +25,19 @@ const projection=(receipt:TeamExternalReceipt):CoreRef=>({kind:'external',surfac
 /** The same core adapter is used by local team UI actions and every MCP team tool. It never guesses native handles. */
 export function createTeamRuntimeBridge(options:TeamRuntimeBridgeOptions):CoreRuntime&{
   isCurrent(scope:TeamExternalScope):boolean;
-  read(ref:CoreRef,input:{cursor?:string;limit?:number}):Promise<{text:string;cursor?:string;agentVerified:boolean|null;outcome:'read'|'unavailable'|'unconfirmed';reason:string|null}>;
+  read(ref:CoreRef,input:{cursor?:string;limit?:number}):Promise<{text:string;cursor?:string;agentVerified:boolean|null;outcome:'read'|'unavailable'|'unconfirmed';reason:string|null;question?:TeamQuestionNotice}>;
   reveal(ref:CoreRef,operationId:string):Promise<{outcome:'requested'|'refused'|'unconfirmed'}>;
   keys(ref:CoreRef,keys:readonly string[],operationId:string):Promise<{outcome:'sent'|'not-sent'|'unknown'|'refused';reason:string|null}>;
 } {
+  let questionSequence=0;
+  const nextQuestionSequence=()=>{if(questionSequence>=Number.MAX_SAFE_INTEGER)throw Error('질문 관찰 순서 한도에 도달했습니다.');return ++questionSequence;};
   function bindingMatches(scope:TeamExternalScope):boolean {
     const b=options.binding(scope.teamId,scope.memberId);
     return !!b&&b.active&&scope.targetId===b.targetId&&scope.cwd===b.cwd
       &&scope.agent===b.agent&&scope.surface===b.surface&&scope.generation===b.generation;
   }
   function isCurrent(scope:TeamExternalScope):boolean {return scope.hostInstanceId===options.hostInstanceId&&bindingMatches(scope);}
+  const questionBinding=(ref:import('./teamExternalRuntime').TeamExternalRef):TeamQuestionBinding=>({teamId:ref.teamId,memberId:ref.memberId,executionId:ref.executionId,generation:teamQuestionGeneration([ref.hostInstanceId,ref.generation,ref.targetId,ref.agent,ref.surface,ref.native])});
   async function receipt(ref:CoreRef):Promise<TeamExternalReceipt> {
     if(ref.runtime!==RUNTIME)throw Error('팀 실행 연결을 확인하지 못했습니다.');
     const record=await options.journal.read(ref.handle);
@@ -56,9 +61,15 @@ export function createTeamRuntimeBridge(options:TeamRuntimeBridgeOptions):CoreRu
       return {ref:projection(result),state:coreState(result),delivery:delivery(result)};
     },
     async observe(ref):Promise<TeamExternalObserved> {
+      const sequence=nextQuestionSequence();
       const saved=await receipt(ref),result=await options.runtime.probe(saved.executionRef);
       const state=result.state==='closed'?'exited':result.state==='exited'?'exited':coreState(result);
-      return {state,delivery:delivery(result)};
+      let question:TeamExternalObserved['question']={binding:questionBinding(saved.executionRef),sequence,available:false,observation:null};
+      if(saved.executionRef.surface==='orca-worktree'&&result.agentVerified===true&&result.capabilities.read&&isCurrent(saved.executionRef)&&typeof options.runtime.read==='function'){
+        const read=await options.runtime.read(saved.executionRef,{limit:8000});
+        if(read.outcome==='read'&&read.receipt.agentVerified===true&&isCurrent(saved.executionRef)&&read.question!==undefined)question={binding:questionBinding(saved.executionRef),sequence,available:true,observation:read.question};
+      }
+      return {state,delivery:delivery(result),...(question?{question}:{})};
     },
     async send(ref,text,requestId) {
       const saved=await receipt(ref),result=await options.runtime.submit(saved.executionRef,{operationId:requestId,text});
@@ -76,6 +87,7 @@ export function createTeamRuntimeBridge(options:TeamRuntimeBridgeOptions):CoreRu
       return {closed:result.state==='closed'&&!result.retainWorktree?'closed':'unknown'};
     },
     async read(ref,input) {
+      const sequence=nextQuestionSequence();
       const saved=await receipt(ref),result=await options.runtime.read(saved.executionRef,input);
       // EXTERNAL_HOST_RESTART_READ_ONLY: an execution an earlier run of this host started is read once its binding still holds and
       // no write of it is unresolved — checked before and after the separately verified read. It is evidence only
@@ -94,7 +106,7 @@ export function createTeamRuntimeBridge(options:TeamRuntimeBridgeOptions):CoreRu
           }
         }
       }
-      return {text:result.text,...(result.cursor!==undefined?{cursor:result.cursor}:{}),agentVerified:result.receipt.agentVerified,outcome:result.outcome,reason:result.receipt.reason};
+      return {text:result.text,...(result.cursor!==undefined?{cursor:result.cursor}:{}),agentVerified:result.receipt.agentVerified,outcome:result.outcome,reason:result.receipt.reason,...(result.outcome==='read'&&result.receipt.agentVerified===true&&isCurrent(saved.executionRef)&&result.question!==undefined?{question:{binding:questionBinding(saved.executionRef),sequence,available:true,observation:result.question}}:{question:{binding:questionBinding(saved.executionRef),sequence,available:false,observation:null}})};
     },
     async reveal(ref,operationId) {
       const saved=await receipt(ref);

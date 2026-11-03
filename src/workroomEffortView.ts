@@ -63,7 +63,8 @@ const levelWord = (level: string) => (TIERS as readonly string[]).includes(level
 /** The receipt next to the model/effort the CLI shows; null when the session has no decision to report. */
 export function workroomEffortBadgeText(session: WorkroomEffortSessionView | undefined): string | null {
   if (!session) return null;
-  // A level without a tier is one the person pinned at launch (a 팀 작전 member): the Mac's mode does not apply to it.
+  // A level without a tier is one the person pinned at launch (a 팀 작전 member) or chose for this session
+  // (agentstoz_use_set_workroom_effort): the Mac's mode does not apply to it.
   if (session.level && !session.tier) {
     if (session.manual) return '에포트 직접 설정';
     const requested = `에포트 요청 · ${levelWord(session.level)}`;

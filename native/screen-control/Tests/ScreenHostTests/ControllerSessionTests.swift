@@ -16,7 +16,7 @@ import XCTest
 // MARK: - Rig shared by the host checks
 
 /// Store items in memory. An account in `failing` refuses writes, one in `failingReads` reads, as a locked keychain would.
-final class HostTestItems: ScreenStoreItems, Sendable {
+final class HostTestItems: ScreenStoreItems,ScreenInputHoldAtomicItems,ScreenOwnerRecoveryAtomicItems, Sendable {
     let items = OSAllocatedUnfairLock(initialState: [String: Data]())
     let failing = OSAllocatedUnfairLock(initialState: Set<String>())
     let failingReads = OSAllocatedUnfairLock(initialState: Set<String>())
@@ -28,7 +28,23 @@ final class HostTestItems: ScreenStoreItems, Sendable {
         if failing.withLock({ $0.contains(account) }) { throw ScreenStoreError.keychain(errSecInteractionNotAllowed) }
         items.withLock { $0[account] = data }
     }
+    func replaceInputHold(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        let account="input-hold-v1"
+        if failing.withLock({$0.contains(account)}) || failingReads.withLock({$0.contains(account)}) { throw ScreenStoreError.keychain(errSecInteractionNotAllowed) }
+        return try items.withLock { values in
+            let current=try values[account].map(ScreenInputHoldRecord.decode)
+            guard current?.generation==expectedGeneration else { return false };values[account]=data;return true
+        }
+    }
     func fail(_ accounts: Set<String>) { failing.withLock { $0 = accounts } }
+    func replaceOwnerRecovery(expectedGeneration:String?,data:Data,generation:String)throws->Bool {
+        let account="owner-recovery-v1"
+        if failing.withLock({$0.contains(account)}) || failingReads.withLock({$0.contains(account)}) {throw ScreenStoreError.keychain(errSecInteractionNotAllowed)}
+        return try items.withLock { values in
+            let current=try values[account].map{try JSONDecoder().decode(ScreenOwnerRecoveryStore.State.self,from:$0)}
+            guard current?.recordGeneration==expectedGeneration else {return false};values[account]=data;return true
+        }
+    }
     func failReads(_ accounts: Set<String>) { failingReads.withLock { $0 = accounts } }
 }
 
@@ -188,6 +204,8 @@ final class HostRig {
     var monitorAvailable = true
     var captureFails = false
     var authenticates = true
+    var authenticationReply:(@MainActor (LAPolicy) async throws -> Bool)?
+    var beforeOpenNearby:(@MainActor () async throws -> Void)?
     private(set) var policies: [LAPolicy] = []
     private(set) var opened: [QuietSource] = []
     private(set) var pairingClosed = 0
@@ -202,7 +220,7 @@ final class HostRig {
     var remoteInputURL: URL { folder.appending(path: "remote-input.json") }
     var powerHoldURL: URL { folder.appending(path: "power-hold") }
 
-    func makeService() -> ScreenService {
+    func makeService(directoryAuthority:ScreenCommunityAuthority?=nil) -> ScreenService {
         let injected = injected, typed = typed, locked = locked, desktop = desktop, captureFails = captureFails, available = monitorAvailable
         let net = net, clock = clock, mac = mac
         let probe: PhysicalInputProbe = { PhysicalInputSnapshot(available: true) }
@@ -221,9 +239,11 @@ final class HostRig {
         let authenticate: @MainActor (String, LAPolicy) async throws -> Bool = { [weak self] _, policy in
             guard let self else { return false }
             self.policies.append(policy)
+            if let reply=self.authenticationReply { return try await reply(policy) }
             return self.authenticates
         }
         let openNearby: @MainActor (MacHandshake, PreAuthGate, String) async throws -> any ScreenSessionSource = { [weak self] _, _, _ in
+            if let before=self?.beforeOpenNearby { try await before() }
             let source = QuietSource()
             self?.opened.append(source)
             return source
@@ -237,11 +257,11 @@ final class HostRig {
         let environment = ScreenServiceEnvironment(
             store: store, publishesStatus: false, observesTermination: false, resumesKeptOn: false, watchesKeptOnNetwork: false,
             flags: flags, liveness: liveness, push: push, identity: identity, authenticate: authenticate,
-            sessions: ScreenSessionSystem(inputMonitor: inputMonitor, streamer: streamer, lockStates: nil),
+            sessions: ScreenSessionSystem(inputMonitor: inputMonitor, streamer: streamer, lockStates: nil,isUnlocked:{locked.value==false}),
             openNearby: openNearby,
             currentNetwork: { net.value },
             addresses: { ["192.168.0.10", "10.0.0.7", "100.64.0.1", "127.0.0.1"] },
-            remoteInputURL: remoteInputURL, powerHoldURL: powerHoldURL, now: { clock.now })
+            remoteInputURL: remoteInputURL, powerHoldURL: powerHoldURL, now: { clock.now },communityDirectoryAuthority:directoryAuthority)
         let service = ScreenService(environment: environment)
         service.closeControllerPairing = { [weak self] in self?.pairingClosed += 1 }
         return service
@@ -577,9 +597,10 @@ final class ControllerSessionTests: XCTestCase {
         let phoneSession = try await rig.connect(service, phone, as: .phone)
         _ = await read(phoneSession, until: isStarted)
         XCTAssertEqual(service.sessionInput?.mode, .paused, "a different device cannot clear the Mac-wide hold")
-        XCTAssertFalse(service.resumeRemoteInput(refusal: .otherProcess))
+        let refusedResume=await service.resumeRemoteInput(refusal:.otherProcess);XCTAssertFalse(refusedResume)
         XCTAssertEqual(service.sessionInput?.mode, .paused)
-        XCTAssertTrue(service.resumeRemoteInput(refusal: nil))
+        let resumed=await service.resumeRemoteInput(refusal:nil);XCTAssertTrue(resumed)
+        XCTAssertTrue(rig.policies.isEmpty,"Never-opted-in legacy hand-back must not acquire an additional authentication prompt")
         service.disconnect()
         _ = await ending(of: phoneSession)
 

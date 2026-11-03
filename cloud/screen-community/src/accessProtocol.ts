@@ -4,12 +4,13 @@ import {b64,demand,publicKey,uuid,integer,name,Fault} from './protocol';
 
 export const ACCESS_REQUEST_DOMAIN=Buffer.from('agentstoz.community-access.request/v2\0');
 export const ACCESS_RESPONSE_DOMAIN=Buffer.from('agentstoz.community-access.response/v2\0');
+export const ACCESS_NOTICE_DOMAIN=Buffer.from('agentstoz.community-access.notice/v2\0');
 export const ACCESS_IDLE_MS=60*60_000,ACCESS_LEASE_MS=90_000,ACCESS_PLAN_MS=10*60_000;
 export const CAPABILITIES=['screen.view','screen.control','screen.receive.view','screen.receive.control',
-  'agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser'] as const;
+  'agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser','screen.desktop-trust','screen.owner-delegation'] as const;
 export type Capability=typeof CAPABILITIES[number];
 export type DeviceKind='desktop'|'mobile';
-export const ACCESS_OPERATIONS=['prepare','status','receipt','list','review','approve','authorization','directory','session-open','session-status','activity','session-close','relay-ticket','receiver-status','receiver-directory','receiver-ticket','receiver-session','component-status','component-directory','component-ticket','component-session'] as const;
+export const ACCESS_OPERATIONS=['owner-delegation-set','owner-recovery-request','owner-recovery-poll','owner-recovery-publish','owner-recovery-list','owner-recovery-approve','owner-recovery-result','owner-recovery-status','screen-safety-subscribe','receiver-safety-poll','screen-safety-stop','screen-safety-result','receiver-safety-event','screen-safety-state','prepare','recover-registration','status','receipt','list','review','approve','review-management','approve-management','authorization','directory','session-open','session-status','activity','session-close','relay-ticket','receiver-status','receiver-directory','receiver-ticket','receiver-session','component-status','component-directory','component-ticket','component-session'] as const;
 export type AccessOperation=typeof ACCESS_OPERATIONS[number];
 export interface AccessEnvelope {payload:string;signature:string}
 export interface AccessRequest {op:AccessOperation;id:string;at:number;nonce:string;actor:string|null;args:unknown[];bytes:Buffer;signature:Buffer}
@@ -36,6 +37,10 @@ export function capabilities(value:unknown,kind?:DeviceKind):Capability[]{
   demand(Array.isArray(value)&&value.length>0&&value.length<=CAPABILITIES.length&&value.every(v=>CAPABILITIES.includes(v))&&new Set(value).size===value.length);
   const result=CAPABILITIES.filter(c=>value.includes(c));
   demand(kind!=='mobile'||!result.some(c=>c.startsWith('screen.receive.')),'MOBILE_CANNOT_HOST');
+  demand(kind!=='mobile'||!result.includes('screen.desktop-trust'),'MOBILE_CANNOT_TRUST_DESKTOP');
+  demand(kind!=='mobile'||!result.includes('screen.owner-delegation'),'MOBILE_CANNOT_DELEGATE_OWNER');
+  demand(!result.includes('screen.owner-delegation')||result.includes('screen.desktop-trust')&&result.includes('screen.receive.control')&&result.includes('screen.receive.view'),'OWNER_DELEGATION_REQUIRES_TRUSTED_RECEIVER');
+  demand(!result.includes('screen.desktop-trust')||result.includes('screen.view')||result.includes('screen.receive.view'),'DESKTOP_TRUST_REQUIRES_SCREEN');
   demand(!result.includes('screen.control')||result.includes('screen.view'),'MISSING_CAPABILITY');
   demand(!result.includes('screen.receive.control')||result.includes('screen.receive.view'),'MISSING_CAPABILITY');
   return [...result];
@@ -63,7 +68,7 @@ export function readAccessRequest(value:unknown,now:number):AccessRequest{
   exact(value,['payload','signature']);const bytes=b64(value.payload,32_000),signature=b64(value.signature,86);demand(bytes.length<=24_000&&signature.length===64);
   let fields:unknown;try{fields=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new Fault('INVALID_REQUEST');}
   demand(Array.isArray(fields)&&fields.length===7&&fields[0]===2&&ACCESS_OPERATIONS.includes(fields[1])&&uuid(fields[2])&&integer(fields[3])
-    &&Math.abs(now-fields[3])<=60_000&&b64(fields[4],43).length===32&&(fields[5]===null||uuid(fields[5]))&&Array.isArray(fields[6])&&fields[6].length<=5);
+    &&Math.abs(now-fields[3])<=60_000&&b64(fields[4],43).length===32&&(fields[5]===null||uuid(fields[5]))&&Array.isArray(fields[6])&&fields[6].length<=(fields[1]==='approve-management'?6:5));
   return {op:fields[1],id:fields[2],at:fields[3],nonce:fields[4],actor:fields[5],args:fields[6],bytes,signature};
 }
 export function checkAccessProof(r:AccessRequest,key:string):void{
@@ -85,3 +90,10 @@ export function accessPurposeAllowed(caps:readonly Capability[],purpose:RelayPur
     case 'agent-settings':case 'mobile-agent-settings':return caps.includes('computer-use.agent-settings');case 'browser':case 'mobile-browser':return caps.includes('computer-use.browser');}
 }
 export const accessChallenge=()=>randomBytes(32).toString('base64url');
+
+/** Advisory discovery only: no membership or approval authority is carried by a notice. */
+export function accessNoticeSigned(planId:string,communityId:string,profileId:string,digest:string,at:number,expiresAt:number,key:KeyObject):AccessEnvelope {
+  demand(uuid(planId)&&uuid(communityId)&&uuid(profileId)&&/^[0-9a-f]{64}$/.test(digest)&&integer(at)&&integer(expiresAt)&&expiresAt>at&&expiresAt<=at+ACCESS_PLAN_MS);
+  const bytes=Buffer.from(JSON.stringify([2,'access-enrollment-notice',planId,at,communityId,profileId,digest,expiresAt]));
+  return {payload:bytes.toString('base64url'),signature:sign('sha256',Buffer.concat([ACCESS_NOTICE_DOMAIN,bytes]),{key:key.export({format:'pem',type:'pkcs8'}),dsaEncoding:'ieee-p1363'}).toString('base64url')};
+}

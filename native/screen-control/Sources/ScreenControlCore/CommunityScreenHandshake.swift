@@ -16,6 +16,10 @@ public struct CommunityScreenAdmission: Sendable {
     public let useSession: CommunityUseSession?
     public let binding: CommunityScreenBinding
     public let canControl: Bool
+    public let desktopTrust:CommunityDesktopScreenTrust?
+    init(controller:CommunityAuthorization,receiver:CommunityAuthorization,useSession:CommunityUseSession?,binding:CommunityScreenBinding,canControl:Bool,desktopTrust:CommunityDesktopScreenTrust?=nil) {
+        self.controller=controller;self.receiver=receiver;self.useSession=useSession;self.binding=binding;self.canControl=canControl;self.desktopTrust=desktopTrust
+    }
     public var peerClass: ScreenPeerClass { controller.body.deviceKind == .mobile ? .phone : .controller }
     public var expiresAt: Date {
         Date(timeIntervalSince1970: Double(min(controller.body.expiresAt, receiver.body.expiresAt, useSession?.body.expiresAt ?? Int64.max)) / 1000)
@@ -47,13 +51,17 @@ private enum CommonScreenWire {
     static func controllerKey(_ auth: CommunityAuthorization, _ session: CommunityUseSession?) throws -> P256.Signing.PublicKey {
         try P256.Signing.PublicKey(x963Representation: AccessValue.key(session?.body.publicKey ?? auth.body.publicKey))
     }
-    static func admission(controller: CommunityAuthorization, receiver: CommunityAuthorization, session: CommunityUseSession?, binding: CommunityScreenBinding, requestedControl: Bool) throws -> CommunityScreenAdmission {
+    static func admission(controller: CommunityAuthorization, receiver: CommunityAuthorization, session: CommunityUseSession?, binding: CommunityScreenBinding, requestedControl: Bool,authority:ScreenCommunityAuthority,now:Date) throws -> CommunityScreenAdmission {
         let client = controller.body, host = receiver.body
         let scopes = session?.body.capabilities ?? client.capabilities
         guard client.communityId == host.communityId, client.profileId == host.profileId, client.deviceId != host.deviceId,
               host.deviceKind == .desktop, host.capabilities.contains(.receiveView), scopes.contains(.screenView) else { throw ScreenCommunityError.wrongCommunity }
+        let trust:CommunityDesktopScreenTrust?
+        if client.deviceKind == .desktop,client.capabilities.contains(.desktopTrust),host.capabilities.contains(.desktopTrust) {
+            trust=try CommunityDesktopScreenTrust.verified(authority:authority,controller:controller,receiver:receiver,channelId:binding.channelId,now:now)
+        } else { trust=nil }
         return .init(controller: controller, receiver: receiver, useSession: session, binding: binding,
-                     canControl: requestedControl && scopes.contains(.screenControl) && host.capabilities.contains(.receiveControl))
+                     canControl: requestedControl && scopes.contains(.screenControl) && host.capabilities.contains(.receiveControl),desktopTrust:trust)
     }
     static func hash(_ hello: Data, _ header: Data) -> Data {
         sha256(LengthPrefixed.encode([Data(ScreenControlProtocol.name.utf8), UInt16(6).bigEndianData, hello, header]))
@@ -94,7 +102,7 @@ public actor CommunityScreenClientHandshake {
               receiver.body.hostPublicKey == target.body.hostPublicKey, receiver.body.revision >= target.body.revision,
               try CommonScreenWire.text(header[4]) == peerConnectionId else { throw HandshakeError.badSignature }
         let binding = try CommunityScreenBinding(channelId: channelId, clientConnectionId: connectionId, hostConnectionId: peerConnectionId)
-        let admission = try CommonScreenWire.admission(controller: own, receiver: receiver, session: session, binding: binding, requestedControl: requestedControl)
+        let admission = try CommonScreenWire.admission(controller: own, receiver: receiver, session: session, binding: binding, requestedControl: requestedControl,authority:authority,now:now)
         let hash = CommonScreenWire.hash(hello, response[0]), labels = CommonScreenWire.labels
         let key = try P256.Signing.PublicKey(x963Representation: AccessValue.key(receiver.body.hostPublicKey))
         guard key.isValidSignature(try signature(response[1]), for: labels.macSignature + hash) else { throw HandshakeError.badSignature }
@@ -123,7 +131,7 @@ public struct CommunityScreenHostHandshake: Sendable {
               fields[6].count == 32, fields[7].count == 65, fields[8].count == 1, fields[8].first == 0 || fields[8].first == 1 else { throw HandshakeError.malformed }
         let controller = try CommonScreenWire.credential(fields[4], authority: authority, now: now)
         let session = try CommonScreenWire.session(fields[5], authorization: controller, authority: authority, now: now)
-        let admission = try CommonScreenWire.admission(controller: controller, receiver: receiver, session: session, binding: binding, requestedControl: fields[8].first == 1)
+        let admission = try CommonScreenWire.admission(controller: controller, receiver: receiver, session: session, binding: binding, requestedControl: fields[8].first == 1,authority:authority,now:now)
         try await admits(controller, session)
         guard await replay.insert(fields[6]) else { throw HandshakeError.replayedNonce }
         let ephemeral = P256.KeyAgreement.PrivateKey(), labels = CommonScreenWire.labels

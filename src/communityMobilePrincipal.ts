@@ -4,7 +4,7 @@ import {CommunityAccessReply,COMMUNITY_MOBILE_RELAY_PURPOSES,communityBytes,comm
 
 export interface CommunityMobileAuthority {origin:string;issuerPublicKey:string;profileId:string}
 export const COMMUNITY_MOBILE_CAPABILITY_ORDER=['screen.view','screen.control','screen.receive.view','screen.receive.control',
-  'agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser'] as const;
+  'agent.communicate','teams.run','computer-use.agent-settings','computer-use.browser','screen.desktop-trust','screen.owner-delegation'] as const;
 export type CommunityMobileCapability=typeof COMMUNITY_MOBILE_CAPABILITY_ORDER[number];
 export interface CommunityDeviceAuthorizationBody {
   version:1;communityId:string;profileId:string;enrollmentId:string;deviceId:string;deviceKind:'desktop'|'mobile';name:string;
@@ -44,7 +44,9 @@ function checkPurpose(purpose:unknown):asserts purpose is CommunityMobileRelayPu
 function caps(value:unknown,mobile:boolean):readonly CommunityMobileCapability[]{
   if(!Array.isArray(value)||value.length===0||value.length>COMMUNITY_MOBILE_CAPABILITY_ORDER.length
     ||JSON.stringify(value)!==JSON.stringify(COMMUNITY_MOBILE_CAPABILITY_ORDER.filter(c=>value.includes(c))))return fail('INVALID_CAPABILITIES');
-  if(mobile&&value.some(c=>c==='screen.receive.view'||c==='screen.receive.control')
+  if(mobile&&value.some(c=>c==='screen.receive.view'||c==='screen.receive.control'||c==='screen.desktop-trust'||c==='screen.owner-delegation')
+    ||value.includes('screen.owner-delegation')&&(!value.includes('screen.desktop-trust')||!value.includes('screen.receive.control')||!value.includes('screen.receive.view'))
+    ||value.includes('screen.desktop-trust')&&!value.includes('screen.view')&&!value.includes('screen.receive.view')
     ||value.includes('screen.control')&&!value.includes('screen.view')||value.includes('screen.receive.control')&&!value.includes('screen.receive.view'))return fail('INVALID_CAPABILITIES');
   return Object.freeze([...value]) as readonly CommunityMobileCapability[];
 }

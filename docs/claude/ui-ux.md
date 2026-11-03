@@ -25,6 +25,13 @@
   검증: `tests/dialog-escape.test.ts`, `tests/projects-tab-ui.e2e.mjs --tools-dialog-only`.
   ⚠️ 포커스된 입력칸이 대화상자와 함께 지워지면 WebKit은 blur를 보내지 않는다 — `onBlur`로 푸는 상태(예: 단축키 「기록 중」)는
   대화상자 닫힘에서도 풀 것. Esc가 기록 칸에서 대화상자를 닫게 된 뒤(949ce0b5) 다시 열면 「키를 누르세요...」가 남았다(v1603 QA, 닫힘 effect로 해결).
+- **도구 메뉴의 첫 동작은 목적별로 묶는다 (2026-11-03)** — 고정 프로젝트 바로가기는 그대로 두고
+  `기기 연결`(Screen·Viewer·컴퓨터 유즈), `AI 협업`(Teams·기기 대화·음성·호출), `설정·지원`으로 나눈다.
+  OPS 폴더 준비·복원은 고급 설정 안에 두며 기존 프로젝트 선택·데이터 작업·각 버튼의 handler와 권한 검사는 유지한다.
+  `WorkspaceScreenEntries`는 `WorkspaceTools`가 열렸을 때만 기존 helper hook을 mount한다. 닫힌 메뉴의
+  상태 조회 타이머를 새로 만들지 않는다. 실패·다른 위치 실행·업데이트 보류 안내는 기존 helper 판정을 재사용하고,
+  버튼은 helper UI만 연다. 회귀: `tests/workspace-tools-groups.test.tsx`, `bun tests/workspace-tools-ui.mjs`
+  (Chromium·WebKit, 1100/390px, synthetic IPC이며 실제 화면 연결·OS 권한은 시험하지 않는다).
 - **디자인 시스템 (2026-09 리디자인)**: 정본은 Claude Design 프로젝트
   `https://claude.ai/design/p/ccba361f-f7c9-4c63-b089-dcbedf5a0f9b`의 `AgentsToZ Redesign.dc.html` ·
   `AgentsToZ Mobile.dc.html` · `Design Tokens & Components.dc.html` 세 파일이다.

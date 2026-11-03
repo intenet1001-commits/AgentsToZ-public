@@ -7,6 +7,12 @@ import ScreenControlCore
 /// Native Screen owns its key. The signed Viewer may request only a community-protocol proof bound to this exact
 /// device/profile/viewer key and fixed authority. There is no arbitrary signing, session/capture/input RPC.
 public actor ScreenCommunityBroker {
+    public struct SafetyActivation:Codable,Sendable,Equatable {
+        public let id:String,since:Int64
+        var enabled:Bool
+    }
+    struct SafetyStoredResult:Codable { let envelope:ScreenCommunityEnvelope,retireAt:Int64 }
+    struct SafetyReservation:Codable { let activationId:String,expiresAt:Int64 }
     struct State: Codable {
         let deviceID: String
         let hostKey: Data
@@ -17,6 +23,12 @@ public actor ScreenCommunityBroker {
         var withdrawnEnrollmentIDs: [String]?
         var accessCertificate: ScreenCommunityEnvelope?
         var minimumAccessRevision: Int64?
+        var safetyActivation:SafetyActivation?
+        var safetyDeniedEnrollmentIDs:[String]?
+        var safetyPendingCommands:[String:SafetyReservation]?
+        var safetyResults:[SafetyStoredResult]?
+        var safetyObservationSequence:Int64?
+        var ownerRecoveryInitialized:Bool?
     }
     private let store: ScreenStore
     private let identity: SecureEnclaveTranscriptSigner
@@ -27,6 +39,137 @@ public actor ScreenCommunityBroker {
     private let didChange: @Sendable (ScreenCommunityDirectory?, Bool) -> Void
     private let didAccessChange: @Sendable (CommunityAuthorization?, [CommunityAuthorization], Bool) -> Void
     private var accessDirectory: [CommunityAuthorization] = []
+    private var ownerTarget:ScreenOwnerRecoveryTarget?
+    private let ownerProtectedStore:ScreenOwnerRecoveryStore
+    private var viewerTargetHandoff:CommunityViewerHandoff?
+
+    /// Called only by Screen's real list button. No IPC operation accepts a selected target or creates a handoff.
+    func chooseViewerTarget(_ selection:CommunityDesktopScreenTrust)throws->String {
+        let own=try accessIdentity()
+        guard own.isCurrent(),own.body==selection.controller,
+              let peer=accessDirectory.first(where:{$0.body==selection.receiver}),peer.isCurrent() else {throw ScreenCommunityError.expired}
+        _=try CommunityDesktopScreenTrust.verified(authority:authority,controller:own,receiver:peer)
+        viewerTargetHandoff=try CommunityViewerHandoff(selection:selection)
+        return viewerTargetHandoff!.nonce
+    }
+    func cancelViewerTarget(_ nonce:String) {if viewerTargetHandoff?.nonce==nonce {viewerTargetHandoff=nil}}
+    func cancelViewerTargetHint(){viewerTargetHandoff=nil}
+    private func consumeViewerTarget()throws->ScreenCommunityBrokerReply {
+        let hint=viewerTargetHandoff;viewerTargetHandoff=nil
+        guard let hint,hint.expiresAt>Int64(Date().timeIntervalSince1970*1000) else {return ScreenCommunityBrokerReply()}
+        return ScreenCommunityBrokerReply(values:[.string(ScreenCommunityRequest.base64(try JSONEncoder().encode(hint)))])
+    }
+
+    func ownerRecoveryTarget()throws->ScreenOwnerRecoveryTarget {
+        if let ownerTarget {return ownerTarget}
+        if state.ownerRecoveryInitialized != true {
+            state.ownerRecoveryInitialized=true;try save() // Presence marker first: interrupted/lost state never becomes a fresh bootstrap.
+            ownerProtectedStore.allowFreshInitialization()
+        }
+        _=try ownerProtectedStore.read()
+        let value=ScreenOwnerRecoveryTarget(store:ownerProtectedStore,authority:authority,signer:identity,context:{ [weak self] qualifying in
+            guard let self else {throw ScreenCommunityError.expired};return try await self.ownerRecoveryContext(qualifying:qualifying)
+        });ownerTarget=value;return value
+    }
+    private func ownerRecoveryContext(qualifying:Bool)async throws->ScreenOwnerRecoveryTarget.Context {
+        if qualifying {try await refreshAccess()}
+        return .init(own:try accessIdentity(),peers:accessDirectory,receivingHeld:state.held)
+    }
+
+    /// Native lifecycle only. None of these operations is exposed by the automatic `.prepare` IPC signer.
+    public func beginSafetyActivation(resuming:Bool) throws -> SafetyActivation {
+        if resuming,let old=state.safetyActivation,old.enabled { return old }
+        let next=SafetyActivation(id:UUID().uuidString.lowercased(),since:Int64(Date().timeIntervalSince1970*1000),enabled:true)
+        state.safetyActivation=next;state.safetyPendingCommands=[:];try save();return next
+    }
+    public func endSafetyActivation(_ id:String) throws {
+        guard var current=state.safetyActivation,current.id==id else { return }
+        current.enabled=false;state.safetyActivation=current;try save()
+    }
+    public func permitsSafetyPeer(_ enrollmentId:String) -> Bool { !(state.safetyDeniedEnrollmentIDs ?? []).contains(enrollmentId) }
+    public func denySafetyPeer(_ enrollmentId:String,activationId:String) throws {
+        guard state.safetyActivation?.id==activationId,state.safetyActivation?.enabled==true,!state.held else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+        guard UUID(uuidString:enrollmentId)?.uuidString.lowercased()==enrollmentId else { throw ScreenCommunityError.malformed }
+        var denied=state.safetyDeniedEnrollmentIDs ?? []
+        if !denied.contains(enrollmentId) { guard denied.count<1024 else { throw ScreenCommunityError.service("SAFETY_DENY_LIMIT") };denied.append(enrollmentId);state.safetyDeniedEnrollmentIDs=denied;try save() }
+    }
+    public func safetyPoll(activation:SafetyActivation,afterSequence:Int64,snapshot:CommunitySafetyHostState) async throws -> CommunitySafetyRound {
+        let own=try await receiverAuthorization()
+        guard state.safetyActivation==activation,activation.enabled,!state.held,snapshot.power != .off,!snapshot.held else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+        state.safetyResults=(state.safetyResults ?? []).filter{$0.retireAt>Int64(Date().timeIntervalSince1970*1000)}
+        let carried=Array((state.safetyResults ?? []).prefix(16)).map(\.envelope)
+        let results=try carried.map { try JSONSerialization.jsonObject(with:JSONEncoder().encode($0)) }
+        let observed=try nextSafetyObservation(snapshot)
+        let value=observed.value()
+        let request=try CommunityAccessRequest(operation:.safetyPoll,actor:own.body.enrollmentId,argumentsJSON:JSONSerialization.data(withJSONObject:[own.body.communityId,activation.id,afterSequence,results,value],options:.withoutEscapingSlashes))
+        let reply=try await CommunityAccessHTTP(authority:authority).send(request.signed(by:identity),requestId:request.id)
+        let round=try CommunitySafetyRound.verify(reply.envelope,authority:authority,own:own,activationId:activation.id,request:request)
+        let current=try accessIdentity()
+        guard state.safetyActivation==activation,!state.held,state.safetyObservationSequence==observed.observationSequence,current.isCurrent(),
+              try CommunityMobileControlPolicy.authorizationDigest(current)==CommunityMobileControlPolicy.authorizationDigest(own) else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+        for watcher in round.watchers {
+            guard let peer=accessDirectory.first(where:{$0.body.enrollmentId==watcher.enrollmentId}),peer.isCurrent(),
+                  try CommunityMobileControlPolicy.authorizationDigest(peer)==watcher.policyDigest else { throw ScreenCommunityError.service("SAFETY_WATCHER_CHANGED") }
+        }
+        if !carried.isEmpty {
+            let ids=Set(carried.map(\.payload));state.safetyResults=(state.safetyResults ?? []).filter { !ids.contains($0.envelope.payload) };try save()
+        }
+        return round
+    }
+    public func performSafetyCommand(_ command:CommunitySafetyCommand,activation:SafetyActivation,apply:@Sendable () async throws -> CommunitySafetyOutcome) async throws {
+        let ownNow=try accessIdentity()
+        guard state.safetyActivation?.id==activation.id,state.safetyActivation?.enabled==true,!state.held,ownNow.isCurrent(),
+              try CommunityMobileControlPolicy.authorizationDigest(ownNow)==command.receiverPolicyDigest,
+              let watcher=accessDirectory.first(where:{$0.body.enrollmentId==command.authorization.body.enrollmentId}),watcher.isCurrent(),
+              try CommunityMobileControlPolicy.authorizationDigest(watcher)==CommunityMobileControlPolicy.authorizationDigest(command.authorization) else { throw ScreenCommunityError.service("SAFETY_INACTIVE") }
+        // A crash after reservation is an unknown outcome, never permission to execute a second time.
+        if state.safetyPendingCommands?[command.commandId] != nil {
+            if (state.safetyResults ?? []).contains(where:{ item in
+                let envelope=item.envelope
+                guard let bytes=try? ScreenCommunityRequest.decodeBase64(envelope.payload,max:4096),let fields=(try? JSONSerialization.jsonObject(with:bytes)) as? [Any],fields.count==7 else { return false }
+                return fields[4] as? String==command.commandId
+            }) { return }
+            throw ScreenCommunityError.service("SAFETY_COMMAND_UNKNOWN")
+        }
+        var pending=(state.safetyPendingCommands ?? [:]).filter{$0.value.expiresAt>Int64(Date().timeIntervalSince1970*1000)}
+        guard pending.count<256 else { throw ScreenCommunityError.service("SAFETY_RECEIPT_LIMIT") }
+        pending[command.commandId] = .init(activationId:activation.id,expiresAt:command.expiresAt);state.safetyPendingCommands=pending;try save()
+        let outcome=try await apply(),own=try accessIdentity()
+        if outcome == .turnedOff,var current=state.safetyActivation,current.id==activation.id { current.enabled=false;state.safetyActivation=current;try save() }
+        let result=try await CommunitySafetyHostResult.make(communityId:own.body.communityId,receiverEnrollmentId:own.body.enrollmentId,activationId:activation.id,commandId:command.commandId,outcome:outcome,signer:identity)
+        var results=state.safetyResults ?? []
+        guard results.count<256 else { throw ScreenCommunityError.service("SAFETY_RECEIPT_LIMIT") }
+        results.append(.init(envelope:result.envelope,retireAt:command.acceptedAt+604_800_000));state.safetyResults=results
+        // Retain the reservation after receipt delivery. The command may recur, but its effect may not.
+        try save()
+        if outcome == .turnedOff {
+            // Turning off cancels the regular polling task. Only this bounded negative-result delivery outlives it.
+            Task.detached { [weak self] in try? await self?.flushSafetyResults(activation:activation) }
+        }
+    }
+    private func flushSafetyResults(activation:SafetyActivation) async throws {
+        guard state.safetyActivation?.id==activation.id,state.safetyActivation?.enabled==false else { return }
+        let own=try accessIdentity();guard own.isCurrent() else { throw ScreenCommunityError.expired }
+        state.safetyResults=(state.safetyResults ?? []).filter{$0.retireAt>Int64(Date().timeIntervalSince1970*1000)}
+        let carried=Array((state.safetyResults ?? []).prefix(16)).map(\.envelope);guard !carried.isEmpty else { return }
+        let results=try carried.map { try JSONSerialization.jsonObject(with:JSONEncoder().encode($0)) }
+        let snapshot=try nextSafetyObservation(CommunitySafetyHostState(power:.off,held:state.held,session:nil))
+        let request=try CommunityAccessRequest(operation:.safetyPoll,actor:own.body.enrollmentId,argumentsJSON:JSONSerialization.data(withJSONObject:[own.body.communityId,activation.id,0,results,snapshot.value()],options:.withoutEscapingSlashes))
+        let reply=try await CommunityAccessHTTP(authority:authority).send(request.signed(by:identity),requestId:request.id)
+        try CommunitySafetyRound.verifyAcknowledgement(reply.envelope,authority:authority,own:own,activationId:activation.id,request:request)
+        let ids=Set(carried.map(\.payload));state.safetyResults=(state.safetyResults ?? []).filter { !ids.contains($0.envelope.payload) };try save()
+    }
+    private func nextSafetyObservation(_ snapshot:CommunitySafetyHostState) throws -> CommunitySafetyHostState {
+        let old=state.safetyObservationSequence ?? 0
+        guard old>=0,old<9_007_199_254_740_990 else { throw ScreenCommunityError.service("SAFETY_OBSERVATION_EXHAUSTED") }
+        state.safetyObservationSequence=old+1;try save() // Never reset on activation, policy change or restart.
+        return .init(power:snapshot.power,held:snapshot.held,session:snapshot.session,observationSequence:old+1)
+    }
+    public func safetyEvent(activationId:String,kind:String,actor:String?) async throws {
+        guard ["connection","enrollment","security"].contains(kind),let current=state.safetyActivation,current.id==activationId else { throw ScreenCommunityError.malformed }
+        let own=try accessIdentity(),request=try CommunityAccessRequest(operation:.safetyEvent,actor:own.body.enrollmentId,argumentsJSON:JSONSerialization.data(withJSONObject:[own.body.communityId,activationId,UUID().uuidString.lowercased(),kind,actor as Any? ?? NSNull()]))
+        _ = try await CommunityAccessHTTP(authority:authority).send(request.signed(by:identity),requestId:request.id)
+    }
 
     public init(didAccessChange: @escaping @Sendable (CommunityAuthorization?, [CommunityAuthorization], Bool) -> Void = { _, _, _ in },
                 didChange: @escaping @Sendable (ScreenCommunityDirectory?, Bool) -> Void = { _, _ in }) throws {
@@ -44,6 +187,7 @@ public actor ScreenCommunityBroker {
             if try store.read("controllers") != nil { state.held = try !store.controllers().allowMacControllers }
         }
         self.store = store; self.identity = identity; self.authority = authority; self.didChange = didChange; self.didAccessChange = didAccessChange
+        ownerProtectedStore=ScreenOwnerRecoveryStore(store:store)
     }
     private func save() throws { try store.write("community-membership", JSONEncoder().encode(state)); metadataSaved = true }
     private func certificate() throws -> ScreenCommunityCertificate {
@@ -62,7 +206,7 @@ public actor ScreenCommunityBroker {
     }
     private func execute(_ command: ScreenCommunityCommand) async throws -> ScreenCommunityBrokerReply {
         let a = command.arguments
-        guard [.commit, .accessCommit].contains(command.operation) || command.certificate == nil else { throw ScreenCommunityError.malformed }
+        guard [.commit, .accessCommit,.ownerDelegationCommit,.viewerDirectoryCommit].contains(command.operation) || command.certificate == nil else { throw ScreenCommunityError.malformed }
         switch command.operation {
         case .identity:
             guard a.isEmpty else { throw ScreenCommunityError.malformed }
@@ -111,6 +255,26 @@ public actor ScreenCommunityBroker {
             guard a.isEmpty else { throw ScreenCommunityError.malformed }
             try await refreshAccess()
             return ScreenCommunityBrokerReply(envelopes: [state.accessCertificate].compactMap { $0 })
+        case .ownerDelegationStatus:
+            guard a.isEmpty else {throw ScreenCommunityError.malformed}
+            let status=try await ownerRecoveryTarget().status()
+            return ScreenCommunityBrokerReply(values:[.string(status.localGeneration),.bool(status.enabled),.number(status.revision)],envelopes:status.round.map{[$0.envelope]} ?? [])
+        case .ownerDelegationCommit:
+            guard a.count==2,let generation=a[0].string,let original=a[1].string,let policy=command.certificate else {throw ScreenCommunityError.malformed}
+            let request=try JSONDecoder().decode(ScreenCommunityEnvelope.self,from:ScreenCommunityRequest.decodeBase64(original,max:32_000))
+            try await ownerRecoveryTarget().commit(policy:policy,original:request,expectedLocalGeneration:generation)
+            return ScreenCommunityBrokerReply()
+        case .ownerDelegationDisable:
+            guard a.isEmpty else {throw ScreenCommunityError.malformed};try await ownerRecoveryTarget().disable();return ScreenCommunityBrokerReply()
+        case .viewerDirectoryCommit:
+            guard a.isEmpty,let envelope=command.certificate else {throw ScreenCommunityError.malformed}
+            let own=try accessIdentity()
+            guard own.isCurrent(),own.body.capabilities.contains(.screenView),own.body.capabilities.contains(.desktopTrust) else {throw ScreenCommunityError.expired}
+            let peers=try CommunityAccessReply.verify(envelope,authority:authority).directory(authority:authority,communityId:own.body.communityId)
+            accessDirectory=peers;didAccessChange(own,peers,state.held);return ScreenCommunityBrokerReply()
+        case .viewerTargetConsume:
+            guard a.isEmpty else {throw ScreenCommunityError.malformed}
+            return try consumeViewerTarget()
         }
     }
     /// Strictly validates the complete automatic-proof domain and scope before touching the Secure Enclave key.
@@ -186,6 +350,8 @@ public actor ScreenCommunityBroker {
         }
     }
     private func withdrawMembership() throws {
+        _ = try? ownerRecoveryTarget()
+        ownerProtectedStore.invalidateInMemory();_ = try? ownerProtectedStore.closeLocally();viewerTargetHandoff=nil
         let old = try? certificate()
         if let old {
             let previous = state.withdrawnEnrollmentIDs ?? []
@@ -196,7 +362,11 @@ public actor ScreenCommunityBroker {
         state.certificate = nil; directory = nil; state.accessCertificate = nil; accessDirectory = []
         try save(); didChange(nil, state.held); didAccessChange(nil, [], state.held)
     }
-    public func hold(_ held: Bool) throws { state.held = held; try save(); didChange(directory, held); didAccessChange(try? accessIdentity(), accessDirectory, held) }
+    public func hold(_ held: Bool) throws {
+        state.held=held
+        if held {try? ownerProtectedStore.invalidatePending()}
+        try save();didChange(directory,held);didAccessChange(try? accessIdentity(),accessDirectory,held)
+    }
     private func verifiedAccess(_ envelope: ScreenCommunityEnvelope, historical: Bool) throws -> CommunityAuthorization {
         let reply = try CommunityAccessReply.verify(envelope, authority: authority)
         let date = historical ? Date(timeIntervalSince1970: Double(reply.issuedAt) / 1000) : Date()
@@ -215,6 +385,9 @@ public actor ScreenCommunityBroker {
         if let old = try? accessIdentity() {
             guard old.body.communityId == body.communityId, old.body.enrollmentId == body.enrollmentId,
                   body.keyEpoch >= old.body.keyEpoch else { throw ScreenCommunityError.wrongCommunity }
+            if try CommunityMobileControlPolicy.authorizationDigest(old) != CommunityMobileControlPolicy.authorizationDigest(access) {
+                if state.ownerRecoveryInitialized==true {try? ownerProtectedStore.observePolicyChange()};viewerTargetHandoff=nil
+            }
         }
         let changed = state.minimumAccessRevision != body.revision || state.accessCertificate == nil
         state.accessCertificate = access.envelope; state.minimumAccessRevision = body.revision
@@ -252,6 +425,11 @@ public actor ScreenCommunityBroker {
         guard own.isCurrent(), own.body.capabilities.contains(.receiveView) else { throw ScreenCommunityError.expired }
         return own // A hardware action at Screen must still request turning on. This function does not enable it.
     }
+    public func trustedConsentForTurningOn() async throws -> CommunityDesktopReceiveTrust {
+        try await refreshAccess()
+        guard !state.held else { throw ScreenCommunityError.service("RECEIVING_HELD") }
+        return try CommunityDesktopReceiveTrust.verified(authority:authority,authorization:accessIdentity(),deviceID:state.deviceID,hostKey:ScreenCommunityRequest.base64(state.hostKey))
+    }
     public func receiverTicket(connectionId: String) async throws -> CommunityRelayTicket {
         let own = try await receiverAuthorization()
         return try await receiverRequest(.receiverTicket, [connectionId]).relayTicket(for: own, connectionId: connectionId, purpose: .screen, role: .host)
@@ -267,6 +445,7 @@ public actor ScreenCommunityBroker {
     /// again. An expired/revoked session never becomes valid because video or a receiver poll is active.
     public func admitted(_ controller: CommunityAuthorization, session: CommunityUseSession?) async throws -> (CommunityAuthorization, CommunityAuthorization, CommunityUseSession?) {
         let own = try await receiverAuthorization()
+        guard permitsSafetyPeer(controller.body.enrollmentId) else { throw ScreenCommunityError.service("SAFETY_PEER_REVOKED") }
         guard let current = accessDirectory.first(where: { $0.body.deviceId == controller.body.deviceId }), current.isCurrent(),
               current.body.enrollmentId == controller.body.enrollmentId, current.body.publicKey == controller.body.publicKey,
               current.body.hostPublicKey == controller.body.hostPublicKey, current.body.deviceKind == controller.body.deviceKind,

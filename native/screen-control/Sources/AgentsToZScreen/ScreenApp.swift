@@ -212,7 +212,7 @@ struct ScreenMenu: View {
         // The self-hosted relay's state, only where one is saved: 「꺼짐」 here read as if remote use were off.
         if service.internetRoute != nil { Text(service.internetConnection.label) }
         Divider()
-        ControllerMenuSection(service: service)
+        Menu("고급 · 이전 직접 등록 관리") {ControllerMenuSection(service: service)}
         Divider()
         if ScreenRecordingPermission.current == .granted {
             Text("화면 기록 권한: 허용됨")
@@ -351,7 +351,7 @@ struct StatusPanel: View {
     var body: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 14) {
-            Text("아이폰·아이패드로 이 Mac 보기").font(.title3.bold())
+            Text("이 Mac 화면 수신 · 커뮤니티 Mac 연결").font(.title3.bold())
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     switch service.power {
@@ -359,12 +359,16 @@ struct StatusPanel: View {
                         Label("화면 제어 꺼짐", systemImage: "display.and.arrow.down")
                         if let reason { Text(reason).font(.callout).foregroundStyle(.secondary) }
                         if service.unifiedReceivingRegistered {
-                            HardwareButton(title: "커뮤니티 화면 제어 켜기") { click in Task { await service.turnOnFromCommunity(click: click) } }
+                            if service.offersTrustedCommunityTurnOn {
+                                Button("기기 신뢰로 화면 수신 켜기") { Task { await service.turnOnFromTrustedCommunity() } }
+                                Text("수신·입력 보류는 유지합니다. 최초 입력 보호 이행과 명시적 보류 해제 때만 이 Mac의 계정 소유자 확인이 필요합니다.").font(.caption)
+                            } else { HardwareButton(title: "커뮤니티 화면 제어 켜기") { click in Task { await service.turnOnFromCommunity(click: click) } } }
                         } else { Button("켜기 (Touch ID)") { Task { await service.turnOn() } }.keyboardShortcut(touchIDReturnKey) }
                     case .starting:
                         Label("켜는 중…", systemImage: "hourglass")
                     case .on(let address):
                         Label("화면 제어 켜짐 · \(address)", systemImage: "display").foregroundStyle(.green)
+                        if service.unifiedReceivingRegistered { Text(service.unifiedSafetyNotice).font(.caption).foregroundStyle(.secondary) }
                         if let network = service.listeningNetwork {
                             Text("승인된 네트워크: \(network.label)").font(.callout).foregroundStyle(.secondary)
                         }
@@ -380,6 +384,11 @@ struct StatusPanel: View {
                             }
                             Button("끄기") { service.turnOff() }
                         }
+                    }
+                    if let notice=service.inputProtectionNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+                    if service.needsTrustedInputOwnerConfirmation {
+                        Button("입력 보류 · 계정 소유자 확인…") { Task { await service.confirmTrustedInputOwner() } }
+                        Text("보기는 계속 가능합니다. 생체·Apple Watch 또는 macOS 암호로 OS가 계정 소유자를 확인합니다. 일반 연결마다 다시 묻지 않습니다.").font(.caption)
                     }
                     if let session = service.session, session.peerClass == .phone {
                         Divider()
@@ -456,9 +465,27 @@ struct StatusPanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            GroupBox {
-                ControllerStatusSection(service: service)
+            GroupBox("커뮤니티의 다른 Mac") {
+                VStack(alignment:.leading,spacing:8) {
+                    Text(service.communityDesktopNotice).font(.caption)
+                    Button("커뮤니티 Mac 목록 불러오기"){Task{await service.prepareCommunityDesktopList()}}
+                    Button("커뮤니티 등록·기능·위임 관리…"){Task{await service.openCommunityApprovals()}}
+                    ForEach(service.communityDesktops) {target in
+                        if target.ready {Button("\(target.name) 데스크톱 열기"){Task{await service.openCommunityDesktop(target.id)}}}
+                        else {Text("\(target.name) · 양쪽 기기 신뢰·화면 기능 승인을 확인해 주세요.").font(.caption)}
+                    }
+                    Text("Mac은 커뮤니티에서 한 번 등록·기능 승인하면 목록을 함께 씁니다. iPhone·iPad QR 등록은 각 대상 Mac에서 진행합니다.").font(.caption)
+                }.frame(maxWidth:.infinity,alignment:.leading)
             }
+            GroupBox("이 Mac의 입력 보류 해제 위임") {
+                VStack(alignment:.leading,spacing:8) {
+                    Text(service.ownerDelegationNotice).font(.caption)
+                    Text("최초 기능 계획에 별도 선택하면 같은 관리 승인 한 번으로 준비합니다. 실제 해제는 다른 현재 승인 Mac의 요청별 생체 확인이며 대상 OS 인증을 대신하지 않습니다.").font(.caption)
+                    Button("위임 등록·관리 열기…"){Task{await service.openCommunityApprovals()}}
+                    Button("이 Mac의 위임 끄기"){Task{await service.disableOwnerDelegation()}}
+                }.frame(maxWidth:.infinity,alignment:.leading)
+            }
+            DisclosureGroup("고급 · 이전 직접 등록 관리") {ControllerStatusSection(service: service)}
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     // One listener (TCP 52741) serves both: near-field directly, and Cloudflare's private tunnel from outside.

@@ -136,7 +136,11 @@ import buildInfo from '../build-number.json';
 // 1.79.0: common-authenticated remote Teams, receiver-selected project allowlist and opaque remote execution proxies.
 // 1.80.0: combines remote Teams with the public release's opt-in one-hop OPS/DEV memory relations and
 //          bounded personal-preference selection explanations; preserves both optional recall extensions.
-export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.80.0';
+// 1.81.0: set_workroom_effort — a person's session-only effort choice for another Workroom session of the same
+//          project (never the caller's own): read returns choices and a binding, set applies the chosen level through
+//          that CLI's runtime control and reads it back. ask=true lets this server show the choices to the person through
+//          the client's MCP elicitation (form) and apply only their pick. A host without the action answers HOST_OUTDATED.
+export const AGENTSTOZ_USE_MCP_CONTRACT_VERSION = '1.81.0';
 
 export function agentsToZUseMcpServerVersion(buildNumber: number): string {
   return `${AGENTSTOZ_USE_MCP_CONTRACT_VERSION}+build.${buildNumber}`;

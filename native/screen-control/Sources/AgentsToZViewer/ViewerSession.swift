@@ -23,6 +23,8 @@ final class ViewerSession {
     let target: ViewerTarget
     let path: ScreenTargetPath
     private let viewer: ScreenViewer
+    private let desktopTrust:CommunityDesktopTrustLease?
+    private let requiresDesktopTrust:Bool
     private let ledger: ViewerTargetsLedger
     let commonRegistration: Bool
     private(set) var model: ViewerSessionModel
@@ -41,10 +43,13 @@ final class ViewerSession {
         path = connected.path
         viewer = connected.viewer
         self.ledger = ledger; self.commonRegistration = commonRegistration
-        model = ViewerSessionModel(path: connected.path, started: .now)
+        requiresDesktopTrust=connected.desktopTrust != nil
+        desktopTrust=try? connected.desktopTrust.map { try CommunityDesktopTrustLease($0) }
+        model = ViewerSessionModel(path: connected.path, started: .now,desktopTrust:desktopTrust)
     }
 
     func start() {
+        if requiresDesktopTrust,desktopTrust?.current() == nil { end(.guardTripped,text:"기기 신뢰 확인이 만료되어 연결을 종료했습니다.");return }
         let viewer = viewer
         tasks.append(Task { [weak self] in
             for await notice in viewer.notices {
@@ -67,6 +72,7 @@ final class ViewerSession {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, !self.ended else { return }
+                if self.desktopTrust != nil,self.desktopTrust?.current() == nil { self.end(.guardTripped,text:"기기 신뢰 권한의 현재 확인이 만료되어 연결을 종료했습니다.");return }
                 // Read again every time: input that moved B's deadline later takes the warning down.
                 if self.model.tick(at: .now) {
                     if self.model.limitWarningShown { NSSound.beep() }
@@ -88,6 +94,24 @@ final class ViewerSession {
 
     /// Whether the person's keyboard and pointer go to B now.
     var sendsInput: Bool { model.sendsInput }
+    var isTrustedDeviceSession:Bool { requiresDesktopTrust }
+    func renewDesktopTrust(controller:CommunityAuthorization,receiver:CommunityAuthorization) {
+        guard let desktopTrust,!ended else { return }
+        do { try desktopTrust.renew(controller:controller,receiver:receiver) }
+        catch { end(.guardTripped,text:"기기 신뢰 권한이 변경되었거나 만료되어 연결을 종료했습니다.") }
+    }
+    func sendTrusted(_ input:InputEvent) {
+        guard desktopTrust?.current()?.canControl == true,!ended,model.admit(input,at:.now) else { return };viewer.input(input)
+    }
+    enum TrustedAction { case chord([UInt16],KeyModifiers),navigate(ScreenSpaceAction),pause(Bool) }
+    func performTrusted(_ action:TrustedAction) {
+        guard !ended,desktopTrust?.current() != nil else { return }
+        switch action {
+        case .chord(let keys,let modifiers): guard desktopTrust?.current()?.canControl == true else { return };sendChordEvents(keys,modifiers:modifiers)
+        case .navigate(let action): guard desktopTrust?.current()?.canControl == true,model.admitControl(at:.now) else { return };try? viewer.desktopControl(.navigateSpace(action))
+        case .pause(let paused): model.setPausedHere(paused);if model.needsRelease { releaseHeld() };changed()
+        }
+    }
     var pausedHere: Bool { model.pausedHere }
     var bandLines: [String] { model.bandLines }
     var addressOffer: ViewerAddressOffer { commonRegistration ? .none : model.addressOffer }
@@ -105,6 +129,9 @@ final class ViewerSession {
 
     /// A toolbar key combination such as ⌘Tab: pressed and released in order.
     func sendChord(_ keys: [UInt16], modifiers: KeyModifiers, proof: HumanProof) {
+        sendChordEvents(keys,modifiers:modifiers)
+    }
+    private func sendChordEvents(_ keys:[UInt16],modifiers:KeyModifiers) {
         guard !ended, model.sendsInput else { return }
         var events: [InputEvent] = []
         var held = KeyModifiers()
@@ -188,7 +215,7 @@ final class ViewerSession {
 
     func end(_ ending: Ending, text: String? = nil) {
         guard !ended else { return }
-        ended = true
+        ended = true;desktopTrust?.invalidate()
         for task in tasks { task.cancel() }
         tasks.removeAll()
         Task { [viewer] in await viewer.close() }

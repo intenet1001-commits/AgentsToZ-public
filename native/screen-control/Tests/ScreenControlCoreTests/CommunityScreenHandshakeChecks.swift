@@ -45,10 +45,28 @@ final class CommunityScreenHandshakeChecks: XCTestCase {
         let finished = try await connector.finish(answer.message, peerConnectionId: binding.hostConnectionId)
         let server = try await answer.pending.confirm(finished.message)
         XCTAssertEqual(finished.channel.version, 6); XCTAssertTrue(finished.admission.canControl)
+        XCTAssertNil(finished.admission.desktopTrust,"An old common registration cannot opt into device trust")
         XCTAssertEqual(try server.open(finished.channel.seal(.input, Data("fixture".utf8))).payload, Data("fixture".utf8))
         XCTAssertEqual(try finished.channel.open(server.seal(.video, Data([1, 2, 3]))).payload, Data([1, 2, 3]))
         do { _ = try await connector.finish(answer.message, peerConnectionId: binding.hostConnectionId); XCTFail("one use only") } catch HandshakeError.alreadyUsed { }
         XCTAssertEqual(ScreenControlProtocol.phoneVersion, 4); XCTAssertEqual(ScreenControlProtocol.version, 5)
+    }
+    func testExplicitBothDesktopTrustSurvivesRealKeyConfirmationAndKeepsRequestedViewOnly() async throws {
+        let f=Fixture(),binding=f.binding
+        let receiver=try f.authorization(hostKey:f.host.publicKey,operation:P256.Signing.PrivateKey().publicKey,kind:"desktop",caps:["screen.receive.view","screen.receive.control","screen.desktop-trust"])
+        let client=try f.authorization(hostKey:P256.Signing.PrivateKey().publicKey,operation:f.client.publicKey,kind:"desktop",caps:["screen.view","screen.control","screen.desktop-trust"])
+        for requestedControl in [false,true] {
+            let connector=try CommunityScreenClientHandshake(authority:f.authority,own:client,target:receiver,signer:f.client,channelId:binding.channelId,connectionId:binding.clientConnectionId,requestedControl:requestedControl)
+            let host=try CommunityScreenHostHandshake(authority:f.authority,own:receiver,signer:f.host,replay:.init()){auth,use in guard auth.body==client.body,use==nil else {throw HandshakeError.unknownDevice} }
+            let answer=try await host.respond(connector.hello,binding:binding)
+            let finish=try await connector.finish(answer.message,peerConnectionId:binding.hostConnectionId)
+            let server=try await answer.pending.confirm(finish.message)
+            XCTAssertEqual(finish.admission.canControl,requestedControl)
+            let trust=try XCTUnwrap(finish.admission.desktopTrust)
+            XCTAssertEqual(trust.channelId,binding.channelId);XCTAssertEqual(trust.controller,client.body);XCTAssertEqual(trust.receiver,receiver.body)
+            XCTAssertEqual(answer.pending.admission.desktopTrust,trust)
+            XCTAssertEqual(try server.open(finish.channel.seal(.input,Data("software only".utf8))).payload,Data("software only".utf8))
+        }
     }
     func testMobileSessionKeyIsRequiredAndTransportConnectionSubstitutionFailsBeforeClientSigns() async throws {
         let f = Fixture(), binding = f.binding

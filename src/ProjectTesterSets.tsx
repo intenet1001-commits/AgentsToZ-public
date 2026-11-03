@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import type {TesterClickSweepSet,TesterSets,TesterTarget} from './testerAgentContract';
 import {testerSetsCache,type TesterSetsSnapshot} from './testerSetsCache';
 import {testerRequest} from './testerAgentClient';
+import {desktopSweepCompletionIsConsistent} from './testerClickSweepScope';
 import './ProjectTesterSets.css';
 
 export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen}:{portId:string;workspaceTargetId?:string;compact?:boolean;onOpen?:()=>void}){
@@ -19,7 +20,7 @@ export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen
   const label=(state:string,count:number,unit:string)=>state==='none'?'구성 전':state==='invalid'?'설정 확인':`${count}${unit}`;
   if(compact)return <div ref={ref} className="tester-sets-compact" data-testid="project-tester-sets-summary" onClick={e=>e.stopPropagation()}>
     <button type="button" onClick={onOpen??refresh} title="일반 테스트·프로젝트 페르소나 구성 보기">
-      {data?`일반 ${label(data.general.state,data.general.count,'개')} · 페르소나 ${label(data.personas.state,data.personas.count,'역할')}${data.personas.candidates?` · 후보 ${data.personas.candidates}`:''}${data.clickSweep?.state==='configured'?` · 전수 클릭 ${data.clickSweep.surfaces.length}화면`:''}`:snapshot.error?'테스트 구성 확인 필요':'일반 · 페르소나 구성 확인 중…'}
+      {data?`일반 ${label(data.general.state,data.general.count,'개')} · 페르소나 ${label(data.personas.state,data.personas.count,'역할')}${data.personas.candidates?` · 후보 ${data.personas.candidates}`:''}${data.clickSweep?.state==='configured'?` · 전수 클릭 ${data.clickSweep.surfaces.length}대상`:''}`:snapshot.error?'테스트 구성 확인 필요':'일반 · 페르소나 구성 확인 중…'}
     </button>
   </div>;
   return <div ref={ref} className="tester-sets" data-testid="project-tester-sets" onClick={e=>e.stopPropagation()}>
@@ -40,40 +41,49 @@ export function ProjectTesterSets({portId,workspaceTargetId,compact=false,onOpen
   </div>;
 }
 const sweepTime=(at:string)=>{const d=new Date(at);return Number.isNaN(d.getTime())?'':d.toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});};
-/**
- * 세 번째 세트: 버튼을 하나씩 다 눌러 보는 전수 클릭. 옛 호스트(칸 없음)에서는 카드를 숨긴다 — 「모름」을 「구성 전」으로 말하지 않는다.
- * 등록된 포트가 있으면 「켜기」 한 번으로 설정·엔진을 깔고, 「기준선 만들기」로 첫 목록을 만든다. 포트가 없으면 누를 화면이 없으니
- * 「대상 아님」이다(실패도 통과도 아님).
- */
+/** Web and desktop harnesses keep independent results. A missing web port says nothing about desktop eligibility. */
 function ClickSweepCard({set,portId,workspaceTargetId}:{set?:TesterClickSweepSet;portId:string;workspaceTargetId?:string}){
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
   const running=set?.job?.state==='running';
-  // 캐시만 새로 읽는다 — 보던 내용을 지우지 않아 카드가 깜빡이지 않는다.
   const onChanged=()=>testerSetsCache.refresh({portId,...(workspaceTargetId?{workspaceTargetId}:{})});
-  // 기준선 만들기는 몇 분 걸린다. 도는 동안만 4초마다 다시 읽고, 끝나면 멈춘다.
   useEffect(()=>{if(!running)return;const timer=setInterval(()=>testerSetsCache.refresh({portId,...(workspaceTargetId?{workspaceTargetId}:{})}),4000);return ()=>clearInterval(timer);},[running,portId,workspaceTargetId]);
   if(!set)return null;
   const act=async(operation:'sweep-enable'|'sweep-baseline')=>{
     setBusy(true);setError('');
     try{await testerRequest({portId,...(workspaceTargetId?{workspaceTargetId}:{}),operation});onChanged();}catch(e){setError(e instanceof Error?e.message:'요청을 처리하지 못했습니다.');}finally{setBusy(false);}
   };
-  const surfaces=set.surfaces,last=surfaces.map(s=>s.last).filter((l):l is NonNullable<typeof l>=>!!l).sort((a,b)=>b.at.localeCompare(a.at))[0];
-  const missing=surfaces.filter(s=>!s.baselinePresent).length,failing=surfaces.filter(s=>s.last&&!s.last.passed).length;
-  const noScreen=set.state==='none'&&set.enableUrl===null;
-  const job=set.job;
+  const surfaces=set.surfaces,missing=surfaces.filter(s=>!s.baselinePresent).length;
   return <div data-testid="tester-click-sweep-set"><strong>전수 클릭 세트</strong>
-    <b>{set.state==='none'?(noScreen?'대상 아님':'구성 전'):set.state==='invalid'?'설정 확인':`${surfaces.length}개 화면`}</b>
-    {set.state==='none'&&!noScreen&&<span>화면의 버튼을 하나씩 다 눌러 보고 목록을 이력으로 남깁니다</span>}
-    {set.state==='none'&&set.enableUrl===undefined&&<span>.agentstoz/click-sweep.json으로 켭니다</span>}
-    {noScreen&&<span>등록된 로컬 포트가 없어 누를 화면이 없습니다. 웹 화면이 있으면 프로젝트에 포트를 등록하세요</span>}
-    {set.state==='none'&&typeof set.enableUrl==='string'&&<button type="button" data-testid="tester-click-sweep-enable" disabled={busy} onClick={()=>void act('sweep-enable')}>{busy?'켜는 중…':`켜기 · ${set.enableUrl.replace(/^https?:\/\//,'').replace(/\/$/,'')}`}</button>}
-    {set.state==='configured'&&<span>기준선 {surfaces.length-missing}/{surfaces.length} · {surfaces.map(s=>s.label).join(' · ')}</span>}
-    {last&&<span>최근 {last.passed?(last.updated?'기준선 갱신':'통과'):'실패'} · 대상 {last.elements}개 · 클릭 {last.clicked}회{sweepTime(last.at)?` · ${sweepTime(last.at)}`:''}</span>}
-    {set.state==='configured'&&!last&&!job&&<span>아직 실행 기록이 없습니다</span>}
-    {!!missing&&!running&&<span className="tester-sets-gap">기준선 필요 {missing}개{surfaces.some(s=>!s.baselinePresent&&s.kind==='url')?' — 개발 서버를 켜 둔 채 만드세요':''}</span>}
+    <b>{set.state==='none'?'구성 전':set.state==='invalid'?'설정 확인':`${surfaces.length}개 대상`}</b>
+    {set.state==='none'&&<span>웹 화면과 프로젝트의 데스크톱 앱을 대상별 하네스로 구성합니다</span>}
+    {set.state==='none'&&set.enableUrl===null&&<span>웹 주소가 등록되지 않았습니다. 데스크톱 앱은 포트 없이 프로젝트 command 하네스로 구성할 수 있습니다.</span>}
+    {set.state==='none'&&typeof set.enableUrl==='string'&&<button type="button" data-testid="tester-click-sweep-enable" disabled={busy} onClick={()=>void act('sweep-enable')}>{busy?'켜는 중…':`웹 켜기 · ${set.enableUrl.replace(/^https?:\/\//,'').replace(/\/$/,'')}`}</button>}
+    {set.state==='configured'&&<span>기준선 파일 {surfaces.length-missing}/{surfaces.length} · 대상별 결과는 아래에 표시합니다</span>}
+    {surfaces.length>0&&<ul className="tester-sweep-surfaces">{surfaces.map(surface=>{
+      const target=surface.target??(surface.kind==='url'?'web':'legacy'),environment=surface.environment??(target==='web'?'browser':'unknown');
+      const category=target==='web'?'웹':target==='desktop'?'데스크톱':'범위 미지정';
+      const execution=environment==='native'?'native · 프로젝트 하네스 보고':environment==='fixture'?'모의 환경 · 실제 앱 미검증':environment==='browser'?'브라우저':'이전 하네스 · 실행 범위 확인 필요';
+      const last=surface.last,invalid=target==='desktop'&&!!last&&!desktopSweepCompletionIsConsistent(last),state=invalid?'unverified':last?.state??(last?.passed?'passed':'failed');
+      const outcome=target==='legacy'?(last?.passed?'종료코드 통과 · 대상 범위 미지정':'이전 하네스 실패 · 대상 범위 미지정')
+        :state==='unverified'?'기록 확인 필요 · 미검증':state==='unavailable'?'실행 불가 · 통과 아님':state==='unconfigured'?'구성 필요':target==='desktop'&&!last?.completed?'하네스 실패 · 완료 보고 없음'
+        :last?.passed?(last.updated?'기준선 갱신':environment==='fixture'?'모의 하네스 통과':target==='desktop'?'하네스 보고 통과':'웹 통과'):'실패';
+      return <li key={surface.id} data-testid="tester-click-sweep-surface" data-target={target}>
+        <strong>{category} · {surface.label}</strong>
+        <span>실행 환경 · {execution}{surface.platform?` · ${surface.platform}`:''} · {surface.kind==='command'?'프로젝트 command':'loopback URL'}</span>
+        <span>기준선 파일 {surface.baselinePresent?'있음':'필요'}</span>
+        {last?<span>{outcome}{(target!=='desktop'||last.completed&&!invalid)&&` · 대상 ${last.elements}개 · 클릭 ${last.clicked}회`}{sweepTime(last.at)?` · ${sweepTime(last.at)}`:''}</span>:<span>해당 대상·환경의 실행 기록이 없습니다</span>}
+      </li>;
+    })}</ul>}
+    {!surfaces.some(s=>s.target==='desktop')&&<span className="tester-sets-gap">데스크톱 앱 하네스 미구성 · 프로젝트의 실제 데스크톱 검사 command를 별도로 연결하세요</span>}
+    <details data-testid="tester-click-sweep-desktop-guide"><summary>데스크톱 하네스 구성 안내</summary>
+      <p>.agentstoz/click-sweep.json의 schemaVersion 2에 target: desktop, environment: native 또는 fixture, platform: darwin·win32·linux와 프로젝트 소유 command를 지정합니다.</p>
+      <p>실제 앱의 검사 도구·권한·클릭 절차는 프로젝트 하네스가 제공합니다. 공통 테스터는 네이티브 입력 드라이버를 설치하거나 권한을 추가하지 않습니다.</p>
+      <p>하네스는 현재 실행 ID와 대상·환경이 일치하는 완료 결과 및 별도 기준선을 남깁니다. 공통 러너 1.9.0 이상의 계약 읽기: python3 scripts/agentstoz-maintainer.py sweep contract --root . --json. 데스크톱 결과는 프로젝트 하네스의 범위 선언과 완료 보고입니다.</p>
+      {set.scopeVersion!==2&&<p>대상별 계약을 사용하려면 테스터 공통 러너를 업데이트하세요.</p>}
+    </details>
+    {!!missing&&!running&&<span className="tester-sets-gap">기준선 필요 {missing}개{surfaces.some(s=>!s.baselinePresent&&s.kind==='url')?' — 웹 개발 서버를 켜 둔 채 만드세요':''}</span>}
     {set.state==='configured'&&!!missing&&<button type="button" data-testid="tester-click-sweep-baseline" disabled={busy||running} onClick={()=>void act('sweep-baseline')}>{running?'기준선 만드는 중…':'기준선 만들기'}</button>}
-    {job&&<span role="status" className={job.state==='failed'||job.state==='unavailable'?'tester-sets-gap':undefined}>{job.message}</span>}
-    {!!failing&&<span className="tester-sets-gap">최근 실패 화면 {failing}개</span>}
+    {set.job&&<span role="status" className={set.job.state==='failed'||set.job.state==='unavailable'?'tester-sets-gap':undefined}>{set.job.message}</span>}
     {set.problem&&<span className="tester-sets-gap">{set.problem}</span>}
     {error&&<span role="alert" className="tester-sets-gap">{error}</span>}
   </div>;

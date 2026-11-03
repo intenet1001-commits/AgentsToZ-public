@@ -939,6 +939,8 @@ describe("AgentsToZ USE Codex MCP bridge", () => {
       "agentstoz_use_send_shared_shell_command",
       "agentstoz_use_read_shared_shell",
       "agentstoz_use_send_workroom_keys",
+      // 1.81.0: a person's session-only effort choice for another Workroom session.
+      "agentstoz_use_set_workroom_effort",
       "agentstoz_use_wait_workroom_session",
       "agentstoz_use_create_team",
       "agentstoz_use_team_remote_devices",

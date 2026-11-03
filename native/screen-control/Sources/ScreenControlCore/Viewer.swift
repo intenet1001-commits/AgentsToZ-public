@@ -125,6 +125,7 @@ enum ScreenViewerNoticeError: Error, Equatable { case overflow, consumerEnded }
 /// on the way out.
 public final class ScreenViewer: Sendable {
     let connection: SecureConnection
+    private enum FirstPictureState { case waiting, received, expired, ended }
     private enum Outgoing: Sendable { case input(InputEvent), control(ControlMessage) }
     private let inputs: AsyncStream<Outgoing>.Continuation
     /// Notices in arrival order. One consumer; version 5 ends the session if the bounded buffer cannot preserve them.
@@ -187,12 +188,29 @@ public final class ScreenViewer: Sendable {
 
     /// Pictures in arrival order until the Mac closes the session. One consumer; a malformed frame ends the session.
     /// Notices that arrive meanwhile go to `notices`.
-    public func pictures() -> AsyncThrowingStream<ScreenPicture, Error> {
+    public func pictures(firstFrameTimeout: Duration = .seconds(20)) -> AsyncThrowingStream<ScreenPicture, Error> {
+        pictures(firstFrameTimeout: firstFrameTimeout, sleep: { try await Task.sleep(for: $0) })
+    }
+
+    /// The injected sleeper is for software checks. The deadline captures this connection, never a replacement viewer.
+    func pictures(firstFrameTimeout: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void) -> AsyncThrowingStream<ScreenPicture, Error> {
         AsyncThrowingStream { continuation in
-            let task = Task { [connection, ended, noticeSink] in
+            let opening = OSAllocatedUnfairLock(initialState: FirstPictureState.waiting)
+            let deadline = Task { [connection, inputs] in
+                do { try await sleep(firstFrameTimeout) } catch { return }
+                guard !Task.isCancelled, opening.withLock({ state in
+                    guard state == .waiting else { return false }; state = .expired; return true
+                }) else { return }
+                inputs.finish(); connection.close()
+                continuation.finish(throwing: TransportError.timedOut)
+            }
+            let task = Task { [connection, ended, noticeSink, inputs] in
                 var builder = VideoSampleBuilder()
                 var waitingForKeyframe = false
-                defer { noticeSink.finish() }
+                defer {
+                    opening.withLock { $0 = .ended }; deadline.cancel()
+                    inputs.finish(); noticeSink.finish()
+                }
                 do {
                     receiving: while true {
                         let record = try await connection.receive()
@@ -228,7 +246,12 @@ public final class ScreenViewer: Sendable {
                         case .video:
                             let frame = try VideoFrame(decoding: record.payload)
                             do {
-                                continuation.yield(try builder.picture(for: frame))
+                                let picture = try builder.picture(for: frame)
+                                guard opening.withLock({ state in
+                                    guard state == .waiting || state == .received else { return false }; state = .received; return true
+                                }) else { throw TransportError.timedOut }
+                                deadline.cancel()
+                                continuation.yield(picture)
                                 waitingForKeyframe = false
                             } catch VideoError.needKeyframe {
                                 // Ask once; delta frames until the keyframe are useless anyway.
@@ -242,10 +265,13 @@ public final class ScreenViewer: Sendable {
                 } catch {
                     // The first refusal ends the session for good, as the channel does for a refused record.
                     connection.close()
-                    continuation.finish(throwing: error)
+                    continuation.finish(throwing: opening.withLock { $0 == .expired } ? TransportError.timedOut : error)
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            continuation.onTermination = { [connection, inputs] _ in
+                opening.withLock { $0 = .ended }; deadline.cancel(); task.cancel()
+                inputs.finish(); connection.close()
+            }
         }
     }
 

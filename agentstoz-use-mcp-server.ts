@@ -28,6 +28,7 @@ import {AGENTSTOZ_TARGET_ALIAS_GUIDANCE} from './src/conversationTargetAlias';
 import {SERVICE_USE_MCP_TOOL,SERVICE_USE_NATURAL_LANGUAGE_GUIDANCE} from './src/serviceUseMcp';
 import {AGENTSTOZ_MENTION_GUIDANCE,AGENTSTOZ_READ_REFERENCE_TOOL,parseAgentMentionReference} from './src/agentstozMention';
 import {AGENTSTOZ_USE_MCP_SERVER_VERSION} from './src/agentstozUseMcpVersion';
+import {WORKROOM_EFFORT_CHOICE_LEVELS} from './src/workroomEffortChoiceLevels';
 import {OPS_FOLDER_NAME} from './src/opsFolderName';
 import {AI_INITIAL_PROMPT_MAX_BYTES} from './src/aiInitialPrompt';
 import {normalizeWorkroomKeys,startsWithShellEscape,WORKROOM_KEY_NAMES,WORKROOM_KEYS_MAX,WORKROOM_READ_VIEWS,WORKROOM_WAIT_CLIENT_MARGIN_MS,WORKROOM_WAIT_LIMITS} from './src/workroomOrchestration';
@@ -351,6 +352,24 @@ export const AGENTSTOZ_USE_MCP_TOOLS: ToolDefinition[] = [
         keys: { type: "array", minItems: 1, maxItems: WORKROOM_KEYS_MAX, items: { type: "string", enum: [...WORKROOM_KEY_NAMES] } },
       },
       required: ["sessionId", "requestId", "keys"],
+      oneOf: surfaceTargetChoice,
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "agentstoz_use_set_workroom_effort",
+    description: "Let the person choose the reasoning effort of one Workroom session of the same registered project (or target=ops), never your own, for that session only. First call without level: returns effort {supported, model, current, currentFrom (screen or last-observed), choices, binding} or why it is unsupported (agy model variant, team-pinned level, env override, restricted CLI, no runtime control, effort not shown yet, an earlier unknown outcome with its originalRequestId). Show choices to the person as one clickable single-select question (Claude Code: AskUserQuestion) with current marked and wait; never pick a level yourself. Then call again with their level, the binding unchanged and a fresh requestId. Or pass ask=true alone: AgentsToZ itself shows the choices to the person through your client's MCP elicitation (Claude Code, Codex), waits up to 45 seconds and applies only their pick (personChoice chosen, declined, cancelled, timeout, or ask-unavailable: then ask them yourself). AgentsToZ changes only that CLI's session effort (Claude /effort slider with this-session-only save, Codex reasoning shortcut, Hermes /reasoning without --global), never the global default, model or account, then reads the screen back: outcome applied (readback), held (already that level), released (auto: back to the Mac policy) or not-held. The choice outranks automatic effort until auto, a change made in the CLI itself, or the CLI process ending. BINDING_CHANGED means the session, model, account, effort or input changed since the read: read again and ask again. OUTCOME_UNKNOWN means keys may have been typed: do not resend; read the session, and the same requestId returns the recorded result. Desktop apps (Codex, Claude, Hermes, Antigravity) are not connected here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...surfaceTargetProperties,
+        sessionId: { type: "string", minLength: 8, maxLength: 160 },
+        level: { type: "string", enum: ["auto", ...WORKROOM_EFFORT_CHOICE_LEVELS] },
+        binding: { type: "string", pattern: "^[a-f0-9]{32}$" },
+        ask: { type: "boolean" },
+        requestId: { type: "string", pattern: "^[A-Za-z0-9_-]{8,160}$" },
+      },
+      required: ["sessionId"],
       oneOf: surfaceTargetChoice,
       additionalProperties: false,
     },
@@ -828,6 +847,20 @@ export function agentsToZUseMcpActionForTool(
       requestId: requiredId(args.requestId, "requestId"), keys,
     };
   }
+  if (toolName === "agentstoz_use_set_workroom_effort") {
+    // A model, provider or account never rides along: refused, not dropped, so a caller cannot believe it was applied.
+    const properties = AGENTSTOZ_USE_MCP_TOOLS.find(tool => tool.name === toolName)!.inputSchema.properties as Record<string, unknown>;
+    const unknown = Object.keys(args).filter(key => !Object.hasOwn(properties, key));
+    if (unknown.length) throw new Error(`set_workroom_effort changes only the session's effort; unsupported arguments: ${unknown.slice(0, 8).join(', ')}.`);
+    if (args.ask !== undefined && args.ask !== false) throw new Error('ask=true is answered by this MCP server through the client; it is never sent to the host.');
+    // The host parser checks level/binding/requestId again and refuses a binding or requestId on a read.
+    return {
+      action: "set-workroom-effort", controllerPortId: controller,
+      ...surfaceTarget(), sessionId: requiredId(args.sessionId, "sessionId"),
+      ...(args.level !== undefined ? { level: args.level, binding: args.binding, requestId: args.requestId }
+        : { ...(args.binding !== undefined ? { binding: args.binding } : {}), ...(args.requestId !== undefined ? { requestId: args.requestId } : {}) }),
+    };
+  }
   if (toolName === "agentstoz_use_wait_workroom_session") {
     return {
       action: "wait-workroom-session", controllerPortId: controller,
@@ -1031,6 +1064,12 @@ async function callLocalControl(
       (error as Error & { data?: unknown }).data = { success: false, code: 'AGENTSTOZ_USE_HOST_OUTDATED', unconfirmed: ['workroom-team'], hostResult: result };
       throw error;
     }
+    // set_workroom_effort (1.81.0) is refused the same way by a host that predates it; nothing ran there.
+    if (action.action === 'set-workroom-effort' && result.code === 'AGENTSTOZ_USE_ACTION_NOT_ALLOWED') {
+      const error = new Error('The running AgentsToZ app is older than this MCP server and cannot change a Workroom session effort. Update AgentsToZ; never type /effort into the session instead.');
+      (error as Error & { data?: unknown }).data = { success: false, code: 'AGENTSTOZ_USE_HOST_OUTDATED', unconfirmed: ['set-workroom-effort'], hostResult: result };
+      throw error;
+    }
     if (agentsToZUseHostRefusedNewForm(action, result)) {
       const error = new Error(`The running AgentsToZ app is older than this MCP server and does not accept ${String((action.commonMemory as Record<string, unknown>).op)} by long-term memory. Restart or update AgentsToZ; meanwhile use the groupId form.`);
       (error as Error & { data?: unknown }).data = { success: false, code: "AGENTSTOZ_USE_HOST_OUTDATED", unconfirmed: ["memoryId"], hostResult: result };
@@ -1158,6 +1197,9 @@ export function agentsToZUseMcpTimeoutMs(action: Record<string, unknown>): numbe
     if (team?.op === 'confirm') return 30_000;
     if (team?.op === 'member') return 60_000;
   }
+  // A set waits for an idle composer (4 s), the keys and their readback (6 s) and a cancel (1.5 s), behind the session's
+  // queue. A client that gives up early asks again with the same requestId and gets the recorded result.
+  if (action.action === 'set-workroom-effort' && action.level !== undefined) return 30_000;
   if (action.action === "open-code-app" && action.agent === "codex" && action.mode === "prepare") return 150_000;
   if (action.action === 'open-code-app') return 120_000;
   if(action.action==='common-memory'&&(action.commonMemory as any)?.op==='projects-add')return 150_000;
@@ -1172,6 +1214,77 @@ export function agentsToZUseMcpTimeoutMs(action: Record<string, unknown>): numbe
   return action.action === "connect-buzz-channel" ? 60_000 : 20_000;
 }
 
+/** The MCP client as a peer: a request this server sends it (MCP elicitation), answered on the same stdio stream. */
+export interface McpClientPeer {
+  /** The client's `elicitation/create` result, or null when it did not answer in time or answered with an error. */
+  elicit(params: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<Record<string, unknown> | null>;
+  /** Whether this exact parent tools/call still exists. Never inferred from the form response. */
+  active?: () => boolean;
+}
+let clientElicitsForms = false;
+/**
+ * How long the person has to pick before nothing is changed (the client's own dialog is cancelled then). With the set that
+ * follows (about 11 s at worst) it stays under a one-minute client tool limit; Codex has a per-server tool_timeout_sec.
+ */
+export const WORKROOM_EFFORT_ASK_TIMEOUT_MS = 45_000;
+const EFFORT_LABELS: Readonly<Record<string, string>> = {
+  auto: '자동으로 되돌리기', low: '낮음 (low)', medium: '보통 (medium)', high: '높음 (high)', xhigh: '매우 높음 (xhigh)', max: '최대 (max)', ultra: '울트라 (ultra)',
+};
+function workroomEffortAsks(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as Record<string, unknown>).ask === true;
+}
+/**
+ * set_workroom_effort with ask=true: read, show the session's choices to the person through the client's MCP elicitation,
+ * and apply only what they picked (src/workroomEffortChoice.ts). The calling AI never names the level. Without a client
+ * form (or after the person declines, cancels or lets it time out) nothing changes and the read is returned.
+ */
+async function askWorkroomEffort(args: Record<string, unknown>, env: Record<string, string | undefined>, client: McpClientPeer | null): Promise<Record<string, unknown>> {
+  if (client?.active?.() === false) throw new Error('The effort choice request was cancelled; nothing was changed.');
+  if (args.level !== undefined || args.binding !== undefined || args.requestId !== undefined) {
+    throw new Error('ask=true takes no level, binding or requestId: the person picks, and AgentsToZ makes the request.');
+  }
+  const {ask: _ask, ...readArgs} = args;
+  const controller = env.AGENTSTOZ_CONTROLLER_PORT_ID ?? (profileAccess(env) ? CONTROL_PROFILE_CONTROLLER : undefined);
+  const readAction = agentsToZUseMcpActionForTool('agentstoz_use_set_workroom_effort', readArgs, controller);
+  const read = await callLocalControl(readAction, env);
+  if (client?.active?.() === false) return {...read, personChoice: 'cancelled'};
+  const effort = read.effort as {supported?: unknown; choices?: unknown; binding?: unknown; agent?: unknown; model?: unknown; current?: unknown; chosen?: unknown} | undefined;
+  const choices = Array.isArray(effort?.choices) ? effort!.choices.filter((value): value is string => typeof value === 'string') : [];
+  if (effort?.supported !== true || !choices.length || typeof effort.binding !== 'string') return {...read, personChoice: 'unsupported'};
+  if (!client || !clientElicitsForms) {
+    return {...read, personChoice: 'ask-unavailable', guidance: 'This client cannot show an MCP form. Ask the person yourself with one clickable single-select question (Claude Code: AskUserQuestion), then call again with their level, this binding and a fresh requestId. Never pick a level yourself.'};
+  }
+  const where = [effort.agent, effort.model].filter(value => typeof value === 'string' && value).join(' · ');
+  const message = `워크룸 세션(${where || '선택한 세션'})의 에포트를 고르세요. 지금: ${typeof effort.current === 'string' ? effort.current : '알 수 없음'}`
+    + `${typeof effort.chosen === 'string' ? ' (직접 고른 값)' : ''}. 이 세션에서만 바뀌고 전역 기본값·모델·계정은 바뀌지 않습니다.`;
+  const answer = await client.elicit({
+    message,
+    requestedSchema: {
+      type: 'object',
+      properties: {level: {type: 'string', title: '에포트', enum: choices, enumNames: choices.map(level => EFFORT_LABELS[level] ?? level)}},
+      required: ['level'],
+    },
+  }, WORKROOM_EFFORT_ASK_TIMEOUT_MS);
+  if (client.active?.() === false) return {...read, personChoice: 'cancelled'};
+  if (!answer) return {...read, personChoice: 'timeout'};
+  if (answer.action === 'decline' || answer.action === 'cancel') return {...read, personChoice: answer.action === 'decline' ? 'declined' : 'cancelled'};
+  const level = (answer.content as Record<string, unknown> | undefined)?.level;
+  if (answer.action !== 'accept' || typeof level !== 'string' || !choices.includes(level)) {
+    throw new Error('The client returned no level offered for this session; nothing was changed.');
+  }
+  const requestId = `ask-${randomBytes(12).toString('hex')}`;
+  try {
+    if (client.active?.() === false) return {...read, personChoice: 'cancelled'};
+    const set = await callLocalControl({...readAction, level, binding: effort.binding, requestId}, env);
+    return {...set, personChoice: 'chosen', requestId};
+  } catch (error) {
+    // The person did pick: keep the request to check, never a fresh one to replay.
+    const data = (error as Error & {data?: unknown}).data;
+    (error as Error & {data?: unknown}).data = {...(data && typeof data === 'object' ? data : {}), personChoice: 'chosen', level, requestId};
+    throw error;
+  }
+}
+
 function rpcResult(id: JsonRpcId, result: unknown): Record<string, unknown> {
   return { jsonrpc: "2.0", id, result };
 }
@@ -1183,6 +1296,7 @@ function rpcError(id: JsonRpcId, code: number, message: string, data?: unknown):
 export async function handleAgentsToZUseMcpRequest(
   request: JsonRpcRequest,
   env: Record<string, string | undefined> = process.env,
+  client: McpClientPeer | null = null,
 ): Promise<Record<string, unknown> | null> {
   const id = request.id ?? null;
   const method = oneLine(request.method);
@@ -1194,6 +1308,11 @@ export async function handleAgentsToZUseMcpRequest(
       : {};
     const clientInfo = params.clientInfo && typeof params.clientInfo === "object" ? params.clientInfo as Record<string, unknown> : {};
     dialogueClientName = agentDialogueClientHeaderValue(clientInfo.name);
+    const capabilities = params.capabilities && typeof params.capabilities === "object" ? params.capabilities as Record<string, unknown> : {};
+    // MCP 2025-06-18: a client that can show the person a form declares `elicitation` (2025-11-25 may narrow it to url only).
+    const elicitation = capabilities.elicitation;
+    clientElicitsForms = !!elicitation && typeof elicitation === "object" && !Array.isArray(elicitation)
+      && ((elicitation as Record<string, unknown>).form !== undefined || (elicitation as Record<string, unknown>).url === undefined);
     return rpcResult(id, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
@@ -1228,6 +1347,10 @@ export async function handleAgentsToZUseMcpRequest(
       if(isAgentDialogueMcpTool(params.name)){
         const result=await callLocalDialogue(params.name,params.arguments,env);
         return rpcResult(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:false});
+      }
+      if (params.name === 'agentstoz_use_set_workroom_effort' && workroomEffortAsks(params.arguments)) {
+        const result = await askWorkroomEffort(params.arguments as Record<string, unknown>, env, client);
+        return rpcResult(id, {content: [{type: 'text', text: JSON.stringify(result)}], structuredContent: result, isError: false});
       }
       const action = agentsToZUseMcpActionForTool(params.name, params.arguments, env.AGENTSTOZ_CONTROLLER_PORT_ID ?? (profileAccess(env) ? CONTROL_PROFILE_CONTROLLER : undefined));
       const result = await callLocalControl(action, env);
@@ -1275,6 +1398,8 @@ const MCP_CONCURRENT_READ_TOOLS = new Set([
 function isConcurrentMcpRead(request: JsonRpcRequest): boolean {
   if (request.method !== 'tools/call' || !request.params || typeof request.params !== 'object') return false;
   const name = (request.params as {name?: unknown}).name;
+  // A person deciding in the client's dialog must not hold up every later call; the binding refuses a stale pick.
+  if (name === 'agentstoz_use_set_workroom_effort' && workroomEffortAsks((request.params as {arguments?: unknown}).arguments)) return true;
   return typeof name === 'string' && MCP_CONCURRENT_READ_TOOLS.has(name);
 }
 
@@ -1295,12 +1420,38 @@ async function main(): Promise<void> {
     outputTail = next.catch(() => undefined);
     return next;
   };
+  // Requests this server sends the client (elicitation), and the responses that come back on stdin.
+  const asked = new Map<string, (result: Record<string, unknown> | null) => void>();
+  const effortCalls = new Map<JsonRpcId, AbortController>();
+  let askedSeq = 0;
+  const client: McpClientPeer = {
+    elicit: (params, timeoutMs, signal) => new Promise(resolveAnswer => {
+      if (signal?.aborted) { resolveAnswer(null); return; }
+      const requestId = `agentstoz-elicit-${++askedSeq}`;
+      const cancel = () => {
+        const settle = asked.get(requestId);
+        if (!settle) return;
+        asked.delete(requestId);
+        // Close the person's dialog: a pick after this would never be applied.
+        void emit({jsonrpc: '2.0', method: 'notifications/cancelled', params: {requestId, reason: 'AgentsToZ stopped waiting for the choice.'}});
+        settle(null);
+      };
+      const timer = setTimeout(cancel, timeoutMs);
+      asked.set(requestId, result => { clearTimeout(timer); signal?.removeEventListener('abort', cancel); resolveAnswer(result); });
+      signal?.addEventListener('abort', cancel, {once:true});
+      emit({jsonrpc: '2.0', id: requestId, method: 'elicitation/create', params}).catch(cancel);
+    }),
+  };
   const handle = async (request: JsonRpcRequest): Promise<void> => {
     let response: Record<string, unknown> | null;
+    const controller=request.id===undefined ? undefined:effortCalls.get(request.id);
+    const peer:McpClientPeer=controller ? {active:()=>!controller.signal.aborted,elicit:(params,ms)=>client.elicit(params,ms,controller.signal)}:client;
     try {
-      response = await handleAgentsToZUseMcpRequest(request);
+      response = await handleAgentsToZUseMcpRequest(request, process.env, peer);
     } catch (error) {
       response = rpcError(request.id ?? null, -32603, error instanceof Error ? error.message : "Internal error.");
+    } finally {
+      if(controller&&effortCalls.get(request.id!)===controller)effortCalls.delete(request.id!);
     }
     if (response && Object.keys(response).length) await emit(response);
   };
@@ -1362,6 +1513,26 @@ async function main(): Promise<void> {
         continue;
       }
       const request = parsed as JsonRpcRequest;
+      if(request.id===undefined&&request.method==='notifications/cancelled'){
+        const cancelled=request.params as {requestId?:unknown}|undefined;
+        if(cancelled&&(typeof cancelled.requestId==='string'||typeof cancelled.requestId==='number'))effortCalls.get(cancelled.requestId)?.abort();
+        continue;
+      }
+      // A response to a request this server sent: never answered, never dispatched as a request.
+      if (request.method === undefined && ('result' in request || 'error' in request)) {
+        const settle = typeof request.id === 'string' ? asked.get(request.id) : undefined;
+        if (settle) {
+          asked.delete(request.id as string);
+          const result = (request as {result?: unknown}).result;
+          settle(result && typeof result === 'object' && !Array.isArray(result) ? result as Record<string, unknown> : null);
+        }
+        continue;
+      }
+      // A duplicate protocol ID must not steal an open choice's cancellation controller,
+      // including through ping or another tool which would otherwise finish first.
+      if(request.id!==undefined&&effortCalls.has(request.id)){
+        await emit(rpcError(request.id,-32600,'The effort choice request ID is already active.'));continue;
+      }
       if (request.method === "initialize") {
         // Client identity is mutable process state. Keep initialize ordered with earlier work
         // and publish its reply before accepting later requests from this input stream.
@@ -1381,12 +1552,18 @@ async function main(): Promise<void> {
         || (concurrentRead && queuedReads >= MCP_MAX_QUEUED_READS)) {
         await emit(rpcError(request.id ?? null, -32000, "AgentsToZ MCP is busy; retry this request."));
       } else {
+        const params=request.params as {name?:unknown;arguments?:unknown}|undefined;
+        if(request.id!==undefined&&request.method==='tools/call'&&params?.name==='agentstoz_use_set_workroom_effort'&&workroomEffortAsks(params.arguments)){
+          if(effortCalls.has(request.id)){await emit(rpcError(request.id,-32600,'The effort choice request ID is already active.'));continue;}
+          effortCalls.set(request.id,new AbortController());
+        }
         queued.push(request);
         if (concurrentRead) queuedReads += 1;
         pump();
       }
     }
   }
+  for(const controller of effortCalls.values())controller.abort();
   await drain();
   await outputTail;
   await computerUseConnection?.close();

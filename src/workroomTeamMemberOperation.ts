@@ -29,8 +29,17 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
   // Also the session the leader's own 「다시 시작」 continued in (leadsTeam), never another one on its target.
   if(caller&&!leadsTeam(team,caller.sessionId,host.service.host))throw new WorkroomTeamError('이 팀의 리더가 팀원 실행을 확인합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
   // Keys answer a one-time prompt on a member's screen: only the leader's own Workroom asks, which a request without a caller cannot show.
-  if(request.operation==='keys'&&!caller)throw new WorkroomTeamError('팀원 화면의 키 입력은 이 팀을 이끄는 워크룸에서만 요청합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
-  if(request.operation!=='read'&&team.state!=='active')throw new WorkroomTeamError('정리된 팀에는 지시를 보내지 않습니다.','WORKROOM_TEAM_CLOSED',409);
+  if((request.operation==='keys'||request.operation==='answer'||request.operation==='answer-receipt')&&!caller)throw new WorkroomTeamError('팀원 화면의 키 입력은 이 팀을 이끄는 워크룸에서만 요청합니다.','WORKROOM_TEAM_MEMBER_OPERATION_DENIED',403);
+  if(!['read','question','answer-receipt'].includes(request.operation)&&team.state!=='active')throw new WorkroomTeamError('정리된 팀에는 지시를 보내지 않습니다.','WORKROOM_TEAM_CLOSED',409);
+  const questions=host.service.questions;
+  if(request.operation==='question')return {memberId:member.id,performed:false,success:true,questions:questions.list(team.id).questions.filter(q=>q.binding.memberId===member.id),submissionSupported:questions.submissionAvailable,code:questions.submissionAvailable?'READY':'HOST_USER_ANSWER_REQUIRED'};
+  if(request.operation==='answer'||request.operation==='answer-receipt'){
+    const binding=request.operation==='answer'?request.answer.binding:request.binding;
+    if(binding.teamId!==team.id||binding.memberId!==member.id)throw new WorkroomTeamError('다른 팀원의 질문에 답할 수 없습니다.','WORKROOM_TEAM_QUESTION_STALE',409);
+    const receipt=request.operation==='answer'?await questions.answer(request.answer):questions.receipt(request.requestId,binding);
+    return {memberId:member.id,performed:receipt?.outcome==='confirmed'?true:receipt&&['reserved','submitted','unknown'].includes(receipt.outcome)?null:false,success:receipt?.outcome==='confirmed',effectOutcome:receipt?.outcome??'unseen',receipt,code:receipt?.code??'QUESTION_RECEIPT_UNSEEN'};
+  }
+  if(request.operation==='send'&&questions.list(team.id).questions.some(q=>q.binding.memberId===member.id))return {memberId:member.id,performed:false,success:false,delivery:'not-sent',code:'QUESTION_AWAITS_USER_ANSWER',note:'질문이 열린 팀원에게 인계문을 입력하지 않았습니다. 현재 질문과 실제 사용자 답변을 먼저 확인하세요.'};
   const ref=member.execution;
   if(member.remote){
     if(ref?.kind!=='remote'||!host.service.host.remote)throw new WorkroomTeamError('원격 팀 실행을 확인하지 못했습니다. 새 작업으로 다시 시작하지 않습니다.','REMOTE_TEAMS_REF_INVALID',409);
@@ -44,6 +53,7 @@ export async function runTeamMemberOperation(host:TeamMemberOperationHost,reques
   if(ref?.kind==='external'){
     if(request.operation==='read'){
       const result=await host.external.read(ref,{cursor:request.cursor,limit:request.limit});
+      host.service.recordQuestion(team.id,member.id,result.question??null);
       return {memberId:member.id,surface:ref.surface,...result,success:result.outcome==='read',performed:result.outcome==='read',effect:result.outcome==='read'?'read-only':`read-${result.outcome}`};
     }
     if(request.operation==='reveal'){

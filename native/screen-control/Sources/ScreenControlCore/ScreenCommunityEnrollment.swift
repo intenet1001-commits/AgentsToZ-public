@@ -140,6 +140,16 @@ public actor ScreenCommunityEnrollment {
         guard state.locallyLeft != true else { throw ScreenCommunityError.service("LOCALLY_LEFT") }
         return try storedCertificate()
     }
+    /// Refresh only the signed self-member certificate, even when an older certificate is still valid.
+    /// Replaying a historical enrollment receipt must never leave management-role UI stale.
+    /// This read does not clear a mutation journal, change keys or request biometric approval.
+    public func refreshSelfCertificate() async throws -> ScreenCommunityCertificate {
+        try enter();defer { busy=false }
+        guard state.locallyLeft != true else { throw ScreenCommunityError.service("LOCALLY_LEFT") }
+        let response=try await request(.recover,actor:nil,[.string(authority.profileID),.string(device.id),.string(ScreenCommunityRequest.key(identity)),.string(ScreenCommunityRequest.base64(viewerKey))])
+        let certificate=try response.certificate(profileID:authority.profileID,deviceID:device.id,hostKey:identity.publicKey.x963Representation,viewerKey:viewerKey,now:now())
+        state.certificate=response.envelope;try store();return certificate
+    }
     private func storedCertificate() throws -> ScreenCommunityCertificate {
         guard let envelope = state.certificate else { throw ScreenCommunityError.service("NOT_ENROLLED") }
         return try ScreenCommunityResponse.verify(envelope, issuer: authority.issuer, now: now())

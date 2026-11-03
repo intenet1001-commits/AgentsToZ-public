@@ -529,6 +529,8 @@ final class MemoryPreferenceStore: WorkroomPreferenceStore, @unchecked Sendable 
         print("15 screen viewer gesture checks passed")
         try ScreenViewerLifecycleChecks().runAll()
         print("21 screen viewer lifecycle checks passed")
+        try ScreenMacDisplayNamesChecks().runAll()
+        print("2 screen Mac display name checks passed")
     }
 }
 #else

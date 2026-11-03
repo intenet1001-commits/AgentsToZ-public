@@ -331,7 +331,7 @@ export class TesterAgentHost {
     return {handoff:Buffer.from(handoff).subarray(0,16000).toString('utf8').replace(/\uFFFD$/,'')};
   }
   /**
-   * 전수 클릭 세트를 앱에서 켠다. 켜기는 등록된 포트의 loopback 주소로 `.agentstoz/click-sweep.json`을 **없을 때만** 만들고
+   * 웹 전수 클릭 세트를 앱에서 켠다. 데스크톱 앱은 별도 프로젝트 command 하네스로 구성한다. 웹 켜기는 등록된 포트의 loopback 주소로 `.agentstoz/click-sweep.json`을 **없을 때만** 만들고
    * 공통 엔진을 깐다(손으로 고친 설정·엔진은 덮어쓰지 않는다). 기준선 만들기는 `sweep run --update`를 백그라운드로 한 번
    * 돌린다 — 판정은 엔진의 종료 코드뿐이고, 3(Playwright 없음·서버 안 뜸)은 통과가 아니다. 어느 쪽도 커밋하지 않는다.
    */
@@ -344,7 +344,7 @@ export class TesterAgentHost {
     if(req.operation==='sweep-enable'){
       if(present)throw new TesterError('TESTER_SWEEP_CONFIGURED','전수 클릭 설정이 이미 있습니다. 기존 설정은 덮어쓰지 않습니다.');
       const url=await this.deps.localUrl?.(req);
-      if(!url)throw new TesterError('TESTER_SWEEP_NO_SCREEN','등록된 로컬 포트가 없어 누를 화면을 정하지 못했습니다. 웹 화면이 있으면 프로젝트에 포트를 등록하세요.');
+      if(!url)throw new TesterError('TESTER_SWEEP_WEB_URL_REQUIRED','웹 자동 설정에는 등록된 로컬 포트가 필요합니다. 데스크톱 앱은 포트 없이 프로젝트 command 하네스로 구성할 수 있습니다.');
       const lease=await this.deps.lease(target.root);
       try{
         if((await this.resolve(req)).identity!==target.identity)throw new TesterError('TESTER_TARGET_CHANGED','프로젝트 폴더가 변경되었습니다. 다시 확인하세요.');
@@ -352,7 +352,7 @@ export class TesterAgentHost {
         await mkdir(dir,{recursive:true});
         if((await lstat(dir)).isSymbolicLink())throw new TesterError('TESTER_FILE_INVALID','테스터 저장 경로에 심볼릭 링크를 사용할 수 없습니다.');
         await this.python('sweep',target.root,[],['install']);
-        const body={schemaVersion:1,surfaces:[{id:'web',label:'로컬 화면',url}]};
+        const body={schemaVersion:2,surfaces:[{id:'web',label:'로컬 웹 화면',target:'web',environment:'browser',url}]};
         // wx: 그 사이 다른 손이 만든 설정을 덮어쓰지 않는다.
         await writeFile(config,JSON.stringify(body,null,2)+'\n',{flag:'wx'}).catch((e:any)=>{if(e.code==='EEXIST')throw new TesterError('TESTER_SWEEP_CONFIGURED','전수 클릭 설정이 이미 있습니다. 기존 설정은 덮어쓰지 않습니다.');throw e;});
       }finally{await lease.release();}
@@ -378,7 +378,7 @@ export class TesterAgentHost {
         let reasons:string[]=[];
         try{const parsed=JSON.parse(output.slice(output.lastIndexOf('{"set"')));reasons=(parsed.results??[]).filter((r:any)=>r.state!=='passed').map((r:any)=>String(String(r.output??'').trim().split('\n').pop()||r.reason||r.state));}catch{}
         job.state=code===0?'passed':code===3?'unavailable':'failed';
-        job.message=spawnError?'기준선 만들기를 시작하지 못했습니다.':code===0?'첫 기준선을 만들었습니다. 프로젝트 Git에 커밋하면 버튼 목록의 이력이 됩니다.':
+        job.message=spawnError?'기준선 만들기를 시작하지 못했습니다.':code===0?'요청한 하네스 실행을 마쳤습니다. 대상별 기준선과 결과 범위를 확인하세요.':
           safeText((code===3?'실행하지 못했습니다(통과 아님): ':'기준선을 만들지 못했습니다: ')+(reasons.join(' · ')||output.trim().split('\n').pop()||'원인 확인 필요'),target.root,400);
         job.at=new Date().toISOString();
       }finally{await lease.release();}

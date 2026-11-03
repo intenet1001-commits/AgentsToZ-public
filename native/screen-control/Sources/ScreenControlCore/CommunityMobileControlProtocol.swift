@@ -27,7 +27,9 @@ enum CommunityMobileControlBytes {
 
 public enum CommunityMobileControlPolicy {
     public static func authorizationDigest(_ auth: CommunityAuthorization) throws -> String {
-        let b = auth.body
+        try authorizationDigest(auth.body)
+    }
+    public static func authorizationDigest(_ b:CommunityAuthorization.Body)throws->String {
         let values: [Any] = [b.version,b.communityId,b.profileId,b.enrollmentId,b.deviceId,b.agentDeviceId as Any? ?? NSNull(),b.deviceKind.rawValue,b.name,b.hostPublicKey,b.publicKey,b.biometricPublicKey,b.controlKey as Any? ?? NSNull(),b.capabilities.map(\.rawValue),b.revision,b.keyEpoch]
         return CommunityMobileControlBytes.hex(CommunityMobileControlBytes.hash(try CommunityMobileControlBytes.json(values)))
     }
