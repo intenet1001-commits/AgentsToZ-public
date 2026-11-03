@@ -104,6 +104,11 @@ try{
  // panel with its own button leaves 도구 및 설정 open. Clicking the toggle again here would close it.
  assert.equal(await profileEntry.isVisible(),true,'Closing the panel keeps the tools popover that opened it');
  const shortcut=page.getByTestId('control-center-project-shortcut');
+ const advancedTools=page.locator('.workspace-tools-advanced').filter({has:shortcut});
+ assert.equal(await advancedTools.count(),1,'OPS belongs to the advanced tools group');
+ assert.equal(await shortcut.isVisible(),false,'OPS stays folded until the operator chooses advanced tools');
+ await advancedTools.locator(':scope > summary').click();
+ assert.equal(await shortcut.isVisible(),true,'Opening advanced tools exposes the existing OPS choices');
  await shortcut.locator('summary').click();
  await shortcut.getByRole('button',{name:'다른 Mac의 아젠투지 복원',exact:true}).click();
  await dialog.waitFor();
