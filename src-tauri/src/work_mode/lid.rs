@@ -77,7 +77,11 @@ fn install_script(user: &str) -> String {
 pub(super) fn guard_script() -> String {
     format!(r#"m="$1"; [ -f "$m" ] || exit 0
 p=$(/usr/bin/head -n 1 "$m" 2>/dev/null); case "$p" in ''|*[!0-9]*) p=0;; esac
-t=$(/usr/bin/stat -f %m "$m" 2>/dev/null) || t=0; age=$(( $(/bin/date +%s) - t ))
+# The guard runs on macOS (`stat -f %m`), but its rules are tested on Linux too, where GNU stat rejects `-f` (it prints
+# file-system status to stdout before failing) and prints epoch seconds with `-c %Y`. Only a plain number is a
+# heartbeat; anything else falls through to the next form and finally to 0, which reads as stale.
+t=$(/usr/bin/stat -f %m "$m" 2>/dev/null); case "$t" in ''|*[!0-9]*) t=$(/usr/bin/stat -c %Y "$m" 2>/dev/null);; esac
+case "$t" in ''|*[!0-9]*) t=0;; esac; age=$(( $(/bin/date +%s) - t ))
 if [ "$p" -gt 0 ] && /bin/kill -0 "$p" 2>/dev/null && [ "$age" -lt {STALE_SECS} ]; then exit 0; fi
 /usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0 >/dev/null || exit 1
 /bin/rm -f "$m"

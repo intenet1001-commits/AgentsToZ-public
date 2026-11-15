@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { screenPushEndpoint, screenPushPlistEntry } from '../scripts/screenPushEndpoint';
 import { screenBundleChildEnvironment } from '../stageScreenControlBundle';
 
@@ -7,6 +7,8 @@ import { screenBundleChildEnvironment } from '../stageScreenControlBundle';
 // means the Mac sends and polls nothing, and the phone asks for no notification permission and registers nothing.
 // The current TestFlight archive builds unchanged. These read the committed sources; they build and sign nothing.
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+// plutil은 macOS에만 있다. 리눅스에서는 Info.plist·entitlements를 읽을 수 없으니 그 검사는 macOS에서 잰다.
+const hasPlutil = process.platform === 'darwin' && existsSync('/usr/bin/plutil');
 const plist = (path: string) => {
   const child = Bun.spawnSync(['plutil', '-convert', 'json', '-o', '-', new URL(`../${path}`, import.meta.url).pathname], { stdout: 'pipe', stderr: 'pipe' });
   if (child.exitCode !== 0) throw Error('plist unreadable: ' + path);
@@ -51,7 +53,7 @@ test("the Screen bundled in the main app gets an endpoint only when this Mac's b
   expect(read('src/macOSBaseAppPipeline.ts')).not.toMatch(/pushEndpoint|AGENTSTOZ_SCREEN_PUSH_URL/);
 });
 
-test('the iPhone app: no endpoint and no push entitlement unless a build asks for both', () => {
+test.skipIf(!hasPlutil)('the iPhone app: no endpoint and no push entitlement unless a build asks for both', () => {
   const app = plist('mobile/ios/App/AgentsToZMobile.entitlements');
   expect(app['aps-environment']).toBeUndefined(); // today's TestFlight archive signs exactly as before
   const push = plist('mobile/ios/App/AgentsToZMobile.push.entitlements');

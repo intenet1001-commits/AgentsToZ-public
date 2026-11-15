@@ -33,7 +33,7 @@
 import {createHash} from 'node:crypto';
 import {appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
-import {RESERVED_LOOPBACK_PORTS, isWithin, realAppDataDir, realHome} from './environment';
+import {RESERVED_LOOPBACK_PORTS, isWithin, lsofPath, realAppDataDir, realHome} from './environment';
 
 export const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 
@@ -397,7 +397,7 @@ export function lanListenerViolations(
 export function listeningSockets(pid: number | readonly number[]): Array<{address: string; port: number}> {
   const pids = (typeof pid === 'number' ? [pid] : [...pid]).filter(value => Number.isInteger(value) && value > 0);
   if (!pids.length) return [];
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-nP', '-a', '-p', pids.join(','), '-iTCP', '-sTCP:LISTEN', '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
+  const out = Bun.spawnSync([lsofPath(), '-nP', '-a', '-p', pids.join(','), '-iTCP', '-sTCP:LISTEN', '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
   return parseLsofListenNames(out.stdout.toString());
 }
 
@@ -406,7 +406,7 @@ export function listeningSockets(pid: number | readonly number[]): Array<{addres
  * lsof는 맞는 소켓이 없으면 1로 끝난다. 그 밖의 종료 코드, 또는 출력 없이 오류만 남긴 1은 관측 실패로 던진다.
  */
 export async function listenersOnPort(port: number): Promise<ListenSocket[]> {
-  const child = Bun.spawn(['/usr/sbin/lsof', '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn'], {stdout: 'pipe', stderr: 'pipe', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
+  const child = Bun.spawn([lsofPath(), '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn'], {stdout: 'pipe', stderr: 'pipe', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   if (code !== 0 && code !== 1) throw new Error(`lsof exited ${code}: ${stderr.trim().slice(-200)}`);
   if (code === 1 && !stdout.trim() && stderr.trim()) throw new Error(`lsof failed: ${stderr.trim().slice(-200)}`);

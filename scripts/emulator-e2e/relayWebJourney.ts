@@ -28,6 +28,7 @@ import {existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync} from '
 import {join} from 'node:path';
 import type {LaneContext, LaneDefinition} from '../emulator-e2e';
 import type {LaneOutcome, PathLabels} from './evidence';
+import {lsofPath} from './environment';
 import {isolatedRoot, listenerOwnedBy, managementRequest, readSideEffectLog, reserveLoopbackPort, writeSidecarFixtures, type RunningSidecar} from './isolatedSidecar';
 import {
   FOREIGN_SUPABASE_ORIGIN,
@@ -379,7 +380,7 @@ const LSOF_ENV = {PATH: '/usr/bin:/bin:/usr/sbin'};
 
 /** 그 포트의 LISTEN 소켓을 가진 pid들(관측: lsof). */
 function listenerPids(port: number): number[] {
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: LSOF_ENV});
+  const out = Bun.spawnSync([lsofPath(), '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: LSOF_ENV});
   return [...new Set(out.stdout.toString().split('\n').map(line => Number(line.trim())).filter(pid => Number.isInteger(pid) && pid > 1))];
 }
 
@@ -405,7 +406,7 @@ function pidAlive(pid: number): boolean {
 
 /** 그 pid의 현재 작업 폴더(lsof -d cwd). 모르면 null. */
 function pidCwd(pid: number): string | null {
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: LSOF_ENV}).stdout.toString();
+  const out = Bun.spawnSync([lsofPath(), '-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: LSOF_ENV}).stdout.toString();
   return out.split('\n').find(line => line.startsWith('n'))?.slice(1) ?? null;
 }
 

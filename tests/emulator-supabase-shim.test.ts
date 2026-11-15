@@ -152,12 +152,13 @@ describe.skipIf(process.platform === 'win32')('per-run fixture CA', () => {
     expect(statSync(dir).mode & 0o077).toBe(0);
     expect(ca.caFingerprintSha256).toMatch(/^[0-9a-f]{64}$/);
     const caText = describeFixtureCertificate(ca.caCertPath);
-    expect(caText).toContain('CN=AgentsToZ emulator fixture CA unit');
+    // OpenSSL 3.0(우분투 러너)은 `CN = x`, 3.5·LibreSSL(macOS)은 `CN=x`로 쓴다 — 등호 주변 공백만 관용한다.
+    expect(caText).toMatch(/CN\s*=\s*AgentsToZ emulator fixture CA unit/);
     expect(caText).toContain('CA:TRUE');
     expect(caText).toMatch(/Name Constraints: critical[\s\S]*DNS:localhost/);
     const leaf = describeFixtureCertificate(ca.serverCertPath);
-    expect(leaf).toContain('Subject: CN=localhost');
-    expect(leaf).toContain('Issuer: CN=AgentsToZ emulator fixture CA unit');
+    expect(leaf).toMatch(/Subject: CN\s*=\s*localhost/);
+    expect(leaf).toMatch(/Issuer: CN\s*=\s*AgentsToZ emulator fixture CA unit/);
     expect(leaf).toMatch(/DNS:localhost, IP Address:127\.0\.0\.1, IP Address:0:0:0:0:0:0:0:1/);
     expect(leaf).toContain('TLS Web Server Authentication');
     // One CA per directory: an owned simulator may already trust the first one.

@@ -38,9 +38,11 @@ import {workroomFixtureCompileCommands,workroomFixtureSdk,workroomFixtureTarget}
 const root = resolve(import.meta.dir,'../../..');
 const ISOLATED_ROOT='AGENTSTOZ_WORKROOM_FIXTURE_ROOT';
 // The account database, not $HOME: Bun's homedir() and even userInfo().homedir follow HOME (measured), and the
-// inherited HOME may already be a scratch path.
-const account=Bun.spawnSync(['/usr/bin/id','-P'],{stdout:'pipe',stderr:'ignore'}).stdout.toString().trim().split(':');
-const realHome=account.at(-2)??'', accountName=account[0]??'';
+// inherited HOME may already be a scratch path. macOS reads directory services (`id -P`, name:…:home:shell); the
+// Linux harness reads /etc/passwd — with `id -P` alone, startup died on Linux and the verdict was never written.
+const [accountName,realHome='']=process.platform==='darwin'
+ ?(()=>{const fields=Bun.spawnSync(['/usr/bin/id','-P'],{stdout:'pipe',stderr:'ignore'}).stdout.toString().trim().split(':');return [fields[0]??'',fields.at(-2)??''];})()
+ :(()=>{const uid=String(process.getuid?.()??'');try{for(const line of readFileSync('/etc/passwd','utf8').split('\n')){const fields=line.split(':');if(fields.length>=7&&fields[2]===uid&&fields[5]!.startsWith('/'))return [fields[0]??'',fields[5]!];}}catch{}return ['',''];})();
 if(!isAbsolute(realHome)||!accountName)throw Error('Cannot read this account from the user database');
 const within=(path:string,parent:string)=>{const r=relative(parent,path);return r===''||(!r.startsWith('..')&&!isAbsolute(r));};
 const isParent=process.env[ISOLATED_ROOT]===undefined;

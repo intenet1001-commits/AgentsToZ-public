@@ -38,6 +38,8 @@ import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync
 import {createConnection, createServer, type Server} from 'node:net';
 import {tmpdir, userInfo} from 'node:os';
 import {basename, dirname, join, relative, resolve} from 'node:path';
+// 리눅스에서는 계정 데이터베이스(/etc/passwd)에서 실제 홈을 읽는다(HOME을 따르는 userInfo().homedir는 대체 값).
+import {accountHome} from './accountHome';
 
 export const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 const PACKAGE_DIR = join(REPO_ROOT, 'native', 'screen-control');
@@ -138,7 +140,7 @@ export function realHome(): string {
     }
     throw new Error('could not resolve the real home from directory services');
   }
-  return (cachedRealHome = canonical(userInfo().homedir));
+  return (cachedRealHome = canonical(accountHome(userInfo().homedir)));
 }
 
 /** Paths the sandboxed fixture may not read (design §2.3, plus WP1's credential files). */

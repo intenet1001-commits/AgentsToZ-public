@@ -7,6 +7,8 @@ import {COMMUNITY_CONFIG_INFO_KEY} from '../scripts/communityBuildConfig';
 import {assertIOSCommunityBuiltBundle,executeIOSCommunityBuild,iosCommunityBuildEnvironment,iosCommunityXcodeArguments,parseIOSCommunityBuildOptions,
   prepareIOSCommunityInfoPlist,readIOSBuildPlist,type IOSCommunityBuildDependencies} from '../mobile/ios/scripts/communityBuild';
 
+// plutil(Info.plist 변환)은 macOS에만 있다. 이 파일이 재는 것은 iOS 빌드 오케스트레이션이므로 plutil이 없으면 그 검사는 건너뛴다.
+const hasPlutil=process.platform==='darwin'&&existsSync('/usr/bin/plutil');
 const root=resolve(import.meta.dir,'..'),commit='a'.repeat(40),team='DA8QKAQ2C9',bundle='com.intenet.agentstoz.mobile.testflight';
 const key=createECDH('prime256v1');key.setPrivateKey(Buffer.from('01'.padStart(64,'0'),'hex'));
 const config={origin:'https://fixture.workers.dev',issuerPublicKey:key.getPublicKey().toString('base64url'),profileId:'11111111-1111-4111-8111-111111111111'};
@@ -66,7 +68,7 @@ test('iOS public config is explicit and bounded; unknown, QA, duplicate, malform
   }finally{f.close();}
 });
 
-test('the fresh main Info snapshot is sealed before signing and preserves source, privacy and Share metadata',()=>{
+test.skipIf(!hasPlutil)('the fresh main Info snapshot is sealed before signing and preserves source, privacy and Share metadata',()=>{
   const f=fixture();try{
     const source=join(f.dir,'mobile/ios/App/Info.plist'),share=join(f.dir,'mobile/ios/ShareExtension/Info.plist'),out=join(f.dir,'App-public.plist');
     const original=readFileSync(source),shareOriginal=readFileSync(share),base=readIOSBuildPlist(source);
@@ -91,7 +93,7 @@ test('only the main target reads the app-specific Info setting; Share signing an
   expect(iosCommunityBuildEnvironment({HOME:'/home',PATH:'/bin',OTHER_SWIFT_FLAGS:'QA',SCREEN_COMMUNITY_QA:'1',XCODE_XCCONFIG_FILE:'override'})).toEqual({HOME:'/home',PATH:'/bin',LANG:'en_US.UTF-8',LC_ALL:'en_US.UTF-8'});
 });
 
-test('the build-only orchestrator feeds the sealed snapshot to Xcode, then checks identity and signature without install or upload',async()=>{
+test.skipIf(!hasPlutil)('the build-only orchestrator feeds the sealed snapshot to Xcode, then checks identity and signature without install or upload',async()=>{
   const f=fixture();try{
     const c=context(f),receipt=await executeIOSCommunityBuild(f.dir,f.args,c.deps);
     expect(receipt).toMatchObject({signed:true,communitySealedBeforeSigning:true,developmentBuildOnly:true,officialRelease:false,testFlightReady:false,installed:false,launched:false,uploaded:false,community:config});
@@ -104,7 +106,7 @@ test('the build-only orchestrator feeds the sealed snapshot to Xcode, then check
   }finally{f.close();}
 });
 
-test('explicit push is separate from community trust, sealed into only Main, and requires matching development APS signature and profile',async()=>{
+test.skipIf(!hasPlutil)('explicit push is separate from community trust, sealed into only Main, and requires matching development APS signature and profile',async()=>{
   const f=fixture();try{
     const args=[...f.args,'--push-endpoint',push],c=context(f),receipt=await executeIOSCommunityBuild(f.dir,args,c.deps);
     expect(receipt.pushEndpoint).toBe(push);expect(receipt.pushEnvironment).toBe('development');expect(receipt.pushEntitlementVerified).toBe(true);
