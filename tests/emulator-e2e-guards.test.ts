@@ -6,7 +6,7 @@
  * 동시 실행 탐지와 부팅 잠금. 시뮬레이터를 만들거나 부팅하지 않는다.
  */
 import {afterAll, describe, expect, test} from 'bun:test';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {
@@ -291,8 +291,13 @@ describe('lane statuses', () => {
     const run = createEvidenceRun(repo, 'test-run-1');
     expect(run.dir.endsWith('/mobile/ios/build/emulator-evidence/test-run-1')).toBe(true);
     const path = run.writeJson('lane/host.json', {ok: true});
-    expect((Bun.spawnSync(['/usr/bin/stat', '-f', '%Lp', run.dir]).stdout.toString().trim())).toBe('700');
-    expect((Bun.spawnSync(['/usr/bin/stat', '-f', '%Lp', path]).stdout.toString().trim())).toBe('600');
+    // BSD stat는 `-f %Lp`(macOS), GNU coreutils의 stat에는 -f가 없다(파일 시스템 상태를 찍는다). 리눅스에서는 같은
+    // 프로세스가 읽은 권한 비트로 잰다.
+    const mode = (target: string) => process.platform === 'darwin'
+      ? Bun.spawnSync(['/usr/bin/stat', '-f', '%Lp', target]).stdout.toString().trim()
+      : (statSync(target).mode & 0o777).toString(8);
+    expect(mode(run.dir)).toBe('700');
+    expect(mode(path)).toBe('600');
     expect(() => createEvidenceRun(repo, 'test-run-1')).toThrow(/already exists/);
     expect(() => run.writeJson('../escape.json', {})).toThrow(/unsafe/);
     expect(findPairTokenLeaks([{name: 'host.log', text: 'https://x/remote/#pair=abcdefghijklmnop'}, {name: 'ok', text: 'no token'}])).toEqual(['host.log']);
@@ -406,7 +411,8 @@ describe('concurrency guard', () => {
   });
 });
 
-describe('simulator boot lock (kernel flock through lockf)', () => {
+// lockf(1)는 macOS에만 있다. 부팅 잠금 자체가 macOS 시뮬레이터 하네스의 것이라 다른 플랫폼에서는 잰 것이 없다.
+describe.skipIf(process.platform !== 'darwin')('simulator boot lock (kernel flock through lockf)', () => {
   const lockScript = (dir: string) => {
     const script = join(dir, 'hold-lock.ts');
     writeFileSync(script, [

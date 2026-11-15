@@ -25,6 +25,7 @@ import {
   environmentKeyNames,
   environmentViolations,
   isWithin,
+  lsofPath,
   realAppDataDir,
   realHome,
   type ChildIdentityReport,
@@ -478,7 +479,7 @@ function lastJsonLine<T>(text: string): T | null {
 }
 
 function listenersOn(port: number): number[] {
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
+  const out = Bun.spawnSync([lsofPath(), '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
   return out.stdout.toString().split('\n').map(value => Number(value.trim())).filter(value => Number.isInteger(value) && value > 0);
 }
 

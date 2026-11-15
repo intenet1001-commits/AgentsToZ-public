@@ -4,12 +4,15 @@
  * probe (simulator-only, loopback-only). Nothing here builds, boots a simulator or starts the fixture host.
  */
 import {afterAll, describe, expect, test} from 'bun:test';
-import {mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {resolveLane, unregisterLane} from '../scripts/emulator-e2e';
 import {detectForbiddenTools, HARNESS_SCAN_PATHS} from '../scripts/emulator-e2e/preflight';
 import {formatGate, type NmGateResult} from '../scripts/emulator-e2e/screenFixtureHost';
+
+// project.pbxproj(OpenStep plist)를 JSON으로 바꾸는 plutil은 macOS에만 있다.
+const hasPlutil = process.platform === 'darwin' && existsSync('/usr/bin/plutil');
 import {
   EXPECTED_RENDER, EXPECTED_SENT, GESTURE_CLASS, GESTURE_TESTS, MIN_FRAMES, PHONE_ATTACHMENTS, SCOPE_LABEL, SCREEN_VIEWER_CLASS, SCREEN_VIEWER_TESTS,
   canonicalPhoneSent, expectedTestOutcomes, judgeRunDirectory, judgeScreenViewerRun, landingProblems, testCaseOutcomes, tokenForHostEvent,
@@ -366,7 +369,7 @@ describe('check-ui.py --screen-gestures', () => {
     expect(run(['--screen-gestures', '--device', '00000000-0000000000000000']).exitCode).toBe(2);
   });
 
-  test('the copied project has exactly one place for each added source (what check-ui.py adds beside)', () => {
+  test.skipIf(!hasPlutil)('the copied project has exactly one place for each added source (what check-ui.py adds beside)', () => {
     const converted = Bun.spawnSync(['/usr/bin/plutil', '-convert', 'json', '-o', '-', join(root, 'mobile/ios/AgentsToZMobile.xcodeproj/project.pbxproj')], {stdout: 'pipe'});
     const objects = (JSON.parse(converted.stdout.toString()) as {objects: Record<string, any>}).objects;
     const script = readFileSync(checkUi, 'utf8');

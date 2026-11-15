@@ -55,7 +55,7 @@ export interface WorkroomTurnSignals {
   forget(sessionId: string): void;
 }
 /** Host-only. A witness exists only when a bounded complete transcript ends with this exact completion. */
-export interface WorkroomTranscriptWitness {path:string;agent:'claude'|'codex';key:string;digest:string;dev:number;ino:number;size:number}
+export interface WorkroomTranscriptWitness {path:string;agent:'claude'|'codex';key:string;digest:string;dev:number;ino:number;size:number;/** 없으면(이 필드 이전에 저장된 증거) 그 검사만 건너뛴다. */mtimeMs?:number}
 export const WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES=512*1024;
 export function readWorkroomTranscriptWitness(path:string,agent:'claude'|'codex',key:string,maxBytes=WORKROOM_TRANSCRIPT_WITNESS_MAX_BYTES,onRead?:(bytes:number)=>void):WorkroomTranscriptWitness|null {
   const opened=openRegular(path);if(!opened)return null;
@@ -69,14 +69,17 @@ export function readWorkroomTranscriptWitness(path:string,agent:'claude'|'codex'
       ||after.size!==size||pathAfter.size!==size||after.mtimeMs!==before.mtimeMs||after.ctimeMs!==before.ctimeMs||data[size-1]!==10)return null;
     const lines=data.toString('utf8').trimEnd().split('\n');const last=lines.at(-1);if(!last)return null;
     const ends=parseWorkroomTurnCompletions(agent,last+'\n');if(ends.length!==1||ends[0]!.key!==key)return null;
-    return {path,agent,key,digest:createHash('sha256').update(data).digest('hex'),dev:before.dev,ino:before.ino,size};
+    return {path,agent,key,digest:createHash('sha256').update(data).digest('hex'),dev:before.dev,ino:before.ino,size,mtimeMs:before.mtimeMs};
   }catch{return null;}finally{try{closeSync(opened.fd);}catch{}}
 }
 /** Compare to the history service's verified exact provider file, never a nearby/latest transcript. */
 export function verifyWorkroomTranscriptWitness(witness:WorkroomTranscriptWitness,verifiedPath:string):boolean {
   if(witness.path!==verifiedPath)return false;
   const now=readWorkroomTranscriptWitness(verifiedPath,witness.agent,witness.key);
-  return !!now&&now.dev===witness.dev&&now.ino===witness.ino&&now.size===witness.size&&now.digest===witness.digest;
+  // 같은 바이트를 다시 써 넣은 파일도 「그때 완료한 그 파일」이 아니다. 기기·inode는 재사용될 수 있으므로(ext4는
+  // 지운 inode를 곧바로 다시 준다 — CI 실측) mtime까지 같아야 같은 파일로 본다.
+  const mtimeUnchanged=witness.mtimeMs===undefined||now?.mtimeMs===witness.mtimeMs;
+  return !!now&&now.dev===witness.dev&&now.ino===witness.ino&&now.size===witness.size&&mtimeUnchanged&&now.digest===witness.digest;
 }
 
 interface Binding {path: string | null; dev: number; ino: number; offset: number; carry: string; lastLocateAt: number; agent: 'claude' | 'codex'}

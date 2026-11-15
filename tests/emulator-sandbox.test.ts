@@ -232,10 +232,15 @@ describe('sandbox profile generator', () => {
   });
 
   test('refuses writable roots that would cover the real home or do not exist', () => {
-    expect(() => buildSandboxProfile({writableRoots: ['/'], home: '/Users/example'})).toThrow();
-    expect(() => buildSandboxProfile({writableRoots: ['/Users'], home: '/Users'})).toThrow(/real home/);
-    expect(() => buildSandboxProfile({writableRoots: ['/definitely/not/here'], home: '/Users/example'})).toThrow(/must exist/);
-    expect(() => buildSandboxProfile({writableRoots: [], home: '/Users/example'})).toThrow();
+    // /Users는 macOS에만 있다. 어느 플랫폼에서든 존재하는 폴더로 같은 규칙을 잰다(규칙 자체는 플랫폼과 무관하다).
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'atz-sbx-home-')));
+    try {
+      const home = join(base, 'home');
+      expect(() => buildSandboxProfile({writableRoots: ['/'], home})).toThrow();
+      expect(() => buildSandboxProfile({writableRoots: [base], home})).toThrow(/real home/);
+      expect(() => buildSandboxProfile({writableRoots: [join(base, 'definitely-not-here')], home})).toThrow(/must exist/);
+      expect(() => buildSandboxProfile({writableRoots: [], home})).toThrow();
+    } finally { rmSync(base, {recursive: true, force: true}); }
   });
 
   test('profiles are never written inside a writable root, and a rewritten profile is refused before spawn', () => {

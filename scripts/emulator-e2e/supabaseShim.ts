@@ -87,6 +87,8 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { resolveAppDataDir, resolveAppDataDirFromEnvironment } from '../../src/appDataDir';
 import { AGENT_DIALOGUE_TABLES, REMOTE_CONTROL_RELAY_TABLES, migrationSqlForAllowedEmails } from '../../src/schemaSql';
 import { createFixtureCa, type FixtureCa } from './fixtureCa';
+// 리눅스에서는 계정 데이터베이스(/etc/passwd)에서 실제 홈을 읽는다(HOME을 따르는 userInfo().homedir는 대체 값).
+import { accountHome } from './accountHome';
 
 export type ShimDoor = 'http' | 'https';
 export type ShimRole = 'anon' | 'authenticated' | 'service_role';
@@ -567,7 +569,7 @@ export function shimRealHome(): string {
     if (entry.exitCode !== 0 || !home || !isAbsolute(home)) throw new Error('supabase shim: could not read the real home from directory services');
     return (cachedRealHome = home);
   }
-  return (cachedRealHome = userInfo().homedir);
+  return (cachedRealHome = accountHome(userInfo().homedir));
 }
 
 /** Folders the harness must never write into: the installed app's data, agent configs and the keychains. */

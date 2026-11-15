@@ -32,6 +32,7 @@ import {
   createIsolatedProfile,
   environmentKeyNames,
   isWithin,
+  lsofPath,
   mentionsProductionSupabase,
   realAppDataDir,
   realHome,
@@ -93,7 +94,7 @@ export function reserveLoopbackPort(): number {
 
 /** 그 포트의 TCP LISTEN 소켓이 이 pid의 것인가(관측: lsof). */
 export function listenerOwnedBy(pid: number, port: number): boolean {
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-nP', '-a', '-p', String(pid), `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
+  const out = Bun.spawnSync([lsofPath(), '-nP', '-a', '-p', String(pid), `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}});
   return out.stdout.toString().split('\n').some(line => Number(line.trim()) === pid);
 }
 
@@ -108,7 +109,7 @@ export function isolatedRoot(scratch: string, label: string): IsolatedRoot {
 export function forbiddenOpenFiles(pid: number, options: {repoRoot?: string; home?: string} = {}): string[] {
   const repoRoot = options.repoRoot ?? REPO_ROOT;
   const prefixes = forbiddenPrefixes(options.home);
-  const out = Bun.spawnSync(['/usr/sbin/lsof', '-p', String(pid), '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}}).stdout.toString();
+  const out = Bun.spawnSync([lsofPath(), '-p', String(pid), '-Fn'], {stdout: 'pipe', stderr: 'ignore', env: {PATH: '/usr/bin:/bin:/usr/sbin'}}).stdout.toString();
   return out.split('\n').filter(line => line.startsWith('n')).map(line => line.slice(1))
     // A managed checkout may live under ~/.codex/worktrees. lsof reports the
     // sidecar's cwd there even when it opens no user data; keep every child

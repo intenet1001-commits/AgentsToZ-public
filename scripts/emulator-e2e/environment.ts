@@ -12,6 +12,8 @@
 import {chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync} from 'node:fs';
 import {tmpdir, userInfo} from 'node:os';
 import {join, resolve} from 'node:path';
+// 리눅스에서는 계정 데이터베이스(/etc/passwd)에서 읽는다. HOME을 따르는 userInfo().homedir는 마지막 대체 값일 뿐이다.
+import {accountHome} from './accountHome';
 
 export const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 
@@ -33,7 +35,20 @@ export function realHome(): string {
     }
     throw new Error('could not resolve the real home from directory services');
   }
-  return (cachedRealHome = userInfo().homedir);
+  return (cachedRealHome = accountHome(userInfo().homedir));
+}
+
+let cachedLsofPath: string | null = null;
+
+/**
+ * lsof는 macOS에서 `/usr/sbin`, 리눅스 배포판(우분투 러너 포함)에서 `/usr/bin`에 있다. 하네스의 관측(리스너 소유·연
+ * 파일)은 어느 쪽에서든 같은 명령이므로, 있는 쪽을 한 번 찾아 쓴다. 둘 다 없으면 macOS 기본 경로를 그대로 넘겨
+ * 기존과 같은 실패(명령 없음)로 드러낸다.
+ */
+export function lsofPath(): string {
+  if (cachedLsofPath) return cachedLsofPath;
+  for (const candidate of ['/usr/sbin/lsof', '/usr/bin/lsof', '/usr/local/bin/lsof']) if (existsSync(candidate)) return (cachedLsofPath = candidate);
+  return '/usr/sbin/lsof';
 }
 
 /** 사용자 이름(계정 정보). 환경 USER는 믿지 않는다. */
