@@ -3,6 +3,7 @@
  * 되돌아가면 자식의 스크래치 HOME이 곧 「실제 홈」이 되어 가드가 스스로를 거부한다(CI 실측). 여기서 고정하는 것은
  * `/etc/passwd` 6번째 필드를 uid로 찾는다는 점, 그리고 그 값이 없을 때만 대체 값(HOME을 따르는 값)을 쓴다는 점이다.
  */
+import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';

@@ -19,8 +19,9 @@ export function accountHomeFromPasswd(uid: number | undefined = typeof process.g
   try { passwd = readFileSync(database, 'utf8'); } catch { return null; }
   for (const line of passwd.split('\n')) {
     const fields = line.split(':');
+    const home = fields[5];
     // name:passwd:uid:gid:gecos:home:shell — 홈은 절대 경로여야 한다.
-    if (fields.length >= 7 && fields[2] === String(uid) && fields[5].startsWith('/')) return fields[5];
+    if (fields.length >= 7 && fields[2] === String(uid) && typeof home === 'string' && home.startsWith('/')) return home;
   }
   return null;
 }
