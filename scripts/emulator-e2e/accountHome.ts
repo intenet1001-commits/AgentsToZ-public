@@ -27,6 +27,6 @@ export function accountHomeFromPasswd(uid: number | undefined = typeof process.g
 }
 
 /** 계정 데이터베이스의 홈. 계정을 읽지 못했을 때만 주어진 대체 값(`userInfo().homedir` 등)을 쓴다. */
-export function accountHome(fallback: string): string {
-  return accountHomeFromPasswd() ?? fallback;
+export function accountHome(fallback: string, database: string = ACCOUNT_DATABASE): string {
+  return accountHomeFromPasswd(undefined, database) ?? fallback;
 }
